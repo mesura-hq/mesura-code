@@ -1,16 +1,7 @@
 /**
- * The contract as a consumer that is not TypeScript reads it.
- *
- * Symmetria Shell is QML. It cannot import an Effect schema, so everything the
- * earlier phases stated in TypeScript has to reach it as JSON Schema. This
- * module is the projection: one draft 2020-12 document per root schema, built
- * from the same Effect values the TypeScript consumers decode with. There is no
- * second description of any fact here — `Schema.toJsonSchemaDocument` derives
- * every document, and nothing under `schema/` is ever written by hand.
- *
- * The building is pure and lives here rather than in the emitter script, so the
- * tests can rebuild every document in memory and compare it against the file on
- * disk without running the script or touching the filesystem.
+ * The contract as JSON Schema, for consumers that are not TypeScript (Symmetria Shell is QML).
+ * `Schema.toJsonSchemaDocument` derives one draft 2020-12 document per root from the same Effect
+ * values. Nothing under `schema/` is written by hand. Building is pure, so tests compare in memory.
  */
 import * as Schema from "effect/Schema";
 
@@ -48,14 +39,8 @@ export type SymmetriaSchemaRoot = {
 };
 
 /**
- * Every root a consumer validates a payload against.
- *
- * A union gets one document covering all of its members rather than one per
- * member: `SymmetriaCommandEnvelope` is how a consumer sends any of the four
- * commands, so an activation payload validates against the envelope document
- * and a change to the activation member moves the contract checksum. Splitting
- * the union would give a consumer four things to pin where the contract has
- * one.
+ * Every root a consumer validates a payload against. A union gets one document, not one per
+ * member, so a consumer pins one thing and a member change moves the contract checksum.
  */
 export const SYMMETRIA_SCHEMA_ROOTS: ReadonlyArray<SymmetriaSchemaRoot> = [
   {
@@ -133,27 +118,10 @@ export const SYMMETRIA_SCHEMA_ROOTS: ReadonlyArray<SymmetriaSchemaRoot> = [
 ];
 
 /**
- * Schemas the package exports that no emitted document covers, and why.
- *
- * The root list above is written by hand, so on its own nothing would notice a
- * wire schema added by a later run and never added here: it would ship with no
- * document, no index entry, and no movement in the value a consumer pins. The
- * suite closes that by walking every schema the barrel exports and requiring
- * each one to be a root, to be reachable inside a root's tree, or to be named
- * here. Adding a schema and forgetting the emitter therefore fails the suite.
- *
- * Each name here is a value this fork computes locally and never puts on the
- * wire:
- * - `AnnouncedProtocolVersion` is the unchecked pair a peer sends *before* the
- *   version gate runs. What a payload carries is `SymmetriaProtocolVersion`,
- *   which is inside the envelope, the receipt and the stream documents.
- * - `SymmetriaProtocolVersionRejection` and its two members, plus
- *   `SymmetriaStreamNotOpened` and `SymmetriaStreamItemMalformed`, are the
- *   typed outcomes the decode helpers return to their own caller. Nothing
- *   transmits them, and this run builds no transport that could.
- * `EnvironmentId` used to be named here because no projection carried it. A
- * dictation target now carries the environment boundary, so the schema became
- * reachable from three published roots and the exemption had to disappear.
+ * Exported schemas that no emitted document covers. The suite requires every exported schema to
+ * be a root, reachable from a root, or named here, so a schema missing from the emitter fails.
+ * Each name is a local value that never goes on the wire: the pre-gate `AnnouncedProtocolVersion`
+ * and the typed outcomes that the decode helpers return to their own caller.
  */
 export const SYMMETRIA_UNPUBLISHED_SCHEMAS: ReadonlyArray<string> = [
   "AnnouncedProtocolVersion",
@@ -165,27 +133,16 @@ export const SYMMETRIA_UNPUBLISHED_SCHEMAS: ReadonlyArray<string> = [
 ];
 
 /**
- * Builds the publishable document for one root.
- *
- * Follows `buildT3ProjectFileJsonSchema` (`packages/shared/src/t3ProjectFile.ts:32`),
- * which is the fork's own convention: spread the returned `schema` under a
- * `$schema` and `$id` header and map the returned `definitions` onto `$defs`.
- * The renaming is not cosmetic — emitted references are written as
- * `#/$defs/Name`, so a document that kept the pool under `definitions` would
- * resolve none of them.
+ * Builds the publishable document for one root, following `buildT3ProjectFileJsonSchema`.
+ * `definitions` must map onto `$defs`, because emitted references are written as `#/$defs/Name`.
  */
 export const buildSymmetriaJsonSchemaDocument = (
   root: SymmetriaSchemaRoot,
 ): Record<string, unknown> => {
-  // `additionalProperties: true`, diverging from the `t3.json` precedent, and
-  // it is not looseness. The contract requires a consumer to ignore additive
-  // unknown fields, and the TypeScript decoder already does exactly that: it
-  // drops an unknown key at every depth rather than failing. Emitting the
-  // default of `false` would make a QML consumer reject the very payload a
-  // TypeScript consumer accepts, so the two consumer kinds would disagree on
-  // the first additive field this contract ever ships. Do not tighten it.
-  // Effect 4.0.2 renamed the option: `onExcessProperty: "ignore"` is the old
-  // `additionalProperties: true`.
+  // `additionalProperties: true` on purpose, unlike `t3.json`. The TypeScript decoder drops
+  // unknown keys, so `false` would make a QML consumer reject payloads TypeScript accepts.
+  // Do not tighten it. Effect 4.0.2 renamed the option: `onExcessProperty: "ignore"` is the
+  // old `additionalProperties: true`.
   const document = Schema.toJsonSchemaDocument(root.schema, { onExcessProperty: "ignore" });
   const jsonSchema: Record<string, unknown> = {
     $schema: SYMMETRIA_JSON_SCHEMA_DIALECT,
@@ -237,15 +194,9 @@ export type SymmetriaSchemaIndex = {
 };
 
 /**
- * Builds the index over already-built artifacts. The document checksum covers
- * the documents only and never the index itself, which could not hash its own
- * bytes anyway.
- *
- * `sourceChecksum` covers the schema trees instead, and it is what catches an
- * edit JSON Schema cannot express — a check dropped on emission changes no
- * document byte, so the document checksum alone would report a weakened
- * contract as unchanged. Both values are recorded; a consumer that is not
- * TypeScript pins `checksum`, which it can reproduce from the published bytes.
+ * Builds the index over built artifacts. `checksum` covers the documents only, and a consumer
+ * that is not TypeScript pins it. `sourceChecksum` covers the schema trees, so it catches a check
+ * that emission drops without changing a document byte.
  */
 export const buildSymmetriaSchemaIndex = (
   artifacts: ReadonlyArray<SymmetriaSchemaArtifact>,

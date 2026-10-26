@@ -12,16 +12,9 @@ import {
 } from "./nvimViewport.ts";
 
 /**
- * Two authorities over one window, and the rule that keeps them apart.
- *
- * Monaco owns scrolling the pointer and the wheel caused; Neovim owns
- * scrolling a key caused. Each tells the other, and without a rule the two
- * tell each other forever: Monaco scrolls, Neovim is moved, Neovim reports its
- * new window, Monaco is moved to it, Monaco reports its new window.
- *
- * The grid's size is not decoration either. Neovim draws nothing beyond the
- * grid's width, so a flash label past the last column of a narrow grid is a
- * label the developer never sees.
+ * Monaco owns pointer and wheel scrolling, Neovim owns key scrolling, and each tells the other;
+ * without the echo rule they scroll each other forever. Neovim draws nothing beyond the grid's
+ * width, so a flash label past a narrow grid's last column is never seen.
  */
 
 const range = (start: number, end: number) => ({ startLineNumber: start, endLineNumber: end });
@@ -84,11 +77,8 @@ describe("viewportFromEditor", () => {
 
 describe("viewportFromEditor against the viewport contract", () => {
   it("asks for a viewport the contract accepts whatever the length of a visible line", () => {
-    // Phase 2 of the editor latency cycle, criterion 5. The contract bounds
-    // `cols`, and a visible line can be longer than any bound: the bench's
-    // Markdown has 1,087-character paragraphs, a minified file has megabyte
-    // lines. A request the contract refuses is a viewport that never reaches
-    // Neovim, topline and rows included.
+    // Phase 2, criterion 5: the contract bounds `cols`, but a line can be longer than any bound
+    // (1,087-character Markdown, megabyte minified lines). A refused request never reaches Neovim.
     const accepts = Schema.is(EditorSessionViewportInput);
     for (const length of [1087, 1_000_000]) {
       const wide = {

@@ -3,13 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { sortActiveThreadsForSidebar } from "./activeThreadOrder";
 
 /**
- * `#33` ordered the active sidebar list by recent messages. Upstream's v2
- * sidebar replaced that with a static anchor whose comment says activity never
- * reorders the list, which took the fork's behaviour out.
- *
- * Both are wanted, and the setting already exists to choose between them:
- * "Last user message" restores the fork's ordering, "Created at" keeps
- * upstream's anchor exactly, including its un-settle re-anchor.
+ * The setting chooses between two wanted orders: "Last user message" restores the fork's
+ * recent-message order, and "Created at" keeps upstream's anchor exactly, including its
+ * un-settle re-anchor.
  */
 
 const thread = (input: {

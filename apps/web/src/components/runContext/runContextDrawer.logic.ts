@@ -103,12 +103,9 @@ export function resolveDigitOptionIndex(key: string): number | null {
 }
 
 /**
- * Whether a host belongs in the Host tab and the host cycle: connected, or on
- * its first connection attempt. `reconnecting` only follows a failed attempt
- * (see presentConnectionState in client-runtime), and a stopped server stays
- * there indefinitely while the client retries, so it counts as unreachable,
- * as do `error`, `offline` and `available` (saved but not connecting).
- * Unknown stays. The draft's current host is still named by the tab.
+ * Whether a host belongs in the Host tab and the host cycle: connected, or on its first attempt.
+ * `reconnecting` only follows a failed attempt and a stopped server stays there indefinitely, so
+ * it counts as unreachable with `error`, `offline` and `available`. Unknown stays undefined.
  */
 export function isRunContextHostReachable(
   phase: EnvironmentConnectionPhase | undefined,

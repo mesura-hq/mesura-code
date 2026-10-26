@@ -1,9 +1,8 @@
 import { act, render as renderBrowser, type Screen, fakeTimers } from "../../test/render";
-// Entry points: `focusPanelSurface` (`panelSurfaceFocus.ts`), and
-// `usePanelSurfaceKeys` mounted beside `useRightPanelTabCycling` in a panel
-// harness, as `RightPanelTabs` mounts them: a real `Ctrl+Tab` keydown changes
-// the active surface, and the specs read Chromium's native focus and layout.
-// The frame queue controls handoff order without changing native geometry.
+// The harness mounts `usePanelSurfaceKeys` beside `useRightPanelTabCycling` as
+// `RightPanelTabs` does, so a real `Ctrl+Tab` keydown changes the surface and the
+// specs read Chromium's native focus and layout. The frame queue controls handoff
+// order without changing native geometry.
 import { useLayoutEffect, useRef, useState } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 

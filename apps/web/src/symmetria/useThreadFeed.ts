@@ -1,14 +1,7 @@
 /**
- * Forwards the renderer's projected thread list to the main process.
- *
- * Deliberately thin: everything decidable is
- * in `threadFeed.ts`, which is pure and is where the tests are.
- *
- * The generation is minted once per mount and is what tells the main process a
- * reload happened. Its state after a reload has no relationship to the state
- * before, so continuing the delta sequence across that boundary would be the
- * silent gap the contract forbids — the publisher answers a new generation with
- * a whole snapshot instead.
+ * The generation is minted once per mount and tells the main process a reload happened:
+ * state after a reload has no relation to state before, so the publisher answers a new
+ * generation with a whole snapshot instead of continuing the delta sequence.
  */
 import { useEffect, useRef } from "react";
 
@@ -33,6 +26,7 @@ export function useThreadFeed(input: {
 
   const { projects, threads } = input;
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: synchronizes the projected thread list to the Electron main process
   useEffect(() => {
     const publish = window.desktopBridge?.publishThreads;
     // Absent on web and on any build without the publisher. The bar is simply

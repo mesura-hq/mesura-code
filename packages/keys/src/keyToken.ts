@@ -1,18 +1,7 @@
 /**
- * Key tokens: one key press reduced to Vim notation.
- *
- * A token is the unit every keymap, sequence and which-key row is written in:
- * a printable glyph as itself (`j`, `G`, `?`), and everything else in angle
- * brackets (`<Space>`, `<Esc>`, `<C-d>`, `<M-x>`).
- *
- * Printable glyphs never carry Shift. The glyph is what the layout PRODUCED,
- * and on the Latin-American layout `/` is Shift+7 and `?` is Shift+'; a token
- * that kept Shift would make `/` unmatchable there. This is the rule
- * Symmetria's `fm-core/src/keys/types.ts` documents for its `"*"` mods, after
- * the same bug broke slash-search in its Qt build.
- *
- * AltGr is reported by browsers as Ctrl+Alt. A glyph typed with AltGr (`@` on
- * AltGr+Q) is therefore the glyph alone, never `<C-M-@>`.
+ * One key press in Vim notation. Printable glyphs never carry Shift: on the Latin-American layout `/`
+ * is Shift+7, and keeping Shift made `/` unmatchable (the same bug broke Symmetria's Qt slash-search).
+ * Browsers report AltGr as Ctrl+Alt, so a glyph typed with AltGr is the glyph alone, never `<C-M-@>`.
  */
 
 export interface KeyPress {

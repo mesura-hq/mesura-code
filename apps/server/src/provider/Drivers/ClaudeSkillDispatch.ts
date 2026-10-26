@@ -1,21 +1,12 @@
 import type { ServerProviderSkill } from "@t3tools/contracts";
 
 /**
- * Claude Code's only user-side invocation is a text block whose first character
- * is `/`: the harness expands `/name args` into the SKILL.md body, and every
- * character after the name (newlines included) arrives as `ARGUMENTS`. Only one
- * skill expands per message; a second `/x` becomes argument text
- *    ([#87113](https://github.com/anthropics/claude-code/issues/87113)).
+ * Claude expands one skill per message only when `/name` starts the text block.
+ * Everything after the name, including newlines or a second `/x`, becomes `ARGUMENTS`.
+ * https://github.com/anthropics/claude-code/issues/87113
  */
 
-// WORKAROUND: portado de pingdotgg/t3code#15662 — quitar al sincronizar con upstream si se mergea.
-// Any currency symbol (`\p{Sc}`, upstream #12098) opens a mention; the second
-// alternative is the namespaced `plugin:skill` name this port adds.
-/**
- * Composer tokens plus namespaced plugin names, checked against the discovered
- * catalog below. Native plugin names can contain punctuation; whitespace ends
- * the command name and starts its arguments.
- */
+/** Match packages/shared/src/composerInlineTokens.ts so displayed chips and dispatched skills accept the same tokens. */
 const SKILL_MENTION_PATTERN =
   /(^|\s)\p{Sc}((?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])[a-zA-Z0-9][a-zA-Z0-9:_-]*|[^\s:]+:[^\s]+)(?=\s|$)/gu;
 

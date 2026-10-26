@@ -3,13 +3,9 @@ import "../mesura.css";
 
 import { act, render as renderBrowser } from "../../test/render";
 /**
- * Entry point: the real `/settings/dictation` file route (`settings.dictation.tsx`),
- * mounted under a `/settings` parent the way `routeTree.gen.ts` mounts it, beside
- * the real `SettingsSidebarNav`. The user reaches the page by clicking the nav.
- * The fixture replaces server settings and environment discovery, and sidebar
- * chrome that needs a live connection. The settings scope, page and nav stay real.
- *
- * Phase 2 of the STT redesign, criteria 1–3: the Dictation settings page.
+ * The real `/settings/dictation` route, mounted under `/settings` as `routeTree.gen.ts` does,
+ * beside the real `SettingsSidebarNav`; the user reaches it from the nav. Replaced: server
+ * settings, environment discovery and sidebar chrome that needs a live connection.
  */
 import { DEFAULT_SERVER_SETTINGS, SECRET_SETTING_REDACTION_MARKER } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
@@ -95,7 +91,7 @@ import {
   TranscriptionsListHost,
 } from "~/components/dictation/TranscriptionsList";
 
-import { Route as SettingsDictationRoute } from "./settings.dictation";
+import { Route as SettingsDictationRoute } from "./_chat.settings.dictation";
 
 import { SettingsScopeProvider } from "~/components/settings/SettingsScopeContext";
 import { SettingsSidebarNav } from "~/components/settings/SettingsSidebarNav";

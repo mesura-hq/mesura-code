@@ -1,17 +1,6 @@
-/**
- * Which pane owns the keyboard, read from the browser's own focus tree.
- *
- * Nothing here is state. `document.activeElement` is already the truth about
- * where a keystroke will be delivered, so a stored copy could only ever
- * disagree with it. This mirrors `terminalFocus.ts` and `previewFocus.ts`,
- * which answer the same question for one surface each.
- *
- * The roots are attributes the app already renders, so no component gains an
- * attribute for this: `[data-app-sidebar]` (AppSidebarLayout),
- * `[data-chat-column-maximized-away]` (ChatView), `[data-terminal-owner]`
- * (ThreadTerminalDrawer) and `[data-preview-panel-mode]` (PreviewPanelShell).
- * If one is renamed, that pane stops being reachable and nothing else breaks.
- */
+// Reads the pane from `document.activeElement`, never from stored state, which
+// could only disagree with it. The roots are attributes the app already renders;
+// renaming one makes that pane unreachable and breaks nothing else.
 
 export type PaneId = "sidebar" | "chat" | "panel" | "terminal";
 export type PaneDirection = "left" | "right" | "up" | "down";
@@ -48,16 +37,10 @@ const CONTAINMENT_ORDER: ReadonlyArray<PaneId> = ["terminal", "sidebar", "panel"
  * keystroke, which looks identical to the feature not working.
  */
 const PANE_ENTRY_SELECTORS: Record<PaneId, ReadonlyArray<string>> = {
-  // A thread row before anything else. The rows are what the sidebar is for,
-  // and the `[data-sidebar="menu-button"]` elements are the six icon buttons
-  // in the top and bottom bars — verified in the running app, where the
-  // original selector landed the keyboard on the collapse toggle. The row
-  // itself is the `role="button"` inside the `<li>`: the `<li>` carries the
-  // key but is not focusable.
-  //
-  // Which row is a question this module cannot answer, so the route
-  // registers the active one through `registerPaneEntry` and these are the
-  // fallback for when it has not.
+  // A thread row first: `[data-sidebar="menu-button"]` is the toolbar's icon
+  // buttons, and once landed the keyboard on the collapse toggle. The `<li>` is
+  // not focusable, so the row is its `role="button"`. The route registers the
+  // active row through `registerPaneEntry`; these are the fallback.
   sidebar: [
     '[data-app-sidebar] [data-thread-item] [role="button"]',
     '[data-app-sidebar] [data-sidebar="menu-button"]',
@@ -153,17 +136,10 @@ export function isPaneReachable(pane: PaneId): boolean {
   if (root === null) return false;
 
   switch (pane) {
-    // `data-app-sidebar` lands on the inner `sidebar-container` div, and the
-    // collapsed state is on its `[data-slot="sidebar"]` parent — verified in
-    // the running app, where the container keeps its full width and merely
-    // slides off-screen, so neither its own dataset nor its width can answer
-    // this. That parent is the hook upstream's own CSS selects on, so it
-    // cannot be renamed there without upstream noticing.
-    //
-    // No such parent means a sidebar rendered `collapsible="none"`, which
-    // this app does not use. Unreachable is the safe answer: focusing a
-    // sidebar that turns out to be off-screen strands the keyboard with no
-    // way back except the mouse.
+    // Collapse state lives on the `[data-slot="sidebar"]` parent (upstream's own
+    // CSS hook); the inner container keeps its width and only slides off-screen.
+    // No such parent means `collapsible="none"`, unused here: answer unreachable,
+    // since focusing an off-screen sidebar strands the keyboard.
     case "sidebar": {
       const stateHost = root.closest<HTMLElement>('[data-slot="sidebar"]');
       return stateHost !== null && stateHost.dataset.state !== "collapsed";
@@ -244,18 +220,9 @@ export function focusPane(pane: PaneId): boolean {
 /** Elements a keystroke goes into rather than through. */
 const TEXT_ENTRY_TAGS: ReadonlySet<string> = new Set(["INPUT", "TEXTAREA"]);
 
-/**
- * Whether the keyboard is in something you type into, inside the sidebar.
- *
- * The sidebar's list chords are the only bare letters in the app: `j` and `k`
- * walk the thread list. So something has to say when the sidebar holds the
- * keyboard and a letter is nonetheless meant to be a letter.
- *
- * Asked of any text entry rather than of one named search box. The sidebar
- * renders two — the thread search and the project filter — and a rule keyed
- * to either would silently stop guarding the other the day upstream adds a
- * third.
- */
+// The sidebar's bare `j`/`k` chords must yield to any text entry inside it, not
+// one named search box: the thread search and the project filter are separate
+// inputs, and a rule keyed to one stops guarding the other.
 export function isSidebarSearchFocused(): boolean {
   if (typeof document === "undefined") return false;
   const activeElement = document.activeElement;

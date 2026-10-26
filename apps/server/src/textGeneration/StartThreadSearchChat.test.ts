@@ -1,10 +1,7 @@
-// Mesura: starting a search conversation (ADR-010). Entry point:
-// `makeStartThreadSearchChat`, the effect the `startThreadSearchChat` RPC in
-// `wsMesura.ts` calls. The project side is the real `ProjectService` over
-// in-memory SQLite, so the hidden project, its creation receipt, project
-// listing and project deletion are the production ones. Threads are created
-// through `ThreadManagementService.dispatch`, faked here to record each
-// `thread.create`; the orchestrator's thread creation has its own tests.
+// Mesura: starting a search conversation (ADR-010) via `makeStartThreadSearchChat`. Projects
+// are the real `ProjectService` over in-memory SQLite, so the hidden project, its receipt,
+// listing and deletion are production code. `ThreadManagementService.dispatch` is faked to
+// record each `thread.create`; the orchestrator's thread creation has its own tests.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {

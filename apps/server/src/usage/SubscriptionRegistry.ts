@@ -1,15 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- a synchronous sha256 fingerprint of a credential, computed in a pure helper.
 /**
- * The subscriptions this environment meters, independent of any agent.
- *
- * A subscription is a stored record with its own credential, and a provider
- * instance is one way to read one rather than its owner. That is what lets a
- * plan keep its row when the agent that first found it is idle, uninstalled, or
- * was never started.
- *
- * Credentials live in the server's secret store and never in the record: the
- * record layer is read by anything that lists subscriptions, and a key belongs
- * in neither a listing nor a snapshot nor the wire.
+ * The subscriptions this environment meters. A provider instance reads a subscription but does
+ * not own it, so a plan keeps its row while its agent is idle, uninstalled or never started.
+ * Credentials stay in the secret store, never in the record: every subscription listing reads it.
  *
  * @module usage/SubscriptionRegistry
  */
@@ -99,17 +92,10 @@ export class SubscriptionRegistry extends Context.Service<
 >()("t3/usage/SubscriptionRegistry") {}
 
 /**
- * Identify a subscription the vendor does not name.
- *
- * Neither the OpenCode Go plan nor the Z.ai plan reports an account, so the
- * credential is the only thing that distinguishes one from another. A digest
- * keeps the key stable across environments that share a key — which is what
- * folds them into one row — without the key itself ever leaving the server.
- *
- * Rotating a credential therefore starts a new row, and the old one is pruned
- * after the next successful read. The alternative identifiers are worse: an
- * OpenCode-local account id differs per machine, so two machines on one
- * subscription would never fold.
+ * The OpenCode Go and Z.ai plans report no account, so a credential digest names the subscription.
+ * Environments that share a key fold into one row, and the key never leaves the server.
+ * Rotating the credential starts a new row, and the next successful read prunes the old one.
+ * An OpenCode-local account id differs per machine, so two machines would never fold on it.
  */
 export function subscriptionIdentifierFromCredential(credential: string): string {
   return NodeCrypto.createHash("sha256").update(credential).digest("hex").slice(0, 16);
@@ -137,13 +123,9 @@ export const makeSubscriptionRegistry = Effect.fn(function* (input: {
   });
 
   /**
-   * A file this version cannot decode loads as empty, whole.
-   *
-   * One unknown namespace rejects every entry rather than just its own,
-   * because the array decodes as a unit. That is survivable and deliberate:
-   * discovery re-seeds the records at the next start, so the cost of a
-   * corrupt or future-version file is one boot, not a lost subscription. The
-   * credentials themselves are untouched — nothing here removes a secret.
+   * A file this version cannot decode loads as empty: the array decodes as a unit, so one unknown
+   * namespace rejects every entry. Discovery re-seeds the records at the next start, so a corrupt
+   * or future-version file costs one boot, not a subscription. Nothing here removes a secret.
    */
   const ensureLoaded = yield* Effect.cached(
     fileSystem.readFileString(input.recordPath).pipe(
@@ -214,7 +196,7 @@ export const makeSubscriptionRegistry = Effect.fn(function* (input: {
         // secret name cannot differ here: it is built from the same namespace
         // and identifier the key was, so only the label can have moved.
         if (previous?.label !== upsertInput.label) {
-          yield* persist().pipe(Effect.catchCause(() => Effect.void));
+          yield* persist().pipe(Effect.ignoreCause);
           yield* PubSub.publish(changes, undefined);
         }
       }),
@@ -228,8 +210,8 @@ export const makeSubscriptionRegistry = Effect.fn(function* (input: {
         const record = records.get(key);
         if (record === undefined) return;
         records.delete(key);
-        yield* input.secrets.remove(record.secretName).pipe(Effect.catchCause(() => Effect.void));
-        yield* persist().pipe(Effect.catchCause(() => Effect.void));
+        yield* input.secrets.remove(record.secretName).pipe(Effect.ignoreCause);
+        yield* persist().pipe(Effect.ignoreCause);
         yield* PubSub.publish(changes, undefined);
       }),
     );
@@ -291,11 +273,10 @@ export const layer = Layer.effect(
         get: (name) =>
           store.get(name).pipe(
             Effect.map(Option.map((bytes) => decoder.decode(bytes))),
-            Effect.catch(() => Effect.succeed(Option.none<string>())),
+            Effect.orElseSucceed(() => Option.none<string>()),
           ),
-        set: (name, value) =>
-          store.set(name, encoder.encode(value)).pipe(Effect.catch(() => Effect.void)),
-        remove: (name) => store.remove(name).pipe(Effect.catch(() => Effect.void)),
+        set: (name, value) => store.set(name, encoder.encode(value)).pipe(Effect.ignore),
+        remove: (name) => store.remove(name).pipe(Effect.ignore),
       },
     });
 
@@ -305,7 +286,7 @@ export const layer = Layer.effect(
       readFile: (filePath) =>
         fileSystem.readFileString(filePath).pipe(
           Effect.map(Option.some<string>),
-          Effect.catch(() => Effect.succeed(Option.none<string>())),
+          Effect.orElseSucceed(() => Option.none<string>()),
         ),
     });
 

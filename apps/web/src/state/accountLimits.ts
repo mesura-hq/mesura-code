@@ -127,12 +127,8 @@ function timestampMillis(value: string): number {
 }
 
 /**
- * The newest reading of each subscription an environment reported.
- *
- * Keyed by the subscription, never by the instance that read it. Keying by the
- * instance collapses two DIFFERENT subscriptions that one agent reads into one
- * — which is the whole OpenCode case, where a single instance drives several
- * plans and the second silently replaced the first.
+ * Keyed by the subscription, never by the instance that read it: one OpenCode instance
+ * drives several plans, and keying by instance let the second replace the first.
  */
 function newestSnapshotsBySubscription(
   snapshots: ReadonlyArray<AccountLimitsSnapshot>,
@@ -213,15 +209,9 @@ function ageMillis(observedAt: string | undefined, currentEnvironmentTime: numbe
 }
 
 /**
- * What a subscription is called, and the account it belongs to.
- *
- * The vendor names the row — "Claude", not the address it is registered to —
- * because that is what a person recognises at a glance. The address is a
- * disambiguator, so it becomes the subtitle and only shows when two rows of the
- * same vendor would otherwise read alike.
- *
- * A subscription the vendor named itself, like a plan, already carries the
- * right title in its label and keeps it.
+ * The vendor titles the row ("Claude", not the account address). The address is only a
+ * disambiguator, shown as the subtitle when two rows of one vendor would read alike.
+ * A subscription the vendor named itself, like a plan, keeps its label as the title.
  */
 function subscriptionPresentation(subscription: { readonly key: string; readonly label: string }): {
   readonly title: string;
@@ -243,32 +233,18 @@ function subscriptionPresentation(subscription: { readonly key: string; readonly
 }
 
 /**
- * Whether this agent ever reports account limits, and so deserves a row saying
- * it has not reported one yet.
- *
- * The client should not know which drivers these are. The honest answer
- * is a capability on the provider snapshot the server already builds, since the
- * server is the only side that knows which drivers implement the reader. This
- * list exists because adding that capability means touching the provider
- * contract and every driver's snapshot, which is more than this change carries.
- * Remove it once `ServerProvider` carries the capability.
- *
- * Note this gate applies ONLY to the placeholder pass. A reading that actually
- * arrived is shown whatever produced it — the server does not send one for a
- * driver it cannot read, so the readings need no allowlist and must not get one.
+ * WORKAROUND: a client-side driver list, because the capability belongs on `ServerProvider`
+ * and adding it touches every driver's snapshot. Remove once `ServerProvider` carries it.
+ * It gates ONLY the "no reading yet" placeholder; a reading that arrived is always shown.
  */
 function reportsAccountLimits(driver: ProviderDriverKind): boolean {
   return driver === "claudeAgent" || driver === "codex";
 }
 
 /**
- * Whether this instance belongs in the panel at all.
- *
- * An instance whose CLI is missing answers every read with a failure, and a row
- * that says "Refresh failed" forever reads as a broken subscription rather than
- * as a provider that is not installed here. But `ready` is a narrow bar — an
- * instance can sit at `warning` and still be the one metering the account — so
- * a reading we already hold keeps its row whatever the probe currently says.
+ * Hides an instance whose CLI is missing, which would show "Refresh failed" forever. A
+ * reading already held keeps its row whatever the probe says: an instance at `warning`
+ * can still be the one metering the account.
  */
 function canReportAccountLimits(
   entry: ProviderInstanceEntry | undefined,
@@ -359,13 +335,9 @@ function leadCandidate(candidates: ReadonlyArray<AccountLimitsCandidate>): Accou
 }
 
 /**
- * Fold every environment's readings into one row per subscription.
- *
- * Two environments that drive the same account report the same account key, and
- * their readings are the same subscription seen at two moments — so they become
- * one row whose every window shows the freshest of the two. A reading with no
- * account key is never folded: it keeps its own row, labelled by environment,
- * which is what an environment too old to report an account still gets.
+ * Readings with the same account key from several environments fold into one row, each
+ * window showing the freshest. A reading with no account key is never folded: it keeps
+ * its own row, labelled by environment.
  */
 export function projectAccountLimits(
   inputs: ReadonlyArray<EnvironmentAccountLimitsInput>,
@@ -403,12 +375,9 @@ export function projectAccountLimits(
       // its existence: the numbers are still a real subscription's, and
       // dropping it would blink a row out on a reconnect race.
       if (entry !== undefined && !canReportAccountLimits(entry, snapshot)) continue;
-      // A reading the server marked unfoldable keys on the environment plus its
-      // own key, never on the instance that read it. The server already tells
-      // several unnamed plans from one instance apart by an ordinal in that
-      // key, and keying on the instance would throw that away and merge two
-      // subscriptions' windows under one label. The `#env:` prefix keeps these
-      // apart from real keys, which always start with a vendor namespace.
+      // An unfoldable reading keys on environment plus its own key, never the instance:
+      // the key's ordinal tells one instance's unnamed plans apart. `#env:` cannot
+      // collide with real keys, which start with a vendor namespace.
       const foldable = isFoldableSubscriptionKey(snapshot.subscription.key)
         ? snapshot.subscription
         : null;
@@ -437,13 +406,9 @@ export function projectAccountLimits(
       else groups.set(candidate.groupKey, [candidate]);
     }
 
-    // An agent that is configured but has produced no reading yet still gets a
-    // row, saying so. Walking only the subscriptions would drop it, and a
-    // freshly configured Claude vanishing from the panel reads as broken.
-    //
-    // Only agents that actually report limits, though. An agent that never
-    // will — Cursor, Grok — would otherwise hold a "No reading yet" row for
-    // ever, since the thing that clears one is a reading arriving.
+    // A configured agent with no reading yet still gets a row, or a fresh Claude would
+    // vanish from the panel. Only agents that report limits: Cursor or Grok would hold
+    // "No reading yet" forever, since only a reading clears it.
     for (const entry of deriveProviderInstanceEntries(environment.providers)) {
       if (!reportsAccountLimits(entry.driverKind)) continue;
       if (readInstances.has(String(entry.instanceId))) continue;
@@ -576,15 +541,19 @@ const environmentAccountLimitsAtom = Atom.make(
   },
 ).pipe(Atom.withLabel("web-account-limits:environments"));
 
+// Ages are measured when the readings change; no timer re-projects them.
+const accountLimitsProjectionAtom = Atom.make((get): AccountLimitsProjection =>
+  projectAccountLimits(get(environmentAccountLimitsAtom), Date.now()),
+).pipe(Atom.withLabel("web-account-limits:projection"));
+
 export interface AccountLimitsView extends AccountLimitsProjection {
   readonly refresh: () => void;
 }
 
 export function useAccountLimits(): AccountLimitsView {
-  const inputs = useAtomValue(environmentAccountLimitsAtom);
-  const projection = projectAccountLimits(inputs, Date.now());
+  const projection = useAtomValue(accountLimitsProjectionAtom);
   const refresh = () => {
-    for (const environment of inputs) {
+    for (const environment of projection.environments) {
       appAtomRegistry.refresh(
         serverEnvironment.accountLimits({ environmentId: environment.environmentId, input: {} }),
       );

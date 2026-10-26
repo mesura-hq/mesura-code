@@ -1,24 +1,8 @@
 import { act, fakeTimers } from "../../../../../test/render";
 /**
- * Entry point: `useNvimFileEditor`, the hook `MonacoFileSurface` mounts for
- * modal editing, rendered under React with a model, over an editor that lays
- * that model out with word wrap on (`HarnessLayout` in
- * `~/test/nvimEditorHarness.tsx`). Keys enter through the editor's
- * `onKeyDown`; Neovim's answers arrive on the real attach subscription; the
- * window the client asks Neovim for leaves through the real
- * `editorSession.viewport` command.
- *
- * Phase 2 of the editor latency cycle, criterion 6, the client's half:
- * viewport requests never move Neovim's cursor away from where keys put it.
- * The server clamps the cursor into the window a viewport request names
- * (`SET_VIEWPORT_LUA`), so a request whose window leaves out the line Neovim's
- * cursor is on moves that cursor. The bench recorded exactly that on its
- * Markdown fixture: `j` put the cursor on line 8, Neovim scrolled to topline
- * 2, the client followed topline 2, word wrap left Monaco showing lines 2 to 7
- * only, and the client asked for `topline 2, rows 6` — which pulled the cursor
- * back to line 7. Fifty `j` from the top ended on line 41.
- *
- * The server's half, the same run replayed against a real Neovim, is in
+ * `useNvimFileEditor` with word wrap on: viewport requests never move Neovim's cursor. The server
+ * clamps the cursor into the requested window (`SET_VIEWPORT_LUA`), so a window that leaves out
+ * the cursor line pulls the cursor back. The server's half is in
  * `apps/server/src/editor/conformance/longLines.test.ts`.
  */
 import { describe, expect, it, vi } from "vite-plus/test";

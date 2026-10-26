@@ -1,21 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off - Browser automation helper for agents; no Effect runtime.
 /**
- * A paired, headless browser on this worktree's dev server, for agents verifying
- * UI. Every session used to rebuild the same throwaway Playwright script: find a
- * browser binary, mint a pairing token, pair, emulate a phone, set the theme. This
- * module is that script, once.
- *
- *   import { openMesuraPage } from "<repo>/scripts/lib/mesura-browser.ts";
- *   const { page, close } = await openMesuraPage({ route: "/", device: "phone" });
- *   try { ... } finally { await close(); }
- *
- * - The profile lives in the worktree's gitignored home (`browser-profile`), so the
- *   pairing survives a reboot that clears `/tmp`. One process may hold it at a time.
- * - Pairing mints its own token with `apps/server/src/bin.ts pair --base-dir`, against
- *   this worktree's home unless `baseDir` names another isolated home. Without the
- *   flag `pair` falls back to the shared home, which is the developer's live install.
- * - `theme` sets the browser's `prefers-color-scheme`. Dark is the default because it
- *   is the developer's; an appearance saved in the app's settings still wins over it.
+ * A paired headless browser on this worktree's dev server, for agents verifying UI.
+ * The profile lives in the worktree's gitignored home, so pairing survives a reboot; one process holds it.
+ * `pair` always gets `--base-dir`: without it, `pair` mints against the developer's live install.
+ * Dark is the default `prefers-color-scheme`; an appearance saved in the app's settings wins over it.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

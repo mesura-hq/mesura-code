@@ -1,47 +1,10 @@
 import { act, type Screen } from "../test/render";
 import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout — and in it the real
- * `Sidebar`, with six thread rows — and whose chat layout is the real
- * `_chat.tsx` route component around the real ChatView. The file panel, its
- * Monaco editor and the modal editor's Neovim driver are real; Neovim's side
- * is the nvim harness's transport (`test/nvimEditorHarness.tsx`), which the
- * connection runtime is pointed at. Keys are real `keydown`/`keyup` events
- * dispatched from the focused element, which is the editor's own text node.
- *
- * Phase 4 of the editor latency cycle ("One key costs one small render"),
- * criterion 2: editor keystrokes re-render nothing outside the file panel —
- * `SidebarThreadRow` and `TooltipTrigger` commit 0 times per keystroke.
- *
- * What the baseline measured (6.1 `SidebarThreadRow` and 25 `TooltipTrigger`
- * commits per key) was not spread over every key. Re-attributed at this
- * phase's base (`/tmp/editor-perf/p4-fence/why-rows.ts`): plain keys — `j`,
- * `k`, insert-mode text — re-render no sidebar row. A Control chord does:
- * the sidebar tracks held modifiers for its thread jump hints
- * (`useShortcutModifierState`, a capture listener on `window`), so the
- * Control keydown and keyup of every `Ctrl-d`/`Ctrl-u` re-render the whole
- * `Sidebar`, and with it every row and every row's tooltips, because the row
- * memo does not hold across a sidebar render. Four chords measured 8 sidebar
- * renders, 528 row renders and 2,144 tooltip-trigger renders.
- *
- * The fixture is `test/appRootFenceMocks.tsx` without its sidebar stub.
- *
- * Phase 6 ("Desktop background thread sync does not tax the editor") adds one
- * spec here, for the same harness: with ten agents streaming, every running
- * thread's shell changes every few seconds, and the editor bench (S8) measured
- * about 20 ms of main-thread work per shell frame, inside the WebSocket
- * message, ahead of the editor's own replies and paints. A shell update for
- * one thread re-rendered every row and every row's tooltips, because the
- * memoized row's `sortable` bag was new each time: the drag sensor's options
- * were rebuilt with each sidebar render, which renews every row's listeners,
- * and the sortable ids were a new array, which dnd-kit reads as a reorder.
- *
- * The thread attention cycle (phase 3) reuses the harness for the one thing
- * only the real sidebar shows: a live Working row at Pixel 7 size, opened
- * through the sidebar sheet, beside a Waiting row it must look like.
- */
+// Editor latency: keys in the real file panel (Monaco, Neovim over `test/nvimEditorHarness.tsx`)
+// must not re-render `SidebarThreadRow` or `TooltipTrigger` in the real Sidebar. Control chords
+// did, through `useShortcutModifierState`; shell updates did, through a new `sortable` bag on each
+// sidebar render. The fixture is `test/appRootFenceMocks.tsx` without its sidebar stub.
 import { type ReactNode } from "react";
 import * as monaco from "monaco-editor";
 import { PromiseClipboardItem } from "./test/promiseClipboardItem";

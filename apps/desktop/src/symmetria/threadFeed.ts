@@ -1,44 +1,8 @@
 /**
- * Turns a series of read models into the ordered stream a consumer reads.
- *
- * Pure and synchronous: no clock, no IO, no sockets. It holds the current
- * projected world and answers two questions — what a peer connecting NOW should
- * be handed, and what changed since the last push.
- *
- * ## Who numbers, and why it is not upstream
- *
- * ⚠ **This publisher owns the sequence, and that reverses what the previous
- * phase did.** The contract borrows its framing from upstream and says
- * `revision` is `OrchestrationReadModel.snapshotSequence` — "the position in
- * the event sequence that a snapshot reflects" — and that deltas number the
- * same sequence.
- *
- * That cannot hold here, and the reason is measurable rather than a matter of
- * taste: `projector.ts:203` sets `snapshotSequence` from `event.sequence`, so
- * it advances on EVERY orchestration event, the great majority of which are
- * transcript and activity events this projection drops. A delta numbered with
- * it would jump by tens, `applySymmetriaStreamDelta` would read a gap, and the
- * consumer would resnapshot on almost every update — the exact cost the gap
- * mechanism exists to make rare.
- *
- * So the numbering is this module's: one increment per emitted frame, and the
- * snapshot's revision is the last position emitted. That satisfies the rule a
- * consumer actually depends on — the first delta it may apply is `revision + 1`
- * — and gives up only the coincidence of sharing upstream's numbers, which no
- * consumer can observe.
- *
- * ## What cannot be expressed, and what is done instead
- *
- * The contract has no removal member, deliberately: a thread that goes away
- * says so in its own summary through `archivedAt` and `deletedAt`. But a read
- * model can simply stop listing a thread, and there is no delta for that. The
- * same is true of a renderer reload, whose new state has no relationship to the
- * old one.
- *
- * Both are discontinuities, and both are answered the same way: emit a whole
- * SNAPSHOT rather than a delta. A stream opens with a snapshot, so a consumer
- * already knows what to do with one; continuing the delta sequence across
- * either boundary would be the silent gap the framing forbids.
+ * Pure: turns a series of read models into frames (a snapshot for a new peer, then deltas).
+ * This module numbers the frames, not upstream's `snapshotSequence`, which advances on every event
+ * this projection drops and would make consumers resnapshot on almost every delta.
+ * A dropped thread or a renderer reload (new generation) has no delta form, so it emits a SNAPSHOT.
  */
 import { projectReadModel, type ProjectableReadModel } from "./threadProjection.ts";
 
@@ -151,16 +115,9 @@ export function createFeed(): Feed {
 }
 
 /**
- * Reads what the renderer sent, refusing anything it cannot use.
- *
- * The renderer is our own code, but this is a process boundary and an IPC
- * payload is `unknown` on arrival. Refusing beats trusting: a malformed push
- * should publish nothing, not publish a half-built world.
- *
- * Deliberately shallow. It checks the shape the feed indexes on — a generation
- * string, and arrays whose entries carry the identifiers used as keys — and
- * lets `projectReadModel` handle the rest, which it already does by building
- * every field by name.
+ * An IPC payload is `unknown` on arrival; a malformed push publishes nothing, not a half-built
+ * world. Deliberately shallow: it checks only the generation and the keys the feed indexes on, and
+ * `projectReadModel` builds every other field by name.
  */
 export function parseFeedPush(
   raw: unknown,

@@ -1,8 +1,6 @@
-// Mesura: agent thread search reads on the V2 projection tables. These specs
-// drive ThreadSearchEvidence against in-memory SQLite, seeded through the V2
-// projection and project stores. The lexical guard at the end pins the
-// behavior of upstream's ThreadSearch that the picker depends on, which the
-// evidence API must leave unchanged.
+// Mesura: agent thread search reads on the V2 projection tables. The lexical
+// guard at the end pins the behavior of upstream's ThreadSearch that the picker
+// depends on, which the evidence API must leave unchanged.
 import { assert, it } from "@effect/vitest";
 import {
   EventId,
@@ -381,11 +379,9 @@ const assertBoundedEvidencePlans = (
 };
 
 /**
- * Walks one thread's evidence one match per page and deletes the message the
- * first cursor names before resuming, as a projection rebuild that renumbers
- * rowids would lose it. Returns the ids delivered after the deletion; the walk
- * must still reach every match below the boundary, repeating at most matches
- * that share the boundary timestamp.
+ * Pages one match at a time and deletes the first cursor's message before
+ * resuming, as a rowid-renumbering rebuild would. The walk must still reach every
+ * match below the boundary, repeating at most those sharing its timestamp.
  */
 const walkThreadEvidencePastDeletedBoundary = (query: string, threadId: string) =>
   Effect.gen(function* () {
@@ -1350,8 +1346,11 @@ it.effect("keeps lexical searchThreads active-only and capped at fifty threads",
         defaultResult.matches.some((match) => match.threadId === "thread-lexical-archived"),
       );
       assert.deepStrictEqual(Object.keys(defaultResult.matches[0] ?? {}).toSorted(), [
+        "hits",
         "messageCreatedAt",
+        "messageId",
         "projectId",
+        "quality",
         "snippet",
         "source",
         "threadId",

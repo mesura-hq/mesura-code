@@ -34,11 +34,9 @@ it.effect("creates the directory a socket path needs", () =>
   ),
 );
 
-// Guard. `$XDG_RUNTIME_DIR` is already `drwx------`, so the socket's own mode
-// is a second lock there. The `os.tmpdir()` fallback has no such parent, and a
-// predictable name in a world-writable directory invites another local user to
-// pre-place a symlink between the unlink and the bind. A directory we create
-// must therefore be owner-only from the moment it exists.
+// Guard: the `os.tmpdir()` fallback has no owner-only parent like `$XDG_RUNTIME_DIR`, so another
+// local user could pre-place a symlink between the unlink and the bind. A directory we create
+// must be owner-only from the moment it exists.
 it.effect("creates a directory of its own as owner-only", () =>
   withServices(
     Effect.gen(function* () {

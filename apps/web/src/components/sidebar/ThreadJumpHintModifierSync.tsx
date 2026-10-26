@@ -8,17 +8,10 @@ import { shouldShowThreadJumpHintsForModifiers } from "../../keybindings";
 import { useEffect } from "react";
 
 /**
- * Follows the held modifiers for the sidebar's thread jump hints, and renders
- * nothing.
- *
- * Its own component so that a modifier press re-renders this and nothing
- * else. Held in `Sidebar` itself, every Control keydown and keyup re-rendered
- * the whole sidebar, every thread row and every row's tooltips — dnd-kit
- * rebuilds a row's listeners on a sidebar render, so the row memo did not
- * hold. A `Ctrl-d` typed in the modal editor cost 66 row renders twice. The
- * hints themselves still appear through `onChange`, which is the delayed
- * visibility controller: a modifier held past its delay shows them, a chord
- * shows nothing.
+ * Follows the held modifiers for the sidebar's thread jump hints, and renders nothing. Its own
+ * component so a modifier press re-renders only this: held in `Sidebar`, every Control key event
+ * re-rendered every thread row (dnd-kit defeats the row memo). `onChange` is the delayed
+ * visibility controller, so a modifier held past its delay shows hints and a chord shows none.
  */
 export function ThreadJumpHintModifierSync(props: {
   readonly keybindings: ResolvedKeybindingsConfig;
@@ -45,6 +38,7 @@ export function ThreadJumpHintModifierSync(props: {
       },
     },
   );
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reports the derived hint state to the parent's delayed visibility controller after commit
   useEffect(() => {
     onChange(shouldShowJumpHintsNow);
   }, [shouldShowJumpHintsNow, onChange]);

@@ -1,15 +1,9 @@
 import { act, render as renderBrowser, type Screen, fakeTimers } from "../../../test/render";
 /**
- * Entry point: AppRoot, with a memory router rendering the real sidebar footer
- * (`SidebarChromeFooter` inside `SidebarProvider`, as `Sidebar.tsx` mounts it).
- * The footer's utility row, both docks, their controllers, the keybindings
- * atom with the shipped defaults, the shared host stats projection and the
- * dock's own clock stay real. The fixture replaces only the transport: the
- * environments list, the usage dock's data and the hosts dock's sources.
- *
- * Phase 5 fence, one describe per acceptance criterion it can reach from here.
- * What only a real browser can show — the dimming as rendered, the layout at
- * 224 px and 400 px, the gap as drawn — is left to the headless verifier.
+ * AppRoot with a memory router rendering the real sidebar footer, both docks, their controllers,
+ * the shipped keybindings, the host stats projection and the dock's clock. Only the transport is
+ * replaced: the environments list, the usage dock's data and the hosts dock's sources. What only
+ * a real browser shows (dimming, layout at 224 px and 400 px) is left to the headless verifier.
  */
 
 import {

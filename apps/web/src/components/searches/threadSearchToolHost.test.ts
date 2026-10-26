@@ -1,18 +1,8 @@
 /**
- * Phase 3 of the search unification cycle, carried over from phase 2's
- * Implement decision: the web client connects as the search client and
- * answers the `find_threads` requests the server's thread search broker
- * forwards (docs/mesura/adr-010-search-chats.md). The unmerged branch's
- * `ThreadSearchToolRuntime.tsx` held this loop inside a React mount; this
- * spec pins it as a service over the event stream the connection yields
- * (`threadSearchToolConnect`), with the two transport edges injected:
- * `answer` (in the app, `answerThreadSearchToolRequest` over the registered
- * environments) and `respond` (in the app, the `threadSearchToolRespond` RPC).
- *
- * - A connected client answers a request for its connection exactly once.
- * - A request that names another connection (a second tab) is not answered.
- * - A request id delivered twice is answered once.
- * - A cancelled request is interrupted and never answered.
+ * The web client answers the `find_threads` requests the server's thread search broker forwards
+ * (docs/mesura/adr-010-search-chats.md), as a service over `threadSearchToolConnect` with `answer`
+ * and `respond` injected. Each request for this connection is answered exactly once; another
+ * connection's, a duplicate id and a cancelled request are not.
  */
 import type {
   ThreadSearchToolEvent,

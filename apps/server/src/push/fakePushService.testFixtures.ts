@@ -1,15 +1,8 @@
 /**
- * A push service and a subscribed browser, played by the test process.
- *
- * The receiving side is written here from the RFCs, not taken from `web-push`,
- * so a spec that decrypts with it does not trust the library under test:
- * - RFC 8291 (Message Encryption for Web Push) over RFC 8188 (`aes128gcm`).
- * - RFC 8292 (VAPID): `Authorization: vapid t=<ES256 JWT>, k=<public key>`.
- *
- * The push service is a `node:http` server on the loopback interface. The
- * subscription keeps a realistic `https://` endpoint; the `httpClient` layer
- * that `fakePushService` returns sends every request to the local server
- * instead, so no request leaves the machine.
+ * A push service and a subscribed browser, played by the test process. The receiver follows
+ * RFC 8291 (over RFC 8188 `aes128gcm`) and RFC 8292 (VAPID), not `web-push`, so a spec that
+ * decrypts with it does not trust the library under test. Subscriptions keep a real `https://`
+ * endpoint; the returned `httpClient` layer routes every request to the loopback server.
  */
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no ECDH, HMAC or AES-GCM, which the receiver needs.
 import * as NodeCrypto from "node:crypto";

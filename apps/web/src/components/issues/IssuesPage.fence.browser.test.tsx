@@ -1,16 +1,9 @@
 import { act, render as renderBrowser, type Screen, fakeTimers } from "../../../test/render";
 /**
- * Entry points: the real `/_chat/issues` file route (`routes/_chat.issues.tsx`), mounted at
- * `/issues` the way `routeTree.gen.ts` mounts it, and the real `ThreadIssuesPanel`, the pane
- * entry `ChatView` renders for the `issues` right-panel surface. Both render the real
- * `IssuesPage`.
- *
- * The fixture replaces the boundaries only: the environment and project hooks, and the
- * `issueList` / `issueDetail` query families. Every call to a query family is recorded, so a
- * spec can prove that no issue RPC was ever created for an environment that has not said it
- * supports Issues.
- *
- * Issues pane, phase 2: acceptance criteria 3–7.
+ * Mounts the real `/_chat/issues` route and the real `ThreadIssuesPanel`, both over `IssuesPage`.
+ * Only boundaries are faked: the environment and project hooks and the `issueList` /
+ * `issueDetail` query families, whose calls are recorded to prove no issue RPC is created for an
+ * environment that has not said it supports Issues.
  */
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";

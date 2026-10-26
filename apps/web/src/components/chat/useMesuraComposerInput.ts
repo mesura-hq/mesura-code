@@ -43,6 +43,7 @@ export function useMesuraComposerInput(input: {
     applyPromptReplacement,
   } = input;
   const setPrompt = useStableCallback(input.setPrompt);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers this composer as the Vim adapter while mounted
   useEffect(
     () =>
       registerComposerVimAdapter({
@@ -63,9 +64,11 @@ export function useMesuraComposerInput(input: {
   );
   // Several fills can arrive before the editor commits. The last fill owns the caret until then.
   const lastFillRef = useRef<{ prompt: string; expandedCursor: number } | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: an editor commit ends the last fill's ownership of the caret
   useLayoutEffect(() => {
     lastFillRef.current = null;
   });
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the dictation slot fill handler for this draft target
   useEffect(
     () =>
       registerDictationSlotFillHandler(composerDraftTarget, (jobId, transcript) => {

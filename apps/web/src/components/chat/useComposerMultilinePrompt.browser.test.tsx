@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { expect, it, vi } from "vite-plus/test";
 
 import { render } from "../../../test/render";
@@ -7,13 +6,12 @@ import { useComposerMultilinePrompt } from "./useComposerMultilinePrompt";
 const SHORT_PROMPT = "A draft with several words";
 
 function Composer({ editorKey, prompt }: { editorKey: string | null; prompt: string }) {
-  const [body, setBody] = useState<HTMLDivElement | null>(null);
-  const isMultiline = useComposerMultilinePrompt(body);
+  const [isMultiline, observeBody] = useComposerMultilinePrompt();
 
   return (
     <>
       <div
-        ref={setBody}
+        ref={observeBody}
         data-testid="composer-body"
         style={{ boxSizing: "border-box", width: 320, height: 160, paddingInline: 16 }}
       >

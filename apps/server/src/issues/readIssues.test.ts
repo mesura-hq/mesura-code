@@ -1,5 +1,9 @@
 import { assert, it } from "@effect/vitest";
-import { ProjectId, type OrchestrationProjectShell } from "@t3tools/contracts";
+import {
+  ProjectId,
+  SourceControlProviderKind,
+  type OrchestrationProjectShell,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -21,7 +25,7 @@ const project: OrchestrationProjectShell = {
   updatedAt: "2026-10-01T00:00:00Z",
   repositoryIdentity: {
     canonicalKey: "github.com/acme/app",
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     webUrl: "https://github.com/acme/app",
     locator: {
       source: "git-remote",
@@ -195,7 +199,10 @@ it.effect("rejects other source-control providers before calling GitHub", () =>
         mockReads({
           project: Option.some({
             ...project,
-            repositoryIdentity: { ...project.repositoryIdentity!, provider: "gitlab" },
+            repositoryIdentity: {
+              ...project.repositoryIdentity!,
+              provider: SourceControlProviderKind.make("gitlab"),
+            },
           }),
           execute: () => {
             throw new Error("Must not call GitHub");
@@ -256,7 +263,10 @@ const forbidGitHub: GitHubIssueCli.GitHubIssueCli["Service"]["execute"] = () => 
 
 const gitlabProject = Option.some<OrchestrationProjectShell>({
   ...project,
-  repositoryIdentity: { ...project.repositoryIdentity!, provider: "gitlab" },
+  repositoryIdentity: {
+    ...project.repositoryIdentity!,
+    provider: SourceControlProviderKind.make("gitlab"),
+  },
 });
 
 // The shape `gh` prints for a deleted account: its Go structs keep the object and empty the login.
@@ -703,7 +713,7 @@ const upstreamIdentityProject = Option.some<OrchestrationProjectShell>({
   workspaceRoot: "/home/dev/repos/fork-checkout",
   repositoryIdentity: {
     canonicalKey: "github.com/pingdotgg/t3code",
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     owner: "pingdotgg",
     name: "t3code",
     locator: {
@@ -996,7 +1006,7 @@ it.effect(
   "issues phase 3 fence: reference resolution reads the null pull_request field GitHub's jq projection writes for an issue",
   () =>
     Effect.gen(function* () {
-      // The live shape `gh api --jq '{…, pull_request: .pull_request}'` printed for issue #17402.
+      // The live shape `gh api --jq '{…, pull_request: .pull_request}'` printed for an issue.
       const result = yield* resolveIssueReference({ projectId, number: 7 }).pipe(
         Effect.provide(
           mockReads({
@@ -1022,7 +1032,7 @@ const canonicalOnlyIdentityProject = Option.some<OrchestrationProjectShell>({
   workspaceRoot: "/home/dev/repos/fork-checkout",
   repositoryIdentity: {
     canonicalKey: "github.com/pingdotgg/t3code",
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     locator: {
       source: "git-remote",
       remoteName: "upstream",

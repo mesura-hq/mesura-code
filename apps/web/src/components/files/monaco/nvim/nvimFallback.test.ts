@@ -13,7 +13,7 @@ import {
 describe("describeFallback", () => {
   it("says what is wrong and where", () => {
     expect(describeFallback({ reason: "config-missing", detail: "/home/dev/.neovim" })).toBe(
-      "that configuration directory is not there — /home/dev/.neovim",
+      "that configuration directory is not there: /home/dev/.neovim",
     );
   });
 
@@ -24,7 +24,7 @@ describe("describeFallback", () => {
       "Neovim is not on this machine's PATH",
     );
     expect(describeFallback({ reason: "version", detail: "0.10.2, need 0.12.0" })).toBe(
-      "this Neovim is too old — 0.10.2, need 0.12.0",
+      "this Neovim is too old: 0.10.2, need 0.12.0",
     );
   });
 

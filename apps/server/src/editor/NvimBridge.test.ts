@@ -3,18 +3,10 @@ import { assert, describe, it } from "@effect/vitest";
 import { shouldReadCursor, type CursorReadTrigger } from "./NvimBridge.ts";
 
 /**
- * Which frames are worth a round trip for the cursor.
- *
- * Held here, one case at a time, because driving a real Neovim cannot hold
- * them apart: a half-page scroll changes the viewport *and* redraws every row,
- * and entering insert redraws too. Every behavioural test of this guard passes
- * with three of the four triggers deleted, which is the shape of coverage that
- * looks complete and is not.
- *
- * The cost of getting it wrong runs both ways. Miss a trigger and the caret
- * stops moving for a whole class of key — that is what `h`, `j`, `k`, `l` did.
- * Fire on an idle frame and a real configuration bills a round trip about 230
- * times a second for nothing.
+ * Which frames are worth a round trip for the cursor, one trigger per case: a real Neovim fires
+ * several triggers per frame, so behavioural tests pass with three of the four deleted.
+ * A missed trigger freezes the caret for a class of keys; firing on idle frames costs a round
+ * trip about 230 times a second.
  */
 
 const QUIET: CursorReadTrigger = {

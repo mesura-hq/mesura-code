@@ -1,12 +1,7 @@
 /**
- * What a steady-state pull-request sweep spends in local git processes when
- * every thread group's lookup succeeds and nothing in the repository changed,
- * and that a change to a branch's upstream, the remote URL, a local branch or
- * the default branch still reaches the next sweep. Entry point:
- * `ThreadPullRequestService.make` started through
- * `ThreadPullRequestService.testkit.ts`, over the real GitManager, repository
- * identity resolver and source control registry of `GitManager.testkit.ts`,
- * with a GitHub provider that answers lookups, against a real repository.
+ * Local git cost of a steady-state pull-request sweep when nothing changed, and
+ * that a change to a branch's upstream, the remote URL, a local branch or the
+ * default branch still reaches the next sweep. Runs on a real repository.
  */
 import { describe, expect, it } from "@effect/vitest";
 import { SourceControlProviderKind, ProjectId, type ChangeRequest } from "@t3tools/contracts";

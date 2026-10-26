@@ -1,13 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off - these specs drive the socket as the bind's client
 // would, which is the only way to observe what the main process binds and forwards.
 /**
- * Entry points: `makeDictationCommandSocket`, which `DesktopDictationWidget` starts and stops
- * with the dictation session, and `forwardDictationCommand`, which the `second-instance`
- * handler in `app/DesktopClerk.ts` and the socket both call. The main window is a recording
- * stand-in for `ElectronWindow`; the socket is a real `node:net` server in a temporary
- * directory standing in for `XDG_RUNTIME_DIR`.
- *
- * Search unification, phase 4, criteria 1, 2, 3 and 6.
+ * Entry points: `makeDictationCommandSocket` and `forwardDictationCommand` (also called from
+ * `second-instance` in `app/DesktopClerk.ts`). The main window is a recording stand-in for
+ * `ElectronWindow`; the socket is a real `node:net` server in a temporary `XDG_RUNTIME_DIR`.
  */
 import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";

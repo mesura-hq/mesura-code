@@ -58,15 +58,17 @@ function useHostStatsNow(open: boolean): number {
   if (clockRef.current === null) {
     clockRef.current = createHostStatsAgeClock({
       intervalMs: HOST_STATS_AGE_REFRESH_MS,
-      now: () => Date.now(),
+      now: Date.now,
       schedule: (callback, delayMs) => setTimeout(callback, delayMs),
       cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
       onTick: setNowLocal,
     });
   }
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: starts or stops the external age clock as the dock opens and closes
   useEffect(() => {
     clockRef.current?.setOpen(open);
   }, [open]);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: disposes the external age clock on unmount
   useEffect(() => () => clockRef.current?.dispose(), []);
   return nowLocal;
 }
@@ -232,11 +234,8 @@ export function HostsPanelContent(props: {
   const { hosts, open, shortcutLabel } = props;
   const headingId = useId();
   return (
-    // The usage dock's surface, for the same reasons (see
-    // `AccountLimitsPanelContent`): two horizontal rules and a recessed fill
-    // built from theme tokens are the whole delimitation, because the dock is
-    // flush with the sidebar's edges and a custom theme has to reach it.
-    //
+    // The usage dock's surface, for the same reasons (see `AccountLimitsPanelContent`): two rules
+    // and a recessed fill from theme tokens, since the dock is flush with the sidebar's edges.
     // `data-hosts-panel` is a stable selector for tests and browser checks.
     <div
       aria-labelledby={headingId}
@@ -283,12 +282,9 @@ export function HostsPanelContent(props: {
 }
 
 /**
- * The Hosts dock: a band of the sidebar above the footer row that opens it,
- * built exactly like `AccountLimitsDock` — see its comments for why a band and
- * not a popover, why `inert`, and why the negative inline margin.
- *
- * It subscribes to host stats only while open, and re-projects on its own
- * 15-second clock so the ages move while it is on screen.
+ * The Hosts dock, built exactly like `AccountLimitsDock` (see its comments for the band, `inert`
+ * and the negative margin). It subscribes to host stats only while open, and re-projects on its
+ * own 15-second clock so the ages move while it is on screen.
  */
 export function HostsDock(props: { readonly controller: SidebarDockController }) {
   const { controller } = props;

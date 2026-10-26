@@ -52,11 +52,9 @@ export function MesuraFileManagerLayer({
   const project = useProject(
     activeThread ? scopeProjectRef(activeThread.environmentId, activeThread.projectId) : null,
   );
-  // The projection behind `target` can be empty for a moment — before it
-  // first lands, or while a reconnect repopulates it — and a layer that
-  // unmounted on each blip would lose its tabs and cursor. The last target
-  // holds while the thread stays; only the thread leaving the route closes
-  // the layer, or the next chord would flip a flag nobody can see.
+  // The projection behind `target` blinks empty on first load and on reconnect;
+  // unmounting then would lose tabs and cursor, so the last target holds while
+  // the thread stays. Only the thread leaving the route closes the layer.
   const currentTarget = fileManagerTarget(activeThread, project);
   const [lastTarget, setLastTarget] = useState<FileManagerTarget | null>(currentTarget);
   if (
@@ -68,6 +66,7 @@ export function MesuraFileManagerLayer({
     setLastTarget(currentTarget);
   }
   const target = currentTarget ?? lastTarget;
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: the route, not a handler, drops the thread; an open flag left behind would make the next chord invisible
   useEffect(() => {
     if (open && routeThreadRef === null) closeFileManager();
   }, [open, routeThreadRef]);
@@ -93,6 +92,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
   const host = useEnvironmentQuery(fileManagerHost({ environmentId, input: {} }));
   const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
   const latest = useRef({ httpBaseUrl });
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref read by the long-lived bridge without rebuilding it
   useEffect(() => {
     latest.current = { httpBaseUrl };
   });
@@ -101,6 +101,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
   // its hooks call the bridge from their mount effects, which would run
   // before an effect of this component installed it.
   const [bridge, setBridge] = useState<WsBridge | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: owns the bridge's lifetime, a server session per environment
   useEffect(() => {
     const created = createWsBridge(createFileManagerTransport(environmentId), {
       close: closeFileManager,
@@ -141,6 +142,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
     origin: Element | null;
     restoreComposer: ReturnType<typeof captureComposerFocusReturn>;
   } | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: dialog focus taken on mount and returned on unmount
   useEffect(() => {
     const owner = root.current;
     // StrictMode replays this effect while the dialog already owns focus.

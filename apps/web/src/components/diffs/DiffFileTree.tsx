@@ -25,11 +25,9 @@ import { usePierreTreePaneEntry } from "./pierreTreeKeys";
 export type { DiffFileTreeEntry } from "./diffFileTree.logic";
 
 /**
- * Fork addition: Symmetria IDE's git palette instead of Pierre's, whose blue
- * for a modified file is the same blue as an untracked one and as the app's
- * links. Modified is amber, so blue is left to untracked alone. The values are
- * the app's own tokens, so both themes follow. Custom properties inherit into
- * Pierre's shadow root, where its `--trees-git-*-color-override` hooks read them.
+ * Fork: Pierre's modified blue matches its untracked blue and the app's links, so modified
+ * is amber here. The values are app tokens, so both themes follow; custom properties
+ * inherit into Pierre's shadow root, where its `--trees-git-*-color-override` hooks read them.
  */
 const GIT_STATUS_COLOR_STYLE = {
   "--trees-git-added-color-override": "var(--success)",
@@ -100,10 +98,10 @@ export function DiffFileTree({
       },
     };
   });
-  const gitStatus = (() =>
-    entries.map((entry) => ({ path: presented.modelPath(entry.path), status: entry.status })))();
-  const filePathsRef = useRef<ReadonlySet<string>>(new Set(paths));
-  const onSelectFileRef = useRef(onSelectFile);
+  const gitStatus: ReadonlyArray<GitStatusEntry> = entries.map((entry) => ({
+    path: presented.modelPath(entry.path),
+    status: entry.status,
+  }));
   // Pierre takes the renderer once, at creation; the ref keeps it current.
   const renderFileDecorationRef = useRef(renderFileDecoration);
   // Selection driven by `selectedPath` below is an echo of a file already on screen, not a
@@ -192,6 +190,7 @@ export function DiffFileTree({
     model.setGitStatus(gitStatus);
   }, [directoryPaths, gitStatus, model, modelPaths, ordering, positions, presented]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: re-renders mounted Pierre rows when the decoration renderer changes
   useEffect(() => {
     // Updating the renderer ref alone leaves counts stale when paths and Git statuses
     // stay unchanged. Pierre's public render API updates the mounted view without
@@ -292,8 +291,7 @@ export function DiffFileTree({
           ) {
             return;
           }
-          // Pierre does not emit a selection change for its sole selected row.
-          // Read selection before the row handles the click so new selections reveal only once.
+          // Pierre emits no change for its sole selected row; read before the click to avoid double reveals.
           const selected = model.getSelectedPaths();
           const path = selected.length === 1 ? selected[0] : undefined;
           if (!path || !modelPaths.includes(path)) return;

@@ -13,21 +13,9 @@ import {
 import { BORROWED_RUNTIME_VOCABULARIES } from "./upstreamLock.ts";
 
 /**
- * Proves every lock fires in both assignability directions, by typechecking
- * `upstreamLock.ts` on its own against a stand-in for the upstream types.
- *
- * The `@ts-expect-error` proofs in `upstreamLock.test.ts` cover the removal
- * direction only, and they compare against whatever upstream currently says.
- * This walks the other direction too — an upstream that gained a literal — which
- * is the case a weekly synchronization actually produces. It compiles the module
- * in isolation rather than perturbing the real `@t3tools/contracts`, which is
- * why `upstreamLock.ts` deliberately carries no runtime import: with only types
- * to resolve, a temporary directory with no `node_modules` above it is enough.
- *
- * The vocabularies come from `BORROWED_RUNTIME_VOCABULARIES` rather than from a
- * second hardcoded table. A hardcoded copy would go stale the moment somebody
- * mirrors a legitimate upstream addition, and would then fail with nothing to
- * say about the lock it exists to exercise.
+ * Proves every lock fires in both directions, including an upstream that gained a literal,
+ * which `upstreamLock.test.ts` cannot cover. It typechecks `upstreamLock.ts` alone against a
+ * stand-in for the upstream types, which works only while that module has no runtime import.
  */
 
 type VocabularyName = keyof typeof BORROWED_RUNTIME_VOCABULARIES;

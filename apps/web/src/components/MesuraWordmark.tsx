@@ -1,19 +1,7 @@
-// The Mesura wordmark, from the brand's own art at
-// chamba-hq/branding/LOGOS/svg/mesura-wordmark.svg.
-//
-// It lives in its own file rather than inside SidebarChrome so that a weekly
-// upstream merge never has to reconcile eight kilobytes of path data.
-//
-// Two departures from the source file, both deliberate:
-//
-//   The source paints #191310. Every path here takes `currentColor` instead, so
-//   the mark follows the header's own text colour — which is what the T3
-//   wordmark it replaced did, and what keeps it legible in either theme.
-//
-//   The viewBox is cropped from the source's `0 0 1024 336` to the letters'
-//   measured ink box, `70 118 874 126`. In the original the glyphs fill only 37%
-//   of the canvas height, so a height class would have set the padding rather
-//   than the letters: at `h-3` the word would have rendered 4.5px tall.
+// From chamba-hq/branding/LOGOS/svg/mesura-wordmark.svg, in its own file so upstream merges never touch
+// the path data. Paths use `currentColor` (the source paints #191310) to follow the header text in
+// either theme. The viewBox is cropped from `0 0 1024 336` to the ink box `70 118 874 126`, so a height
+// class sizes the letters, not the padding.
 export function MesuraWordmark({ className = "h-3 w-auto shrink-0" }: { className?: string }) {
   return (
     <svg

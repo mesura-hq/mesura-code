@@ -44,18 +44,10 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 const CODEX_TIMEOUT_MS = 180_000;
 
 /**
- * Arguments for a Codex step that reasons over untrusted text.
- * `--ignore-user-config` skips config.toml (MCP servers, plugins, profiles)
- * while auth still loads from CODEX_HOME. Codex applies `--disable` over any
- * `--enable`, so launch args cannot restore a tool.
- *
- * Checked against real codex-cli 0.156.0 through a local Responses endpoint:
- * the model then sees only `request_user_input` and `apply_patch`. Codex picks
- * `apply_patch` per model and offers no switch for it, so writes rest on the
- * read-only sandbox and the never-approve policy, pinned here after launch args
- * so those cannot relax them; the probe saw every patch rejected. An unknown
- * feature name fails the run, and `tools.view_image` is ignored by that version,
- * which is why `view_image` is disabled as a feature.
+ * Codex args for a step over untrusted text. `--ignore-user-config` skips config.toml but keeps
+ * auth from CODEX_HOME, and `--disable` wins over any `--enable` in launch args. codex-cli 0.156.0
+ * still offers `apply_patch`, so the read-only sandbox and never-approve policy, set after launch
+ * args, block writes. An unknown feature fails the run; 0.156.0 ignores `tools.view_image`.
  */
 const CODEX_NO_TOOLS_ARGS: ReadonlyArray<string> = [
   "--ignore-user-config",
@@ -110,9 +102,7 @@ function withoutMcpServerOverrides(execArgs: ReadonlyArray<string>): ReadonlyArr
 /** Mesura: the shared operations plus the Codex-only project icon search. */
 type CodexOperation = TextGenerationOperations.Operation | "selectProjectIcon";
 const CODEX_MCP_LIST_TIMEOUT_MS = 10_000;
-// Plugins and apps bring MCP servers of their own; the user's are listed and
-// turned off by name below. These follow the user's launch args, so they win
-// over a `-c features.plugins=true` there, which `--disable plugins` does not.
+// Plugins/apps add MCP servers; use trailing config overrides because --disable loses to user -c flags.
 const CODEX_NO_PLUGIN_ARGS = [
   "--config",
   "features.plugins=false",
@@ -124,10 +114,7 @@ const CodexMcpServers = Schema.fromJsonString(
 );
 const decodeCodexMcpServers = Schema.decodeEffect(CodexMcpServers);
 
-/**
- * `mcp_servers={}` merges into the user's servers rather than replacing them,
- * so each is named; quoting the name keeps one with a dot a single key.
- */
+// mcp_servers={} merges instead of replacing; disable named entries and quote dotted names.
 const codexMcpServersOff = (names: ReadonlyArray<string>): string | null =>
   names.length === 0
     ? null
@@ -165,13 +152,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     );
 
   const removeTempFileDir = (filePath: string): Effect.Effect<void, never> =>
-    fileSystem
-      .remove(path.dirname(filePath), { recursive: true })
-      .pipe(Effect.catch(() => Effect.void));
+    fileSystem.remove(path.dirname(filePath), { recursive: true }).pipe(Effect.ignore);
 
-  // Deliberately unscoped: text generation runs from background fibers whose
-  // ambient scope may already be closed (a closed scope reaps the temp
-  // directory the moment it is created).
+  // Background fibers may inherit closed scopes that immediately reap temp files; write unscoped.
   const writeTempFile = (
     operation: string,
     prefix: string,
@@ -393,6 +376,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             ? [...withoutMcpServerOverrides(execLaunchArgs), ...CODEX_NO_TOOLS_ARGS]
             : [
                 ...execLaunchArgs,
+                // A user's MCP server could act on the text-generation prompt.
                 ...CODEX_NO_PLUGIN_ARGS,
                 ...(mcpServersOff ? ["--config", mcpServersOff] : []),
               ]),

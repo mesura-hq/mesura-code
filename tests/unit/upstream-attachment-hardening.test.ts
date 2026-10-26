@@ -7,24 +7,10 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * ADR-003 retired this fork's attachment stack partly because upstream's
- * defends the browser against a hostile attachment and the fork's never did.
- * That defence is the concrete thing the fork gains by switching, so it is
- * worth asserting it actually arrived rather than assuming the merge brought
- * it.
- *
- * Three pieces, each of which fails differently if it goes missing:
- *
- * - the content disposition, so a browser downloads an attachment instead of
- *   rendering it;
- * - the sandbox policy, so anything that does render cannot reach out;
- * - the media type allow-list, so an attachment claiming to be html or xml is
- *   served as an opaque download instead.
- *
- * This lives in `tests/unit`, which upstream never touches, so it costs nothing
- * at the next merge. It reads the source rather than driving a request, because
- * what it pins is that the merge kept upstream's implementation — a resolution
- * that dropped it would leave the tree building and every other suite green.
+ * ADR-003 adopted upstream's attachment stack partly for its browser hardening, so this asserts it
+ * arrived: the content disposition (download, not render), the sandbox policy, and the media type
+ * allow-list (html or xml served opaque). It reads source, because a merge resolution that dropped
+ * the implementation would leave the tree building and every other suite green.
  */
 
 const serverHttp = () =>

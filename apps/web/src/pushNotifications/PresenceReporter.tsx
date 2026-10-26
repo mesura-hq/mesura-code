@@ -38,6 +38,7 @@ function PresenceDestination({
 }) {
   const registry = useContext(RegistryContext);
   const canReport = useAtomValue(pushSettingsPermissionAtom(environmentId));
+  // oxlint-disable-next-line t3code/react-effect-budget -- attaches this host to the presence hub while the scope allows, detaching on cleanup
   useEffect(() => {
     if (!canReport) return;
     return hub.attach((active) => openPresenceReport(registry, environmentId, active));

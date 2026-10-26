@@ -1,31 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * Rebuild an isolated dev database from a pruned snapshot of the real
- * ~/.mesura-code database, then run this checkout's migrations against it.
- *
- * `vp run migrate-dev-db` from a worktree:
- *   1. Nukes `<worktree>/.t3/userdata/statev2.sqlite`.
- *   2. Copies a slice of the real db (`~/.mesura-code/userdata/statev2.sqlite`,
- *      attached read-only): the schema, and every row except those of
- *      deleted, archived, and settled threads, which are nearly all of a
- *      long-lived database. It then prunes that to the most recently updated
- *      projects and, per project, the most recent threads that have fully
- *      stopped, with
- *      their forks and subagents. Working, settled, and archived threads, and
- *      threads with pending recovery, are skipped, and scheduled tasks and
- *      queued effects are dropped, so the dev server never adopts live work.
- *      Auth sessions, pairing links, command receipts, and provider
- *      runtime rows are dropped — pair a fresh browser against dev.
- *   3. Runs migrations on the result. Because the clone carries the real
- *      `effect_sql_migrations` table, this proves a new migration applies
- *      on top of the real applied set, and the slot check below catches
- *      the silent failure where two branches claim the same
- *      `Migrations/NNN_` id (the second one's CREATE TABLE is skipped).
- *
- * The event log (`orchestration_events`) is pruned per stream while
- * `sqlite_sequence` and the projection cursors carry over untouched, so new events keep appending
- * after the old high-water mark and projection cursors never rewind.
+ * Rebuilds the worktree's `statev2.sqlite` from a pruned read-only copy of the real one, without
+ * live work, auth sessions or pairing links, so the dev server adopts nothing live. Migrations then
+ * run over the real applied set; the slot check catches two branches that claim one `NNN_` id.
+ * `sqlite_sequence` and the projection cursors carry over, so projection cursors never rewind.
  */
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -45,6 +24,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { Command, Flag } from "effect/cli";
 
 import * as ProjectionStore from "../src/orchestration-v2/ProjectionStore.ts";
+import { rebuildMessageSearch } from "../src/orchestration-v2/messageSearchIndex.ts";
 import { migrationManifest, runMigrations } from "../src/persistence/Migrations.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
@@ -156,7 +136,7 @@ export interface RunMigrateDevDbInput {
 }
 
 export interface RunMigrateDevDbOptions {
-  /** Overridable for tests; the directory writes must never target. */
+  /** Test override for the directory writes must never target. */
   readonly sharedHome?: string | undefined;
 }
 
@@ -185,10 +165,7 @@ const isProcessAlive = (pid: number): boolean => {
   }
 };
 
-/**
- * The server writes its pid to server-runtime.json next to the database, which also catches an idle server holding an open-but-inactive
- * connection. A leftover -shm alone is not a signal — read-only connections cannot clean it up on close.
- */
+// The runtime PID catches idle servers; leftover -shm files can come from read-only connections.
 const ensureNotInUse = Effect.fn("ensureDevDbNotInUse")(function* (databasePath: string) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -250,6 +227,7 @@ const CLEARED_TABLES: ReadonlyArray<string> = [
 ];
 
 const PROVIDER_SESSIONS_TABLE = "orchestration_v2_projection_provider_sessions";
+const FTS5_SHADOW_SUFFIXES = ["_data", "_idx", "_content", "_docsize", "_config"];
 
 // Settled threads stay: they are most of real history, and the UI shows them.
 const rootIsVisible = (sql: SqlClient.SqlClient) => sql`
@@ -257,9 +235,7 @@ const rootIsVisible = (sql: SqlClient.SqlClient) => sql`
   AND json_extract(root.payload_json, '$.deletedAt') IS NULL
   AND json_extract(root.payload_json, '$.archivedAt') IS NULL`;
 
-/**
- * One transaction reads the source, so the copy is consistent while the real server writes.
- */
+// A single read transaction keeps the copy consistent with concurrent server writes.
 const copySourceSlice = Effect.fn("copyDevDbSourceSlice")(function* (sourcePath: string) {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`ATTACH DATABASE ${`${NodeURL.pathToFileURL(sourcePath).href}?mode=ro`} AS src`;
@@ -270,8 +246,33 @@ const copySourceSlice = Effect.fn("copyDevDbSourceSlice")(function* (sourcePath:
     SELECT m.name, c."notnull" FROM src.sqlite_master m, pragma_table_info(m.name, 'src') c
     WHERE m.type = 'table' AND c.name = 'thread_id'`;
   const threadIdNullable = new Map(threadColumns.map((row) => [row.name, row.notnull === 0]));
-  const tables = schema.filter((entry) => entry.type === "table");
+  // FTS5 makes its own shadow tables and contentless rows cannot be copied:
+  // create the virtual table, skip its shadow tables and rows, and rebuild the
+  // index once the messages and triggers are in.
+  const virtualTables = schema
+    .filter((entry) => entry.type === "table" && /^CREATE VIRTUAL TABLE/i.test(entry.sql))
+    .map((entry) => entry.name);
+  const isShadowTable = (name: string) =>
+    virtualTables.some((virtual) =>
+      FTS5_SHADOW_SUFFIXES.some((suffix) => name === `${virtual}${suffix}`),
+    );
+  const tables = schema.filter((entry) => entry.type === "table" && !isShadowTable(entry.name));
   const filtered = tables.some((table) => table.name === "orchestration_v2_projection_threads");
+  // A row that points into a cleared table cannot be copied, so whatever references one is
+  // cleared with it, however far down the chain a newer migration added it.
+  const references = yield* sql<{ name: string; parent: string }>`
+    SELECT m.name, f."table" AS parent FROM src.sqlite_master m, pragma_foreign_key_list(m.name, 'src') f
+    WHERE m.type = 'table'`;
+  const cleared = new Set(CLEARED_TABLES);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const { name, parent } of references) {
+      if (cleared.has(parent) && !cleared.has(name)) {
+        cleared.add(name);
+        grew = true;
+      }
+    }
+  }
 
   yield* sql.withTransaction(
     Effect.gen(function* () {
@@ -285,13 +286,12 @@ const copySourceSlice = Effect.fn("copyDevDbSourceSlice")(function* (sourcePath:
           WHERE ${rootIsVisible(sql)}`;
       }
       for (const { name } of tables) {
-        if (CLEARED_TABLES.includes(name)) continue;
+        if (cleared.has(name) || virtualTables.includes(name)) continue;
         const nullable = threadIdNullable.get(name);
         const filter = !filtered
           ? ""
           : name === "orchestration_events"
-            ? // Two ranges rather than `<>`, so SQLite seeks the (aggregate_kind, stream_id)
-              // index instead of scanning every event.
+            ? // Two ranges let SQLite seek the (aggregate_kind, stream_id) index instead of scanning.
               `WHERE (aggregate_kind = 'thread' AND stream_id IN (SELECT thread_id FROM copied_threads))
                 OR aggregate_kind < 'thread' OR aggregate_kind > 'thread'`
             : nullable === undefined || name === PROVIDER_SESSIONS_TABLE
@@ -305,6 +305,7 @@ const copySourceSlice = Effect.fn("copyDevDbSourceSlice")(function* (sourcePath:
       for (const entry of schema) {
         if (entry.type !== "table") yield* sql.unsafe(entry.sql).unprepared;
       }
+      yield* rebuildMessageSearch(sql);
     }),
   );
   yield* sql`DETACH DATABASE src`;
@@ -313,10 +314,7 @@ const copySourceSlice = Effect.fn("copyDevDbSourceSlice")(function* (sourcePath:
 const pruneSnapshot = Effect.fn("pruneDevDbSnapshot")(function* (input: RunMigrateDevDbInput) {
   const sql = yield* SqlClient.SqlClient;
 
-  // Threads the server would resume or start work on by itself. Its own
-  // recovery queries find most of them; usage-limit recovery also depends on
-  // settings, so any thread whose latest run failed or that has a recovery
-  // choice counts as live too.
+  // Usage-limit recovery also depends on settings; exclude latest-run failures and recovery choices.
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const recoveryThreadIds = yield* Effect.forEach(RECOVERY_KINDS, (kind) =>
     projections.getRecoveryThreadIds(kind),
@@ -334,8 +332,7 @@ const pruneSnapshot = Effect.fn("pruneDevDbSnapshot")(function* (input: RunMigra
     SELECT thread_id FROM orchestration_v2_projection_threads
     WHERE json_extract(payload_json, '$.limitRecovery') IS NOT NULL`;
 
-  // Forks and subagents read history and results through their lineage, so a
-  // thread family is cloned or dropped as a whole.
+  // Clone or drop whole thread families to preserve fork and subagent lineage reads.
   yield* sql`CREATE TEMP TABLE thread_families AS
     SELECT thread_id, updated_at,
       COALESCE(json_extract(payload_json, '$.lineage.rootThreadId'), thread_id) AS root_id
@@ -465,8 +462,7 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
   input: RunMigrateDevDbInput,
   options: RunMigrateDevDbOptions = {},
 ) {
-  // SQLite treats a negative LIMIT as "no limit", which would clone
-  // everything. The CLI flags validate this too; this covers direct callers.
+  // Negative SQLite LIMITs mean unlimited; validate direct callers as well as CLI flags.
   if (input.projects < 1 || input.threadsPerProject < 0) {
     return yield* Effect.die("projects must be >= 1 and threadsPerProject >= 0");
   }
@@ -499,9 +495,7 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
   if (canonicalBaseDir === canonicalSharedHome) {
     return yield* new MigrateDevDbSharedHomeError();
   }
-  // The destination db and snapshot both get deleted below; a --source that
-  // resolves to either (e.g. a leftover snapshot file) would be destroyed
-  // before it is ever read.
+  // Both destination and snapshot are deleted below; reject sources resolving to either.
   const canonicalSourcePath = yield* fs
     .realPath(sourcePath)
     .pipe(Effect.orElseSucceed(() => sourcePath));
@@ -534,12 +528,10 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
       wrapPhase("snapshot", sourcePath),
     );
 
-    // Migrate before pruning: a source older than this checkout would
-    // otherwise crash the prune queries on columns that don't exist yet.
+    // Migrate first so prune queries can use columns missing from older sources.
     yield* Console.log("Running migrations on the snapshot...");
     const executed = yield* Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      // Mirror server boot (persistence/Sqlite.ts).
       yield* sql.unsafe("PRAGMA foreign_keys = ON").unprepared;
       return yield* runMigrations();
     }).pipe(
@@ -547,9 +539,7 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
       wrapPhase("migrate", snapshotPath),
     );
 
-    // Verify while the snapshot is still the only thing touched: a slot
-    // collision must abort before the old worktree db gets replaced with a
-    // schema whose colliding migration was silently skipped.
+    // Detect migration slot collisions before replacing the worktree database.
     yield* verifyMigrationSlots().pipe(
       Effect.provide(NodeSqliteClient.layer({ filename: snapshotPath })),
       Effect.catchTags({
@@ -573,8 +563,7 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
     );
 
     yield* Console.log(`Compacting into ${databasePath}...`);
-    // Re-check right before the swap: a dev server started while the
-    // snapshot was migrating and pruning must not lose its database.
+    // A server may have started during pruning; re-check before replacing its database.
     yield* ensureNotInUse(databasePath);
     yield* removeDatabaseFiles(databasePath);
     yield* Effect.gen(function* () {
@@ -590,8 +579,7 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
 
   yield* Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    // WAL does not survive VACUUM INTO; set it so first `vp run dev` finds
-    // the database exactly as server boot would have left it.
+    // VACUUM INTO loses WAL mode; restore the server boot setting.
     yield* sql.unsafe("PRAGMA journal_mode = WAL").unprepared;
   }).pipe(
     Effect.provide(NodeSqliteClient.layer({ filename: databasePath })),

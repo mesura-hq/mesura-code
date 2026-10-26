@@ -17,3 +17,10 @@ packages/provider-opencode/src/server/status.test.ts:generic-api-key:120
 # The web-push documentation's example PushSubscription keys, used as public test fixtures.
 apps/server/src/push/PushRpc.test.ts:generic-api-key:34
 packages/contracts/src/pushNotifications.test.ts:generic-api-key:34
+
+# Upstream sync to 210b2e7c6a: public test fixtures, not credentials. The digest hashes a
+# fixture token in the same test; the relay preview keys are placeholder hex strings.
+0191d6c647fe0c9af09717d675b91b5a611b3b9e:infra/task-cache/src/NativeClients.test.ts:generic-api-key:6
+ff1f6fd8849cdd2e0a07096eac4fd4440d1ad989:infra/relay/src/previewStages.test.ts:generic-api-key:11
+ff1f6fd8849cdd2e0a07096eac4fd4440d1ad989:infra/relay/src/previewStages.test.ts:generic-api-key:42
+ff1f6fd8849cdd2e0a07096eac4fd4440d1ad989:infra/relay/src/previewTunnelSweep.test.ts:generic-api-key:11

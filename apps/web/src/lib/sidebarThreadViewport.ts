@@ -1,13 +1,9 @@
 import { useEffect, useLayoutEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 /**
- * The sidebar thread list as the screen shows it, read from the DOM.
- *
- * `Sidebar.tsx` marks each thread row with `data-mesura-thread-key`; this
- * module measures those rows against the list's scroll viewport. It is how
- * `Ctrl+1..9` number the threads on screen rather than the first nine of the
- * list (ADR-009, decision 8), and how `Ctrl+D` / `Ctrl+U` scroll the list
- * without opening a thread (#79).
+ * Measures the rows `Sidebar.tsx` marks with `data-mesura-thread-key` against the list's
+ * scroll viewport, so `Ctrl+1..9` number the threads on screen rather than the first nine
+ * of the list (ADR-009, decision 8).
  */
 
 const THREAD_ROW_SELECTOR = "[data-mesura-thread-key]";
@@ -136,29 +132,22 @@ const sameKeys = (left: readonly string[] | null, right: readonly string[] | nul
     left.every((key, index) => key === right[index]));
 
 /**
- * The thread keys on screen while `active` (the jump hints show). Null while
- * inactive or off screen.
- *
- * Read after every commit of the caller: a reorder, a new thread or a removed
- * one moves the rows without a scroll, and a number must always name the key
- * that opens its row. The read is in a layout effect, so a changed list
- * renders again before the frame paints. Also read at most once a frame while
- * the list scrolls, so the numbers follow a `Ctrl+D` made with `Ctrl` held.
+ * Read after every commit, because a reorder or an added or removed thread moves rows
+ * without a scroll. A layout effect, so a changed list renders again before paint. Also
+ * read once a frame while the list scrolls, so the numbers follow a held `Ctrl+D`.
  */
 export function useViewportThreadKeys(active: boolean): readonly string[] | null {
   const [keys, setKeys] = useState<readonly string[] | null>(null);
-  // No dependency list on purpose: every commit can move the rows, and the
-  // rows on screen come from measuring the committed DOM. It compares with
-  // this render's `keys` and sets nothing when they match. A functional
-  // update here queued a no-op update on every commit, and the sidebar, which
-  // does not bail out of its own updates, committed again each time until
-  // React stopped it with "Maximum update depth exceeded".
+  // No dependency list on purpose; compares with this render's `keys`. A functional update
+  // here queued a no-op update per commit and hit "Maximum update depth exceeded".
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the committed DOM after every commit, which render cannot read
   useLayoutEffect(() => {
     if (!active) return;
     const next = readViewportThreadKeys();
     // oxlint-disable-next-line react/set-state-in-effect -- The rows on screen come from measuring the committed DOM, which render cannot read.
     if (!sameKeys(keys, next)) setKeys(next);
   });
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the thread list's scroll events while the jump hints show
   useLayoutEffect(() => {
     if (!active) return;
     const scroller = threadListScroller();
@@ -195,6 +184,7 @@ function refreshViewportThreadKeys(
  * opens it. Only while focus is in the thread list.
  */
 export function useThreadRowArrowKeys(): void {
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: window keydown listener for thread-row arrow navigation, removed on unmount
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;

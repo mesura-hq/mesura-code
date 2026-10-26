@@ -82,16 +82,10 @@ export function onDictationEnvironmentForgotten(
 }
 
 /**
- * A job this device started. Ownership is per device, not per tab, and one storage key holds one
- * job, so two tabs recording at once never overwrite each other's records.
- *
- * The rule that keeps delivery exact across tabs: every tab fills the job's marker wherever its
- * own copy of the draft still holds it (filling is idempotent, a filled marker is gone), and the
- * one-off effects (the "marker deleted" notice, the clipboard copy) run only while `handled` is
- * false. `handled` is set once the fill is written or the notice or copy has happened, never
- * before, so a failed write is retried on the next delivery or after a reload. The one race left:
- * two tabs that both lack the marker and receive the completion in the same instant may each
- * show the notice once; the text itself is never placed twice or lost.
+ * A job this device started, one storage key per job so concurrent tabs never overwrite each
+ * other. Every tab fills the marker wherever its draft holds it (idempotent); the one-off effects
+ * (deleted-marker notice, clipboard copy) run only while `handled` is false, set only once done,
+ * so a failed write retries. Two tabs racing may each show the notice; the text never doubles.
  */
 export interface OwnDictationJob {
   readonly environmentId: EnvironmentId;

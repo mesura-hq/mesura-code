@@ -1,22 +1,9 @@
 import { act } from "../../../../../test/render";
 /**
- * Entry point: `useNvimFileEditor`, the hook `MonacoFileSurface` mounts for
- * modal editing, rendered under React over a model that takes edits
- * (`makeEditableHarnessModel` in `~/test/nvimEditorHarness.tsx`). Neovim's
- * answers arrive on the real attach subscription, are folded by the real
- * `editorSessionFold`, and reach the model through the real `useNvimDriver`.
- *
- * Guards for phase 4 of the editor latency cycle ("One key costs one small
- * render"). That phase moves the cursor out of the passive effect and stops
- * reading the whole model for events that change no text, which is the code
- * every guarantee below runs through:
- *
- * - the model ends at the session's text whatever arrives in one render —
- *   one lines event, two of them, a snapshot, a delta for another file;
- * - text and caret from one chunk land together (phase 1, criterion 4);
- * - Neovim's own edits are never read back as composed input;
- * - a decoration's widget keeps its node while unrelated events arrive;
- * - a `:w` that shares a render with any other event still flushes the save.
+ * `useNvimFileEditor` over an editable model, with Neovim's answers through the real attach
+ * subscription, `editorSessionFold` and `useNvimDriver`. Whatever arrives in one render, the model
+ * ends at the session's text, text and caret land together, Neovim's edits are never read back as
+ * input, decoration widgets keep their nodes, and a `:w` still flushes the save.
  */
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useState } from "react";

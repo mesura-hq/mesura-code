@@ -67,11 +67,8 @@ describe("projectReadModel", () => {
   });
 
   it("takes the revision from its caller rather than from the read model", () => {
-    // ⚠ This assertion replaces one that required the opposite. The first
-    // version borrowed upstream's `snapshotSequence`, on the contract's own
-    // reasoning — and the measurement in `threadFeed.ts`'s module note showed
-    // that field advances on every transcript event, so deltas numbered with
-    // it would read as gaps. The publisher owns the numbering now.
+    // The caller supplies `revision`: upstream's `snapshotSequence` advances on every transcript
+    // event, so deltas numbered with it read as gaps (see `threadFeed.ts`).
     expect(projectReadModel(READ_MODEL, 412).revision).toBe(412);
     expect(projectReadModel(READ_MODEL, 7).revision).toBe(7);
   });
@@ -110,11 +107,8 @@ describe("projectReadModel", () => {
   });
 
   it("drops a thread whose title upstream left blank", () => {
-    // `title` is required and non-blank on the wire, and upstream's own type
-    // says it cannot be blank — but upstream's check is dropped on emission
-    // and this producer is the last place that can refuse one. Dropping the
-    // row beats failing the whole snapshot: one thread missing from the bar
-    // costs less than every thread missing.
+    // Upstream's blank-title check is lost on emission, so this producer is the last place to refuse
+    // one. Dropping the row beats failing the snapshot: one thread missing beats every thread missing.
     const withBlank: ProjectableReadModel = {
       ...READ_MODEL,
       threads: [{ ...READ_MODEL.threads[0]!, title: "   " }],

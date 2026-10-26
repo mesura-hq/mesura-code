@@ -33,11 +33,8 @@ import { request, type EnvironmentRpcInput, type EnvironmentUnaryRpcTag } from "
 import { runInEnvironment } from "./runtime.ts";
 import { threadSearchMatchKey } from "./threadSearch.ts";
 
-// Agent thread search: one description searches every connected environment
-// through bounded, read-only RPCs, and the model environment's configured text
-// model steers the reads. Every budget below exists so a search on a large
-// history, a model that never finishes, or many connected environments still
-// ends; hitting one is reported as `budgetExhausted` instead of claiming
+// Every budget below exists so a search on a large history, a model that never finishes, or many
+// connected environments still ends. Hitting one is reported as `budgetExhausted`, never as
 // complete coverage.
 
 /** Catalog and evidence reads in flight at once, across every environment. */
@@ -538,11 +535,9 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
   };
 
   /**
-   * Chooses the evidence for one model step. Each environment offers its
-   * newest message evidence, then catalog titles that contain a searched term,
-   * then the rest of its catalog; environments take turns so none is starved.
-   * The serialized request, JSON overhead included, stays within
-   * THREAD_SEARCH_REASONING_MAX_INPUT_BYTES.
+   * Each environment offers its newest message evidence, then catalog titles containing a searched
+   * term, then the rest of its catalog, taking turns so none is starved. The serialized request,
+   * JSON overhead included, stays within THREAD_SEARCH_REASONING_MAX_INPUT_BYTES.
    */
   const selectModelEvidence = (finalStep: boolean): ReadonlyArray<EvidenceItem> => {
     const lowerTerms = searchedTerms.map((term) => term.toLowerCase());

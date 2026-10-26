@@ -1,15 +1,7 @@
 /**
- * Mesura: the background pull-request sweep's backoff for thread groups whose
- * lookup failed for a cause a retry cannot change. Such a group is skipped by
- * periodic sweeps until its wait is over; the wait doubles per failure from one
- * minute up to an hour. Events that can change the answer (a finished run, a
- * checkpoint, a branch change) look the group up at once regardless, and a
- * success forgets the group. It also says when the next lookup must bypass a
- * failure GitManager cached, so an event or the next sweep reaches the provider.
- *
- * Kept out of `ThreadPullRequestService.ts`, an upstream file, so the upstream
- * diff stays a few lines.
- *
+ * Mesura: sweep backoff for thread groups whose PR lookup failed for a cause a retry cannot change.
+ * Only periodic sweeps wait; events that can change the answer look up at once. Kept out of
+ * upstream's `ThreadPullRequestService.ts` so that file's diff stays a few lines.
  * @module orchestration-v2/pullRequestLookupBackoff
  */
 import * as Cause from "effect/Cause";

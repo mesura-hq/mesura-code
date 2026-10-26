@@ -4,15 +4,9 @@ import * as NodePath from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 
 /**
- * Two properties of this phase that no behavioural test can see.
- *
- * The sleep rule is about the harness itself: a test that waits on a clock
- * passes on a fast machine for the wrong reason and fails on a loaded one for
- * no defect, and a text-sync harness that does it is worse than none, because
- * it reports confidence it has not earned.
- *
- * The dependency rule is about the merge: this fork takes upstream every week,
- * and every dependency added here is a line in a manifest upstream also edits.
+ * Two properties no behavioural test can see. A test that waits on a clock passes or fails on
+ * machine speed, not on a defect. Every dependency added here is a manifest line upstream also
+ * edits, which costs a conflict at each weekly merge.
  */
 
 const editorDirectory = NodePath.join(import.meta.dirname);
@@ -31,23 +25,13 @@ function editorSourceFiles(): string[] {
 }
 
 /**
- * The tests allowed to wait on a clock, and why.
- *
- * A list rather than a marker comment a file could put on itself: widening
- * this is an edit somebody reads, not something a new test can do quietly.
- *
- * The bench measures how long a keystroke takes; the gap between keys is part
- * of what it models, because a person types rather than holding the key down.
- * The rule above does not apply to it for a specific reason — it asserts
- * nothing about a duration, so there is no threshold for a fast machine to
- * pass for the wrong reason or a loaded one to fail against.
+ * The tests allowed to wait on a clock, as a list a reviewer reads rather than a marker a file
+ * could set on itself. The bench models the gap between keys and asserts no duration, so no
+ * threshold depends on machine speed.
  */
 const MAY_WAIT_ON_A_CLOCK: ReadonlyMap<string, string> = new Map([
-  // Keyed by a phrase the file would not survive losing, so the exemption
-  // follows the file rather than the path. Checking only that *something*
-  // exists at the path is the same hole one step removed: delete the bench,
-  // let anything else land on that name, and it inherits a pass it never
-  // asked for.
+  // Keyed by a phrase the file would not survive losing, so the exemption follows the file:
+  // another file landing on the same path does not inherit the pass.
   ["conformance/insertModeLatency.test.ts", "MESURA_NVIM_CONFIG_DIR"],
   // Pins the hold's time bound, which nothing but a clock can show.
   ["Manager.cursorWait.test.ts", "TEXT_WAIT_MS"],

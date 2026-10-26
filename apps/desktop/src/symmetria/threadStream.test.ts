@@ -134,13 +134,8 @@ describe("createThreadStreamServer", () => {
   });
 
   it("forgets a peer that has gone", async () => {
-    // ⚠ Asserted through `peerCount`, and the first two attempts at this test
-    // were both wrong in the same way. Writing to a destroyed socket neither
-    // throws nor emits synchronously — Node defers the failure a tick — so
-    // "broadcast and then check no error arrived" is vacuously true whether or
-    // not the peer was ever removed. Verification proved it by deleting the
-    // cleanup and watching the test stay green. The set's size is the only
-    // thing that actually moves.
+    // ⚠ Assert through `peerCount`: Node defers the failure of a write to a destroyed socket by a
+    // tick, so "broadcast, then no error" passes whether or not the peer was removed.
     const path = socketPath("forget");
     const server = createThreadStreamServer({ snapshot: () => SNAPSHOT });
     servers.push(server);
@@ -177,28 +172,20 @@ describe("createThreadStreamServer", () => {
     servers.push(server);
     await listenOnPath(server, path);
 
-    // Connect and never read: `pause()` stops the flow so the kernel buffer
-    // and then Node's own buffer fill up.
+    // The snapshot's arrival proves the server registered this peer; then it stops reading.
     const stalled = NodeNet.createConnection(path);
     stalled.on("error", () => {});
-    await new Promise<void>((resolve) => stalled.on("connect", () => resolve()));
+    await new Promise<void>((resolve) => stalled.once("data", () => resolve()));
     stalled.pause();
 
+    // No yield between broadcasts: the peer never gets a turn to read, so once the kernel
+    // buffer is full every write stays in Node's backlog until `broadcast` drops the peer.
     const fat = "x".repeat(256 * 1024);
-    let closed = false;
-    stalled.on("close", () => {
-      closed = true;
-    });
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      // `closed` is set from the socket's own event handler, not from this
-      // body, so it is read at the top rather than in the loop condition —
-      // where the linter reads an unmodified condition and says so.
-      if (closed) break;
+    for (let attempt = 0; attempt < 64 && server.peerCount() > 0; attempt += 1) {
       server.broadcast(fat);
-      // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- Yield to the real socket while filling its backpressure buffer; a fake clock cannot drive kernel I/O.
-      await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
+    expect(server.peerCount()).toBe(0);
     expect(errors.some((error) => /not reading/.test(error.message))).toBe(true);
   });
 });

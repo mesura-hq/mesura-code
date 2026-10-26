@@ -1,15 +1,7 @@
-/**
- * Phase 6 fence (thread-attention plan) in the browser: the pinned Factory plan card in the
- * dock above the composer, acceptance criteria 1, 2 and 7.
- *
- * Entry point: AppRoot with its memory router and the real ChatView, MessagesTimeline,
- * ChatComposer, ComposerBannerStack, PinnedActionDock and FactoryPlanCard, mounted as
- * `FactoryPlanApproval.browser.test.tsx` mounts them. The thread, its provider list and the
- * stored plan body are fixtures; `threadEnvironment.startTurn` is a spy, so an approval is read
- * from its input. What only a browser shows: the dock at any timeline scroll position, at
- * desktop and Pixel 7 widths, the composer input left uncovered, and the unpin surviving a
- * remount from the same browser storage.
- */
+// Thread attention phase 6, criteria 1, 2 and 7: the pinned Factory plan card, mounted as
+// `FactoryPlanApproval.browser.test.tsx` mounts it, with `threadEnvironment.startTurn` as a spy. It
+// covers what only a browser shows: the dock at any scroll position and width, the composer input
+// left uncovered, and the unpin surviving a remount from the same browser storage.
 import "~/index.css";
 import { type ReactNode } from "react";
 import {

@@ -23,6 +23,8 @@ vi.mock("~/browser/previewRuntime", () => ({
 vi.mock("~/state/server", async () => ({
   environmentServerConfigsAtom: (await import("~/test/threadLinkFixture")).threadLinkFixture
     .configs,
+  // state/projects.ts reads this at import; the links under test never call it.
+  serverEnvironment: { configValueAtom: () => undefined },
 }));
 vi.mock("~/connection/catalog", async () => {
   const f = (await import("~/test/threadLinkFixture")).threadLinkFixture;
@@ -66,6 +68,7 @@ vi.mock("~/hooks/useSettings", () => ({
     savedTarget.value = await linkTargetMocks.preference();
   },
   getClientSettings: () => ({ browserLinkTarget: savedTarget.value }),
+  isClientSettingsHydrated: () => true,
 }));
 const savedTarget = vi.hoisted(() => ({ value: "app" as "app" | "system" }));
 

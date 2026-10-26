@@ -1,58 +1,9 @@
 import { cdp, page } from "vite-plus/test/browser";
 import { act, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout, as `routes/__root.tsx`
- * does, and whose chat layout is the real `_chat.tsx` route component (the
- * real KeyEngineHost around the real ChatView). ChatView's right panel, its
- * launcher (`RightPanelTabs.tsx`) and every surface it renders stay real. The
- * key engine is installed on `window` before React renders, as `main.tsx`
- * does. Keys are real `keydown` events dispatched from the focused element; a
- * tap is a `pointerdown` then a `click` on the tapped element.
- *
- * Phase 4 of the Vim keys round 2 cycle (land the keyboard in every panel
- * surface):
- * - Criterion 1 was retired: upstream removed the Agents surface in v2.
- *   The launcher now guards its absence.
- * - Criterion 2: `Space p l` and `Space p p` leave focus inside the pull
- *   request list's and the pull request's content.
- * - Criterion 3: `Space p s` leaves focus inside Software Factory's scrolling
- *   content.
- * - Criterion 4: a Markdown file shown rendered, and an image, take focus in
- *   their scroll region when `Ctrl+Tab` brings their tab back, and `Ctrl+D`
- *   there scrolls half a page.
- *   Leaving the Files tree (`Escape`, `Ctrl+E`) after Enter opened such a file
- *   lands in the same scroll region, as it lands in the editor for a source
- *   file (guard).
- * - Criterion 5: in `components/preview/PreviewPanel.launcher.test.tsx`; the
- *   native view exists only in the Electron window.
- * - Criterion 6, guard: `Space p m` (Device) leaves focus on the tab title.
- *   The Browser surface is desktop-only (`isPreviewSupportedInRuntime`), so
- *   its guard is in `PreviewPanel.launcher.test.tsx`.
- * - Criterion 7, guard: at a phone's width, a tap on the panel's `+` shows the
- *   full-panel launcher, a tapped row opens its surface, and no text entry
- *   holds focus. The verifier covers the real phone.
- *
- * Chromium loads the app's CSS and owns layout, scrolling and animation
- * frames. The real LegendList preserves the list's pane entry and scroller.
- *
- * Fixture state beyond `test/appRootFenceMocks.tsx`, each the least that makes
- * a surface render:
- * - The environment advertises `pullRequests` and `threadPullRequests`, and
- *   `useServerConfigs` reads it with the default server settings (the pull
- *   request page resolves project settings from it).
- * - The thread links one pull request and has it as its linked pull request,
- *   and the pull request's detail read answers with that pull request.
- * - The thread's v2 turn items hold a presented Software Factory plan.
- * - The device host finished onboarding (`useDeviceState`).
- * - The project's listing (`useProjectEntriesQuery`) holds three files, so the
- *   Files tree has rows to open.
- * - The file read (`useProjectFileQuery`) answers every text file with one
- *   Markdown document, and the asset URL (`useAssetUrlState`) answers every
- *   image with a URL. Rendered Markdown is the stored preference.
- * - An attachment's signed URL (`useAssetUrlRefresh`) resolves to a data URL
- *   which Chromium loads as an image or fetches as a Markdown document.
- */
+// Keyboard landing in every right panel surface (Vim keys round 2 phase 4) through AppRoot,
+// ChatView and the real launcher. Criterion 1 is retired: upstream removed the Agents surface. The
+// Electron-only Browser surface is covered in `PreviewPanel.launcher.test.tsx`. Fixture state
+// beyond `test/appRootFenceMocks.tsx` is the least that makes each surface render.
 import { type ReactNode } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { ChatFileAttachment, ThreadId } from "@t3tools/contracts";

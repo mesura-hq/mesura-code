@@ -1,28 +1,8 @@
 import { freshTestId } from "~/test/freshTestId";
 /**
- * Entry point: `composerSurface`, driven the way the key engine drives it
- * (`handleKey`, one token per key) and the composer drives it
- * (`registerComposerVimAdapter`, focus arriving in and leaving the editor).
- * The adapter is a stand-in for `ChatComposer.tsx`'s: it holds one draft's
- * prompt and collapsed cursor, and reports which draft that is.
- * `AppRoot.composerUndo.fence.browser.test.tsx` covers the same criteria through the
- * real composer.
- *
- * Phase 6 of the modal keys production cycle (composer undo spans normal-mode
- * sessions):
- * - Criterion 1: an insert session is one undo step.
- * - Criterion 2: undo walks back across several normal-mode sessions in order.
- * - Criterion 3: `Ctrl+R` redoes what `u` undid; a new change clears redo.
- * - Criterion 4: the cursor after `u` and `Ctrl+R` is at the start of the
- *   changed text.
- * - Criterion 5: switching thread starts a fresh history for the new draft;
- *   returning to a thread walks back that draft's own history, with text
- *   changed elsewhere as its latest state.
- * - Criterion 6: mentions, citations, skills and context references survive
- *   undo and redo as the same tokens.
- * - The palette resume (`resumeComposerNormalOnFocus`) pushes no step by
- *   itself, and the history survives it.
- * - Guard: `u` inside one normal-mode session undoes the last change.
+ * The adapter stands in for `ChatComposer.tsx`'s: one draft's prompt and collapsed cursor.
+ * `AppRoot.composerUndo.fence.browser.test.tsx` covers the same behaviour through the real
+ * composer.
  */
 import { describe, expect, it } from "vite-plus/test";
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";

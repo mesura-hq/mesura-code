@@ -1,28 +1,7 @@
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout, and whose chat layout is
- * the real `_chat.tsx` route component around the real ChatView. In it the
- * real ChatComposer renders the real ProviderModelPicker, CombinedModelPickerContent
- * and ModelPickerContent. Keys are real `keydown` events dispatched from the
- * focused element, and every write is read back from the real composer draft
- * store.
- *
- * The behavior contract of the combined picker in the composer:
- * - Tab and Shift+Tab cycle provider tabs from the search field.
- * - Left/Right change the highlighted model's pending effort, and the
- *   steppers do the same by pointer, without choosing the model.
- * - Enter or a row click applies that model with its pending effort.
- * - More options replaces the model screen; Back to models returns to the
- *   same search with every pending edit kept; Use applies effort, options and
- *   access together.
- * - Escape and a press outside discard every pending edit.
- * - The access shown is the thread's saved access until it is edited.
- * - The effort shortcut opens the picker on More options and toggles it while
- *   the picker is open; the access shortcut opens the picker.
- *
- * Boundaries the fixture replaces, and nothing else: the ones listed in
- * `test/appRootFenceMocks.tsx`. The providers are this file's catalog.
- */
+// The combined picker's behavior contract in the composer, through AppRoot and the real
+// ChatComposer, ProviderModelPicker and CombinedModelPickerContent. Keys are real `keydown` events,
+// and every write is read back from the real composer draft store. Boundaries: only
+// `test/appRootFenceMocks.tsx`.
 import { type ReactNode } from "react";
 import { act } from "../test/render";
 import { describe, expect, it, vi } from "vite-plus/test";

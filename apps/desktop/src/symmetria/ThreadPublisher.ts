@@ -1,24 +1,8 @@
 /**
- * Serves the projected thread list to Symmetria Shell.
- *
- * A thin shell: the projection lives in
- * `threadProjection.ts`, the socket in `threadStream.ts`, the filesystem in
- * `socketFiles.ts` and the binding in `unixSocket.ts`. This module supplies
- * only what needs the application — where the socket goes, what state is
- * current, and that the whole thing must never be able to fail startup.
- *
- * **The state is pushed in from the renderer over IPC**, on
- * `PUBLISH_THREADS_CHANNEL`. The renderer already holds the fork's read model
- * and already renders it, so a second subscription in the main process would be
- * a duplicate with its own authentication. `threadFeed.ts` turns that series of
- * pushes into the ordered stream, and this module only carries frames from it
- * to the socket.
- *
- * That choice has one consequence worth stating where somebody will meet it:
- * **the publisher only has state while a renderer is alive.** It therefore
- * serves the LAST KNOWN state rather than nothing when none is attached — a
- * shell showing a stale bar is better than one showing an empty bar, because a
- * consumer cannot tell "no threads" from "nobody has told me".
+ * Serves the projected thread list to Symmetria Shell; it must never fail startup.
+ * The renderer pushes its read model over `PUBLISH_THREADS_CHANNEL`; a main-process subscription would duplicate it.
+ * State exists only while a renderer is alive, so a socket peer gets the last known state:
+ * a stale bar beats an empty one, because a consumer cannot tell "no threads" from "nobody told me".
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -72,11 +56,8 @@ export const make = Effect.gen(function* () {
       },
     });
 
-    // A `net.Server` emitting 'error' with no listener THROWS, and this one
-    // lives for the whole session — so an accept-time failure long after
-    // startup would take the entire main process down over the bar.
-    // `listenOnPath` installs a listener for the bind only and removes it
-    // again, which leaves exactly that gap.
+    // A `net.Server` 'error' with no listener throws and would take down the main process.
+    // `listenOnPath` listens only during the bind, so accept-time errors need this listener.
     server.on("error", (error) => {
       runSync(logWarning("thread socket server error", { message: error.message }));
     });
@@ -96,7 +77,7 @@ export const make = Effect.gen(function* () {
   });
 
   const started = yield* start.pipe(
-    Effect.map((running) => Option.some(running)),
+    Effect.asSome,
     // Best-effort: a bind failure must never
     // block startup. The bar is simply absent until the next launch, and every
     // other surface of the application is unaffected.
@@ -108,18 +89,9 @@ export const make = Effect.gen(function* () {
     ),
   );
 
-  // ⚠ PARTLY UNTESTED, and named here rather than left as a gap of unknown
-  // shape. `ThreadPublisher.test.ts` covers the happy path: the socket binds,
-  // this handler is registered, and a peer receives the snapshot. Not covered
-  // are the two bind-failure decisions — that the handler is still registered,
-  // and that frames are dropped rather than queued — which would need a socket
-  // path that cannot bind. Everything the handler CALLS is covered
-  // (`parseFeedPush`, `createFeed`, `projectReadModel`).
-  //
-  // Registered even when the bind failed. The renderer must not have to know
-  // whether a socket came up, and an unhandled `invoke` channel rejects in the
-  // renderer rather than being ignored — which would turn an absent bar into a
-  // console full of errors on every push.
+  // Registered even when the bind failed: an unhandled `invoke` channel rejects in the
+  // renderer, which would log an error on every push. Frames are then dropped, not queued.
+  // Untested: both bind-failure decisions need a socket path that cannot bind.
   yield* ipc.handle({
     channel: PUBLISH_THREADS_CHANNEL,
     handler: (raw: unknown) =>

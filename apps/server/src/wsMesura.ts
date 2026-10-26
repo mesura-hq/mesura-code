@@ -1,11 +1,8 @@
 /**
- * Mesura: the WebSocket RPC handlers for the fork's own RPCs.
- *
- * They are served by the same RPC server as upstream's (`ws.ts`), but their
- * handler layer is built here, over `WsRpcGroupMesura`. One handler layer over
- * every RPC exceeds TypeScript's instantiation depth (see `WsRpcGroupMesura`
- * in `packages/contracts/src/rpc.ts`), and a separate file keeps the fork's
- * handlers out of upstream's `ws.ts`, which conflicts at every sync.
+ * Mesura: the handler layer for the fork's own RPCs, merged into `ws.ts`'s RPC server. A separate
+ * group because one layer over every RPC exceeds TypeScript's instantiation depth (see
+ * `WsRpcGroupMesura` in `packages/contracts/src/rpc.ts`), and a separate file because `ws.ts`
+ * conflicts at every upstream sync.
  */
 import {
   OrchestrationSearchThreadsError,

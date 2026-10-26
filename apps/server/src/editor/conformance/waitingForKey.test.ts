@@ -12,15 +12,9 @@ import { makeScratchManager, recordChunks } from "./managerHarness.ts";
 import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * Entry point: `EditorSessionManager`'s driving calls, over a real Neovim.
- *
- * Phase 6 of the editor latency cycle, criterion 4: the base lost every key of
- * five windows with "2 requests waiting longer than 15s" and Neovim alive. Its
- * typing began in normal mode, so `Z` left Neovim waiting for the rest of the
- * command. Neovim defers a non-fast request (`nvim_exec_lua`) while it waits
- * for a key, so the next cursor move, viewport or text write never answered,
- * held the thread's lock, and the key that would have released Neovim queued
- * behind it for good.
+ * While Neovim waits for the rest of a command (`Z` in normal mode), it defers non-fast requests
+ * such as `nvim_exec_lua`. A cursor read, viewport or text write then never answered, held the
+ * thread's lock, and queued the releasing key behind it: "2 requests waiting longer than 15s".
  */
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));

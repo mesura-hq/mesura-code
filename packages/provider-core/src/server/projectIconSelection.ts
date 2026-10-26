@@ -1,13 +1,7 @@
 /**
- * Mesura: the provider-side contract of the Luna project-icon search.
- *
- * A provider instance that can answer the search exposes
- * `ProviderInstance.selectProjectIcon`. The server's project-icon discovery
- * decides when a search may run and builds the request; only the types it
- * shares with drivers live here, because provider-core cannot import the
- * server.
- *
- * @module provider-core/server/projectIconSelection
+ * Mesura: provider-side types of the Luna project-icon search, exposed through
+ * `ProviderInstance.selectProjectIcon`. The server decides when a search runs; only shared types live
+ * here, because provider-core cannot import the server.
  */
 import type { OrchestrationProjectShell } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";

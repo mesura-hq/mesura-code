@@ -7,19 +7,10 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * Phase 4 of factory-in-chat, acceptance criterion 8: the web client builds
- * the route defaults, the routing rules and the Approve message from one
- * shared module in `packages/client-runtime`.
- *
- * This reads source rather than behaviour because the failure it guards
- * against is invisible to a test that runs the client: a second copy of the
- * rules in the client passes every behaviour spec on the day it is written,
- * and only drifts later. The behaviour itself is pinned by
- * `packages/client-runtime/src/factory/routes.test.ts` and
- * `planApproval.test.ts`, and by the web card spec. The native mobile app that once shared it was
- * removed (ADR-008).
- *
- * Assertions are on substrings, never on counts.
+ * Factory-in-chat phase 4, criterion 8: the web client builds route defaults, routing rules and the
+ * Approve message from one shared `packages/client-runtime` module. This reads source because a
+ * second copy of the rules passes every behaviour spec on day one and only drifts later. The
+ * behaviour is pinned by `routes.test.ts` and `planApproval.test.ts`. Assert substrings, not counts.
  */
 
 const read = (relativePath: string) =>
@@ -92,7 +83,7 @@ it("factory routes web route picker and approval hook import the shared module",
 
 it("factory routes no client defines its own approval line, family defaults or budget", () => {
   const offenders: string[] = [];
-  for (const file of [...clientSources("apps/web/src/factory")]) {
+  for (const file of clientSources("apps/web/src/factory")) {
     const source = read(file);
     if (source.includes("Approve plan sha256")) offenders.push(`${file}: approval line`);
     if (/["'`](opus|sol|luna)["'`]/.test(source)) offenders.push(`${file}: family literal`);

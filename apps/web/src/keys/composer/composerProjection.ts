@@ -1,14 +1,9 @@
 import { splitPromptIntoComposerSegments } from "~/composer-editor-mentions";
 
 /**
- * The prompt as Vim sees it: plain text where every inline token (mention,
- * citation, skill, context reference) is ONE private-use character.
- *
- * One character per token is the composer's own "collapsed cursor" model
- * (`composer-logic.ts`), so a collapsed offset here is a composer cursor with
- * no conversion. Each token gets its own code point, so a token deleted from
- * the middle can never hand its identity to the token after it when the text
- * is expanded back.
+ * Every inline token is ONE private-use character, matching the composer's collapsed-cursor model
+ * (`composer-logic.ts`), so an offset here needs no conversion. Each token gets its own code point,
+ * so deleting one can never hand its identity to the next when the text is expanded back.
  */
 
 const TOKEN_BASE = 0xe000;
@@ -62,11 +57,9 @@ export function positionOf(text: string, offset: number): { line: number; col: n
 }
 
 /**
- * The composer (Tiptap/ProseMirror) writes a hard break as a plain `<br>`, and
- * ends a paragraph whose last line is empty with one more `<br>` that holds the
- * line open but is not a character. ProseMirror marks that one with
- * `ProseMirror-trailingBreak`, and may put a separator `<img>` before it after
- * an inline chip, so the class decides first. That trailing one is skipped.
+ * A paragraph whose last line is empty ends with one extra `<br>` that holds the line open but is
+ * not a character. ProseMirror marks it `ProseMirror-trailingBreak` and may put a separator `<img>`
+ * before it after a chip, so the class decides first.
  */
 function isPlaceholderBreak(br: HTMLBRElement): boolean {
   if (br.classList.contains("ProseMirror-trailingBreak")) return true;

@@ -40,6 +40,7 @@ export function useLinkableMachines(environmentId: EnvironmentId, enabled: boole
   const discoverIfUnasked = useEffectEvent(() => {
     if (discovery.environments.size === 0 && !discovery.refreshing) void refreshDiscovery();
   });
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: asks for T3 Connect hosts when the machine picker opens, from every caller of this hook
   useEffect(() => {
     if (enabled) discoverIfUnasked();
   }, [enabled]);

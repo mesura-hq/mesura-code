@@ -281,6 +281,18 @@ describe("desktop update UI helpers", () => {
       "Install update 1.1.0 and restart Mesura Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
     );
   });
+
+  it.each(["owner/repo/extra", "owner#notes/repo", "owner/repo?tab=notes"])(
+    "falls back to upstream for an invalid configured repository: %s",
+    (repository) => {
+      expect(getDesktopUpdateReleaseHistoryUrl(repository)).toBe(
+        "https://github.com/pingdotgg/t3code/releases",
+      );
+      expect(getDesktopUpdateReleaseUrl("1.2.3", repository)).toBe(
+        "https://github.com/pingdotgg/t3code/releases/tag/v1.2.3",
+      );
+    },
+  );
 });
 
 describe("canCheckForUpdate", () => {

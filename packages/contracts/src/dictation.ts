@@ -10,11 +10,9 @@ import {
 import { ComposerContextId } from "./composerContext.ts";
 
 /**
- * Server-side dictation: a client uploads a recording through the signed
- * attachment upload route, then starts a job that the server transcribes with
- * the environment's OpenAI key. Every job's state reaches every subscribed
- * client, so the marker a client drops into a draft can be filled wherever the
- * draft lives.
+ * Server-side dictation: a client uploads a recording through the signed attachment upload route,
+ * then starts a job the server transcribes with the environment's OpenAI key. Every job's state
+ * reaches every subscribed client, so a draft's marker can be filled wherever the draft lives.
  */
 
 /**

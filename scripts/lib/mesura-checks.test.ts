@@ -166,7 +166,7 @@ describe("readWorkspacePackages", () => {
         readWorkspacePackages(root).map((entry) => [entry.name, entry.typecheckScript]),
       );
       expect(scripts).toEqual({
-        tasks: "tsc-rs --noEmit",
+        tasks: "tsc --noEmit",
         plain: undefined,
         astro: "astro check",
       });

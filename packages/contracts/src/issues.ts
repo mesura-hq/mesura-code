@@ -2,8 +2,6 @@ import * as Schema from "effect/Schema";
 
 import { PositiveInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import type { RepositoryIdentity } from "./environment.ts";
-import { pullRequestHostOf } from "./pullRequest.ts";
-import { SourceControlProviderKind } from "./sourceControl.ts";
 
 export const IssueState = Schema.Literals(["open", "closed", "all"]);
 export type IssueState = typeof IssueState.Type;
@@ -78,13 +76,10 @@ export class IssueReadError extends Schema.TaggedError<IssueReadError>()("IssueR
 const GITHUB_REPOSITORY_PATH = /^[^/\s]+\/[^/\s]+$/u;
 
 /**
- * The GitHub repository a project's recorded identity names, as a web URL. Issue reads use it
- * instead of the checkout's default remote, which in a fork with an `upstream` remote is the fork.
- *
- * Every field that names the repository — the canonical key, the web URL, the display name and
- * the owner/name pair — must name the same one on the same host. Null when the identity names
- * another provider, too little to address a repository, or two different repositories: a
- * doubtful identity is refused rather than settled by picking one of its fields.
+ * The GitHub web URL of the repository a project's identity names. Issue reads use it, not the
+ * checkout's default remote, which in a fork with an `upstream` remote is the fork. Null for
+ * another provider, for too little to address a repository, and when the naming fields (canonical
+ * key, web URL, display name, owner/name) disagree: a doubtful identity is refused, not guessed.
  */
 export function issueRepositoryUrl(
   identity:
@@ -96,7 +91,7 @@ export function issueRepositoryUrl(
     | undefined,
 ): string | null {
   if (!identity || (identity.provider !== undefined && identity.provider !== "github")) return null;
-  const host = pullRequestHostOf(identity, SourceControlProviderKind.make("github"));
+  const host = identity.canonicalKey?.split("/")[0]?.trim().toLowerCase() || "github";
   const paths: string[] = [];
   const canonicalPath = identity.canonicalKey.split("/").slice(1).join("/");
   if (canonicalPath) paths.push(canonicalPath);

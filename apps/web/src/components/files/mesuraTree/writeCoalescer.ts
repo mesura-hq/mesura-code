@@ -1,10 +1,7 @@
 /**
- * Coalesces storage writes behind a short delay.
- *
- * The file manager reports view state on every cursor move and every scroll
- * frame, and treats the write as a cheap in-memory update; here the write is
- * a synchronous local-storage call, so the latest value is kept and written
- * once the burst ends, and at once when the page hides.
+ * Coalesces storage writes behind a short delay. The file manager reports view state on
+ * every cursor move and scroll frame as if writes were free; here each is a synchronous
+ * local-storage call, so only the burst's last value is written, or at once on page hide.
  */
 export function createWriteCoalescer(write: () => void, wait: number) {
   let timer: ReturnType<typeof setTimeout> | null = null;

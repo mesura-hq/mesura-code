@@ -1,51 +1,20 @@
 /**
- * Monaco, without the four language services.
- *
- * The package's own entry is `editor.main.js`, and it imports three kinds of
- * thing: the Monarch grammars that colour text, the sixty-odd editor
- * contributions that make it an editor, and the four language *services* for
- * CSS, HTML, JSON and TypeScript. This file is that list with the third kind
- * left out, and with the LSP client external left out with it.
- *
- * The services are what emit the workers. Each one references its worker
- * through Vite's worker plugin, so the chunks are built whether or not the
- * service is ever switched on — last cycle measured the four at 9,160,971
- * bytes raw and 2,058,703 gzipped, emitted and never fetched. Turning them off
- * at runtime, which is what this app did before, keeps them reachable and
- * keeps the chunks.
- *
- * This app wants none of them: code intelligence comes from a language server
- * on the backend, and a second analysis running in the browser is a
- * disagreeing answer that costs two megabytes compressed.
- *
- * **The import list is in upstream's own order on purpose.** A Monaco bump is
- * then a diff against `editor.main.js`, and anything upstream adds shows up as
- * a line that is here or is missing. Keep it that way: sorting it, grouping it
- * or tidying it makes the next bump a reading exercise instead of a diff.
+ * Monaco's `editor.main.js` without the CSS, HTML, JSON and TypeScript language services or the LSP
+ * client: each service makes Vite emit its worker chunk even when switched off (about 2 MB gzipped,
+ * never fetched), and code intelligence comes from the backend language server. Keep the imports
+ * in upstream's order so a Monaco bump stays a diff against `editor.main.js`.
  */
 
 export * from "monaco-editor/editor/editor.api.js";
 
-// The two codicon stylesheets upstream imports here are deliberately absent.
-// They cannot be reached through the package name at all: the exports map is
-// `./*` to `./esm/vs/*.js`, which appends `.js` to everything, so a `.css`
-// specifier resolves to a file that does not exist. They arrive anyway —
-// `standalone/browser/quickAccess/standaloneGotoSymbolQuickAccess.js`, which
-// is in the list below, imports both by a relative path from inside the
-// package, where no exports map applies.
+// Upstream's two codicon stylesheets are absent on purpose: the exports map appends `.js` to every
+// specifier, so a `.css` import cannot resolve. They still arrive through
+// `standaloneGotoSymbolQuickAccess.js` (imported below), which imports them by relative path.
 
-// JSON is the one exception, and it is not a matter of taste. Every other
-// language this app colours has a Monarch grammar under
-// `languages/definitions/`; JSON has none. Its language registration *and* its
-// tokenizer live inside the language service module, so leaving that module
-// out the way the other three are left out would mean `.json` files are not a
-// language Monaco knows about at all — no colour, and `getLanguages()` does
-// not list it.
-//
-// Registering it here takes the tokenizer without the service. `tokenization.js`
-// pulls in a scanner and nothing else; `jsonMode.js`, which is what references
-// the worker, is only reached through the service's own `onLanguage` handler,
-// and that handler is in the module this file does not import.
+// JSON is the exception: it has no Monarch grammar, and its registration and tokenizer live in the
+// language service module. Registering here takes the tokenizer without the service:
+// `tokenization.js` pulls in only a scanner, and `jsonMode.js` (which references the worker) is
+// reached only through the service's `onLanguage` handler, which this file does not import.
 import { languages } from "monaco-editor/editor/editor.api.js";
 import { createTokenizationSupport } from "monaco-editor/languages/features/json/tokenization.js";
 

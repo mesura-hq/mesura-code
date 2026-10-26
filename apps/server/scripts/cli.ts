@@ -13,7 +13,6 @@ import { DEVELOPMENT_ICON_OVERRIDES } from "../../../scripts/lib/brand-assets.ts
 import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-executable-imports.ts";
 import rootPackageJson from "../../../package.json" with { type: "json" };
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
-import serverPackageJson from "../package.json" with { type: "json" };
 import { resolveWebClientBundleAction } from "./cliBuildPolicy.ts";
 import {
   ServerCliBuildAssetMissingError,
@@ -112,7 +111,7 @@ const buildCmd = Command.make(
 
       if (clientAction === "skip") {
         yield* Effect.logWarning(
-          "[cli] --allow-missing-client was set and no web client is built — producing a server-only package. Browser and mobile clients will receive 503 from it.",
+          "[cli] --allow-missing-client was set and no web client is built, so this is a server-only package. Browser and mobile clients will receive 503 from it.",
         );
       } else {
         yield* fs.copy(webDist, clientTarget);
@@ -159,9 +158,7 @@ const buildExeCmd = Command.make(
         }),
       );
 
-      // The executable can only `import` built-ins. A file-backed import
-      // passes the bundler and `node dist/bin.mjs`, then throws inside the
-      // binary, so read the emitted module graph rather than trusting config.
+      // Executables reject non-builtin imports even when bundling succeeds; inspect the emitted graph.
       const bundlePath = path.join(serverDir, "dist-exe/bin.mjs");
       const specifiers = findEsmImportsOfExternalPackages(yield* fs.readFileString(bundlePath));
       if (specifiers.length > 0) {
@@ -177,11 +174,7 @@ const buildExeCmd = Command.make(
   ),
 );
 
-/**
- * Publishes the `t3.tgz` launcher scripts/build-npm-launcher.ts produced. The
- * launcher downloads its executable from the GitHub Release, so the release
- * workflow runs this only after that release is published.
- */
+/** Publish after the GitHub release exists; the launcher downloads from it. */
 const publishCmd = Command.make(
   "publish",
   {

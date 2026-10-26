@@ -1,28 +1,9 @@
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, render as renderBrowser, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, whose root route wraps the real `CommandPalette` inside
- * the toast providers around the page, as `routes/__root.tsx` does. The palette
- * mounts the global `ProjectIconFileDialogHost`. The palette specs open the
- * palette through `openCommandPalette` and choose "Update project icon…"; the
- * Settings specs render the real `/settings/projects` page component
- * (`ProjectsSettings`) inside the real `SettingsScopeProvider`, as
- * `routes/settings.tsx` does.
- *
- * Project icons phase 2, acceptance criteria 1 (the palette opens the existing
- * picker; cancel changes nothing), 2 (palette and Settings edits keep the group
- * fan-out and its partial-failure report, each member naming the root it
- * belongs to), 6 (manual selection needs no Luna) and 7 (the result explains a
- * repository icon that masks the saved image).
- *
- * Boundaries the fixture replaces, and nothing else:
- * - The server's commands, at `useAtomCommand`: the project update records each
- *   member's request and answers success or a failure, and
- *   `projectIcons.preview` answers the effective icon from the fixture.
- * - The picker's image search, at `useProjectFilePickerQuery`.
- * - The project store, environments, settings and unrelated chrome, as
- *   `AppRoot.projectIconDiscovery.fence.test.tsx` does.
- */
+// Project icons phase 2 through the real CommandPalette ("Update project icon…") and the real
+// `/settings/projects` page inside `SettingsScopeProvider`. The project update records each group
+// member's request and answers success or failure. `projectIcons.preview` and the picker's image
+// search (`useProjectFilePickerQuery`) answer from the fixture.
 
 import {
   createMemoryHistory,

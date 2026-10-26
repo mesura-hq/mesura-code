@@ -1,14 +1,7 @@
 /**
- * Specs for the client side of the `find_threads` MCP tool (ADR-010).
- *
- * Entry point under test: `answerThreadSearchToolRequest` from
- * `./agentThreadSearch.ts`, which the connected client runs for each request
- * the server's thread search broker sends it, and whose result it returns to
- * the broker unchanged. Environments are the disposable fakes of
- * `threadSearchEnvironmentFakes.testFixtures.ts`, reached through the real
- * `EnvironmentRegistry` and RPC `request` path; the model environment's
- * `reasonThreadSearch` handler stands in for the server, answering Jev steps
- * (`engine: "jev"`) and configured text model steps (no engine) separately.
+ * The client side of the `find_threads` MCP tool, whose result goes back to the server's broker
+ * unchanged. The model environment's `reasonThreadSearch` handler stands in for the server and
+ * answers Jev steps (`engine: "jev"`) and configured text model steps (no engine) separately.
  */
 import {
   EnvironmentId,

@@ -21,12 +21,10 @@ import { writeProjectIconFile } from "./ProjectIconFile.ts";
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>');
 
 /**
- * The preload. `ICON_WRITER_SWAP` names the step and the paths:
- * - `before-enter`: replaces `<swap>` with a link to `<outside>` right before
- *   the writer enters the directory named `<segment>`.
- * - `before-create`: after the writer entered its last directory, renames
- *   `<swap>` to `<moved>` and links `<swap>` to `<outside>`, right before it
- *   creates the file.
+ * The preload; `ICON_WRITER_SWAP` names the step and paths. `before-enter` replaces `<swap>`
+ * with a link to `<outside>` right before the writer enters the directory `<segment>`.
+ * `before-create` renames `<swap>` to `<moved>` and links `<swap>` to `<outside>` after the
+ * writer entered its last directory, right before it creates the file.
  */
 const PRELOAD = `
 "use strict";

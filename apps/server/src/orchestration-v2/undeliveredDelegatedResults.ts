@@ -1,13 +1,8 @@
 /**
- * Mesura: a finished delegated task whose result has not reached its parent yet.
- *
- * The task leaves the active roster when it finishes, but its result reaches the parent only
- * when the delivery run starts. Without a hold the parent shows Done in that gap and then wakes.
- * The shell keeps the task in `pendingBackgroundTasks` as a sub-agent until delivery, so every
- * client's existing sub-agent hold covers it without a new field.
- *
- * `pending` and `claimed` are undelivered. `acknowledged` (the parent read the result through
- * the task tools), `delivered` and `disposed` end the hold; delivery planning skips all three.
+ * Mesura: a finished delegated task leaves the active roster before its result reaches the parent,
+ * so the shell keeps it in `pendingBackgroundTasks` as a sub-agent until delivery, or the parent
+ * shows Done in the gap. `pending` and `claimed` hold; `acknowledged` (read through the task
+ * tools), `delivered` and `disposed` end the hold, and delivery planning skips all three.
  */
 import type {
   OrchestrationV2PendingBackgroundTask,

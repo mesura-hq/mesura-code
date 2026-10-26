@@ -1,12 +1,7 @@
 /**
- * Search unification phase 1, criteria 1 and 2 at the logic level: the sidebar's
- * search pool reaches every project while the query has text, and the results
- * keep the order the sidebar gave them (field matches first, then message
- * matches), with no word score.
- *
- * The pipeline under test is the one `Sidebar.tsx` runs: the scope rule picks
- * the project keys, `filterSidebarV2VisibleThreads` narrows the shells to them,
- * and `searchSidebarThreads` filters the result in its input order.
+ * The sidebar's search pool reaches every project while the query has text, and results keep the
+ * sidebar's order (field matches, then message matches) with no word score. The pipeline is the one
+ * `Sidebar.tsx` runs: scope rule, then `filterSidebarV2VisibleThreads`, then `searchSidebarThreads`.
  */
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
@@ -30,6 +25,10 @@ function shell(id: string, title: string, projectId: string, branch: string | nu
     title,
     projectId,
     branch,
+    createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+    latestUserMessageAt: null,
+    latestUserAuthoredMessageAt: null,
     archivedAt: null as string | null,
     lineage: {
       rootThreadId: ThreadId.make(id),
@@ -51,7 +50,7 @@ function searchPool(
     resolveSidebarSearchProjectKeys(query, scopedProjectKeys),
     NO_DELEGATED,
   );
-  return searchSidebarThreads(
+  const { titleMatches, contentMatches } = searchSidebarThreads(
     visible,
     query,
     PROJECT_TITLE_BY_ID,
@@ -60,7 +59,8 @@ function searchPool(
         threadSearchMatchKey({ environmentId, threadId: ThreadId.make(id) }),
       ),
     ),
-  ).map((thread) => thread.id);
+  );
+  return [...titleMatches, ...contentMatches].map((thread) => thread.id);
 }
 
 describe("resolveSidebarSearchProjectKeys", () => {

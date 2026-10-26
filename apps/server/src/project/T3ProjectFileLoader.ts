@@ -1,10 +1,7 @@
 /**
- * T3ProjectFileLoader - Effect service that loads repository defaults from
- * `.mesura.json` and the legacy `t3.json` at a workspace root.
- *
- * Loading is best-effort: a missing file resolves to `Option.none`, and
- * unreadable or invalid files are logged and treated as absent so callers
- * can fall back to their defaults.
+ * Loads repository defaults from `.mesura.json` and the legacy `t3.json`. A missing,
+ * unreadable or invalid file reads as absent (the last two are logged), so callers
+ * fall back to their defaults.
  *
  * @module T3ProjectFileLoader
  */
@@ -50,10 +47,7 @@ export class T3ProjectFileLoadError extends Schema.TaggedError<T3ProjectFileLoad
 export class T3ProjectFileLoader extends Context.Service<
   T3ProjectFileLoader,
   {
-    /**
-     * Never fails: missing, unreadable, or invalid files resolve to `Option.none` (invalid files
-     * are logged as warnings).
-     */
+    /** Never fails; missing/unreadable/invalid files return none, with warnings for invalid files. */
     readonly load: (workspaceRoot: string) => Effect.Effect<Option.Option<T3ProjectFile>>;
     /** Read both files in this checkout and resolve their defaults independently per field. */
     readonly loadRepositoryDefaults: (workspaceRoot: string) => Effect.Effect<RepositoryDefaults>;
@@ -70,7 +64,7 @@ const logT3ProjectFileLoadError = (error: T3ProjectFileLoadError) =>
     }),
   );
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;

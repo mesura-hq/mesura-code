@@ -106,9 +106,8 @@ export function useProjectGroupUpdate(group: SidebarProjectSnapshot) {
   }, []);
 
   /**
-   * Upstream (#9786): a connection without the orchestration-operate grant
-   * for some member's environment may not edit the group. Reports the first
-   * denied environment by name and returns the failure, or null when allowed.
+   * A connection without the orchestration-operate grant for some member's environment
+   * may not edit the group. Reports the first denied environment by name.
    */
   const checkProjectAccess = useCallback(
     (

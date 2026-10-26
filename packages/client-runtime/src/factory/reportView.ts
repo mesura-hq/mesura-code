@@ -1,11 +1,7 @@
 /**
- * What a Software Factory report shows, on the web and on Android: the web
- * Report tab and the Android Report tab render `deriveFactoryReportView`, and
- * both report cards render `deriveFactoryReportCard`, so the two clients show
- * the same numbers for the same run. The frame (clock, verification table,
- * coverage, degraded count, cost, step record) comes from the run; only the
- * prose comes from `report.md`. Hermes has no ES2023 array methods: none are
- * used here.
+ * The Report tab and both report cards render from here, so they show the same numbers for a run.
+ * The frame (clock, verification table, coverage, degraded count, cost, step record) comes from
+ * the run state; only the prose comes from `report.md`.
  */
 import type { FactoryRunState, FactoryRunSummary } from "@t3tools/contracts";
 import {
@@ -249,11 +245,11 @@ function phaseSteps(state: FactoryRunState, index: number): ReadonlyArray<Factor
   for (const verdict of phase.verdicts) {
     add(
       verdict.at,
-      `${factoryNodeDisplayName(`verify-${verdict.pass}`)}: ${verdictText(verdict.verdict)} — ${verdict.deciding}`,
+      `${factoryNodeDisplayName(`verify-${verdict.pass}`)}: ${verdictText(verdict.verdict)}, ${verdict.deciding}`,
     );
   }
   for (const finding of phase.findings) {
-    const disposition = finding.disposition === null ? "" : ` — ${finding.disposition}`;
+    const disposition = finding.disposition === null ? "" : `, ${finding.disposition}`;
     add(
       finding.at,
       `${finding.id} (${finding.severity}) ${finding.title}${disposition}`,

@@ -1,13 +1,6 @@
 /**
- * Shared data and mock factories for the suites that mount the command palette
- * on the application entry point through `commandPaletteFence.testMount.tsx`.
- *
- * The factories replace data sources only — environment presentations, entity
- * shells, the lexical search query, settings, and the RPC command boundary.
- * Keyboard routing, overlay modes and navigation stay real.
- *
- * `vi.mock` must be called from each test file, so this module exports the
- * factories and the mutable state they read. It must not import application
+ * Data and `vi.mock` factories for the command palette suites. They replace data sources only;
+ * keyboard routing, overlay modes and navigation stay real. This module must not import application
  * modules: the factories load it while the application graph is loading.
  */
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";

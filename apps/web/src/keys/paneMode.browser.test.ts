@@ -1,8 +1,5 @@
-// Entry point: `handlePaneKey` (`paneMode.ts`), which the key engine hands
-// every key while PANE mode is active. The three edges register through
-// `usePaneEdge`, as the sidebar rail, the right panel and the terminal drawer
-// do, so a spec sees the size each owner's `resizeTo` would receive. Focus
-// sits in the pane roots the app renders (`paneFocus.ts`).
+// The edges register through `usePaneEdge` as their real owners do, so a spec
+// sees the size each owner's `resizeTo` would receive.
 import { createElement } from "react";
 import { describe, expect, it } from "vite-plus/test";
 

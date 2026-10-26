@@ -1,11 +1,6 @@
 /**
- * Specs for the shared agent thread search coordinator.
- *
- * Entry point under test: `runAgentThreadSearch` from `./agentThreadSearch.ts`,
- * the callable that web and mobile share. Every environment is a disposable
- * fake behind the real `EnvironmentRegistry` and RPC `request` path (see
- * `threadSearchEnvironmentFakes.testFixtures.ts`); the configured model is a
- * scripted `reasonThreadSearch` handler on the model environment.
+ * Every environment is a disposable fake behind the real `EnvironmentRegistry` and RPC `request`
+ * path; the configured model is a scripted `reasonThreadSearch` handler on the model environment.
  */
 import {
   EnvironmentId,

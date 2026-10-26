@@ -770,6 +770,13 @@ describe("worktreesDirectory", () => {
 });
 
 describe("synchronized model preferences", () => {
+  it("supports provider identifiers that match inherited object keys", () => {
+    const provider = ProviderInstanceId.make("toString");
+    const next = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      setModelsHidden: [{ provider, model: "example", hidden: true }],
+    });
+    expect(next.providerModelPreferences?.[provider]?.hiddenModels).toEqual(["example"]);
+  });
   const provider = ProviderInstanceId.make("codex_work");
   const legacy = {
     favorites: [{ provider, model: "sol" }],
@@ -804,6 +811,9 @@ describe("synchronized model preferences", () => {
       ],
       setProviderModelOrder: { provider, modelOrder: ["sol", "luna", "astra"] },
     });
+    expect(initial.providerModelPreferences?.[provider]).toEqual(
+      legacy.providerModelPreferences[provider],
+    );
     expect(web.providerModelPreferences?.[provider]).toEqual({
       hiddenModels: ["luna", "sol"],
       modelOrder: ["sol", "luna", "astra"],

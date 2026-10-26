@@ -1,17 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * A GitManager over real git, for tests that measure what a caller costs in
- * spawned processes. Every process the stack starts (the git driver, the
- * process runner, the repository identity resolver) goes through one counting
- * spawner, so `spawned` lists them in order.
- *
- * The source control registry is the server's real one. With no
- * `listChangeRequests` it has no provider registered, so every remote
- * returns no change requests for an unknown remote, as production does. With
- * one, a GitHub provider answers lookups through it, so github.com remotes can
- * exercise success and failure paths. No test reaches a real hosting provider.
- *
- * @module git/GitManager.testkit
+ * A GitManager over real git whose every spawned process goes through one counting spawner, so
+ * `spawned` lists them in order. The source control registry is the server's real one: without
+ * `listChangeRequests` no provider is registered, as in production; with it, a GitHub provider
+ * answers github.com lookups. No test reaches a real hosting provider.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -159,12 +151,9 @@ export const runGitSync = (cwd: string, args: ReadonlyArray<string>): string =>
   NodeChildProcess.execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" });
 
 /**
- * A repository whose only remote is `origin` at `remoteUrl`, with one local
- * branch per name. Each branch tracks `origin/<name>` and the remote-tracking
- * ref exists, as after `git push -u`, so a pull-request lookup reaches the
- * provider. `checkout` names the branch left checked out (default `main`).
- * Nothing here contacts the remote. Built with plain git, outside any
- * counting spawner, in a temporary directory removed with the scope.
+ * A repository whose only remote is `origin` at `remoteUrl`, with one branch per name tracking an
+ * existing `origin/<name>` ref (as after `git push -u`), so a pull-request lookup reaches the
+ * provider. Built with plain git outside the counting spawner; it never contacts the remote.
  */
 export const makeTrackedBranchesRepository = (input: {
   readonly remoteUrl: string | null;

@@ -1,17 +1,7 @@
 /**
- * Phase 4 fence of phone push notifications: acceptance criteria 3 and 4 on
- * the presence map itself.
- *
- * Entry point: `ClientPresence.layer`, the server-scope service the
- * dispatcher asks before it sends and the `push.presence` handler reports
- * into. Time is the `TestClock` of `it.effect`, so the two-minute window
- * moves only through `TestClock.adjust`.
- *
- * What the specs rely on, from the plan:
- * - `report(connectionId, active)` records one connection's latest report.
- * - `disconnect(connectionId)` ends that connection's state.
- * - `isAnyClientActive()` is true while at least one connection's latest
- *   report is active and younger than two minutes.
+ * Phone push acceptance criteria 3 and 4 on `ClientPresence.layer` itself. Time is the
+ * `TestClock` of `it.effect`, so the two-minute activity window moves only through
+ * `TestClock.adjust`.
  */
 import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";

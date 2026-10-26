@@ -147,11 +147,8 @@ export function addFenceThread(
 }
 
 /**
- * A memory router whose root renders the real CommandPalette around the real
- * AppSidebarLayout, as `routes/__root.tsx` does, and whose chat layout is the
- * real `_chat.tsx` route component. That layout reads the thread params and
- * mounts ThreadRouteView. The leaf route renders nothing, as the real thread
- * route does, so navigation keeps one ChatView mounted across thread changes.
+ * Mirrors `routes/__root.tsx` and the real `_chat.tsx` layout. The leaf route renders nothing, as
+ * the real thread route does, so navigation keeps one ChatView mounted across thread changes.
  */
 export function createFenceRouter(firstThreadId: ThreadId) {
   const route = createRootRoute({

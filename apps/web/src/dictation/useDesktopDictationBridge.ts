@@ -69,6 +69,7 @@ export function shouldPublishDictationSnapshot(input: {
 }
 
 export function useDesktopDictationBridge(): void {
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the desktop dictation bridge and the stores it publishes, for the app's lifetime
   useEffect(() => {
     const bridge = window.mesuraDictationBridge;
     if (!bridge) return;

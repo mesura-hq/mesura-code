@@ -1,14 +1,6 @@
 /**
- * Neovim's mode codes, as a person would name them.
- *
- * Its own module rather than part of the driver so it can be tested without
- * standing up React, and because the status strip needs it without needing a
- * hook.
- *
- * The codes come from `nvim_get_mode`, which returns the short form: a letter,
- * sometimes two. They are matched as prefixes rather than exact values — `no`,
- * `nov` and `noV` are all an operator waiting for its motion — which keeps the
- * list short without lying about the codes it does not enumerate.
+ * Neovim's `nvim_get_mode` codes, as a person would name them. Matched as prefixes, not exact
+ * values (`no`, `nov` and `noV` are all an operator waiting for its motion).
  */
 
 /** Visual block, which Neovim reports as the literal `Ctrl-V` character. */
@@ -35,15 +27,8 @@ export function describeMode(mode: string): string {
 }
 
 /**
- * The caret shape for a mode.
- *
- * A block outside insert mode, as vim's own is: it covers the character the
- * cursor is *on*, which is what `x` deletes. A bar between characters would
- * make every normal-mode command look like it acted one place to the right.
- *
- * Replace mode keeps the block. It is not insert mode: the next character
- * typed lands *on* the one under the cursor rather than before it, which is
- * exactly what a block says and a bar denies.
+ * The caret shape for a mode: a block outside insert mode, as in vim, since it covers the character
+ * `x` deletes. Replace mode keeps the block, because the next character lands on the one under it.
  */
 export function caretStyleFor(mode: string): "block" | "line" {
   return mode.startsWith("i") ? "line" : "block";

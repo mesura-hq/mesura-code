@@ -1,10 +1,6 @@
 /**
- * Mesura: the shared host stats model. `applyHostStatsMessage` folds the
- * `subscribeHostStats` stream into one environment's history, and
- * `projectHostStats` turns every environment's history and connection into
- * the rows the web dock and the mobile Hosts screen render. Every decision
- * about whether a number can be trusted lives here, so the two clients cannot
- * disagree about it.
+ * Mesura: every decision about whether a host stats number can be trusted lives here, so no two
+ * clients can disagree about it.
  */
 import {
   HOST_STATS_CONTRACT_VERSION,
@@ -59,11 +55,9 @@ export interface HostStatsHistory {
 }
 
 /**
- * - `updating`: connected, showing a history an earlier subscription read, before
- *   the current one delivers. It is recent, but not current, so it is never live.
- * - `no-access`: connected, but the server refused the subscription because this
- *   client's token lacks `orchestration:read`. A history read before the refusal
- *   stays on screen and keeps ageing, but is never live.
+ * `updating`: connected, showing an earlier subscription's history until the current one delivers.
+ * `no-access`: the server refused the subscription (the token lacks `orchestration:read`); a
+ * history read before the refusal stays on screen and keeps ageing. Neither is ever live.
  */
 export type HostStatsHostState =
   | "live"
@@ -88,32 +82,29 @@ export type HostStatsRowId =
 /** `sleeping`: the host has GPUs, and every one it could have measured is runtime-suspended. */
 export type HostStatsRowAvailability = "available" | "not-available" | "sleeping";
 
-/**
- * One metric line. What `value` and `secondary` hold, per row:
- * - cpu: busy percent; load1. `secondaryLevel` is the load per core.
- * - memory, swap: used percent; used bytes.
- * - disk: used percent; free bytes.
- * - gpu: busy percent of the busiest active GPU; its memory used percent, which sets `level`.
- *   With no active GPU and one asleep, the row is `sleeping`, with its past series.
- * - temperature: CPU degrees Celsius; null.
- * - network: receive bytes per second; send bytes per second.
- * - agents: agents running; agent sessions open.
- * - servers: installed Mesura Code servers; dev servers.
- *
- * Series are percent for cpu, memory and gpu, degrees for temperature, bytes
- * per second received plus sent for network, and the running maximum for agents.
- * Swap and disk render as bars, and servers as a count, so they carry no series.
- * cpu and gpu also carry `peakSeries`, each bucket's maximum on the same axis.
- */
+/** One metric line. Swap and disk render as bars and servers as a count, so they have no series. */
 export interface HostStatsRow {
+  /**
+   * cpu, gpu: busy percent (gpu: the busiest active GPU). memory, swap, disk: used percent.
+   * temperature: CPU degrees Celsius. network: received bytes per second. agents: agents running.
+   * servers: installed Mesura Code servers.
+   */
   readonly value: number | null;
+  /**
+   * cpu: load1. memory, swap: used bytes. disk: free bytes. gpu: memory used percent, which sets
+   * `level`. network: sent bytes per second. agents: agent sessions open. servers: dev servers.
+   */
   readonly secondary: number | null;
   /** Null unless the row is available. */
   readonly level: HostStatsLevel | null;
   /** The level of `secondary` where it has one of its own: load per core on the CPU row. */
   readonly secondaryLevel: HostStatsLevel | null;
+  /** A `sleeping` GPU row (no active GPU, one asleep) keeps its past series. */
   readonly availability: HostStatsRowAvailability;
-  /** One slot per bucket of the window, null for a gap; null when the row has no series. */
+  /**
+   * One slot per bucket of the window, null for a gap; null when the row has no series. Units are
+   * the value's, except network (received plus sent) and agents (the running maximum).
+   */
   readonly series: ReadonlyArray<number | null> | null;
   /** Per slot, the bucket's maximum where it keeps one: cpu and gpu. Null on every other row. */
   readonly peakSeries: ReadonlyArray<number | null> | null;
@@ -347,21 +338,10 @@ type HostStatsStreamEvent =
   | { readonly _tag: "failed"; readonly unauthorized: boolean };
 
 /**
- * The `transform` of the `hostStats` subscription atom.
- *
- * - The atom keeps only the last value a stream chunk carries, so the history
- *   is folded here, before the atom, where a snapshot and an update landing
- *   together both count.
- * - The RPC client drains transport failures itself and resubscribes on the
- *   next session, but ends the stream on anything else: a message it cannot
- *   decode, or a refusal. This fold marks the subscription failed, keeps the
- *   history, and subscribes again after `hostStatsRetryDelayMs`, so a host
- *   recovers while the dock stays open. The delay resets once an attempt
- *   delivers an update after its snapshot.
- * - An authorization refusal ends the stream instead: the token will not gain
- *   the scope by waiting. The web dock starts it again each time it opens,
- *   and the mobile screen whenever it is seen again, since it releases its
- *   streams on leaving; that is where a device paired again returns to.
+ * The atom keeps only a chunk's last value, so the history is folded here. A failure the RPC
+ * client does not retry itself keeps the history and resubscribes after `hostStatsRetryDelayMs`,
+ * reset once an attempt delivers an update after its snapshot. An authorization refusal ends the
+ * stream instead: waiting will not give the token the scope, so the dock restarts it on open.
  */
 export function accumulateHostStatsMessages<E, R>(
   messages: Stream.Stream<HostStatsMessage, E, R>,

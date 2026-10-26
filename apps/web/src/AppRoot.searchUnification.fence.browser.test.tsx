@@ -1,44 +1,10 @@
 import { page, userEvent } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout — and in it the real
- * `Sidebar`, listing threads from two projects — and whose chat layout is the
- * real `_chat.tsx` route component around the real ChatView
- * (`test/appRootFenceApp.tsx`). The key engine is installed on `window`
- * before React renders, as `main.tsx` does. Keys are real `keydown` events
- * dispatched from the focused element.
- *
- * Phase 1 of the search unification cycle ("Make the sidebar Search the one
- * thread search and put the project filter on keys"):
- * - Criterion 1: with a project filter active, a sidebar query lists matching
- *   threads from every project; clearing it shows the filtered project again.
- * - Criterion 2: field matches before message matches, each in the sidebar's
- *   own order, across projects.
- * - Criterion 3: `threadSearch.toggle` (its chord, `<leader>ft` and the
- *   palette's Search threads row) focuses the sidebar Search field, opening
- *   the drawer first at Pixel 7 width.
- * - Criterion 4: `projectScope.toggle` (its chord and `<leader>fp`) opens the
- *   sidebar's project filter combobox with its search input focused.
- * - Criterion 5: `projectScope.toggleAll` on Mod+Alt+P flips to All projects
- *   and back to the last project, and does nothing with no last project.
- * - Criterion 6, guard: a freshly loaded scope store starts on All projects
- *   whatever the session wrote to localStorage.
- * - Criterion 7, guard: Mod+O palette thread rows still open their thread.
- * - Review P1-1: on Settings the focus commands return to the main app and
- *   land there; with the legacy sidebar they open the command palette; the
- *   scope toggle writes the store in both.
- * - Review P1-2: a focus chord pressed over the open palette closes it and
- *   lands, the phone's closed drawer included.
- *
- * Boundaries the fixture replaces, and nothing else: the environment, project
- * and thread reads (two projects, thread shells from both), the server's
- * message search (`useThreadSearch`, answered from the fixture), every RPC
- * command, the chords (the shipped defaults, as a fresh keybindings file
- * resolves them) and unrelated chrome. The setup follows
- * `AppRoot.editorKeySidebarCost.fence.browser.test.tsx`, without its editor.
- */
+// Sidebar Search as the one thread search, project filter on keys (search unification phase 1),
+// through AppRoot, the real Sidebar over two projects, CommandPalette and ChatView. Message search
+// (`useThreadSearch`) answers from the fixture; chords are the shipped defaults. The setup follows
+// `AppRoot.editorKeySidebarCost.fence.browser.test.tsx`, without its editor.
 import { describe, expect, it, vi } from "vite-plus/test";
 
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
