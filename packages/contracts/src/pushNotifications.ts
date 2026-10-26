@@ -26,7 +26,7 @@ export const PushPreferences = Schema.Struct({
 });
 export type PushPreferences = typeof PushPreferences.Type;
 
-const DEFAULT_PUSH_PREFERENCES: PushPreferences = {
+export const DEFAULT_PUSH_PREFERENCES: PushPreferences = {
   approval: true,
   input: true,
   failed: true,

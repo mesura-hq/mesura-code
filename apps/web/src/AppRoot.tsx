@@ -8,6 +8,7 @@ import { environmentShell } from "./state/shell";
 import { BrowserProfileReporter } from "./browser/BrowserProfileReporter";
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { QuitHoldOverlay } from "./components/QuitHoldOverlay";
+import { openPushTargets } from "./pushNotifications/notificationTarget";
 import { appAtomRegistry, AppAtomRegistryProvider } from "./rpc/atomRegistry";
 import type { AppRouter } from "./router";
 
@@ -27,6 +28,8 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
       }),
     [],
   );
+  // Mesura: a tapped push notification opens its thread, or its agent search, in this window.
+  useEffect(() => openPushTargets(router), [router]);
   return (
     <AppAtomRegistryProvider>
       <RouterProvider router={router} />

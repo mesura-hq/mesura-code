@@ -90,6 +90,8 @@ describe("application branding residuals", () => {
     expect(manifest.icons.map(({ src }) => src)).toEqual([
       "/favicon-32x32.png",
       "/apple-touch-icon.png",
+      "/icon-192.png",
+      "/icon-512.png",
     ]);
     for (const { src } of manifest.icons) {
       expect(NodeFS.existsSync(NodePath.join(REPOSITORY_ROOT, "apps/web/public", src))).toBe(true);

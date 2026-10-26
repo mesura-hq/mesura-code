@@ -3,7 +3,6 @@ import {
   presentThreadShell,
 } from "@t3tools/client-runtime/state/models";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
@@ -29,10 +28,20 @@ import {
   threadNotificationTag,
   unlockNotificationAudio,
 } from "../threadNotifications";
+import {
+  type NotificationTarget,
+  notificationTargetPath,
+  openNotificationTarget,
+} from "../pushNotifications/notificationTarget";
+import {
+  knownPushRegistration,
+  refreshPushRegistration,
+  watchPushRegistration,
+} from "../pushNotifications/pushRegistration";
 import { resolveSidebarThreadStatus } from "./Sidebar.logic";
 import { resolveSidebarThreadAttention } from "./sidebarThreadAttention";
 import { toastManager } from "./ui/toast";
-import { AGENT_SEARCH_FINISHED_TITLE, openAgentSearch } from "./searches/agentSearchNotification";
+import { AGENT_SEARCH_FINISHED_TITLE } from "./searches/agentSearchNotification";
 import { isSearchThread } from "./searches/agentSearchPopup.logic";
 
 export function ThreadNotificationCoordinator() {
@@ -42,11 +51,21 @@ export function ThreadNotificationCoordinator() {
     (settings) => settings.inAppNotificationsEnabled,
   );
   const pending = useRef(
-    new Map<string, { environmentId: EnvironmentId; notification: Notification }>(),
+    new Map<
+      string,
+      { environmentId: EnvironmentId; notification: Notification; persistent?: boolean }
+    >(),
   );
-  const onNotification = (environmentId: EnvironmentId, notification: Notification) => {
-    pending.current.get(notification.tag)?.notification.close();
-    pending.current.set(notification.tag, { environmentId, notification });
+  const onNotification = (
+    environmentId: EnvironmentId,
+    notification: Notification,
+    persistent = false,
+  ) => {
+    const previous = pending.current.get(notification.tag);
+    // Mesura: Chrome gives worker notifications with one tag one ID, so closing the old
+    // handle would close the replacement that is already on screen.
+    if (!(persistent && previous?.persistent)) previous?.notification.close();
+    pending.current.set(notification.tag, { environmentId, notification, persistent });
     setNotificationBadge(pending.current.size);
   };
 
@@ -77,6 +96,9 @@ export function ThreadNotificationCoordinator() {
       clear();
     };
   }, [mode]);
+
+  // Mesura: page notifications show through the push worker when this page has one.
+  useEffect(() => watchPushRegistration(), []);
 
   useEffect(() => {
     if (!hasNotificationSound(mode)) return;
@@ -111,7 +133,11 @@ function EnvironmentNotifications({
   onNotification,
 }: {
   environmentId: EnvironmentId;
-  onNotification: (environmentId: EnvironmentId, notification: Notification) => void;
+  onNotification: (
+    environmentId: EnvironmentId,
+    notification: Notification,
+    persistent?: boolean,
+  ) => void;
 }) {
   const shell = useAtomValue(environmentShell.stateValueAtom(environmentId));
   const threads =
@@ -264,6 +290,30 @@ function EnvironmentNotifications({
         Notification.permission !== "granted"
       )
         continue;
+      const target: NotificationTarget = { environmentId, threadId: thread.id, agentSearch };
+      // Mesura: Android Chrome throws on the Notification constructor, so a page with the push
+      // worker shows the notification through it. Its click reaches the worker, which focuses
+      // this window and posts the target back as `mesura-push-open` (AppRoot opens it).
+      const registration = knownPushRegistration();
+      if (registration) {
+        const tag = threadNotificationTag(environmentId, thread.id);
+        void registration
+          .showNotification(title, {
+            body: thread.title,
+            tag,
+            silent: true,
+            data: { url: notificationTargetPath(target) },
+          })
+          // The shown notification joins the badge count and closes with the others.
+          .then(() => registration.getNotifications({ tag }))
+          .then((shown) => {
+            const notification = shown.at(-1);
+            if (notification) onNotification(environmentId, notification, true);
+          })
+          // A worker unregistered since the last lookup; the next notification uses what is left.
+          .catch(() => void refreshPushRegistration());
+        continue;
+      }
       try {
         const notification = new Notification(title, {
           body: thread.title,
@@ -275,13 +325,11 @@ function EnvironmentNotifications({
           notification.close();
           window.focus();
           void window.desktopBridge?.revealWindow?.().catch(() => undefined);
-          if (agentSearch) {
-            openAgentSearch(scopeThreadRef(environmentId, thread.id));
-            return;
-          }
-          void navigate({
-            to: "/$environmentId/$threadId",
-            params: { environmentId, threadId: thread.id },
+          openNotificationTarget(target, (targetEnvironmentId, threadId) => {
+            void navigate({
+              to: "/$environmentId/$threadId",
+              params: { environmentId: targetEnvironmentId, threadId },
+            });
           });
         });
       } catch {
