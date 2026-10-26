@@ -219,13 +219,24 @@ describe("external editor setting", () => {
       return event;
     };
 
+    const menuShortcutLabels = async () => {
+      await fixture.click(fixture.byLabel("Choose editor"));
+      const labels = fixture.menuItems().map((item) => item.textContent ?? "");
+      await act(async () => {
+        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      });
+      return labels;
+    };
+
     state.openInExternalEditor = false;
     await renderPicker(editors, false, { openInCwd: "/work/project/README.md" });
     expect((await pressAltO()).defaultPrevented).toBe(false);
     expect(state.run).not.toHaveBeenCalled();
+    expect((await menuShortcutLabels()).some((label) => label.includes("Alt"))).toBe(false);
 
     state.openInExternalEditor = true;
     await renderPicker(editors, false, { openInCwd: "/work/project/README.md" });
+    expect((await menuShortcutLabels()).some((label) => label.includes("Alt"))).toBe(true);
     expect((await pressAltO()).defaultPrevented).toBe(true);
     expect(state.run).toHaveBeenCalledTimes(1);
   });

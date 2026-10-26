@@ -280,10 +280,10 @@ export const OpenInPicker = memo(function OpenInPicker({
     return result;
   };
 
-  const openFavoriteEditorShortcutLabel = shortcutLabelForCommand(
-    keybindings,
-    "editor.openFavorite",
-  );
+  // Mesura: a disarmed chord shows no label, so the menu never offers a key that does nothing.
+  const openFavoriteEditorShortcutLabel = shortcutArmed
+    ? shortcutLabelForCommand(keybindings, "editor.openFavorite")
+    : null;
 
   useEffect(() => {
     if (!shortcutArmed || !canOpenEditor) return;
