@@ -51,11 +51,42 @@ describe("diff tree decoration refresh guards", () => {
     });
   }
 
+  function treeScroller(): HTMLElement {
+    for (const element of container.querySelectorAll("*")) {
+      const scroller = element.shadowRoot?.querySelector<HTMLElement>(
+        "[data-file-tree-virtualized-scroll]",
+      );
+      if (scroller) return scroller;
+    }
+    throw new Error("Expected the mounted tree's scroller");
+  }
+
+  /**
+   * The tree lays its rows out again once its ResizeObserver measures the viewport, which can land
+   * after the first render: it renders other rows (more decoration calls) and clamps `scrollTop`.
+   * Observers report in one rendering step, so this later observer's first report follows the
+   * tree's.
+   */
+  async function treeViewportMeasured() {
+    const scroller = treeScroller();
+    await act(
+      () =>
+        new Promise<void>((resolve) => {
+          const observer = new ResizeObserver(() => {
+            observer.disconnect();
+            resolve();
+          });
+          observer.observe(scroller);
+        }),
+    );
+  }
+
   it("DiffFileTree decoration guard: count-only updates preserve the model, selection, collapsed folders and keyboard entry", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     const render = vi.spyOn(FileTreeModel.prototype, "render");
     await renderDecoration(() => ({ text: "+9 −2" }));
+    await treeViewportMeasured();
     const model = render.mock.contexts[0];
     if (!(model instanceof FileTreeModel)) throw new Error("Expected the mounted Pierre model");
     const host = model.getFileTreeContainer()!;
@@ -95,6 +126,7 @@ describe("diff tree decoration refresh guards", () => {
 
     const decoration = vi.fn(() => ({ text: "+9 −2" }));
     await renderDecoration(decoration);
+    await treeViewportMeasured();
     const calls = decoration.mock.calls.length;
     await renderDecoration(decoration);
     expect(decoration.mock.calls.length).toBe(calls);

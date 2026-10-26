@@ -1,3 +1,4 @@
+import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, render as renderBrowser, type Screen, fakeTimers } from "../test/render";
 /**
@@ -283,6 +284,7 @@ import {
   makeFenceUserInput,
 } from "./test/fenceThreadShell";
 import { publishFenceThreadProjection } from "./test/appRootFenceApp";
+import { focusTestWindow } from "./test/windowFocus";
 
 const { DictationWidgetPage } = await import("./dictation/DictationWidget");
 
@@ -312,6 +314,16 @@ function makeThreadProjection(): OrchestrationV2ThreadProjection {
       createdAt: now,
     }),
   );
+}
+
+async function desktopViewport() {
+  const previous = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1280, 800);
+  return {
+    async [Symbol.asyncDispose]() {
+      await page.viewport(previous.width, previous.height);
+    },
+  };
 }
 
 async function setupBrowserFixture0() {
@@ -430,6 +442,7 @@ async function mountApp(
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
+  await focusTestWindow();
   await act(async () => {
     root = await renderBrowser(null, { container: container, router: false });
     await root.rerender(<AppRoot router={router as unknown as AppRouter} />);
@@ -1555,6 +1568,10 @@ describe("dictation phase 5 rework regressions", () => {
 
   it("dictation returns to the normal composer after a question field loses focus", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
+    // Browser tests render at 414 px, a phone width. Since questions moved to the pinned dock,
+    // the phone composer collapses and hides its editor whenever it loses focus, so focusing
+    // the question field raced the editor's visibility. This spec is the desktop flow.
+    await using _desktop = await desktopViewport();
 
     fixture.projection = withOpenQuestion(makeThreadProjection());
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Normal draft");

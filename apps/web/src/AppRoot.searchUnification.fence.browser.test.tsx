@@ -393,12 +393,15 @@ async function typeIntoSearch(value: string): Promise<void> {
 /** Picks a project in the sidebar's own filter, as a pointer user does. */
 async function chooseProjectInFilter(title: string): Promise<void> {
   await userEvent.click(projectFilterTrigger());
-  await settle();
-  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((candidate) =>
-    candidate.textContent?.includes(title),
-  );
-  expect(option, `the ${title} option in the project filter`).toBeDefined();
-  await userEvent.click(option!);
+  // The options open in a popup that can mount after one settle on a loaded runner.
+  const option = await vi.waitFor(() => {
+    const found = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((candidate) =>
+      candidate.textContent?.includes(title),
+    );
+    expect(found, `the ${title} option in the project filter`).toBeDefined();
+    return found!;
+  });
+  await userEvent.click(option);
   await settle();
   expect(projectFilterTrigger().getAttribute("aria-label")).toBe(
     `Filter threads by project: ${title}`,
