@@ -181,6 +181,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.deepEqual(keysFor("thread.previousPage"), ["mod+u"]);
       assert.equal(soleKeyFor("thread.jump.1"), "mod+1");
       assert.equal(soleKeyFor("thread.jump.9"), "mod+9");
+      assert.equal(soleKeyFor("thread.jump.10"), "mod+0");
       assert.deepEqual(keysFor("modelPicker.toggle"), ["alt+m", "mod+shift+m"]);
       assert.equal(soleKeyFor("themeEditor.toggle"), "mod+alt+shift+t");
       assert.equal(soleKeyFor("usage.peek"), "alt+u");
@@ -572,6 +573,40 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.deepEqual(
         persisted.filter((entry) => entry.command === "usage.peek").map((entry) => entry.key),
         ["alt+u"],
+      );
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  // Mesura: the developer's file binds the nine jumps without a when clause
+  // and keeps the preview's mod+0, and the tenth still has to arrive.
+  it.effect("installs the tenth thread jump on mod+0 beside the preview's reset zoom", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        ...Keybindings.DEFAULT_KEYBINDINGS.filter(
+          (rule) => !rule.command.startsWith("thread.jump."),
+        ),
+        ...Array.from({ length: 9 }, (_, index) => ({
+          key: `mod+${index + 1}`,
+          command: `thread.jump.${index + 1}` as KeybindingCommand,
+        })),
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "thread.jump.10").map((entry) => entry.key),
+        ["mod+0"],
+      );
+      assert.deepEqual(
+        persisted
+          .filter((entry) => entry.command === "preview.resetZoom")
+          .map((entry) => entry.key),
+        ["mod+0"],
       );
     }).pipe(Effect.provide(layerKeybindings())),
   );

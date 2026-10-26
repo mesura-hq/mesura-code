@@ -209,7 +209,7 @@ vi.mock("./state/server", async (original) => {
   };
 });
 /**
- * The shipped chords plus `mod+1`…`mod+9` for the thread jumps, as the
+ * The shipped chords plus `mod+1`…`mod+9` and `mod+0` for the thread jumps, as the
  * developer's keybindings file has them. The fork ships no jump binding, and
  * without one the sidebar shows no jump hints at all.
  */
@@ -220,7 +220,7 @@ const fenceKeybindings = vi.hoisted(() => async () => {
   return compileResolvedKeybindingsConfig([
     ...DEFAULT_KEYBINDINGS,
     ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
-      key: `mod+${index + 1}`,
+      key: `mod+${(index + 1) % 10}`,
       command,
     })),
   ]);

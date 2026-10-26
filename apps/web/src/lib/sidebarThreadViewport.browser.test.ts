@@ -1,4 +1,4 @@
-import { act, render as renderBrowser, type Screen } from "../../test/render";
+import { act, render, render as renderBrowser, type Screen } from "../../test/render";
 import { createElement } from "react";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -6,35 +6,81 @@ import {
   readViewportThreadKeys,
   scrollThreadList,
   useThreadRowArrowKeys,
+  useViewportThreadKeys,
 } from "./sidebarThreadViewport";
-
-function box(top: number, height: number, width = 200): DOMRect {
-  return { top, bottom: top + height, height, width, left: 0, right: width } as DOMRect;
-}
+import { createSidebarListMotion } from "../components/Sidebar.motion";
 
 /**
  * A sidebar list viewport 300 high with 80-high rows at the given content
- * offsets; each row's box follows the viewport's `scrollTop`, as layout would.
+ * offsets, laid out by the browser.
  */
 let fixtureContainer: HTMLDivElement;
 
 function mountList(rows: Array<{ key: string; top: number }>, viewportWidth = 200): HTMLElement {
   const viewport = document.createElement("div");
   viewport.dataset.slot = "scroll-area-viewport";
-  viewport.getBoundingClientRect = () => box(0, 300, viewportWidth);
-  Object.defineProperty(viewport, "clientHeight", { value: 300 });
-  Object.defineProperty(viewport, "scrollHeight", { value: 1200 });
+  Object.assign(viewport.style, {
+    position: "relative",
+    width: `${viewportWidth}px`,
+    height: "300px",
+    overflowY: "auto",
+  });
   viewport.scrollTo = () => {};
+  const content = document.createElement("div");
+  Object.assign(content.style, { position: "relative", height: "1200px" });
   for (const { key, top } of rows) {
     const row = document.createElement("div");
     row.tabIndex = 0;
     row.dataset.mesuraThreadKey = key;
-    row.getBoundingClientRect = () => box(top - viewport.scrollTop, 80);
+    Object.assign(row.style, {
+      position: "absolute",
+      top: `${top}px`,
+      height: "80px",
+      width: "100%",
+    });
     row.scrollIntoView = () => {};
-    viewport.append(row);
+    content.append(row);
   }
+  viewport.append(content);
   fixtureContainer.append(viewport);
   return viewport;
+}
+
+/**
+ * The sidebar's own list: a positioned `ul` in a 100px viewport, 20px rows,
+ * and `createSidebarListMotion`, which animates rows to their new places and
+ * fades a removed row out as an inert copy.
+ */
+function mountAnimatedList(keys: readonly string[]) {
+  const viewport = document.createElement("div");
+  viewport.dataset.slot = "scroll-area-viewport";
+  Object.assign(viewport.style, { width: "200px", height: "100px", overflowY: "auto" });
+  const list = document.createElement("ul");
+  Object.assign(list.style, { position: "relative", margin: "0", padding: "0" });
+  const rowByKey = new Map<string, HTMLLIElement>();
+  for (const key of keys) {
+    const item = document.createElement("li");
+    Object.assign(item.style, { height: "20px", listStyle: "none" });
+    const row = document.createElement("div");
+    row.dataset.mesuraThreadKey = key;
+    row.textContent = key;
+    item.append(row);
+    rowByKey.set(key, item);
+    list.append(item);
+  }
+  viewport.append(list);
+  fixtureContainer.append(viewport);
+  const motion = createSidebarListMotion(list);
+  motion.update(false);
+  return {
+    /** Puts the rows in `order`, dropping the others, and animates as the sidebar does. */
+    render(order: readonly string[]) {
+      for (const [key, item] of rowByKey) if (!order.includes(key)) item.remove();
+      for (const key of order) list.append(rowByKey.get(key)!);
+      motion.update(true);
+    },
+    dispose: () => motion.dispose(),
+  };
 }
 
 let root: Screen | null = null;
@@ -50,6 +96,33 @@ async function mountArrowKeys(): Promise<void> {
   fixtureContainer.append(container);
   root = await renderBrowser(null, { container: container, router: false });
   await act(async () => await root!.rerender(createElement(ArrowKeysProbe)));
+}
+
+/**
+ * A real list, laid out by the browser: a 100px viewport with 20px rows, so
+ * five rows are on screen. Prints what `useViewportThreadKeys` returns.
+ */
+function ViewportKeysProbe(props: {
+  readonly rowKeys: readonly string[];
+  readonly active: boolean;
+}) {
+  const keys = useViewportThreadKeys(props.active);
+  return createElement(
+    "div",
+    null,
+    createElement(
+      "div",
+      { "data-slot": "scroll-area-viewport", style: { height: "100px", overflowY: "auto" } },
+      props.rowKeys.map((key) =>
+        createElement(
+          "div",
+          { key, "data-mesura-thread-key": key, style: { height: "20px" } },
+          key,
+        ),
+      ),
+    ),
+    createElement("output", null, keys === null ? "none" : keys.join(",")),
+  );
 }
 
 describe("sidebar thread viewport", () => {
@@ -188,5 +261,72 @@ describe("sidebar thread viewport", () => {
     rename.dispatchEvent(event);
     expect(document.activeElement).toBe(rename);
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("follows the rows when they reorder, appear or disappear while the numbers show", async () => {
+    // A plain list with no links: nothing here needs a router.
+    await using screen = await render(
+      createElement(ViewportKeysProbe, { rowKeys: ["a", "b", "c", "d", "e", "f"], active: true }),
+      { router: false },
+    );
+    const shown = () => screen.container.querySelector("output")?.textContent;
+    expect(shown()).toBe("a,b,c,d,e");
+
+    // An agent's activity moves a thread to the top, without any scroll.
+    await screen.rerender(
+      createElement(ViewportKeysProbe, { rowKeys: ["d", "a", "b", "c", "e", "f"], active: true }),
+    );
+    expect(shown()).toBe("d,a,b,c,e");
+
+    // A new thread appears above the others.
+    await screen.rerender(
+      createElement(ViewportKeysProbe, {
+        rowKeys: ["new", "d", "a", "b", "c", "e", "f"],
+        active: true,
+      }),
+    );
+    expect(shown()).toBe("new,d,a,b,c");
+
+    // A thread leaves the list.
+    await screen.rerender(
+      createElement(ViewportKeysProbe, { rowKeys: ["new", "a", "b", "c", "e", "f"], active: true }),
+    );
+    expect(shown()).toBe("new,a,b,c,e");
+
+    await screen.rerender(
+      createElement(ViewportKeysProbe, {
+        rowKeys: ["new", "a", "b", "c", "e", "f"],
+        active: false,
+      }),
+    );
+    expect(shown()).toBe("none");
+  });
+
+  it("counts a row where the commit put it while the reorder animation still moves it", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const list = mountAnimatedList(["a", "b", "c", "d", "e", "f", "g"]);
+    using _motion = { [Symbol.dispose]: list.dispose };
+    expect(readViewportThreadKeys()).toEqual(["a", "b", "c", "d", "e"]);
+
+    // `g` was below the fold and moves to the top; for 150ms the animation
+    // still draws it, and every row below, where it was.
+    list.render(["g", "a", "b", "c", "d", "e", "f"]);
+    expect(document.getAnimations().length, "precondition: the reorder animates").toBeGreaterThan(
+      0,
+    );
+    expect(readViewportThreadKeys()).toEqual(["g", "a", "b", "c", "d"]);
+  });
+
+  it("does not count the fading copy of a removed row", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const list = mountAnimatedList(["a", "b", "c", "d", "e", "f", "g"]);
+    using _motion = { [Symbol.dispose]: list.dispose };
+
+    list.render(["b", "c", "d", "e", "f", "g"]);
+    expect(
+      document.querySelectorAll('[data-mesura-thread-key="a"]').length,
+      "precondition: the removed row fades out as a copy",
+    ).toBe(1);
+    expect(readViewportThreadKeys()).toEqual(["b", "c", "d", "e", "f"]);
   });
 });

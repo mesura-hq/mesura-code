@@ -158,6 +158,10 @@ Those defaults use `isDesktop` so they do not steal the
 browser's tab-switch shortcuts. Remove that condition in Settings if you want
 the same jumps in a browser.
 
+`mod+0` jumps to the tenth thread. While the preview has focus, it resets the
+preview's zoom instead. In the desktop app, View > Actual Size resets the app's
+zoom and has no shortcut, because `mod+0` belongs to the thread jump.
+
 ## Commands
 
 `filePicker.toggle` opens file search for the active project and defaults to `mod+p`.
@@ -336,7 +340,7 @@ the file editor, and neither runs while the terminal has focus. See
 `ctrl+tab` and `ctrl+shift+tab`. The bracket pair works everywhere and is the one the app reports as
 the shortcut. The tab pair is desktop-only, because browsers keep those two chords for their own tab
 strip; it is also inactive while the terminal has focus, since the terminal encodes `ctrl+tab`
-itself. `mod+1` through `mod+9` jump straight to a thread: hold `mod` and the threads on screen in
+itself. `mod+1` through `mod+9`, and `mod+0` for the tenth, jump straight to a thread: hold `mod` and the threads on screen in
 the sidebar show their numbers, counted from the top of what you see. With the sidebar hidden, they
 count from the top of the list.
 

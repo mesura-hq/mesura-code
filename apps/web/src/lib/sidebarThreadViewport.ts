@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 /**
  * The sidebar thread list as the screen shows it, read from the DOM.
@@ -33,6 +33,40 @@ function threadListScroller(): HTMLElement | null {
 }
 
 /**
+ * The thread rows in the list, without the inert copy the list's motion
+ * (`Sidebar.motion.ts`) keeps of a removed row while it fades out.
+ */
+function threadRows(scroller: HTMLElement): HTMLElement[] {
+  return [...scroller.querySelectorAll<HTMLElement>(THREAD_ROW_SELECTOR)].filter(
+    (row) => row.closest("[inert]") === null,
+  );
+}
+
+/**
+ * A row's top in the list's scroll content, from layout offsets. Its client
+ * rect includes the transform the list's reorder animation runs, which for
+ * 150ms still draws a moved row where it was; the offsets give where the
+ * commit put it.
+ */
+function contentTop(row: HTMLElement, scroller: HTMLElement): number {
+  let top = 0;
+  let element = row;
+  for (;;) {
+    const parent = element.offsetParent;
+    if (parent === scroller) return top + element.offsetTop;
+    if (!(parent instanceof HTMLElement) || !scroller.contains(parent)) {
+      // The offsets leave the list at `element`, an ancestor the motion does
+      // not move, so its box is where layout put it.
+      const box = element.getBoundingClientRect().top;
+      const origin = scroller.getBoundingClientRect().top + scroller.clientTop;
+      return top + box - origin + scroller.scrollTop;
+    }
+    top += element.offsetTop;
+    element = parent;
+  }
+}
+
+/**
  * The thread keys of the rows on screen, top to bottom: a row counts when its
  * middle is inside the list's viewport. Null when the list is not on screen
  * (the sidebar collapsed or closed), so a caller can fall back to the list's
@@ -43,14 +77,17 @@ export function readViewportThreadKeys(): string[] | null {
   if (scroller === null) return null;
   const bounds = scroller.getBoundingClientRect();
   if (bounds.width === 0 || bounds.height === 0) return null;
-  // Rows measured now, moved to where they will be when a pending scroll stops.
-  const shift = pendingScroll?.scroller === scroller ? pendingScroll.top - scroller.scrollTop : 0;
+  // The viewport where a pending scroll will stop, or where it is now.
+  const viewportTop = pendingScroll?.scroller === scroller ? pendingScroll.top : scroller.scrollTop;
+  const viewportBottom = viewportTop + scroller.clientHeight;
   const rows: { key: string; top: number }[] = [];
-  for (const row of scroller.querySelectorAll<HTMLElement>(THREAD_ROW_SELECTOR)) {
-    const rect = row.getBoundingClientRect();
-    const middle = rect.top - shift + rect.height / 2;
-    if (rect.height === 0 || middle < bounds.top || middle > bounds.bottom) continue;
-    rows.push({ key: row.dataset.mesuraThreadKey ?? "", top: rect.top });
+  for (const row of threadRows(scroller)) {
+    const height = row.offsetHeight;
+    if (height === 0) continue;
+    const top = contentTop(row, scroller);
+    const middle = top + height / 2;
+    if (middle < viewportTop || middle > viewportBottom) continue;
+    rows.push({ key: row.dataset.mesuraThreadKey ?? "", top });
   }
   return rows.toSorted((left, right) => left.top - right.top).map((row) => row.key);
 }
@@ -99,25 +136,41 @@ const sameKeys = (left: readonly string[] | null, right: readonly string[] | nul
     left.every((key, index) => key === right[index]));
 
 /**
- * The thread keys on screen while `active` (the jump hints show), read again
- * at most once a frame while the list scrolls, so the numbers follow a
- * `Ctrl+D` made with `Ctrl` still held. Null while inactive or off screen.
+ * The thread keys on screen while `active` (the jump hints show). Null while
+ * inactive or off screen.
+ *
+ * Read after every commit of the caller: a reorder, a new thread or a removed
+ * one moves the rows without a scroll, and a number must always name the key
+ * that opens its row. The read is in a layout effect, so a changed list
+ * renders again before the frame paints. Also read at most once a frame while
+ * the list scrolls, so the numbers follow a `Ctrl+D` made with `Ctrl` held.
  */
 export function useViewportThreadKeys(active: boolean): readonly string[] | null {
   const [keys, setKeys] = useState<readonly string[] | null>(null);
+  // No dependency list on purpose: every commit can move the rows, and the
+  // rows on screen come from measuring the committed DOM. It compares with
+  // this render's `keys` and sets nothing when they match. A functional
+  // update here queued a no-op update on every commit, and the sidebar, which
+  // does not bail out of its own updates, committed again each time until
+  // React stopped it with "Maximum update depth exceeded".
+  useLayoutEffect(() => {
+    if (!active) return;
+    const next = readViewportThreadKeys();
+    // oxlint-disable-next-line react/set-state-in-effect -- The rows on screen come from measuring the committed DOM, which render cannot read.
+    if (!sameKeys(keys, next)) setKeys(next);
+  });
   useLayoutEffect(() => {
     if (!active) return;
     const scroller = threadListScroller();
     let frame = 0;
-    const read = () => {
-      frame = 0;
-      const next = readViewportThreadKeys();
-      setKeys((previous) => (sameKeys(previous, next) ? previous : next));
-    };
+    const read = () => refreshViewportThreadKeys(setKeys);
     const onScroll = () => {
-      if (frame === 0) frame = window.requestAnimationFrame(read);
+      if (frame !== 0) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        read();
+      });
     };
-    read();
     scroller?.addEventListener("scroll", onScroll, { passive: true });
     scroller?.addEventListener(PENDING_SCROLL_EVENT, read);
     return () => {
@@ -127,6 +180,13 @@ export function useViewportThreadKeys(active: boolean): readonly string[] | null
     };
   }, [active]);
   return active ? keys : null;
+}
+
+function refreshViewportThreadKeys(
+  setKeys: Dispatch<SetStateAction<readonly string[] | null>>,
+): void {
+  const next = readViewportThreadKeys();
+  setKeys((previous) => (sameKeys(previous, next) ? previous : next));
 }
 
 /**
@@ -149,7 +209,7 @@ export function useThreadRowArrowKeys(): void {
       const current = active.closest<HTMLElement>(THREAD_ROW_SELECTOR);
       if (current !== null && current !== active) return;
       event.preventDefault();
-      const rows = [...scroller.querySelectorAll<HTMLElement>(THREAD_ROW_SELECTOR)];
+      const rows = threadRows(scroller);
       const index = current === null ? -1 : rows.indexOf(current);
       const next =
         event.key === "ArrowDown" ? rows[index + 1] : index === -1 ? rows.at(-1) : rows[index - 1];

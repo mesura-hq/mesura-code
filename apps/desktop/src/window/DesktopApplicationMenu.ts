@@ -284,7 +284,9 @@ export const make = Effect.gen(function* () {
             click: mainContentsClick("toggleDevTools"),
           },
           { type: "separator" },
-          { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: zoomClick("reset") },
+          // Mesura: no accelerator. CmdOrCtrl+0 is the tenth thread jump, a
+          // page shortcut, and a menu accelerator would reset the zoom instead.
+          { label: "Actual Size", click: zoomClick("reset") },
           { label: "Zoom In", accelerator: "CmdOrCtrl+=", click: zoomClick("in") },
           {
             label: "Zoom In",
@@ -304,13 +306,8 @@ export const make = Effect.gen(function* () {
             : []),
           { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: zoomClick("out") },
           // The numeric keypad sends its own key codes, so the number-row
-          // accelerators above never match it.
-          {
-            label: "Actual Size",
-            accelerator: "CmdOrCtrl+num0",
-            visible: false,
-            click: zoomClick("reset"),
-          },
+          // accelerators above never match it. Mesura: no keypad Actual Size;
+          // the page reads Ctrl+Numpad0 as the tenth thread jump too.
           {
             label: "Zoom In",
             accelerator: "CmdOrCtrl+numadd",

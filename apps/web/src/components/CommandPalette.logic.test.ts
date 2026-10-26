@@ -8,7 +8,13 @@ import { describe, expect, it, vi } from "vite-plus/test";
 // Default mod+number bindings belong to Electron; web browsers own these chords.
 vi.mock("../env", () => ({ isElectron: true }));
 
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  THREAD_JUMP_KEYBINDING_COMMANDS,
+  ThreadId,
+} from "@t3tools/contracts";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import type { Project, Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
@@ -172,6 +178,22 @@ describe("findJumpTargetItem", () => {
     ).toBe("b");
   });
 
+  it("returns the tenth row for the tenth jump chord", () => {
+    const tenItems = THREAD_JUMP_KEYBINDING_COMMANDS.map((shortcutCommand, index) => ({
+      ...items[0]!,
+      value: `row-${index + 1}`,
+      shortcutCommand,
+    }));
+    expect(
+      findJumpTargetItem({
+        event: press("0"),
+        keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+        items: tenItems,
+        platform: "Linux",
+      })?.value,
+    ).toBe("row-10");
+  });
+
   it("returns null for a chord that is not a jump", () => {
     expect(
       findJumpTargetItem({
@@ -196,8 +218,9 @@ describe("findJumpTargetItem", () => {
 });
 
 describe("enumerateCommandPaletteItems", () => {
-  it("assigns positional jump shortcuts to the first nine displayed items", () => {
-    const items = Array.from({ length: 10 }, (_, index) => ({
+  // Mesura: ten, with Ctrl+0 for the tenth.
+  it("assigns positional jump shortcuts to the first ten displayed items", () => {
+    const items = Array.from({ length: 11 }, (_, index) => ({
       kind: "action" as const,
       value: `project-${index + 1}`,
       searchTerms: [],
@@ -217,6 +240,7 @@ describe("enumerateCommandPaletteItems", () => {
       "thread.jump.7",
       "thread.jump.8",
       "thread.jump.9",
+      "thread.jump.10",
       undefined,
     ]);
   });
