@@ -13,7 +13,7 @@ import {
   type FactoryPlanPhaseCard,
   type FactoryPlanSectionModel,
 } from "@t3tools/client-runtime/factory/plan-model";
-import type { FactoryArchitecture } from "@t3tools/shared/factoryDocument";
+import { FACTORY_PHASES_HEADING, type FactoryArchitecture } from "@t3tools/shared/factoryDocument";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys";
 
@@ -36,16 +36,30 @@ export function Markdown({ text, scope }: { text: string; scope: MarkdownScope }
   );
 }
 
-/** Closed until the reader opens it; the panel mounts its content only while open. */
-export function Fold({ summary, children }: { summary: ReactNode; children: ReactNode }) {
+/** Closed until the reader opens it, unless `defaultOpen`; the panel mounts its content only while open. */
+export function Fold({
+  summary,
+  children,
+  defaultOpen = false,
+  label,
+}: {
+  summary: ReactNode;
+  children: ReactNode;
+  defaultOpen?: boolean;
+  /** The trigger's accessible name, when the summary is not text. */
+  label?: string;
+}) {
   return (
-    <Collapsible>
-      <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-left text-sm text-foreground/90">
+    <Collapsible defaultOpen={defaultOpen}>
+      <CollapsibleTrigger
+        aria-label={label}
+        className="group flex w-full items-center gap-1.5 text-left text-sm text-foreground/90"
+      >
         <ChevronRightIcon
           aria-hidden="true"
           className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-90 motion-reduce:transition-none"
         />
-        <span className="min-w-0">{summary}</span>
+        <span className="min-w-0 flex-1">{summary}</span>
       </CollapsibleTrigger>
       <CollapsiblePanel>
         <div className="pt-2 pl-5">{children}</div>
@@ -54,7 +68,7 @@ export function Fold({ summary, children }: { summary: ReactNode; children: Reac
   );
 }
 
-function PhaseCard({
+export function FactoryPlanPhaseCardView({
   phase,
   scope,
   theme,
@@ -106,7 +120,7 @@ function PhaseCard({
   );
 }
 
-function SectionBody({
+export function FactoryPlanSectionBody({
   section,
   scope,
   theme,
@@ -122,7 +136,12 @@ function SectionBody({
       return (
         <div className="flex flex-col gap-3">
           {section.phases.map((phase) => (
-            <PhaseCard key={phase.number} phase={phase} scope={scope} theme={theme} />
+            <FactoryPlanPhaseCardView
+              key={phase.number}
+              phase={phase}
+              scope={scope}
+              theme={theme}
+            />
           ))}
         </div>
       );
@@ -222,11 +241,87 @@ export const FactoryPlanDocument = memo(function FactoryPlanDocument({
           ) : (
             <>
               <h2 className="text-base font-medium text-foreground">{section.heading}</h2>
-              <SectionBody section={section} scope={scope} theme={resolvedTheme} />
+              <FactoryPlanSectionBody section={section} scope={scope} theme={resolvedTheme} />
             </>
           )}
         </section>
       ))}
+    </div>
+  );
+});
+
+/** What a reader needs before approving opens with the card; every other section waits folded. */
+const PLAN_CARD_OPEN_SECTIONS: ReadonlySet<string> = new Set([
+  "Context",
+  "What we will build",
+  FACTORY_PHASES_HEADING,
+]);
+
+/**
+ * A whole plan inside its chat card: every level-two section in document order
+ * as a fold, the approval-critical ones open, and each phase a fold whose
+ * summary carries its title, criterion count and goal.
+ */
+export const FactoryPlanFolds = memo(function FactoryPlanFolds({
+  markdown,
+  environmentId,
+  cwd,
+  threadRef,
+}: {
+  markdown: string;
+  environmentId: EnvironmentId;
+  cwd: string | undefined;
+  /** The thread whose file panel opens the plan's file links. */
+  threadRef: ScopedThreadRef | null;
+}) {
+  const { resolvedTheme } = useTheme();
+  const document = useMemo(() => deriveFactoryPlanDocumentModel(markdown), [markdown]);
+  const scope = useMemo(
+    () => ({ environmentId, cwd, threadRef: threadRef ?? undefined }),
+    [environmentId, cwd, threadRef],
+  );
+  const sectionKeys = useMemo(
+    () => occurrenceKeys(document.sections.map((section) => section.heading)),
+    [document],
+  );
+  return (
+    <div className="flex flex-col gap-3">
+      {document.sections.map((section, index) => {
+        const summary = <span className="font-medium">{section.heading}</span>;
+        const open = PLAN_CARD_OPEN_SECTIONS.has(section.heading);
+        return (
+          <Fold key={sectionKeys[index]} summary={summary} defaultOpen={open}>
+            {section.kind === "phases" ? (
+              <div className="flex flex-col gap-2">
+                {section.phases.map((phase) => (
+                  <Fold
+                    key={phase.number}
+                    summary={
+                      <span className="flex flex-col">
+                        <span>
+                          <span className="mr-1.5 text-muted-foreground tabular-nums">
+                            {phase.number}.
+                          </span>
+                          {phase.title}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {phase.acceptance.length}{" "}
+                          {phase.acceptance.length === 1 ? "criterion" : "criteria"}
+                          {phase.goal ? ` · ${phase.goal}` : null}
+                        </span>
+                      </span>
+                    }
+                  >
+                    <FactoryPlanPhaseCardView phase={phase} scope={scope} theme={resolvedTheme} />
+                  </Fold>
+                ))}
+              </div>
+            ) : (
+              <FactoryPlanSectionBody section={section} scope={scope} theme={resolvedTheme} />
+            )}
+          </Fold>
+        );
+      })}
     </div>
   );
 });

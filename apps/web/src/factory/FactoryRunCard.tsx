@@ -1,3 +1,4 @@
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import type { FactoryRunTimelineItem } from "@t3tools/client-runtime/factory/run-activities";
 import {
   factoryPhaseMarkTone,
@@ -9,6 +10,8 @@ import { memo } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { cn } from "~/lib/utils";
+import { Fold } from "./FactoryPlanDocument";
+import { FactoryRunTraceFromStream, FactoryTraceStrip } from "./FactoryRunTrace";
 import { FACTORY_MARK_CLASS_BY_TONE, factoryEventClock } from "./factoryTones";
 
 /**
@@ -18,9 +21,12 @@ import { FACTORY_MARK_CLASS_BY_TONE, factoryEventClock } from "./factoryTones";
 export const FactoryRunCard = memo(function FactoryRunCard({
   factoryRun,
   onOpen,
+  threadRef = null,
 }: {
   factoryRun: FactoryRunTimelineItem;
   onOpen: ((runId: string) => void) | null;
+  /** The thread the run is attached to; without one the strip does not open into the trace. */
+  threadRef?: ScopedThreadRef | null;
 }) {
   const card = factoryRunCardModel(factoryRun.run);
   return (
@@ -66,6 +72,18 @@ export const FactoryRunCard = memo(function FactoryRunCard({
             </li>
           ))}
         </ol>
+      )}
+      {factoryRun.run.trace === undefined ? null : (
+        <div className="mt-3">
+          {threadRef === null ? (
+            <FactoryTraceStrip trace={factoryRun.run.trace} />
+          ) : (
+            // The strip comes from the summary; the full trace subscribes only while open.
+            <Fold summary={<FactoryTraceStrip trace={factoryRun.run.trace} />} label="Run trace">
+              <FactoryRunTraceFromStream threadRef={threadRef} runId={factoryRun.run.runId} />
+            </Fold>
+          )}
+        </div>
       )}
       <p className="mt-3 flex flex-wrap gap-x-3 text-xs text-muted-foreground tabular-nums">
         <span>{card.returns}</span>

@@ -1,12 +1,13 @@
 import type { FactoryRunState, FactoryRunStreamItem, ScopedThreadRef } from "@t3tools/contracts";
-import { memo, useEffect, useState, type ReactNode } from "react";
+import { deriveFactoryRunTrace } from "@t3tools/shared/factoryRunTrace";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Spinner } from "../components/ui/spinner";
 import { cn } from "~/lib/utils";
 import { FactoryCostFloor } from "./FactoryCostFloor";
 import { FactoryNodeSpine } from "./FactoryNodeSpine";
-import { FactoryPhaseRail } from "./FactoryPhaseRail";
 import { FactoryRoleSessions } from "./FactoryRoleSessions";
+import { FactoryRunTrace, useFactoryTraceClock } from "./FactoryRunTrace";
 import {
   deriveFactoryRunTotals,
   deriveFactoryRunView,
@@ -190,15 +191,31 @@ function FactoryRunContent({
 }) {
   const [selectedPhase, setSelectedPhase] = useState<number | null>(null);
   const view = useFactoryRunViewModel(item, selectedPhase);
-  return (
-    <div className="space-y-4 px-4 py-4">
-      <FactoryRunTotalsLine state={item.state} live={view.live} />
-      <FactoryPhaseRail items={view.rail} onSelect={setSelectedPhase} />
+  const nowMs = useFactoryTraceClock(view.live);
+  const trace = useMemo(() => deriveFactoryRunTrace(item.state, nowMs), [item.state, nowMs]);
+  // The selected phase's spine, role sessions and record open under its lane.
+  const phaseDetail = () => (
+    <>
       {view.spine === null ? null : <FactoryNodeSpine spine={view.spine} />}
       <Section title="Role sessions">
         <FactoryRoleSessions rows={view.roles} threadRef={threadRef} cwd={cwd} />
       </Section>
       {view.detail === null ? null : <FactoryPhaseRecord detail={view.detail} />}
+    </>
+  );
+  return (
+    <div className="space-y-4 px-4 py-4">
+      <FactoryRunTotalsLine state={item.state} live={view.live} />
+      {trace === null ? (
+        <p className="text-xs text-muted-foreground">The run has not started yet.</p>
+      ) : (
+        <FactoryRunTrace
+          trace={trace}
+          selectedPhase={view.selectedPhase}
+          onSelectPhase={setSelectedPhase}
+          phaseDetail={phaseDetail}
+        />
+      )}
     </div>
   );
 }
