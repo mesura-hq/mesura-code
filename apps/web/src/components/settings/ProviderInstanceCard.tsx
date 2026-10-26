@@ -591,6 +591,7 @@ interface ProviderInstanceCardProps {
   readonly isUpdating?: boolean | undefined;
   readonly onAcceptUrlAuth?: ((action: AcpRegistryUrlAuthAction) => void) | undefined;
   readonly environmentId?: EnvironmentId | undefined;
+  readonly hiddenConfigFields?: ReadonlySet<string> | undefined;
   readonly projectOverride?: ProjectOverrideControl | undefined;
   readonly acpProjects?:
     | ReadonlyArray<{
@@ -639,6 +640,7 @@ export function ProviderInstanceCard({
   isUpdating = false,
   onAcceptUrlAuth,
   environmentId,
+  hiddenConfigFields,
   acpProjects = EMPTY_ACP_PROJECTS,
   projectOverride,
 }: ProviderInstanceCardProps) {
@@ -1095,6 +1097,7 @@ export function ProviderInstanceCard({
       idPrefix={`provider-instance-${instanceId}`}
       variant="settings"
       onChange={updateConfig}
+      hiddenFieldKeys={hiddenConfigFields}
     />
   ) : (
     <SettingsRow

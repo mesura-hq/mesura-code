@@ -7,6 +7,7 @@ import {
   ProjectScript,
   ProviderDriverKind,
   ProviderInstanceId,
+  resolveIdleCompaction,
   resolveProviderInstanceEnabled,
   ServerSettings,
   UsageLimitSourceId,
@@ -224,6 +225,37 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       // Shipped clients decode the switch as a boolean and drop the config otherwise.
       assert.strictEqual(settings.compactIdleThreads, false);
       assert.equal(settings.idleCompaction, "off");
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  // Mesura: servers since idle compaction modes store `idleCompaction` on their
+  // own, so this fork's homes carry "onReturn" nobody chose.
+  it.effect("keeps a stored idle compaction mode out of effect until it is switched on", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const claude = ProviderInstanceId.make("claudeAgent");
+      yield* fs.writeFileString(config.settingsPath, `{ "idleCompaction": "onReturn" }`);
+      const readPersisted = fs
+        .readFileString(config.settingsPath)
+        .pipe(Effect.map((raw) => JSON.parse(raw) as Record<string, unknown>));
+
+      const stored = yield* service.getSettings;
+      assert.equal(stored.idleCompaction, "onReturn");
+      assert.equal(resolveIdleCompaction(stored, claude), "off");
+      assert.notProperty(yield* readPersisted, "idleCompactionEnabled");
+
+      const enabled = yield* service.updateSettings({ idleCompactionEnabled: true });
+      assert.equal(resolveIdleCompaction(enabled, claude), "onReturn");
+      assert.include(yield* readPersisted, {
+        idleCompaction: "onReturn",
+        idleCompactionEnabled: true,
+      });
+
+      const disabled = yield* service.updateSettings({ idleCompactionEnabled: false });
+      assert.equal(resolveIdleCompaction(disabled, claude), "off");
+      assert.notProperty(yield* readPersisted, "idleCompactionEnabled");
     }).pipe(Effect.provide(layerServerSettings())),
   );
 

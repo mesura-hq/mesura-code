@@ -12,9 +12,6 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   type DesktopUpdateChannel,
-  IDLE_COMPACTION_MODES,
-  globalIdleCompaction,
-  idleCompactionPatch,
   type ProviderInstanceId,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
@@ -101,6 +98,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { BackgroundActivitySettingsRow } from "./BackgroundActivitySettings";
+import { IdleCompactionSettings } from "./IdleCompactionSettings";
 
 const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
   turn: "Wait for the full response",
@@ -504,6 +502,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.providerUpdatePopup !== DEFAULT_UNIFIED_SETTINGS.providerUpdatePopup
       ? ["Provider update pop-up"]
       : []),
+    ...(settings.idleCompactionEnabled !== DEFAULT_UNIFIED_SETTINGS.idleCompactionEnabled
+      ? ["Idle compaction"]
+      : []),
     ...(settings.continueThreadsAfterServerUpdate !==
     DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
       ? ["Continue threads after restarts"]
@@ -605,6 +606,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       vimMode: DEFAULT_UNIFIED_SETTINGS.vimMode,
       openInExternalEditor: DEFAULT_UNIFIED_SETTINGS.openInExternalEditor,
       providerUpdatePopup: DEFAULT_UNIFIED_SETTINGS.providerUpdatePopup,
+      idleCompactionEnabled: DEFAULT_UNIFIED_SETTINGS.idleCompactionEnabled,
       neovimConfigDirectory: DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory,
       ...THREAD_ORDER_DEFAULT_SETTINGS_PATCH,
       persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
@@ -1169,50 +1171,7 @@ export function GeneralSettingsPanel() {
           }
         />
 
-        <SettingsRow
-          serverScoped
-          settingKeys={["idleCompaction", "compactIdleThreads"]}
-          {...searchableSetting("compact-idle-threads")}
-          description="When to compact an idle Claude thread over 200,000 tokens: after you return, just before its prompt cache expires, or never. Each Claude provider can override this."
-          resetAction={
-            globalIdleCompaction(settings) !== globalIdleCompaction(DEFAULT_UNIFIED_SETTINGS) ? (
-              <SettingResetButton
-                label="compact idle threads"
-                onClick={() =>
-                  updateSettings(
-                    idleCompactionPatch(settings, globalIdleCompaction(DEFAULT_UNIFIED_SETTINGS)),
-                  )
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={globalIdleCompaction(settings)}
-              onValueChange={(value) => {
-                const mode = IDLE_COMPACTION_MODES.find((candidate) => candidate.value === value);
-                if (mode) updateSettings(idleCompactionPatch(settings, mode.value));
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Compact idle threads">
-                <SelectValue>
-                  {
-                    IDLE_COMPACTION_MODES.find(
-                      (mode) => mode.value === globalIdleCompaction(settings),
-                    )?.label
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {IDLE_COMPACTION_MODES.map((mode) => (
-                  <SelectItem hideIndicator key={mode.value} value={mode.value}>
-                    {mode.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
+        <IdleCompactionSettings />
 
         {supportsAutoSettlement ? (
           <>

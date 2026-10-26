@@ -376,6 +376,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
   },
   {
+    id: "idle-compaction",
+    title: "Idle compaction",
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: [
+      "claude context compaction idle cache tokens compact chip resume suggest automatic",
+    ],
+  },
+  {
     id: "compact-idle-threads",
     title: "Compact idle threads",
     to: "/settings/general",

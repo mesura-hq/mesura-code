@@ -1298,6 +1298,14 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
   idleCompaction: Schema.optionalKey(IdleCompactionMode),
+  /**
+   * Mesura: lets the app start or suggest compaction on its own, in the mode
+   * `idleCompaction` sets. Off by default: this fork's developer compacts only
+   * by hand. A separate switch rather than a new default, because servers since
+   * upstream's idle compaction modes write `idleCompaction: "onReturn"` into
+   * settings.json on their own, so a stored mode is not a choice.
+   */
+  idleCompactionEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sidebarAutoSettleKeepPullRequests: Schema.Boolean.pipe(
@@ -1517,10 +1525,15 @@ export const idleCompactionPatch = (settings: IdleCompactionSettings, mode: Idle
       ? { compactIdleThreads: mode }
       : { compactIdleThreads: mode === "beforeCacheExpires" };
 
+/** The mode in effect for an instance. Mesura: `"off"` while `idleCompactionEnabled` is off. */
 export const resolveIdleCompaction = (
-  settings: Pick<ServerSettings, "providerInstances" | "compactIdleThreads" | "idleCompaction">,
+  settings: Pick<
+    ServerSettings,
+    "providerInstances" | "compactIdleThreads" | "idleCompaction" | "idleCompactionEnabled"
+  >,
   instanceId: ProviderInstanceId,
 ): IdleCompactionMode => {
+  if (!settings.idleCompactionEnabled) return "off";
   const instance = Object.hasOwn(settings.providerInstances, instanceId)
     ? settings.providerInstances[instanceId]
     : undefined;
@@ -1674,6 +1687,7 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   compactIdleThreads: Schema.optionalKey(LegacyCompactIdleThreads),
   idleCompaction: Schema.optionalKey(IdleCompactionMode),
+  idleCompactionEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),

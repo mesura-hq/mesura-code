@@ -98,6 +98,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
+import { useHiddenIdleCompactionFields } from "./idleCompactionFields";
 import { UsageProviderSettings } from "./UsageProviderSettings";
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
@@ -1312,9 +1313,12 @@ function ProviderInstanceRow({
     Boolean(recommendedVersion) &&
     liveProvider.versionAdvisory?.canInstallVersion === true;
 
+  const hiddenConfigFields = useHiddenIdleCompactionFields(environmentId);
+
   return (
     <ProviderInstanceCard
       environmentId={environmentId}
+      hiddenConfigFields={hiddenConfigFields}
       acpProjects={acpProjects}
       projectOverride={projectOverride}
       onAcceptUrlAuth={

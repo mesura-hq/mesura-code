@@ -52,6 +52,7 @@ import { ProviderWizardAuthenticationStep } from "./ProviderWizardAuthentication
 import { resolveOfficialAcpRegistryIconUrl } from "./AcpRegistryIcon";
 import { AddManagedCodexAccountDialog } from "./CodexSetupSection";
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
+import { hiddenIdleCompactionFields } from "./idleCompactionFields";
 
 /**
  * Output is trimmed to 48 chars so the final composed id stays under the 64-char slug cap
@@ -106,6 +107,7 @@ export function AddProviderInstanceDialog({
   onCreated,
 }: AddProviderInstanceDialogProps) {
   const settings = useEnvironmentSettings(environmentId);
+  const hiddenConfigFields = hiddenIdleCompactionFields(settings);
   const persistProviderInstance = usePersistEnvironmentProviderInstanceMutation(environmentId);
   const canManageProviders = useEnvironmentScope(environmentId, AuthProvidersManageScope);
 
@@ -632,6 +634,7 @@ export function AddProviderInstanceDialog({
                     idPrefix={`add-provider-${driver}`}
                     variant="settings"
                     onChange={setConfigDraft}
+                    hiddenFieldKeys={hiddenConfigFields}
                   />
                 </SettingsGroup>
               ) : !isAcpRegistry && wizardStep === 2 ? (

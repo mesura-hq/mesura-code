@@ -9094,14 +9094,16 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               if (!adapterOptions.settings.offerResumeCompaction) {
                 return { behavior: "completed" as const, result: "continue" as const };
               }
+              // Mesura: without the environment's settings, the switch that
+              // allows compaction offers cannot be read, so none is made.
               const idleCompaction = Option.isSome(serverSettings)
                 ? yield* serverSettings.value.getSettings.pipe(
                     Effect.map((settings) =>
                       resolveIdleCompaction(settings, adapterOptions.instanceId),
                     ),
-                    Effect.orElseSucceed(() => adapterOptions.settings.idleCompaction),
+                    Effect.orElseSucceed(() => "off" as const),
                   )
-                : adapterOptions.settings.idleCompaction;
+                : "off";
               if (idleCompaction === "off") {
                 return { behavior: "completed" as const, result: "continue" as const };
               }

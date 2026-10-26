@@ -75,6 +75,7 @@ import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { WorkflowAgentTranscriptReadObserver } from "../workflowAgentTranscript.ts";
 import * as ServerConfig from "../../config.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
@@ -1365,10 +1366,147 @@ describe("ClaudeAdapterV2 resume compaction", () => {
         );
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            ServerSettings.layerTest({ idleCompactionEnabled: true }),
+          ),
         ),
       ),
     ),
+  );
+});
+
+// Mesura: the SDK's resume dialog asks the user only while the environment
+// allows compaction offers.
+describe("ClaudeAdapterV2 resume compaction switch", () => {
+  const answerResumeDialog = (
+    settingsLayer: ReturnType<typeof ServerSettings.layerTest> | null,
+    claudeSettings = DEFAULT_CLAUDE_SETTINGS,
+  ) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
+        const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: claudeSettings,
+          environment: {},
+          attachmentsDir: yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "t3-claude-resume-switch-",
+          }),
+          fileSystem,
+          path: yield* Path.Path,
+          crypto: yield* Crypto.Crypto,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          queryRunner: {
+            allocateSessionId: Effect.succeed("native-thread-claude-resume-switch"),
+            open: (input) =>
+              Effect.sync(() => {
+                openedOptions = input.options;
+                return {
+                  messages: Stream.never,
+                  offer: () => Effect.void,
+                  setModel: () => Effect.void,
+                  applyFlagSettings: () => Effect.void,
+                  setPermissionMode: () => Effect.void,
+                  backgroundTasks: () => Effect.succeed(false),
+                  stopTask: () => Effect.void,
+                  interrupt: Effect.void,
+                  close: Effect.void,
+                };
+              }),
+            forkSession: () => Effect.die("unused"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        });
+        const threadId = ThreadId.make("thread-claude-resume-switch");
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-claude-resume-switch"),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        });
+        yield* runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId,
+            providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-claude-resume-switch"),
+            text: "continue",
+            attachments: [],
+          }),
+        );
+        const callback = openedOptions?.onUserDialog;
+        assert.isFunction(callback);
+        const asked = yield* runtime.events.pipe(
+          Stream.filter((event) => event.type === "runtime_request.updated"),
+          Stream.runHead,
+          Effect.as("asked the user" as const),
+          Effect.forkScoped,
+        );
+        return yield* Effect.raceFirst(
+          Fiber.join(asked),
+          Effect.promise(() =>
+            callback!(
+              {
+                dialogKind: "resume_return",
+                payload: { sessionAgeMinutes: 90, estimatedTokens: 368_000 },
+              },
+              { signal: new AbortController().signal, requestId: "dialog-resume-switch" },
+            ),
+          ),
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            settingsLayer ?? Layer.empty,
+          ),
+        ),
+      ),
+    );
+  const KEEP_FULL_HISTORY = { behavior: "completed", result: "continue" } as const;
+
+  it.effect("keeps the full history when a stored mode was never switched on", () =>
+    Effect.gen(function* () {
+      assert.deepEqual(
+        yield* answerResumeDialog(ServerSettings.layerTest({ idleCompaction: "onReturn" })),
+        KEEP_FULL_HISTORY,
+      );
+    }),
+  );
+
+  it.effect("keeps the full history when the environment's settings are unavailable", () =>
+    Effect.gen(function* () {
+      assert.deepEqual(yield* answerResumeDialog(null), KEEP_FULL_HISTORY);
+    }),
+  );
+
+  it.effect("asks once the switch is on, unless the instance turns resume offers off", () =>
+    Effect.gen(function* () {
+      const enabled = ServerSettings.layerTest({
+        idleCompaction: "onReturn",
+        idleCompactionEnabled: true,
+      });
+      assert.equal(yield* answerResumeDialog(enabled), "asked the user");
+      assert.deepEqual(
+        yield* answerResumeDialog(enabled, {
+          ...DEFAULT_CLAUDE_SETTINGS,
+          offerResumeCompaction: false,
+        }),
+        KEEP_FULL_HISTORY,
+      );
+    }),
   );
 });
 
