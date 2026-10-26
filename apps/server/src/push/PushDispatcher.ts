@@ -15,6 +15,9 @@
  * one was already announced. At start every thread's current key counts as
  * announced without sending, so a restart never re-announces work that
  * already needed the developer.
+ *
+ * No push goes out while a client of this host reports the developer active
+ * (`ClientPresence`); the key is still recorded, so that push never goes out.
  */
 import type {
   EnvironmentId,
@@ -46,6 +49,7 @@ import {
   PUSH_PREFERENCE_BY_PHASE,
   type PushPhase,
 } from "./pushPayload.ts";
+import { ClientPresence } from "./ClientPresence.ts";
 import { PushSubscriptions } from "./PushSubscriptions.ts";
 
 export class PushDispatcher extends Context.Service<
@@ -132,6 +136,7 @@ export const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
   const subscriptions = yield* PushSubscriptions;
+  const presence = yield* ClientPresence;
 
   const announced = new Map<ThreadId, Set<string>>();
 
@@ -194,8 +199,10 @@ export const make = Effect.gen(function* () {
     if (!markAnnounced(threadId, key)) return;
 
     // Recorded before sending: a crash mid-send loses one push rather than
-    // repeating it after the restart.
+    // repeating it after the restart. Recorded while the developer is active
+    // too, so a held push is dropped rather than sent when they leave.
     yield* recordSend(threadId, key);
+    if (yield* presence.isAnyClientActive()) return;
     yield* subscriptions.broadcast(PUSH_PREFERENCE_BY_PHASE[phase], buildPushPayload(awareness));
   });
 

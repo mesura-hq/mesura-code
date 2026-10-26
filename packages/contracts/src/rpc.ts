@@ -435,6 +435,8 @@ import {
 import {
   PushEndpointInput,
   PushNotificationError,
+  PushPresenceInput,
+  PushPresenceRecorded,
   PushPublicKey,
   PushPublicKeyInput,
   PushSendTestResult,
@@ -698,6 +700,7 @@ export const WS_METHODS = {
   pushUnsubscribe: "push.unsubscribe",
   pushStatus: "push.status",
   pushSendTest: "push.sendTest",
+  pushPresence: "push.presence",
 
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeWorktreeSetup: "subscribeWorktreeSetup",
@@ -1446,6 +1449,15 @@ const WsPushSendTestRpc = Rpc.make(WS_METHODS.pushSendTest, {
   payload: PushEndpointInput,
   success: PushSendTestResult,
   error: PushRpcError,
+});
+
+// A stream, so the server learns when the report ends: the client interrupts
+// the call to replace it, and a closed socket ends it too.
+const WsPushPresenceRpc = Rpc.make(WS_METHODS.pushPresence, {
+  payload: PushPresenceInput,
+  success: PushPresenceRecorded,
+  error: PushRpcError,
+  stream: true,
 });
 
 const WsSourceControlPublishRepositoryRpc = Rpc.make(WS_METHODS.sourceControlPublishRepository, {
@@ -2540,6 +2552,7 @@ const MesuraWsRpcGroup = RpcGroup.make(
   WsPushUnsubscribeRpc,
   WsPushStatusRpc,
   WsPushSendTestRpc,
+  WsPushPresenceRpc,
   WsProjectIconsPreviewRpc,
   WsProjectIconsDiscoverRpc,
   WsFileManagerHostRpc,

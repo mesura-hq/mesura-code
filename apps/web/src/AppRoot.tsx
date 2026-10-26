@@ -9,6 +9,7 @@ import { BrowserProfileReporter } from "./browser/BrowserProfileReporter";
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { QuitHoldOverlay } from "./components/QuitHoldOverlay";
 import { openPushTargets } from "./pushNotifications/notificationTarget";
+import { PresenceReporter } from "./pushNotifications/PresenceReporter";
 import { appAtomRegistry, AppAtomRegistryProvider } from "./rpc/atomRegistry";
 import type { AppRouter } from "./router";
 
@@ -35,6 +36,8 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
       <RouterProvider router={router} />
       <ElectronBrowserHost />
       <BrowserProfileReporter />
+      {/* Mesura: while the developer is at this client, the host holds phone pushes. */}
+      <PresenceReporter />
       <QuitHoldOverlay />
     </AppAtomRegistryProvider>
   );

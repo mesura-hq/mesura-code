@@ -239,6 +239,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.pushUnsubscribe]: "push",
   [WS_METHODS.pushStatus]: "push",
   [WS_METHODS.pushSendTest]: "push",
+  [WS_METHODS.pushPresence]: "push",
   [WS_METHODS.editorSessionOpen]: "editor",
   [WS_METHODS.editorSessionAttach]: "editor",
   [WS_METHODS.editorSessionInput]: "editor",

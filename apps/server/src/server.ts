@@ -129,6 +129,7 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as DictationJobs from "./dictation/DictationJobs.ts";
+import * as ClientPresence from "./push/ClientPresence.ts";
 import * as PushDispatcher from "./push/PushDispatcher.ts";
 import * as PushSender from "./push/PushSender.ts";
 import * as PushSubscriptions from "./push/PushSubscriptions.ts";
@@ -449,7 +450,11 @@ const layerPushDispatcher = Layer.effectDiscard(
     const dispatcher = yield* PushDispatcher.PushDispatcher;
     yield* dispatcher.start();
   }),
-).pipe(Layer.provide(PushDispatcher.layer), Layer.provide(layerPushSubscriptions));
+).pipe(
+  Layer.provide(PushDispatcher.layer),
+  Layer.provide(layerPushSubscriptions),
+  Layer.provide(ClientPresence.layer),
+);
 
 const layerKnownWorkspaces = KnownWorkspaces.layer.pipe(
   Layer.provide(ProjectStore.layer),
@@ -683,6 +688,8 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // Mesura: fork services that read the core services below.
   ProjectIconDiscovery.layer,
   layerPushSubscriptions,
+  // One presence map: the WebSocket handlers report into the instance the dispatcher reads.
+  ClientPresence.layer,
   layerPushDispatcher,
   layerAccountLimits,
   layerHostStats,

@@ -75,6 +75,18 @@ export const PushSendTestResult = Schema.Struct({
 });
 export type PushSendTestResult = typeof PushSendTestResult.Type;
 
+/**
+ * Whether the developer is at this client. The call stays open while the
+ * report holds: the server forgets it when the call ends, which a replacing
+ * report or a closed connection does.
+ */
+export const PushPresenceInput = Schema.Struct({ active: Schema.Boolean });
+export type PushPresenceInput = typeof PushPresenceInput.Type;
+
+/** Emitted once the server holds the report, and nothing after it. */
+export const PushPresenceRecorded = Schema.Struct({ active: Schema.Boolean });
+export type PushPresenceRecorded = typeof PushPresenceRecorded.Type;
+
 /** The JSON a push carries; the service worker shows it as one notification. */
 export const PushNotificationPayload = Schema.Struct({
   title: Schema.String,

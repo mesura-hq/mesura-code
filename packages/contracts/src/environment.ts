@@ -156,6 +156,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       servers from before the hosts dock, so clients show "needs update" for them
       rather than subscribing to a method they do not have. */
   hostStats: Schema.optionalKey(Schema.Boolean),
+  /** Mesura: server takes presence reports over `push.presence` and holds phone
+      pushes while a client is active. Absent on older servers, which must not
+      be sent the method. */
+  pushPresence: Schema.optionalKey(Schema.Boolean),
   /** Server answers orchestration.subscribeCommandOutput. Absent on older servers,
       which never send command output, so clients must not subscribe. */
   commandOutputStreaming: Schema.optionalKey(Schema.Boolean),
