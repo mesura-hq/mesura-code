@@ -86,6 +86,7 @@ import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { releaseProjectDraftUploads } from "../lib/composerDraftUploads";
 import { isPreviewFocused } from "../lib/previewFocus";
+import { usePreviewFocusWhile } from "./sidebar/threadJumpTargets";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform } from "../lib/utils";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
@@ -293,6 +294,7 @@ function buildThreadJumpLabelMap(input: {
   keybindings: ResolvedKeybindingsConfig;
   platform: string;
   terminalOpen: boolean;
+  previewFocus: boolean;
   threadJumpCommandByKey: ReadonlyMap<
     string,
     NonNullable<ReturnType<typeof threadJumpCommandForIndex>>
@@ -307,6 +309,7 @@ function buildThreadJumpLabelMap(input: {
     context: {
       terminalFocus: false,
       terminalOpen: input.terminalOpen,
+      previewFocus: input.previewFocus,
     },
   } as const;
   const mapping = new Map<string, string>();
@@ -3270,6 +3273,8 @@ export default function LegacySidebar() {
     ReadonlySet<string>
   >(() => new Set());
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
+  // Mesura: the preview keeps mod+0 while focused, so the tenth label hides then.
+  const previewFocus = usePreviewFocusWhile(showThreadJumpHints);
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
   const suppressProjectClickForContextMenuRef = useRef(false);
@@ -3393,6 +3398,7 @@ export default function LegacySidebar() {
     keybindings,
     platform,
     terminalOpen: routeTerminalOpen,
+    previewFocus,
     threadJumpCommandByKey,
   });
   const sidebarShortcutContext = {

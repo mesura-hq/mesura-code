@@ -101,7 +101,7 @@ export function useThreadJumpTargets(input: {
  * Whether the preview has focus, followed while `active`. Focus moves without
  * rendering the sidebar, so it is read on each focus change.
  */
-function usePreviewFocusWhile(active: boolean): boolean {
+export function usePreviewFocusWhile(active: boolean): boolean {
   const [previewFocus, setPreviewFocus] = useState(false);
   useLayoutEffect(() => {
     if (!active) return;

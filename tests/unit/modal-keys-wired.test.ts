@@ -605,6 +605,17 @@ it("modal keys seam guard round 2: the sidebar numbers and jumps to the threads 
   assertCallCarries(file, "navigateToThreadKey", ["threadKeyForJump(command)"]);
 });
 
+it("modal keys seam guard round 2: the legacy sidebar hides the tenth jump label while the preview owns mod+0", () => {
+  const file = "apps/web/src/components/LegacySidebar.tsx";
+  assertCallCarries(file, "usePreviewFocusWhile", ["showThreadJumpHints"]);
+  assertCallCarries(file, "buildThreadJumpLabelMap", ["previewFocus"]);
+  assert.include(
+    read(file),
+    tokens("previewFocus: isPreviewFocused()"),
+    "the legacy sidebar's number keys no longer leave mod+0 to a focused preview",
+  );
+});
+
 it("modal keys seam guard round 2: Ctrl+D and Ctrl+U scroll the sidebar without opening a thread", () => {
   const file = "apps/web/src/components/Sidebar.tsx";
   const pageKeys = region(
