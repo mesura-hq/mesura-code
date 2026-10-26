@@ -85,6 +85,7 @@ import { useStableCallback } from "../hooks/useStableCallback";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { releaseProjectDraftUploads } from "../lib/composerDraftUploads";
+import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform } from "../lib/utils";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
@@ -3435,6 +3436,8 @@ export default function LegacySidebar() {
       terminalFocus: isTerminalFocused(),
       terminalOpen: routeTerminalOpen,
       modelPickerOpen: isModelPickerOpen(),
+      // Mesura: the preview keeps mod+0 for its reset zoom while focused.
+      previewFocus: isPreviewFocused(),
     };
 
     if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen()) {

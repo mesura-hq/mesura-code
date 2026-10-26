@@ -1,13 +1,9 @@
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import { useProjectScopeStore } from "../projectScopeStore";
 import { useCommandHandlers } from "../commands/commandRegistry";
-import {
-  readViewportThreadKeys,
-  scrollThreadList,
-  useThreadRowArrowKeys,
-  useViewportThreadKeys,
-} from "../lib/sidebarThreadViewport";
+import { scrollThreadList, useThreadRowArrowKeys } from "../lib/sidebarThreadViewport";
 import { ThreadJumpHintModifierSync } from "./sidebar/ThreadJumpHintModifierSync";
+import { useThreadJumpTargets } from "./sidebar/threadJumpTargets";
 import { sortActiveThreadsForSidebar } from "./sidebar/activeThreadOrder";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
@@ -82,10 +78,9 @@ import { isElectron } from "../env";
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
-  threadJumpCommandForIndex,
-  threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
+import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -1153,18 +1148,7 @@ export default function Sidebar() {
 
   const { showThreadJumpHints: showJumpHints, updateThreadJumpHintsVisibility } =
     useThreadJumpHintVisibility();
-  const viewportThreadKeys = useViewportThreadKeys(showJumpHints);
   useThreadRowArrowKeys();
-  const jumpLabelByKey = (() => {
-    const mapping = new Map<string, string>();
-    for (const [index, threadKey] of (viewportThreadKeys ?? orderedThreadKeys).entries()) {
-      const jumpCommand = threadJumpCommandForIndex(index);
-      if (!jumpCommand) break;
-      const label = shortcutLabelForCommand(keybindings, jumpCommand);
-      if (label) mapping.set(threadKey, label);
-    }
-    return mapping;
-  })();
 
   const navigateToThread = (threadRef: ScopedThreadRef) => {
     if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) {
@@ -2562,6 +2546,13 @@ export default function Sidebar() {
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+  // Mesura: the labels and the number keys come from one list, the rows on screen.
+  const { labelByThreadKey: jumpLabelByKey, threadKeyForJump } = useThreadJumpTargets({
+    active: showJumpHints,
+    orderedThreadKeys,
+    keybindings,
+    terminalOpen: routeTerminalOpen,
+  });
   const openAdjacentThread = (direction: "next" | "previous") => {
     const key = resolveAdjacentThreadId({
       threadIds: orderedThreadKeys,
@@ -2588,6 +2579,8 @@ export default function Sidebar() {
           terminalFocus: isTerminalFocused(),
           terminalOpen: routeTerminalOpen,
           modelPickerOpen: isModelPickerOpen(),
+          // Mesura: the preview keeps mod+0 for its reset zoom while focused.
+          previewFocus: isPreviewFocused(),
           isWeb: !isElectron,
           isDesktop: isElectron,
         },
@@ -2619,9 +2612,8 @@ export default function Sidebar() {
         );
         return;
       }
-      const jumpIndex = threadJumpIndexFromCommand(command ?? "");
-      if (jumpIndex === null) return;
-      navigateToThreadKey((readViewportThreadKeys() ?? orderedThreadKeys)[jumpIndex] ?? null);
+      if (command === null) return;
+      navigateToThreadKey(threadKeyForJump(command));
     };
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
@@ -2632,6 +2624,7 @@ export default function Sidebar() {
     routeRowThreadKey,
     routeTerminalOpen,
     threadByKey,
+    threadKeyForJump,
   ]);
 
   const handleNewThreadClick = (event?: ReactMouseEvent) => {

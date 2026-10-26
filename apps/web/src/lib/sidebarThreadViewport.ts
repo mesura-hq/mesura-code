@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 /**
  * The sidebar thread list as the screen shows it, read from the DOM.
@@ -99,25 +99,34 @@ const sameKeys = (left: readonly string[] | null, right: readonly string[] | nul
     left.every((key, index) => key === right[index]));
 
 /**
- * The thread keys on screen while `active` (the jump hints show), read again
- * at most once a frame while the list scrolls, so the numbers follow a
- * `Ctrl+D` made with `Ctrl` still held. Null while inactive or off screen.
+ * The thread keys on screen while `active` (the jump hints show). Null while
+ * inactive or off screen.
+ *
+ * Read after every commit of the caller: a reorder, a new thread or a removed
+ * one moves the rows without a scroll, and a number must always name the key
+ * that opens its row. The read is in a layout effect, so a changed list
+ * renders again before the frame paints. Also read at most once a frame while
+ * the list scrolls, so the numbers follow a `Ctrl+D` made with `Ctrl` held.
  */
 export function useViewportThreadKeys(active: boolean): readonly string[] | null {
   const [keys, setKeys] = useState<readonly string[] | null>(null);
+  // No dependency list on purpose: every commit can move the rows, and the
+  // rows on screen come from measuring the committed DOM.
+  useLayoutEffect(() => {
+    if (active) refreshViewportThreadKeys(setKeys);
+  });
   useLayoutEffect(() => {
     if (!active) return;
     const scroller = threadListScroller();
     let frame = 0;
-    const read = () => {
-      frame = 0;
-      const next = readViewportThreadKeys();
-      setKeys((previous) => (sameKeys(previous, next) ? previous : next));
-    };
+    const read = () => refreshViewportThreadKeys(setKeys);
     const onScroll = () => {
-      if (frame === 0) frame = window.requestAnimationFrame(read);
+      if (frame !== 0) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        read();
+      });
     };
-    read();
     scroller?.addEventListener("scroll", onScroll, { passive: true });
     scroller?.addEventListener(PENDING_SCROLL_EVENT, read);
     return () => {
@@ -127,6 +136,13 @@ export function useViewportThreadKeys(active: boolean): readonly string[] | null
     };
   }, [active]);
   return active ? keys : null;
+}
+
+function refreshViewportThreadKeys(
+  setKeys: Dispatch<SetStateAction<readonly string[] | null>>,
+): void {
+  const next = readViewportThreadKeys();
+  setKeys((previous) => (sameKeys(previous, next) ? previous : next));
 }
 
 /**

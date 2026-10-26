@@ -17,6 +17,8 @@ export const THREAD_JUMP_KEYBINDING_COMMANDS = [
   "thread.jump.7",
   "thread.jump.8",
   "thread.jump.9",
+  // Mesura: a tenth, on mod+0, so every row on screen has a key.
+  "thread.jump.10",
 ] as const;
 export type ThreadJumpKeybindingCommand = (typeof THREAD_JUMP_KEYBINDING_COMMANDS)[number];
 

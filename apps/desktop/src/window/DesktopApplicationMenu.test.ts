@@ -232,6 +232,41 @@ describe("DesktopApplicationMenu", () => {
     }),
   );
 
+  // Mesura: CmdOrCtrl+0 is the tenth thread jump, a page shortcut. A menu
+  // accelerator on it, the number row's or the keypad's, would reset the zoom
+  // instead; Actual Size stays in the menu, without a key.
+  it.effect.each(["linux", "darwin", "win32"] as const)(
+    "leaves CmdOrCtrl+0 to the page on %s",
+    (platform) =>
+      Effect.gen(function* () {
+        const selectedAction = yield* Deferred.make<string>();
+        const applicationMenuTemplate =
+          yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+        yield* configureMenu(selectedAction, applicationMenuTemplate, { platform });
+
+        const template = yield* Deferred.await(applicationMenuTemplate);
+        const accelerators = template.flatMap((menu) =>
+          Array.isArray(menu.submenu) ? menu.submenu.map((item) => item.accelerator) : [],
+        );
+        assert.notInclude(accelerators, "CmdOrCtrl+0");
+        assert.notInclude(accelerators, "CmdOrCtrl+num0");
+        const viewMenu = template.find((item) => item.label === "View");
+        if (!Array.isArray(viewMenu?.submenu)) {
+          throw new Error("Expected View menu submenu to be an array.");
+        }
+        const actualSize = viewMenu.submenu.filter((item) => item.label === "Actual Size");
+        assert.lengthOf(actualSize, 1);
+        const [resetZoom] = actualSize;
+        assert.notStrictEqual(resetZoom?.visible, false);
+        if (typeof resetZoom?.click !== "function") {
+          throw new Error("Expected Actual Size menu item to have a click handler.");
+        }
+        resetZoom.click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+        assert.equal(yield* Deferred.await(selectedAction), "zoom-reset");
+      }),
+  );
+
   it.effect("reloads the main window even while a browser page has focus", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();

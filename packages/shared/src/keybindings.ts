@@ -390,9 +390,15 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+p", command: "thread.pin", when: "!terminalFocus" },
   { key: "mod+z", command: "thread.undo", when: "!terminalFocus && !editableFocus" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
-    key: `mod+${index + 1}`,
+    // Mesura: the tenth jump is mod+0, the digit after 9 on the keyboard.
+    key: `mod+${(index + 1) % 10}`,
     command,
-    when: "!modelPickerOpen && isDesktop",
+    // Mesura: mod+0 is also the preview's reset zoom, which keeps it while the
+    // preview has focus, the way the model picker keeps mod+1..9 while open.
+    when:
+      command === "thread.jump.10"
+        ? "!modelPickerOpen && !previewFocus && isDesktop"
+        : "!modelPickerOpen && isDesktop",
   })),
   ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,

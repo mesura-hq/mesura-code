@@ -36,8 +36,11 @@ function compareCommands(
   const leftRank = usageCommandOrder.get(left);
   const rightRank = usageCommandOrder.get(right);
   if (leftRank !== undefined && rightRank !== undefined) return leftRank - rightRank;
+  // Mesura: numeric, so `thread.jump.10` follows `thread.jump.9`.
   return key(leftRank === undefined ? left : firstUsageCommand).localeCompare(
     key(rightRank === undefined ? right : firstUsageCommand),
+    undefined,
+    { numeric: true },
   );
 }
 

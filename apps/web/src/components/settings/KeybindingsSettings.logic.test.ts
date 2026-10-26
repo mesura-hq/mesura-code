@@ -87,6 +87,31 @@ describe("KeybindingsSettings.logic", () => {
     );
   });
 
+  // Mesura: the tenth thread jump lists after the ninth, in the rows and the choices.
+  it("lists the thread jumps in number order, the tenth after the ninth", () => {
+    const jumpCommands = [
+      "thread.jump.1",
+      "thread.jump.2",
+      "thread.jump.3",
+      "thread.jump.4",
+      "thread.jump.5",
+      "thread.jump.6",
+      "thread.jump.7",
+      "thread.jump.8",
+      "thread.jump.9",
+      "thread.jump.10",
+    ];
+    const isJump = (command: string) => command.startsWith("thread.jump.");
+    expect(
+      buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS)
+        .map((row) => row.command)
+        .filter(isJump),
+    ).toEqual(jumpCommands);
+    expect(buildKeybindingCommandOptions(DEFAULT_RESOLVED_KEYBINDINGS).filter(isJump)).toEqual(
+      jumpCommands,
+    );
+  });
+
   it("changes row identity when a shortcut changes", () => {
     const before = buildKeybindingRows(
       compileResolvedKeybindingsConfig([{ command: "chat.new", key: "mod+n" }]),

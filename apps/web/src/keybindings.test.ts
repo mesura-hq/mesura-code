@@ -455,7 +455,10 @@ describe("thread navigation helpers", () => {
   it("maps jump commands to visible thread indices", () => {
     assert.strictEqual(threadJumpCommandForIndex(0), "thread.jump.1");
     assert.strictEqual(threadJumpCommandForIndex(2), "thread.jump.3");
-    assert.isNull(threadJumpCommandForIndex(9));
+    // Mesura: a tenth jump, on mod+0.
+    assert.strictEqual(threadJumpCommandForIndex(9), "thread.jump.10");
+    assert.isNull(threadJumpCommandForIndex(10));
+    assert.strictEqual(threadJumpIndexFromCommand("thread.jump.10"), 9);
     assert.strictEqual(threadJumpIndexFromCommand("thread.jump.1"), 0);
     assert.strictEqual(threadJumpIndexFromCommand("thread.jump.3"), 2);
     assert.isNull(threadJumpIndexFromCommand("thread.next"));
@@ -1752,6 +1755,94 @@ describe("composer and pull request shortcuts", () => {
         { platform: "MacIntel" },
       ),
       "composer.effort",
+    );
+  });
+});
+
+// Mesura: Ctrl+0 is the tenth thread jump, beside Ctrl+1..9.
+describe("the tenth thread jump", () => {
+  const ctrlZero = (overrides: Partial<ShortcutEventLike> = {}) =>
+    event({ key: "0", code: "Digit0", ctrlKey: true, ...overrides });
+  const resolveOnLinux = (input: ShortcutEventLike, context: Record<string, boolean>) =>
+    resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Linux", context });
+
+  it("jumps to the tenth thread with Ctrl+0 on the desktop, from the number row and the keypad", () => {
+    assert.strictEqual(resolveOnLinux(ctrlZero(), { isDesktop: true }), "thread.jump.10");
+    assert.strictEqual(
+      resolveOnLinux(ctrlZero({ code: "Numpad0" }), { isDesktop: true }),
+      "thread.jump.10",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "0", code: "Digit0", metaKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        { platform: "MacIntel", context: { isDesktop: true } },
+      ),
+      "thread.jump.10",
+    );
+  });
+
+  it("labels the tenth jump with the modifier and 0", () => {
+    const desktop = { context: { isDesktop: true } };
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.jump.10", {
+        platform: "Linux",
+        ...desktop,
+      }),
+      "Ctrl+0",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.jump.10", {
+        platform: "MacIntel",
+        ...desktop,
+      }),
+      "\u23180",
+    );
+  });
+
+  it("leaves Ctrl+0 to the browser on the web, as Ctrl+1..9 are left to its tabs", () => {
+    assert.isNull(resolveOnLinux(ctrlZero(), { isDesktop: false }));
+  });
+
+  it("leaves Ctrl+0 to the preview's reset zoom while the preview has focus", () => {
+    assert.strictEqual(
+      resolveOnLinux(ctrlZero(), { isDesktop: true, previewFocus: true }),
+      "preview.resetZoom",
+    );
+    assert.isNull(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.jump.10", {
+        platform: "Linux",
+        context: { isDesktop: true, previewFocus: true },
+      }),
+    );
+    // The first nine still jump there, as before.
+    assert.strictEqual(
+      resolveOnLinux(event({ key: "1", code: "Digit1", ctrlKey: true }), {
+        isDesktop: true,
+        previewFocus: true,
+      }),
+      "thread.jump.1",
+    );
+  });
+
+  it("follows a rebinding like the other nine", () => {
+    const rebound = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([{ key: "mod+shift+0", command: "thread.jump.10" }]),
+    );
+    const desktop = { isDesktop: true };
+    assert.strictEqual(
+      resolveShortcutCommand(ctrlZero({ key: ")", shiftKey: true }), rebound, {
+        platform: "Linux",
+        context: desktop,
+      }),
+      "thread.jump.10",
+    );
+    assert.isNull(
+      resolveShortcutCommand(ctrlZero(), rebound, { platform: "Linux", context: desktop }),
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(rebound, "thread.jump.10", { platform: "Linux", context: desktop }),
+      "Ctrl+Shift+0",
     );
   });
 });

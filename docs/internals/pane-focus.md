@@ -116,7 +116,7 @@ keyboard out of the pane the developer is working in.
 
 `j` and `k` walk the thread list. `Ctrl+D` and `Ctrl+U` scroll it half a page
 without opening a thread (`lib/sidebarThreadViewport.ts`), and `Ctrl+1..9`
-number the rows on screen from there, read for where the scroll will stop so
+and `Ctrl+0` number the rows on screen from there, read for where the scroll will stop so
 the numbers never trail the animation. Up and Down move the DOM focus over the
 rows, which is what shows a row's details tooltip without opening it. `j` and `k` are the only bare letters
 the app binds, which costs two things.

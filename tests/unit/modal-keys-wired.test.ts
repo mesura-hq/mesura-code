@@ -586,37 +586,23 @@ it("modal keys seam guard round 2: the sidebar numbers and jumps to the threads 
   assert.include(
     read(file),
     tokens("showThreadJumpHints: showJumpHints"),
-    "the viewport keys no longer use the visibility state for jump hints",
+    "the jump targets no longer use the visibility state for jump hints",
   );
-  assertCallCarries(file, "useViewportThreadKeys", ["showJumpHints"]);
+  // The labels and the number keys come from one list of the rows on screen
+  // (`sidebar/threadJumpTargets.ts`): a label drawn from a second list can
+  // name a key that opens another thread.
+  assertCallCarries(file, "useThreadJumpTargets", ["active: showJumpHints", "orderedThreadKeys"]);
   assert.include(
     read(file),
-    tokens("(viewportThreadKeys ?? orderedThreadKeys).entries()"),
-    "the jump hints number the first nine threads of the list again, not the ones on screen",
+    tokens("labelByThreadKey: jumpLabelByKey"),
+    "the jump hints no longer come from the jump targets",
   );
-  assertCallCarries(file, "navigateToThreadKey", ["readViewportThreadKeys()"]);
-  // An inline calculation reruns on each render; a memo must depend on all three inputs.
-  const jumpLabels = region(read(file), "const jumpLabelByKey =", "const navigateToThread =", file);
-  if (callArguments(canonicalize(jumpLabels), "useMemo").length > 0) {
-    assert.include(
-      jumpLabels,
-      tokens("[keybindings, orderedThreadKeys, viewportThreadKeys]"),
-      "the jump hints no longer recompute when the threads on screen change",
-    );
-  } else {
-    assert.include(
-      jumpLabels,
-      tokens("(() => {"),
-      "the jump hints no longer calculate their labels during render",
-    );
-    assert.isTrue(
-      jumpLabels.endsWith(tokens("})();")),
-      "the jump hints no longer recalculate on each render",
-    );
-    for (const input of ["keybindings", "orderedThreadKeys", "viewportThreadKeys"]) {
-      assert.include(jumpLabels, input, `the jump hints no longer read ${input}`);
-    }
-  }
+  assert.include(
+    read(file),
+    tokens("jumpLabelByKey.get(threadKey)"),
+    "the thread rows no longer show the jump hints",
+  );
+  assertCallCarries(file, "navigateToThreadKey", ["threadKeyForJump(command)"]);
 });
 
 it("modal keys seam guard round 2: Ctrl+D and Ctrl+U scroll the sidebar without opening a thread", () => {

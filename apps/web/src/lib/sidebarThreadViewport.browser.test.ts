@@ -1,4 +1,4 @@
-import { act, render as renderBrowser, type Screen } from "../../test/render";
+import { act, render, render as renderBrowser, type Screen } from "../../test/render";
 import { createElement } from "react";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -6,6 +6,7 @@ import {
   readViewportThreadKeys,
   scrollThreadList,
   useThreadRowArrowKeys,
+  useViewportThreadKeys,
 } from "./sidebarThreadViewport";
 
 function box(top: number, height: number, width = 200): DOMRect {
@@ -50,6 +51,33 @@ async function mountArrowKeys(): Promise<void> {
   fixtureContainer.append(container);
   root = await renderBrowser(null, { container: container, router: false });
   await act(async () => await root!.rerender(createElement(ArrowKeysProbe)));
+}
+
+/**
+ * A real list, laid out by the browser: a 100px viewport with 20px rows, so
+ * five rows are on screen. Prints what `useViewportThreadKeys` returns.
+ */
+function ViewportKeysProbe(props: {
+  readonly rowKeys: readonly string[];
+  readonly active: boolean;
+}) {
+  const keys = useViewportThreadKeys(props.active);
+  return createElement(
+    "div",
+    null,
+    createElement(
+      "div",
+      { "data-slot": "scroll-area-viewport", style: { height: "100px", overflowY: "auto" } },
+      props.rowKeys.map((key) =>
+        createElement(
+          "div",
+          { key, "data-mesura-thread-key": key, style: { height: "20px" } },
+          key,
+        ),
+      ),
+    ),
+    createElement("output", null, keys === null ? "none" : keys.join(",")),
+  );
 }
 
 describe("sidebar thread viewport", () => {
@@ -188,5 +216,44 @@ describe("sidebar thread viewport", () => {
     rename.dispatchEvent(event);
     expect(document.activeElement).toBe(rename);
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("follows the rows when they reorder, appear or disappear while the numbers show", async () => {
+    // A plain list with no links: nothing here needs a router.
+    await using screen = await render(
+      createElement(ViewportKeysProbe, { rowKeys: ["a", "b", "c", "d", "e", "f"], active: true }),
+      { router: false },
+    );
+    const shown = () => screen.container.querySelector("output")?.textContent;
+    expect(shown()).toBe("a,b,c,d,e");
+
+    // An agent's activity moves a thread to the top, without any scroll.
+    await screen.rerender(
+      createElement(ViewportKeysProbe, { rowKeys: ["d", "a", "b", "c", "e", "f"], active: true }),
+    );
+    expect(shown()).toBe("d,a,b,c,e");
+
+    // A new thread appears above the others.
+    await screen.rerender(
+      createElement(ViewportKeysProbe, {
+        rowKeys: ["new", "d", "a", "b", "c", "e", "f"],
+        active: true,
+      }),
+    );
+    expect(shown()).toBe("new,d,a,b,c");
+
+    // A thread leaves the list.
+    await screen.rerender(
+      createElement(ViewportKeysProbe, { rowKeys: ["new", "a", "b", "c", "e", "f"], active: true }),
+    );
+    expect(shown()).toBe("new,a,b,c,e");
+
+    await screen.rerender(
+      createElement(ViewportKeysProbe, {
+        rowKeys: ["new", "a", "b", "c", "e", "f"],
+        active: false,
+      }),
+    );
+    expect(shown()).toBe("none");
   });
 });
