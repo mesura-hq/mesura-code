@@ -1,11 +1,14 @@
 import { RegistryContext } from "@effect/atom-react";
-import { EnvironmentId, THREAD_SEARCH_PROJECT_ID } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, THREAD_SEARCH_PROJECT_ID, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 
 import { render, stubGlobal, type Screen } from "../../test/render";
+import { knownPushRegistration } from "../pushNotifications/pushRegistration";
+import { threadNotificationTag } from "../threadNotifications";
 
 const state = vi.hoisted(() => ({
   mode: "notifications",
@@ -17,6 +20,7 @@ const state = vi.hoisted(() => ({
   badge: vi.fn(),
   environmentIds: ["one", "two"],
   noDelegated: new Set(),
+  openSearch: vi.fn(),
 }));
 vi.mock(import("@tanstack/react-router"), async (original) => ({
   ...(await original()),
@@ -61,6 +65,10 @@ vi.mock(import("../hooks/useSettings"), async (original) => ({
     select: (settings: { notificationMode: string; inAppNotificationsEnabled: boolean }) => unknown,
   ) => select({ notificationMode: state.mode, inAppNotificationsEnabled: state.inApp })) as never,
   getClientSettings: (() => ({ notificationMode: state.mode })) as never,
+}));
+vi.mock(import("./searches/agentSearchNotification"), async (original) => ({
+  ...(await original()),
+  openAgentSearch: state.openSearch,
 }));
 vi.mock(import("../threadNotifications"), async (original) => ({
   ...(await original()),
@@ -351,4 +359,183 @@ it("agent search notification guard: an ordinary thread settling beside a search
   await app.render();
 
   expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Thread completed"]);
+});
+
+// Phone push phase 2, criterion 6: page notifications go through the service
+// worker registration when one exists, because Android Chrome throws on the
+// `Notification` constructor. The desktop shell registers no worker, so it
+// keeps the constructor path.
+function stubServiceWorkerRegistration(initial: object | undefined): Disposable & {
+  readonly claimedBy: (registration: object) => void;
+  readonly unregisteredSilently: () => void;
+} {
+  const original = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
+  let registration = initial;
+  const container = Object.assign(new EventTarget(), {
+    controller: null,
+    ready: registration ? Promise.resolve(registration) : new Promise(() => undefined),
+    getRegistration: async () => registration,
+    getRegistrations: async () => (registration ? [registration] : []),
+  });
+  Object.defineProperty(navigator, "serviceWorker", { value: container, configurable: true });
+  return {
+    /** A worker registered elsewhere activates and claims this page. */
+    claimedBy(next) {
+      registration = next;
+      container.dispatchEvent(new Event("controllerchange"));
+    },
+    /** The worker goes away, as an unregister from another tab does, with no event here. */
+    unregisteredSilently() {
+      registration = undefined;
+    },
+    [Symbol.dispose]() {
+      if (original) Object.defineProperty(navigator, "serviceWorker", original);
+      else Reflect.deleteProperty(navigator, "serviceWorker");
+    },
+  };
+}
+
+it("page notification spec: with a service worker registration, an approval shows through registration.showNotification with the thread route", async () => {
+  await using app = setup();
+  const showNotification = vi.fn(async (_title: string, _options?: NotificationOptions) => {});
+  using _worker = stubServiceWorkerRegistration({ scope: `${location.origin}/`, showNotification });
+  await app.render();
+
+  state.shells.set("one", shell({ hasPendingApprovals: true }));
+  await app.render();
+
+  await vi.waitFor(() => expect(showNotification).toHaveBeenCalledTimes(1));
+  expect(showNotification).toHaveBeenCalledWith(
+    "Approval needed",
+    expect.objectContaining({
+      body: "Test thread",
+      tag: threadNotificationTag(EnvironmentId.make("one"), ThreadId.make("thread")),
+      silent: true,
+      data: expect.objectContaining({ url: "/one/thread" }),
+    }),
+  );
+  expect(TestNotification.sent).toHaveLength(0);
+});
+
+it("page notification guard: with no service worker registration, an approval still uses the Notification constructor", async () => {
+  await using app = setup();
+  using _worker = stubServiceWorkerRegistration(undefined);
+  await app.render();
+
+  state.shells.set("one", shell({ hasPendingApprovals: true }));
+  await app.render();
+
+  await vi.waitFor(() =>
+    expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Approval needed"]),
+  );
+  expect(TestNotification.sent[0]!.options.tag).toBe(
+    threadNotificationTag(EnvironmentId.make("one"), ThreadId.make("thread")),
+  );
+});
+
+/**
+ * A worker registration as Chrome keeps it: one notification on screen per tag,
+ * and every handle `getNotifications` returns for that tag closes that one.
+ */
+function persistentRegistration() {
+  const shown = new Map<string, { title: string; options: NotificationOptions }>();
+  return {
+    shown,
+    scope: `${location.origin}/`,
+    showNotification: vi.fn(async (title: string, options: NotificationOptions = {}) => {
+      shown.set(options.tag ?? "", { title, options });
+    }),
+    getNotifications: async ({ tag = "" }: { tag?: string } = {}) =>
+      shown.has(tag) ? [{ tag, close: () => void shown.delete(tag) }] : [],
+  };
+}
+
+const THREAD_TAG = threadNotificationTag(EnvironmentId.make("one"), ThreadId.make("thread"));
+
+// regression: phase 2 review P1-1 — tracking a same-tag replacement closed the replacement.
+it("page notification regression: a second worker notification for a thread stays on screen and counts once", async () => {
+  await using app = setup();
+  const registration = persistentRegistration();
+  using _worker = stubServiceWorkerRegistration(registration);
+  await app.render();
+
+  state.shells.set("one", shell({ hasPendingApprovals: true }));
+  await app.render();
+  await vi.waitFor(() => expect(state.badge).toHaveBeenLastCalledWith(1));
+  state.shells.set("one", shell({ hasPendingUserInput: true }));
+  await app.render();
+
+  await vi.waitFor(() => expect(registration.showNotification).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(registration.shown.get(THREAD_TAG)?.title).toBe("Input needed"));
+  expect(state.badge).toHaveBeenLastCalledWith(1);
+});
+
+// regression: phase 2 review P1-2 — a worker registered in another tab was never seen here.
+it("page notification regression: a worker that claims the page after it mounted shows the next notification", async () => {
+  await using app = setup();
+  using worker = stubServiceWorkerRegistration(undefined);
+  await app.render();
+  const registration = persistentRegistration();
+  worker.claimedBy(registration);
+  await vi.waitFor(() => expect(knownPushRegistration()).toBe(registration));
+
+  state.shells.set("one", shell({ hasPendingApprovals: true }));
+  await app.render();
+
+  await vi.waitFor(() => expect(registration.showNotification).toHaveBeenCalledTimes(1));
+  expect(TestNotification.sent).toHaveLength(0);
+});
+
+// regression: phase 2 review P1-3 — a worker notification for an agent search lost its popup.
+it("page notification regression: a worker notification for an agent search carries the search target", async () => {
+  await using app = setup();
+  const registration = persistentRegistration();
+  using _worker = stubServiceWorkerRegistration(registration);
+  state.shells.set("one", shell(searchThread));
+  await app.render();
+
+  state.shells.set("one", shell(searchCompleted));
+  await app.render();
+
+  await vi.waitFor(() => expect(registration.showNotification).toHaveBeenCalledTimes(1));
+  expect(registration.showNotification).toHaveBeenCalledWith(
+    "Agent search finished",
+    expect.objectContaining({ data: { url: "/one/search?open=agent-search" } }),
+  );
+});
+
+it("page notification guard: clicking a page notification for an agent search opens the search popup", async () => {
+  await using app = setup();
+  using _worker = stubServiceWorkerRegistration(undefined);
+  state.shells.set("one", shell(searchThread));
+  await app.render();
+
+  state.shells.set("one", shell(searchCompleted));
+  await app.render();
+  TestNotification.sent[0]!.dispatchEvent(new Event("click"));
+
+  expect(state.openSearch).toHaveBeenCalledWith(
+    scopeThreadRef(EnvironmentId.make("one"), ThreadId.make("search")),
+  );
+  expect(state.navigate).not.toHaveBeenCalled();
+});
+
+// regression: phase 2 review P1-2 — a worker that went away kept every later notification on it.
+it("page notification regression: after a worker refuses a notification, the next one uses the constructor", async () => {
+  await using app = setup();
+  const registration = persistentRegistration();
+  registration.showNotification.mockRejectedValueOnce(new TypeError("No active worker"));
+  using worker = stubServiceWorkerRegistration(registration);
+  await app.render();
+  await vi.waitFor(() => expect(knownPushRegistration()).toBe(registration));
+  worker.unregisteredSilently();
+
+  state.shells.set("one", shell({ hasPendingApprovals: true }));
+  await app.render();
+  await vi.waitFor(() => expect(knownPushRegistration()).toBeUndefined());
+  state.shells.set("one", shell({ hasPendingUserInput: true }));
+  await app.render();
+
+  expect(registration.showNotification).toHaveBeenCalledTimes(1);
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Input needed"]);
 });

@@ -500,8 +500,12 @@ describe("phone palette restoration through the real collapsed composer", () => 
           expect(currentOwner).not.toBeNull();
           expect(document.activeElement).toBe(currentOwner);
           expect(focusIsInComposer()).toBe(false);
-          expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe(
-            String(owner !== "composer control"),
+          // The collapsed state is React state derived from the focus move, so it can render a
+          // frame after the new owner takes focus on a loaded runner.
+          await vi.waitFor(() =>
+            expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe(
+              String(owner !== "composer control"),
+            ),
           );
           expect(editor.textContent).toBe(prompt);
           await settle();

@@ -249,6 +249,7 @@ import {
   questionAttachmentDraftId,
 } from "../../questionAttachments";
 import { usePinnedActionDockStore } from "./pinnedActionDockStore";
+import { focusTestWindow } from "../../test/windowFocus";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 const environmentId = EnvironmentId.make("pinned-dock-environment");
@@ -510,6 +511,7 @@ async function mountApp(): Promise<Screen> {
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
+  await focusTestWindow();
   const container = document.createElement("div");
   container.style.height = "100dvh";
   container.style.overflow = "hidden";
@@ -1061,8 +1063,11 @@ it("phase6 dock browser P1-5 guard the plan follow-up sits in the dock at deskto
 it("phase6 dock browser P1-5 the plan follow-up stays in the dock with an unfocused phone composer", async () => {
   await using _fixture = await setupDockFixture(PIXEL_7, { proposedPlan: true });
   await using screen = await mountApp();
-  // The composer takes focus on mount; the developer reading the thread has left it.
-  await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+  // The composer takes focus a frame after mount; the developer reading the thread has left it.
+  // Blur only once it holds focus, or the late focus lands after the blur and keeps it expanded.
+  const editor = composerEditor(screen.container);
+  await vi.waitFor(() => expect(document.activeElement).toBe(editor));
+  await act(async () => editor.blur());
   await vi.waitFor(() =>
     expect(
       screen.container.querySelector('[data-chat-composer-mobile-collapsed="true"]'),

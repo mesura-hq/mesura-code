@@ -99,6 +99,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.dictationCancel]: AuthOrchestrationOperateScope,
   [WS_METHODS.dictationSetMode]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeDictationJobs]: AuthOrchestrationReadScope,
+  // Mesura: a stream, so it is not a client-guarded command, but it is a push
+  // device setting like the push RPCs in CLIENT_GUARDED_RPC_SCOPES.
+  [WS_METHODS.pushPresence]: AuthSettingsWriteScope,
   [WS_METHODS.peerLinksList]: AuthAccessReadScope,
   [WS_METHODS.serverUpdateSettings]: AuthSettingsWriteScope,
   [WS_METHODS.serverSearchAcpRegistry]: AuthOrchestrationReadScope,

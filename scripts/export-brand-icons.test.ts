@@ -68,6 +68,8 @@ describe("cross-platform brand icon export", () => {
           variant.outputs.ios,
           variant.outputs.universal,
           variant.outputs.appleTouch,
+          variant.outputs.webIcon192,
+          variant.outputs.webIcon512,
           variant.outputs.favicon16,
           variant.outputs.favicon32,
           variant.outputs.faviconIco,

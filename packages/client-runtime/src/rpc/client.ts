@@ -83,7 +83,9 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeDictationJobs
   | typeof WS_METHODS.reviewSubscribeWorkingTreeChanges
   // Mesura: the search client's broker connection (docs/mesura/adr-010-search-chats.md).
-  | typeof THREAD_SEARCH_WS_METHODS.threadSearchToolConnect;
+  | typeof THREAD_SEARCH_WS_METHODS.threadSearchToolConnect
+  // Mesura: a presence report holds while its call is open (pushNotifications.ts).
+  | typeof WS_METHODS.pushPresence;
 
 export type EnvironmentStreamCommandRpcTag =
   | typeof WS_METHODS.chatGptHandoffSubscribe

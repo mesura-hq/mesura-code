@@ -6,6 +6,7 @@ import {
   DESKTOP_USER_DATA_IDENTITY,
   resolveDesktopLinuxIdentity,
   resolveDesktopUserDataIdentity,
+  resolveWebIconOverrides,
 } from "./brand-assets.ts";
 
 describe("brand-assets", () => {
@@ -46,6 +47,30 @@ describe("brand-assets", () => {
     expect(BRAND_ASSET_PATHS.productionLinuxIconPng).toBe("assets/prod/black-linux-1024.png");
     expect(BRAND_ASSET_PATHS.productionUniversalIconPng).toBe(
       "assets/prod/black-universal-1024.png",
+    );
+  });
+
+  it("copies each channel's 192 and 512 pixel web icons over a built web app", () => {
+    const targets = new Map(
+      resolveWebIconOverrides("production", "apps/server/dist/client").map((override) => [
+        override.targetRelativePath,
+        override.sourceRelativePath,
+      ]),
+    );
+
+    expect(targets.get("apps/server/dist/client/icon-192.png")).toBe(
+      BRAND_ASSET_PATHS.productionWebIcon192Png,
+    );
+    expect(targets.get("apps/server/dist/client/icon-512.png")).toBe(
+      BRAND_ASSET_PATHS.productionWebIcon512Png,
+    );
+    expect(
+      resolveWebIconOverrides("nightly", "dist").map((override) => override.sourceRelativePath),
+    ).toEqual(
+      expect.arrayContaining([
+        BRAND_ASSET_PATHS.nightlyWebIcon192Png,
+        BRAND_ASSET_PATHS.nightlyWebIcon512Png,
+      ]),
     );
   });
 });

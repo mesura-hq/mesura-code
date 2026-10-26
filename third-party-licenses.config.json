@@ -141,7 +141,7 @@
       "generatedNotices": [
         {
           "licenseId": "Apache-2.0",
-          "copyrights": ["Copyright 2009, 2010, 2013 Andr\u00e9 Berg"]
+          "copyrights": ["Copyright 2009, 2010, 2013 André Berg"]
         }
       ]
     },
@@ -720,6 +720,15 @@
       "sourceUrl": "https://github.com/Borewit/tokenizer-token",
       "generatedNotice": {
         "licenseId": "MIT"
+      }
+    },
+    {
+      "name": "http_ece",
+      "version": "1.2.0",
+      "sourceUrl": "https://github.com/martinthomson/encrypted-content-encoding",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) Martin Thomson <martin.thomson@gmail.com>"]
       }
     }
   ]
