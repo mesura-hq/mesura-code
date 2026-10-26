@@ -6,6 +6,8 @@
  * service that answers 404 or 410 has forgotten the device, so the row goes
  * too. Any other failure keeps the row, records it in `last_failure` and logs
  * it, because a busy or unreachable push service says nothing about the device.
+ * `broadcast` fans one payload out to every device that wants its kind; one
+ * device's failure stays with that device.
  */
 import {
   type PushNotificationPayload,
@@ -46,6 +48,9 @@ interface SubscriptionRow {
 
 const NOT_SUBSCRIBED: PushSubscriptionStatus = { subscribed: false };
 
+/** Pushes in flight at once during a broadcast. */
+const BROADCAST_CONCURRENCY = 4;
+
 /** Storage failures reach the client as one readable error; the cause goes to the log. */
 const storageFailure = (action: string) => (cause: unknown) =>
   Effect.logError(`Push subscriptions: could not ${action}`, cause).pipe(
@@ -77,6 +82,10 @@ export class PushSubscriptions extends Context.Service<
     readonly sendTest: (
       endpoint: string,
     ) => Effect.Effect<{ readonly outcome: "delivered" | "gone" }, PushNotificationError>;
+    readonly broadcast: (
+      kind: keyof PushPreferences,
+      payload: PushNotificationPayload,
+    ) => Effect.Effect<void, PushNotificationError>;
   }
 >()("t3/push/PushSubscriptions") {}
 
@@ -185,12 +194,38 @@ const make = Effect.gen(function* () {
     return yield* deliver(row, PUSH_TEST_PAYLOAD);
   });
 
+  const broadcast = Effect.fn("PushSubscriptions.broadcast")(function* (
+    kind: keyof PushPreferences,
+    payload: PushNotificationPayload,
+  ) {
+    const rows = yield* sql<SubscriptionRow>`
+      SELECT endpoint, p256dh, auth, label, preferences_json FROM mesura_push_subscriptions
+    `.pipe(Effect.catch(storageFailure("read the push subscriptions")));
+    const wanted = yield* Effect.filter(rows, (row) =>
+      decodePreferences(row.preferences_json).pipe(
+        Effect.map((preferences) => preferences[kind]),
+        Effect.catch((cause) =>
+          Effect.logWarning(
+            `Push subscription "${row.label}" has unreadable preferences`,
+            cause,
+          ).pipe(Effect.as(false)),
+        ),
+      ),
+    );
+    // `deliver` already logs and records a failure on its own row.
+    yield* Effect.forEach(wanted, (row) => Effect.ignore(deliver(row, payload)), {
+      concurrency: BROADCAST_CONCURRENCY,
+      discard: true,
+    });
+  });
+
   return PushSubscriptions.of({
     publicKey: Effect.succeed({ publicKey: vapid.publicKey }),
     subscribe,
     unsubscribe,
     status,
     sendTest,
+    broadcast,
   });
 });
 

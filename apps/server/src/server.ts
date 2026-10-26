@@ -129,6 +129,7 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as DictationJobs from "./dictation/DictationJobs.ts";
+import * as PushDispatcher from "./push/PushDispatcher.ts";
 import * as PushSender from "./push/PushSender.ts";
 import * as PushSubscriptions from "./push/PushSubscriptions.ts";
 import * as VapidKeys from "./push/vapidKeys.ts";
@@ -442,6 +443,14 @@ const layerPushSubscriptions = PushSubscriptions.layer.pipe(
   Layer.provide(VapidKeys.layer),
 );
 
+// Mesura: pushes a thread that starts needing the developer to subscribed phones.
+const layerPushDispatcher = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const dispatcher = yield* PushDispatcher.PushDispatcher;
+    yield* dispatcher.start();
+  }),
+).pipe(Layer.provide(PushDispatcher.layer), Layer.provide(layerPushSubscriptions));
+
 const layerKnownWorkspaces = KnownWorkspaces.layer.pipe(
   Layer.provide(ProjectStore.layer),
   Layer.provide(GitVcsDriver.layer),
@@ -674,6 +683,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // Mesura: fork services that read the core services below.
   ProjectIconDiscovery.layer,
   layerPushSubscriptions,
+  layerPushDispatcher,
   layerAccountLimits,
   layerHostStats,
   // Mesura: follows Software Factory runs for the MCP tool, the WebSocket and startup alike.

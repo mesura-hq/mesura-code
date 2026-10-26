@@ -32,6 +32,15 @@ export const MESURA_SCHEMA_STATEMENTS: ReadonlyArray<string> = [
     last_success_at TEXT,
     last_failure TEXT
   )`,
+  // Every push reason each thread has announced (`push/PushDispatcher.ts`),
+  // so a repeated or returning state does not push twice. The dispatcher keeps
+  // the newest 32 keys per thread.
+  `CREATE TABLE IF NOT EXISTS mesura_push_announced (
+    thread_id TEXT NOT NULL,
+    push_key TEXT NOT NULL,
+    sent_at TEXT NOT NULL,
+    PRIMARY KEY (thread_id, push_key)
+  )`,
 ];
 
 export const ensureMesuraSchema = Effect.fn("ensureMesuraSchema")(function* () {
