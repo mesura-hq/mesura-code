@@ -322,6 +322,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["vim mode keyboard first leader which-key normal insert visual chat buffer"],
   },
   {
+    id: "open-in-external-editor",
+    title: "Open in external editor",
+    to: "/settings/general",
+    searchTerms: ["open in editor zed vscode cursor external editor favorite shortcut"],
+  },
+  {
     id: "composer-context",
     title: "Composer context",
     to: "/settings/appearance",
