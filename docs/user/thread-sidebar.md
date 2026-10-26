@@ -131,19 +131,24 @@ open.
 ### Fold working threads (beta)
 
 Threads that are working or waiting on work they will resume from move into a collapsed
-**Working** section below the active list.
-That includes subagents, watched pull requests, and background commands or monitors the agent
-says it is waiting on. A dev server or other process an agent leaves running does not keep a thread
-there. A thread returns to the top of the active list when it finishes, fails, or needs an approval or
-answer. The Working section lists the thread you last sent work to first. Pinned threads stay in
-the pinned section.
+**Working** section directly under Search.
+That includes subagents, watched pull requests, a running Software Factory run, and background
+commands or monitors the agent says it is waiting on. A dev server or other process an agent leaves
+running does not keep a thread there. A thread returns to its place in the list when it finishes,
+fails, or needs an approval or answer. The Working section lists the thread you last sent work to
+first. Pinned threads stay in the pinned section.
+
+Press **Alt+Z** (**Space t w** in Vim mode), click or tap the **Working** header, or run **Toggle
+Working section** from the command palette to open or close it; change the key in **Settings →
+Keybindings**. Down from the empty Search field reaches the header and then its threads; Left and
+Right on the header close and open it. While it is closed, the thread you have open still shows
+under the header.
 
 This is on by default. Turn it off with **Settings → Beta → Working section** on web and desktop,
 or **Settings → Thread behavior → Working section** on iOS and Android. Each device keeps its own
 choice.
 
-While this is on, the active list is ordered by when each thread last came back to you, so you
-cannot drag or move threads within it. Your saved order returns when you turn it off.
+The list below keeps your sort order, and you can still drag threads within it.
 
 ## Settle finished work
 
