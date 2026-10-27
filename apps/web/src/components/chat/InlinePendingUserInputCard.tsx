@@ -34,6 +34,7 @@ import {
   startAttachmentUpload,
   useAttachmentUploadStore,
 } from "../../lib/attachmentUploadQueue";
+import { AttachmentPicker } from "./AttachmentPicker";
 import { DictationStartButton } from "../../dictation/DictationControls";
 import { registerDictationComposer } from "../../dictation/dictationController";
 import {
@@ -46,7 +47,6 @@ import { insertDictationSlotAt } from "../../dictation/dictationSlotEdits";
 import { SendWhenReadyNotice } from "../../dictation/SendWhenReadyBanner";
 import { completeQuestionDraftAnswers } from "../../pendingUserInputResponse";
 import { cn } from "../../lib/utils";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface InlinePendingUserInputContext {
   environmentId: EnvironmentId;
@@ -358,7 +358,6 @@ function QuestionField({
 }) {
   const id = useId();
   const textarea = useRef<HTMLTextAreaElement | null>(null);
-  const fileInput = useRef<HTMLInputElement | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const target = questionAttachmentDraftId(
     context.environmentId,
@@ -508,34 +507,21 @@ function QuestionField({
         {question.allowCustomAnswer !== false ? (
           <div className="flex items-center gap-1">
             {context.supportsAttachments ? (
-              <>
-                <input
-                  ref={fileInput}
-                  type="file"
-                  multiple
-                  hidden
-                  onChange={(event) => {
-                    void addFiles(Array.from(event.target.files ?? []));
-                    event.target.value = "";
-                  }}
-                />
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        disabled={!canAttach || context.unavailable}
-                        aria-label={`Attach files to ${question.question}`}
-                        onClick={() => fileInput.current?.click()}
-                        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
-                      />
-                    }
-                  >
-                    <PaperclipIcon className="size-4" />
-                  </TooltipTrigger>
-                  <TooltipPopup>Attach files</TooltipPopup>
-                </Tooltip>
-              </>
+              <AttachmentPicker
+                label={`Attach files to ${question.question}`}
+                // A video stages as a file attachment, which needs a file limit.
+                includeVideos={context.maxFileBytes !== null}
+                disabled={!canAttach || context.unavailable}
+                trigger={
+                  <button
+                    type="button"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                  />
+                }
+                onFilesPicked={(files) => void addFiles(files)}
+              >
+                <PaperclipIcon className="size-4" />
+              </AttachmentPicker>
             ) : null}
             <DictationStartButton
               compact

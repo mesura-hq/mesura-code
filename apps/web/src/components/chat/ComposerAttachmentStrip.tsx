@@ -32,6 +32,7 @@ import { AttachmentImage } from "../media/AttachmentImage";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { AttachmentPicker } from "./AttachmentPicker";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import {
@@ -662,42 +663,31 @@ export function ComposerAttachButton({
   readonly addComposerAttachments: (files: File[]) => Promise<boolean>;
   readonly focusComposer: () => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
   return (
-    <>
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(event) => {
-          const files = Array.from(event.currentTarget.files ?? []);
-          event.currentTarget.value = "";
-          // Inserting a chip refocuses the editor after the draft renders;
-          // focusing synchronously here would report the editor's stale text
-          // over the prompt that was just written.
-          void addComposerAttachments(files).then((inserted) => {
-            if (!inserted) focusComposer();
-          });
-        }}
-      />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={() => inputRef.current?.click()}
-              aria-label="Attach files"
-            />
-          }
-        >
-          <PaperclipIcon />
-        </TooltipTrigger>
-        <TooltipPopup>Attach files</TooltipPopup>
-      </Tooltip>
-    </>
+    <AttachmentPicker
+      label="Attach files"
+      // The composer shows this button only where file attachments stage.
+      includeVideos
+      // No focus return: the editor would raise the phone keyboard over the picker.
+      popupProps={{ ...composerFloatingLayerProps, finalFocus: false }}
+      trigger={
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onPointerDown={(event) => event.preventDefault()}
+        />
+      }
+      onFilesPicked={(files) => {
+        // Inserting a chip refocuses the editor after the draft renders;
+        // focusing synchronously here would report the editor's stale text
+        // over the prompt that was just written.
+        void addComposerAttachments(files).then((inserted) => {
+          if (!inserted) focusComposer();
+        });
+      }}
+    >
+      <PaperclipIcon />
+    </AttachmentPicker>
   );
 }
