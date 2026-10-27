@@ -12,12 +12,9 @@ import { Menu, MenuItem, MenuItemLabel, MenuPopup, MenuTrigger } from "../ui/men
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /**
- * Android Chrome opens the system photo picker only for an input whose every
- * accepted type is `image/*` or `video/*` and that has no `capture` attribute
- * (Chromium `SelectFileDialog.shouldUsePhotoPicker`). An input that accepts
- * anything opens the generic chooser instead, where the gallery is a scroll
- * and a further tap away. Videos are offered only where the attachment target
- * takes non-image files, because a video is staged as a file attachment.
+ * Android Chrome opens its photo picker only when every accepted type is `image/*` or
+ * `video/*` and there is no `capture` (Chromium `SelectFileDialog.shouldUsePhotoPicker`).
+ * Videos only where the target takes non-image files: a video stages as a file attachment.
  */
 function mediaPickerAccept(includeVideos: boolean): string {
   return includeVideos ? "image/*,video/*" : "image/*";
