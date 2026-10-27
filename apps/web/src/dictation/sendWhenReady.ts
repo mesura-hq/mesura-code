@@ -1,7 +1,7 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { CommandId, MessageId, type DictationTarget } from "@t3tools/contracts";
 import { armedDraftSendDecision, dictatedMessageText } from "@t3tools/client-runtime/dictation";
-import { withVoicedPrefix } from "@t3tools/shared/dictationSlots";
+import { findDictationSlots, withVoicedPrefix } from "@t3tools/shared/dictationSlots";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -14,9 +14,9 @@ import {
 } from "./directedComposerSubmission";
 
 /**
- * Send-when-ready: an armed draft sends by itself once its prompt holds no marker; the draft's
- * marker count decides, so a fill, a Discard and a deleted marker all count. Every send goes
- * through the directed submission, so a thread the user left still sends. A question card's
+ * Send-when-ready: an armed draft sends once its prompt holds no marker, through the directed
+ * submission so a thread the user left still sends. A fill and a Discard count; a marker deleted by
+ * hand disarms instead, since the text around it waited for that transcript. A question card's
  * answer is armed by request and submitted by the card, which owns the answer's validation.
  */
 
@@ -28,12 +28,19 @@ interface DraftSendState {
   readonly voiced: boolean;
   /** The job last filled into the draft; its id is the send's command id. */
   readonly lastJobId: string | null;
+  /** The markers the draft held at the last look, to tell a deleted marker from a filled one. */
+  readonly markers?: ReadonlyArray<string>;
+}
+
+interface QuestionSendState {
+  /** As `DraftSendState.markers`, across every answer of the request. */
+  readonly markers?: ReadonlyArray<string>;
 }
 
 interface SendWhenReadyState {
   readonly drafts: Record<string, DraftSendState>;
   /** Question requests, by `pendingUserInputRequestKey`, to submit once no answer holds a marker. */
-  readonly questions: Record<string, true>;
+  readonly questions: Record<string, QuestionSendState>;
 }
 
 export const useSendWhenReadyStore = create(
@@ -73,7 +80,8 @@ function forgetDraftSendState(key: string) {
 }
 
 export function armSendWhenReady(target: ComposerThreadTarget): void {
-  updateDraftSendState(target, { armed: true });
+  const prompt = useComposerDraftStore.getState().getComposerDraft(target)?.prompt ?? "";
+  updateDraftSendState(target, { armed: true, markers: dictationMarkerIds(prompt) });
 }
 
 export function disarmSendWhenReady(target: ComposerThreadTarget): void {
@@ -96,14 +104,25 @@ export function withDictatedPrefix(target: ComposerThreadTarget, prompt: string)
   return prompt.trim() === "" ? prompt : withVoicedPrefix(prompt, isDictationVoiced(target));
 }
 
-export function useSendWhenReadyArmed(target: ComposerThreadTarget): boolean {
-  return useSendWhenReadyStore((state) => state.drafts[sendWhenReadyKey(target)]?.armed === true);
+export function useSendWhenReadyArmed(target: ComposerThreadTarget | null): boolean {
+  return useSendWhenReadyStore(
+    (state) => target !== null && state.drafts[sendWhenReadyKey(target)]?.armed === true,
+  );
 }
 
 export function armQuestionSendWhenReady(requestKey: string): void {
+  // The answers' markers are read by the check this arming triggers.
   useSendWhenReadyStore.setState((state) => ({
-    questions: { ...state.questions, [requestKey]: true },
+    questions: { ...state.questions, [requestKey]: {} },
   }));
+}
+
+export function trackQuestionMarkers(requestKey: string, markers: ReadonlyArray<string>): void {
+  useSendWhenReadyStore.setState((state) =>
+    requestKey in state.questions && !sameMarkers(state.questions[requestKey]?.markers, markers)
+      ? { questions: { ...state.questions, [requestKey]: { markers } } }
+      : state,
+  );
 }
 
 export function disarmQuestionSendWhenReady(requestKey: string): void {
@@ -116,7 +135,48 @@ export function disarmQuestionSendWhenReady(requestKey: string): void {
 }
 
 export function useQuestionSendWhenReadyArmed(requestKey: string): boolean {
-  return useSendWhenReadyStore((state) => state.questions[requestKey] === true);
+  return useSendWhenReadyStore((state) => requestKey in state.questions);
+}
+
+/** The job ids of the markers in `text`, once each, sorted. */
+export function dictationMarkerIds(text: string): ReadonlyArray<string> {
+  return [...new Set(findDictationSlots(text).map((slot) => slot.jobId))].toSorted();
+}
+
+function sameMarkers(
+  left: ReadonlyArray<string> | undefined,
+  right: ReadonlyArray<string>,
+): boolean {
+  return (
+    left !== undefined &&
+    left.length === right.length &&
+    left.every((id, index) => id === right[index])
+  );
+}
+
+/** Markers dictation took out itself (a fill, a Discard, a switch to save) since the last look. */
+const markersTakenOutByDictation = new Set<string>();
+
+export function noteDictationMarkerTakenOut(jobId: string): void {
+  markersTakenOutByDictation.add(jobId);
+}
+
+/**
+ * Whether a marker seen at the last look is gone without dictation taking it out: the user
+ * deleted it. `previous` is `undefined` before the first look, when nothing can be judged.
+ */
+export function dictationMarkerDeletedByHand(
+  previous: ReadonlyArray<string> | undefined,
+  current: ReadonlyArray<string>,
+): boolean {
+  // A marker back in the text (an undo) is not taken out any more.
+  for (const jobId of current) markersTakenOutByDictation.delete(jobId);
+  let deleted = false;
+  for (const jobId of previous ?? []) {
+    if (current.includes(jobId)) continue;
+    if (!markersTakenOutByDictation.delete(jobId)) deleted = true;
+  }
+  return deleted;
 }
 
 /** What the composer on screen knows about the send (provider, model, pending plan). */
@@ -157,13 +217,15 @@ async function sendArmedDraft(
     prompt: dictatedMessageText(prompt, isDictationVoiced(entry.target)),
     messageId: MessageId.make(randomUUID()),
     submissionContext: submissionContextReaders.get(key)?.() ?? null,
+    stillWanted: () => useSendWhenReadyStore.getState().drafts[key]?.armed === true,
   });
   if (result.kind === "turn-dispatched") {
     forgetDraftSendState(key);
     return false;
   }
   // Edited while its uploads finished: still armed, it goes as edited once no marker remains.
-  if (result.kind === "draft-changed") return true;
+  // Disarmed meanwhile: the look after it forgets the draft once it is empty.
+  if (result.kind === "draft-changed" || result.kind === "withdrawn") return true;
   reportUnsent(
     entry.target,
     result.kind === "refused"
@@ -186,16 +248,28 @@ function reportUnsent(target: ComposerThreadTarget, description: string) {
 function checkDraftsAfterChange() {
   const { drafts } = useSendWhenReadyStore.getState();
   for (const [key, entry] of Object.entries(drafts)) {
-    if (sending.has(key)) continue;
+    const inFlight = sending.has(key);
     const draft = useComposerDraftStore.getState().getComposerDraft(entry.target);
     const prompt = draft?.prompt ?? "";
+    const markers = dictationMarkerIds(prompt);
+    const deletedByHand = dictationMarkerDeletedByHand(entry.markers, markers);
     const hasAttachments = (draft?.images.length ?? 0) + (draft?.files.length ?? 0) > 0;
-    const decision = armedDraftSendDecision({ armed: entry.armed, prompt, hasAttachments });
-    if (decision === "forget") {
+    const decision = armedDraftSendDecision({
+      armed: entry.armed && !deletedByHand,
+      prompt,
+      hasAttachments,
+    });
+    if (decision === "forget" && !inFlight) {
       forgetDraftSendState(key);
       continue;
     }
-    if (decision === "wait") continue;
+    // Tracked while a send is in flight too: an edit then sends as `draft-changed` asks again.
+    if (deletedByHand && entry.armed) {
+      updateDraftSendState(entry.target, { armed: false, markers });
+      continue;
+    }
+    if (!sameMarkers(entry.markers, markers)) updateDraftSendState(entry.target, { markers });
+    if (inFlight || decision !== "send") continue;
     sending.add(key);
     void sendArmedDraft(key, entry, prompt)
       .catch((cause: unknown) => {

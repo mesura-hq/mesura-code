@@ -1,4 +1,4 @@
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, render as renderBrowser, type Screen, fakeTimers } from "../test/render";
 // STT redesign phases 4-6 through AppRoot and the real AppSidebarLayout, which hosts the app-wide
@@ -29,6 +29,7 @@ import {
 import * as Schema from "effect/Schema";
 import { findDictationSlots, formatDictationSlot } from "@t3tools/shared/dictationSlots";
 import type { Editor } from "@tiptap/core";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { AllSelection, NodeSelection, TextSelection } from "@tiptap/pm/state";
 import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import type { AppRouter } from "./router";
@@ -1208,11 +1209,57 @@ function voicedCount(text: string): number {
   return text.split("[voiced]").length - 1;
 }
 
-/** The send-when-ready banner, worded as in the prototype's `SendWhenReadyBanner`. */
+/** The send-when-ready banner the composer and the question card once showed; never again. */
 function sendWhenReadyBannerShown(): boolean {
-  return /sends when (the transcription|\d+ transcriptions) lands?/i.test(
-    document.body.textContent ?? "",
+  return (
+    /sends when (the transcription|\d+ transcriptions) lands?/i.test(
+      document.body.textContent ?? "",
+    ) || buttonLabelled("Don't send") !== undefined
   );
+}
+
+const CANCEL_SEND = "Don't send when the transcription lands";
+const CANCEL_SUBMIT = "Don't submit when the transcription lands";
+
+/** The send glyph on an armed draft's marker, which also disarms it. */
+function sendGlyphShown(): boolean {
+  return buttonLabelled(CANCEL_SEND) !== undefined;
+}
+
+/**
+ * Selects a marker (the first, or `jobId`'s) as a node and deletes it with Backspace, both in one
+ * task. The marker drop focuses the editor after the marker one frame later; a frame between the
+ * selection and the key (CI's runner) moved the caret, and Backspace deleted the space instead.
+ */
+async function deleteMarkerByHand(jobId?: string) {
+  const editor = tiptapEditor();
+  const isTheMarker = (node: ProseMirrorNode) =>
+    node.isAtom && node.attrs.kind === "dictation" && (!jobId || node.attrs.contextId === jobId);
+  let markerPosition: number | undefined;
+  editor.state.doc.descendants((node, position) => {
+    if (markerPosition === undefined && isTheMarker(node)) markerPosition = position;
+  });
+  expect(markerPosition, "the draft holds a marker").toBeDefined();
+  await act(async () => {
+    editor.view.focus();
+    editor.view.dispatch(
+      editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, markerPosition!)),
+    );
+    editor.view.dom.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Backspace",
+        code: "Backspace",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  let markerLeft = true;
+  editor.state.doc.descendants((node) => {
+    if (isTheMarker(node)) markerLeft = false;
+  });
+  expect(markerLeft, "Backspace deleted the selected marker").toBe(true);
+  await settle();
 }
 
 async function recordInMode(mode: "send" | "insert") {
@@ -1343,7 +1390,7 @@ describe("dictation phase 5 fence", () => {
     expect(squash(onlyTurnText())).toBe("[voiced] Before the reload después");
   });
 
-  it("dictation phase 5 AC2: pressing Send while a marker is pending arms the draft and shows the banner", async () => {
+  it("dictation phase 5 AC2: pressing Send while a marker is pending arms the draft and shows the send glyph", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
@@ -1351,21 +1398,22 @@ describe("dictation phase 5 fence", () => {
     await recordInMode("insert");
     const { jobId } = startedJob(0).input;
     await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
-    expect(sendWhenReadyBannerShown()).toBe(false);
+    expect(sendGlyphShown()).toBe(false);
 
     const send = requireButton("Submit message");
     expect(send.disabled, "Send stays enabled so that pressing it can arm the draft").toBe(false);
     await click(send);
     expect(turnStarts()).toHaveLength(0);
     expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
-    expect(sendWhenReadyBannerShown()).toBe(true);
+    expect(sendGlyphShown()).toBe(true);
+    expect(sendWhenReadyBannerShown()).toBe(false);
 
     await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "hola mundo" })]);
     expect(squash(onlyTurnText())).toBe("[voiced] Draft hola mundo");
-    expect(sendWhenReadyBannerShown()).toBe(false);
+    expect(sendGlyphShown()).toBe(false);
   });
 
-  it("dictation phase 5 AC3: Don't send disarms the draft and keeps its text", async () => {
+  it("send glyph: an armed draft shows no banner at a phone's width, only the glyph on its marker", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
@@ -1373,14 +1421,203 @@ describe("dictation phase 5 fence", () => {
     await recordInMode("send");
     const { jobId } = startedJob(0).input;
     await pushJobs([job(jobId, { status: "transcribing", mode: "submit" })]);
-    expect(sendWhenReadyBannerShown()).toBe(true);
 
-    await click(requireButton("Don't send"));
+    expect(sendGlyphShown()).toBe(true);
     expect(sendWhenReadyBannerShown()).toBe(false);
+  });
 
-    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "hola mundo" })]);
+  it("send glyph: an armed draft shows no banner at a desktop's width, only the glyph on its marker", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _desktop = await desktopViewport();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "submit" })]);
+
+    expect(sendGlyphShown()).toBe(true);
+    expect(sendWhenReadyBannerShown()).toBe(false);
+  });
+
+  it("dictation phase 5 AC3: pressing the marker's send glyph disarms the draft and keeps its text", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "submit" })]);
+
+    await click(requireButton(CANCEL_SEND));
+    expect(sendGlyphShown()).toBe(false);
+    // The job turns to insert, so the record agrees with the marker.
+    expect(setModeCalls().map((call) => call.value)).toContainEqual(
+      expect.objectContaining({ input: { jobId, mode: "inject" } }),
+    );
+
+    await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "hola mundo" })]);
     expect(turnStarts()).toHaveLength(0);
     expect(squash(promptOf(onScreenTarget))).toBe("Draft hola mundo");
+  });
+
+  it("send glyph: the send key arms a draft the glyph disarmed", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "submit" })]);
+    await click(requireButton(CANCEL_SEND));
+    expect(sendGlyphShown()).toBe(false);
+
+    await pressKey(ALT_ENTER);
+    expect(sendGlyphShown()).toBe(true);
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "hola mundo" })]);
+    expect(squash(onlyTurnText())).toBe("[voiced] Draft hola mundo");
+  });
+
+  it("send glyph: Alt+I disarms a draft that Send armed while its marker was pending", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
+    await mountApp();
+    await recordInMode("insert");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
+    await click(requireButton("Submit message"));
+
+    await pressKey(ALT_I, composerEditorElement());
+    expect(sendGlyphShown()).toBe(false);
+
+    await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "hola mundo" })]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toBe("Draft hola mundo");
+  });
+
+  it("send glyph: deleting an armed draft's marker by hand disarms it instead of sending", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello world");
+    await mountApp();
+    await placeCaretAfter("Hello");
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "submit" })]);
+
+    await deleteMarkerByHand();
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(0);
+    expect(turnStarts()).toHaveLength(0);
+
+    // The transcript has no marker to fill and goes to the Transcriptions list; nothing is sent.
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "hola mundo" })]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toBe("Hello world");
+    expect(transcriptionsNotices()).toHaveLength(1);
+  });
+
+  it("send glyph: deleting one of two send-mode markers by hand turns the other to insert", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello big world");
+    await mountApp();
+    await placeCaretAfter("Hello");
+    await recordInMode("send");
+    await placeCaretAfter("world");
+    await recordInMode("send");
+    const [first, second] = [startedJob(0).input.jobId, startedJob(1).input.jobId];
+    await pushJobs([
+      job(first, { status: "transcribing", mode: "submit" }),
+      job(second, { status: "transcribing", mode: "submit" }),
+    ]);
+
+    await deleteMarkerByHand(first);
+    expect(slotsIn(promptOf(onScreenTarget)).map((slot) => slot.jobId)).toEqual([second]);
+    expect(sendGlyphShown()).toBe(false);
+    const editor = composerEditorElement();
+    expect(editor.querySelector('[data-material-symbol="send"]')).toBeNull();
+    expect(editor.querySelector('[data-material-symbol="input"]')).not.toBeNull();
+    expect(setModeCalls().map((call) => call.value)).toContainEqual(
+      expect.objectContaining({ input: { jobId: second, mode: "inject" } }),
+    );
+
+    await pushJobs([
+      job(first, { status: "completed", mode: "submit", text: "perdido" }),
+      job(second, { status: "completed", mode: "inject", text: "y adios" }),
+    ]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toBe("Hello big world y adios");
+  });
+
+  it("send glyph: a marker deleted by hand while an armed send waits on its uploads keeps the draft unsent", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    useComposerDraftStore
+      .getState()
+      .addFiles(onScreenTarget, [{ ...attachedFile, id: "dictation-send-glyph-gated-file" }], {
+        appendReference: true,
+      });
+    let release: () => void = () => undefined;
+    fixture.verifyGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    expect(turnStarts(), "the send waits on the earlier upload's check").toHaveLength(0);
+
+    // While it waits: another recording, an edit around it, then its marker deleted by hand.
+    await recordInMode("insert");
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
+    await act(async () => {
+      const draft = useComposerDraftStore.getState().getComposerDraft(onScreenTarget)!;
+      useComposerDraftStore.getState().setPrompt(onScreenTarget, `${draft.prompt} y luego`);
+    });
+    await settle();
+    await deleteMarkerByHand();
+    await act(async () => release());
+    await settle();
+
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toContain("y resume");
+  });
+
+  it("send glyph: a hand deletion that leaves the text as the waiting send saw it still keeps it unsent", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    useComposerDraftStore
+      .getState()
+      .addFiles(onScreenTarget, [{ ...attachedFile, id: "dictation-send-glyph-same-text-file" }], {
+        appendReference: true,
+      });
+    let release: () => void = () => undefined;
+    fixture.verifyGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    expect(turnStarts(), "the send waits on the earlier upload's check").toHaveLength(0);
+    const promptTheSendSaw = promptOf(onScreenTarget) ?? "";
+
+    // While it waits: another recording, its marker deleted by hand, and its spacing with it.
+    await recordInMode("insert");
+    await deleteMarkerByHand();
+    await act(async () => {
+      useComposerDraftStore.getState().setPrompt(onScreenTarget, promptTheSendSaw);
+    });
+    await settle();
+    expect(promptOf(onScreenTarget)).toBe(promptTheSendSaw);
+    await act(async () => release());
+    await settle();
+
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toContain("y resume");
   });
 
   it("dictation phase 5 AC4: an armed draft whose thread is not on screen sends through the directed path with its files and is cleared", async () => {
@@ -1467,7 +1704,7 @@ describe("dictation phase 5 fence", () => {
     await pushJobs([job(jobId, { status: "failed", mode: "submit", failure: "Network error" })]);
     expect(turnStarts()).toHaveLength(0);
     expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
-    expect(sendWhenReadyBannerShown()).toBe(true);
+    expect(sendGlyphShown()).toBe(true);
 
     await click(requireButton("Retry transcription"));
     expect(fixture.dictationCalls.filter((call) => call.name === "retry")).toHaveLength(1);
@@ -1487,7 +1724,7 @@ describe("dictation phase 5 fence", () => {
     const { jobId } = startedJob(0).input;
     await pushJobs([job(jobId, { status: "failed", mode: "submit", failure: "Network error" })]);
     expect(turnStarts()).toHaveLength(0);
-    expect(sendWhenReadyBannerShown()).toBe(true);
+    expect(sendGlyphShown()).toBe(true);
 
     await click(requireButton("Discard transcription marker"));
     // Nothing was dictated into the message that leaves.
@@ -1688,7 +1925,7 @@ describe("dictation phase 5 rework regressions", () => {
     expect(startCalls()).toHaveLength(0);
     expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
     expect(turnStarts()).toHaveLength(0);
-    expect(sendWhenReadyBannerShown()).toBe(true);
+    expect(sendGlyphShown()).toBe(true);
 
     await click(requireButton("Retry transcription"));
     expect(fixture.uploads).toHaveLength(2);
@@ -1724,7 +1961,7 @@ describe("dictation phase 5 rework regressions", () => {
     });
   });
 
-  it("dictation phase 5 regression: Submit with a pending answer marker shows the banner, and Don't send keeps the answer unsent", async () => {
+  it("dictation phase 5 regression: Submit with a pending answer marker arms the card without a banner, and its armed Submit keeps the answer unsent", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projection = withOpenQuestion(makeThreadProjection());
@@ -1732,17 +1969,66 @@ describe("dictation phase 5 rework regressions", () => {
     await focusQuestionAnswer();
     await recordIntoQuestion("insert");
     const { jobId } = startedJob(0).input;
-    expect(sendWhenReadyBannerShown()).toBe(false);
+    expect(buttonLabelled(CANCEL_SUBMIT)).toBeUndefined();
 
     await click(requireButton("Submit"));
     expect(respondCalls()).toHaveLength(0);
-    expect(sendWhenReadyBannerShown()).toBe(true);
-
-    await click(requireButton("Don't send"));
+    expect(requireButton(CANCEL_SUBMIT).textContent).toContain("Submits when ready");
     expect(sendWhenReadyBannerShown()).toBe(false);
+
+    await click(requireButton(CANCEL_SUBMIT));
+    expect(buttonLabelled(CANCEL_SUBMIT)).toBeUndefined();
+    expect(requireButton("Submit")).toBeDefined();
     await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "respuesta" })]);
     expect(respondCalls()).toHaveLength(0);
     expect(questionAnswerText()).toBe("respuesta");
+  });
+
+  it("send glyph: Alt+I keeps an armed answer unsent", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    const field = await focusQuestionAnswer();
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+    expect(requireButton(CANCEL_SUBMIT)).toBeDefined();
+
+    await pressKey(ALT_I, field);
+    expect(buttonLabelled(CANCEL_SUBMIT)).toBeUndefined();
+    await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "respuesta" })]);
+    expect(respondCalls()).toHaveLength(0);
+    expect(questionAnswerText()).toBe("respuesta");
+  });
+
+  it("send glyph: deleting an armed answer's marker by hand disarms it instead of submitting", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    const field = await focusQuestionAnswer();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Hello world",
+      );
+    });
+    await settle();
+    field.setSelectionRange(5, 5);
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+    expect(slotsIn(questionAnswerText())).toHaveLength(1);
+
+    await userEvent.fill(field, "Hello world");
+    await settle();
+    expect(questionAnswerText()).toBe("Hello world");
+    expect(respondCalls()).toHaveLength(0);
+    expect(buttonLabelled(CANCEL_SUBMIT)).toBeUndefined();
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "respuesta" })]);
+    expect(respondCalls()).toHaveLength(0);
+    expect(questionAnswerText()).toBe("Hello world");
   });
 
   it("dictation phase 5 regression: the answer's marker goes at the field's caret", async () => {
@@ -2366,7 +2652,7 @@ describe("dictation stays on its thread fence", () => {
     const { jobId } = startedJob(0).input;
     await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
     await click(requireButton("Submit message"));
-    expect(sendWhenReadyBannerShown()).toBe(true);
+    expect(sendGlyphShown()).toBe(true);
     await navigateToOtherThread();
 
     await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "hola mundo" })]);

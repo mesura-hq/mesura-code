@@ -49,16 +49,22 @@ Set **Auto-compact after** in the Claude provider settings to an integer between
 window. Leave it empty for Claude Code's default.
 
 You can also send `/compact` in an existing conversation. Web and desktop offer
-**Compact context** from the context meter. When you return to a large thread
+**Compact context** from the context meter. With **Idle compaction** on, when you return to a large thread
 after Claude's prompt cache expires, a **Compact** chip with the thread's token count shows
-next to the send button. While it is on, Enter summarizes the history first, then
+next to the send button. While the chip is on, Enter summarizes the history first, then
 sends your message. Click the chip to switch it to **Full** and keep the full
 history for that message. The cache lasts about an hour on a Claude
 subscription and 5 minutes with an API key, Bedrock, or Vertex. See [commands and skills](./composer.md#commands-and-skills) for using
 composer commands.
 
-**Compact idle threads** in **Settings > General** controls this for threads
-over 200,000 tokens. Each Claude provider's settings can override it:
+**Idle compaction** in **Settings > General** is off by default in Mesura Code.
+While it is off, a thread compacts only when you ask, with `/compact` or
+**Compact context**: no **Compact** chip, no resume prompt, and no compaction of
+idle threads. Claude still compacts on its own when a conversation fills its
+context window, as **Auto-compact after** sets. Turn it on to choose a mode in **Compact idle threads**, which
+controls this for threads over 200,000 tokens. Each Claude provider's settings
+can override it, and show their compaction settings only while **Idle
+compaction** is on:
 
 - **When you return** shows the **Compact** chip described above. This is the default.
 - **Before the cache expires (beta)** compacts an idle thread shortly before its

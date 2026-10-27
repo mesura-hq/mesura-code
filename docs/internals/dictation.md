@@ -75,10 +75,26 @@ user deleted keeps its text in the Transcriptions list.
 ## Send when ready
 
 A draft is armed in two ways: a recording stops in send mode, or the user presses Send while a
-marker is pending. An armed draft stays editable. After every fill, discard or deleted marker, the
-client checks the draft: with no marker left, it sends. The marker count in the text decides, not
-the job list. A failed marker keeps the draft armed and unsent until a retry fills it or the user
-discards it.
+marker is pending. An armed draft stays editable. After every fill or discard, the client checks
+the draft: with no marker left, it sends. The marker count in the text decides, not the job list. A
+failed marker keeps the draft armed and unsent until a retry fills it or the user discards it.
+
+A marker the user deletes by hand disarms the draft instead of sending it, because the text around
+the marker was written to wait for that transcript. The armed state records the marker ids seen at
+the last check, and the controller notes each marker it takes out itself (a fill, a Discard, a
+switch to save). A marker that vanished without such a note was deleted by hand. A send that waits
+on its uploads reads the armed state again just before it consumes the draft: a disarm during the
+uploads can leave the text exactly as the send saw it, so comparing the text does not catch it.
+
+The armed state has no banner. Every marker in an armed draft draws the send glyph as a button,
+and pressing it disarms the draft. Selecting insert (Alt+I) for the last job does the same; Escape
+is not used, because Vim mode takes it in the composer. A question card shows its armed state on
+its Submit button, which cancels it. Whatever disarms a draft or answer, the controller turns the
+send-mode jobs whose markers still wait there to insert, so the job record, the glyph and the mode
+keys agree.
+
+The armed state is per tab and per device. A cancel in one tab does not reach another tab that
+armed the same draft, and a device cannot cancel a send another device armed.
 
 A sent message gets one `[voiced] ` prefix when any part of it was dictated, never one per
 insertion. Mid-sentence insertions would otherwise scatter tags through the message.

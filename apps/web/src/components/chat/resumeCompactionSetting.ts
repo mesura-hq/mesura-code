@@ -3,7 +3,7 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
 } from "@t3tools/contracts";
-import type { ServerSettings } from "@t3tools/contracts/settings";
+import { resolveIdleCompaction, type ServerSettings } from "@t3tools/contracts/settings";
 
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 
@@ -29,4 +29,20 @@ export function isResumeCompactionOffered(
     : undefined;
   if (!explicitInstance || explicitInstance.driver !== CLAUDE_DRIVER_KIND) return true;
   return readOfferResumeCompaction(explicitInstance.config) ?? true;
+}
+
+/**
+ * Whether the composer may suggest compacting a Claude thread you return to:
+ * the instance's idle compaction mode, which is "off" until the environment
+ * turns `idleCompactionEnabled` on, and its `offerResumeCompaction` switch.
+ */
+export function isResumeCompactionSuggested(
+  settings: Parameters<typeof resolveIdleCompaction>[0],
+  instanceId: ProviderInstanceId | null,
+): boolean {
+  const resolvedInstanceId = instanceId ?? defaultInstanceIdForDriver(CLAUDE_DRIVER_KIND);
+  return (
+    resolveIdleCompaction(settings, resolvedInstanceId) !== "off" &&
+    isResumeCompactionOffered(settings, resolvedInstanceId)
+  );
 }

@@ -715,6 +715,23 @@ describe("agent search popup: Tab and the sparkle start a search", () => {
     await vi.waitFor(() => expect(requirePopup().textContent).toContain(QUERY));
   });
 
+  it("starts agent search with the current field text before its result transition commits", async () => {
+    await using _fixture = await setup();
+    await mountApp();
+    await typeIntoSearch("previous query");
+    const field = sidebarSearchField()!;
+    const tab = new KeyboardEvent("keydown", { ...TAB, bubbles: true, cancelable: true });
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, QUERY);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.dispatchEvent(tab);
+    });
+    expect(tab.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(popup()).not.toBeNull());
+    await vi.waitFor(() => expect(firstMessageCalls()).toHaveLength(1));
+    expect(startCalls()).toHaveLength(1);
+  });
+
   it("agent search popup spec: the sparkle in a non-empty sidebar Search opens the popup and sends the query as the first message", async () => {
     await using _fixture = await setup();
     await mountApp();
@@ -1265,6 +1282,11 @@ describe("agent search popup: closing and completion", () => {
     await act(async () => popupEditor.focus());
     await press(PALETTE_CHORD);
     await vi.waitFor(() => expect(paletteOpen()).toBe(true));
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(
+        document.querySelector('[data-testid="command-palette"] input'),
+      ),
+    );
 
     await press({ key: "Escape", code: "Escape" });
 

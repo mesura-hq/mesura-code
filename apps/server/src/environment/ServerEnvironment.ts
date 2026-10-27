@@ -270,6 +270,8 @@ export const make = Effect.gen(function* () {
       hostStats: true,
       // Mesura: phone pushes wait while a client reports presence.
       pushPresence: true,
+      // Mesura: compaction the app starts waits for `idleCompactionEnabled`.
+      idleCompactionSwitch: true,
       serverBrowser: true,
       threadLinkPreview: true,
       peerLinks: true,

@@ -85,6 +85,7 @@ function readFieldBooleanDefault(
 export function deriveProviderSettingsFields(
   definition: SettingsFormDefinition,
   value?: unknown,
+  hiddenFieldKeys?: ReadonlySet<string>,
 ): ReadonlyArray<ProviderSettingsFieldModel> {
   const isLocalAcp =
     definition.driverKind === "acpRegistry" &&
@@ -106,7 +107,7 @@ export function deriveProviderSettingsFields(
     .flatMap(({ key }) => {
       const fieldSchema = definition.settingsSchema.fields[key]!;
       const formAnnotation = readProviderSettingsFormAnnotation(fieldSchema);
-      if (formAnnotation.hidden) return [];
+      if (formAnnotation.hidden || hiddenFieldKeys?.has(key)) return [];
       if (isLocalAcp && key !== "source" && key !== "commandPath") return [];
 
       const annotatedTitle = readFieldAnnotationString(fieldSchema, "title");
@@ -295,6 +296,8 @@ interface ProviderSettingsFormProps {
   readonly idPrefix: string;
   readonly variant: "card" | "dialog" | "settings";
   readonly onChange: (nextConfig: Record<string, unknown> | undefined) => void;
+  /** Fields that settings outside this config keep out of effect. */
+  readonly hiddenFieldKeys?: ReadonlySet<string> | undefined;
 }
 
 function ProviderSettingsSelect({
@@ -565,8 +568,9 @@ export function ProviderSettingsForm({
   idPrefix,
   variant,
   onChange,
+  hiddenFieldKeys,
 }: ProviderSettingsFormProps) {
-  const fields = deriveProviderSettingsFields(definition, value);
+  const fields = deriveProviderSettingsFields(definition, value, hiddenFieldKeys);
   const isLocalAcp =
     definition.driverKind === "acpRegistry" &&
     readProviderConfigString(value, "source") === "local";
