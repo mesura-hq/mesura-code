@@ -158,6 +158,40 @@ function assertChatPickerConsumers(sources: Map<string, ts.SourceFile>): void {
   // Before the fork table existed, the base guard must still report the original missing commands.
   if (!sources.has(NodePath.join(web, "components/chat/chatPickerCommands.ts"))) return;
   const chatView = sources.get(NodePath.join(web, "components/ChatView.tsx"));
+  const pickerTable = sources.get(NodePath.join(web, "components/chat/chatPickerCommands.ts"))!;
+  const sharedCommands: string[] = [];
+  visitRuntime(pickerTable, (node) => {
+    if (ts.isPropertyAssignment(node) && ts.isStringLiteral(node.name))
+      sharedCommands.push(node.name.text);
+  });
+  const forwardedCommands = new Set<string>();
+  if (chatView)
+    visitRuntime(chatView, (node) => {
+      if (
+        !ts.isVariableDeclaration(node) ||
+        !ts.isIdentifier(node.name) ||
+        node.name.text !== "mesuraPickerCommands" ||
+        !node.initializer ||
+        !ts.isObjectLiteralExpression(node.initializer)
+      )
+        return;
+      for (const entry of node.initializer.properties) {
+        if (
+          ts.isPropertyAssignment(entry) &&
+          ts.isStringLiteral(entry.name) &&
+          ts.isElementAccessExpression(entry.initializer) &&
+          ts.isIdentifier(entry.initializer.expression) &&
+          entry.initializer.expression.text === "chatPickerCommands" &&
+          ts.isStringLiteral(entry.initializer.argumentExpression) &&
+          entry.name.text === entry.initializer.argumentExpression.text
+        )
+          forwardedCommands.add(entry.name.text);
+      }
+    });
+  for (const command of sharedCommands) {
+    if (!forwardedCommands.has(command))
+      throw new Error(`mesuraPickerCommands does not forward ${command}`);
+  }
   const consumers = new Set<string>();
   if (chatView)
     visitRuntime(chatView, (node) => {
@@ -181,7 +215,7 @@ function assertChatPickerConsumers(sources: Map<string, ts.SourceFile>): void {
           (entry) =>
             ts.isSpreadAssignment(entry) &&
             ts.isIdentifier(entry.expression) &&
-            entry.expression.text === "chatPickerCommands",
+            entry.expression.text === "mesuraPickerCommands",
         )
       ) {
         consumers.add(name === "useCommandHandlers" ? "registry" : "chord");
@@ -189,7 +223,7 @@ function assertChatPickerConsumers(sources: Map<string, ts.SourceFile>): void {
     });
   for (const consumer of ["chord", "registry"]) {
     if (!consumers.has(consumer))
-      throw new Error(`chatPickerCommands has no ${consumer} consumer in ChatView`);
+      throw new Error(`mesuraPickerCommands has no ${consumer} consumer in ChatView`);
   }
 }
 
@@ -289,13 +323,33 @@ it.each(["chord", "registry"] as const)(
     const source = sources.get(file)!;
     const pattern =
       consumer === "chord"
-        ? /(commands: \{\s*)\.\.\.chatPickerCommands,/
-        : /(useCommandHandlers\(\{\s*)\.\.\.chatPickerCommands,/;
+        ? /(commands: \{\s*)\.\.\.mesuraPickerCommands,/
+        : /(useCommandHandlers\(\{\s*)\.\.\.mesuraPickerCommands,/;
     const mutated = source.getText().replace(pattern, "$1");
     expect(mutated).not.toBe(source.getText());
     sources.set(file, ts.createSourceFile(file, mutated, ts.ScriptTarget.Latest, true));
     expect(() => missingCommands(sources)).toThrow(
-      `chatPickerCommands has no ${consumer} consumer in ChatView`,
+      `mesuraPickerCommands has no ${consumer} consumer in ChatView`,
     );
   },
 );
+
+it.each([
+  ["removed", ""],
+  ["misrouted", '    "traitsPicker.toggle": chatPickerCommands["workspacePicker.toggle"],\n'],
+])("detects a %s shared handler in the local picker map", (_mutation, replacement) => {
+  const sources = runtimeSources();
+  const file = NodePath.join(web, "components/ChatView.tsx");
+  const source = sources.get(file)!;
+  const mutated = source
+    .getText()
+    .replace(
+      /^.*"traitsPicker.toggle": chatPickerCommands\["traitsPicker.toggle"\],\n/m,
+      replacement,
+    );
+  expect(mutated).not.toBe(source.getText());
+  sources.set(file, ts.createSourceFile(file, mutated, ts.ScriptTarget.Latest, true));
+  expect(() => missingCommands(sources)).toThrow(
+    "mesuraPickerCommands does not forward traitsPicker.toggle",
+  );
+});

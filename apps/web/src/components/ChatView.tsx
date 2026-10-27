@@ -2810,8 +2810,19 @@ export default function ChatView(props: ChatViewProps) {
     composerOverlayHeight: composerTimelineInset,
     onBreakLiveFollow: releaseFollowForNavigation,
   });
+  // Keep the local map explicit: the modal-key guards follow its registered command names.
+  const mesuraPickerCommands = {
+    "traitsPicker.toggle": chatPickerCommands["traitsPicker.toggle"],
+    "workspacePicker.toggle": chatPickerCommands["workspacePicker.toggle"],
+    "branchPicker.toggle": chatPickerCommands["branchPicker.toggle"],
+    "composer.workspace": chatPickerCommands["composer.workspace"],
+    "question.toggleCollapse": chatPickerCommands["question.toggleCollapse"],
+    "runContext.toggle": chatPickerCommands["runContext.toggle"],
+    "runContext.cycleMachine": chatPickerCommands["runContext.cycleMachine"],
+    "runContext.toggleWorkspace": chatPickerCommands["runContext.toggleWorkspace"],
+  };
   useCommandHandlers({
-    ...chatPickerCommands,
+    ...mesuraPickerCommands,
     "thread.copyReference": copyActiveThreadReference,
     "thread.settle": () => {
       // The chord and Vim must share capability checks, unsettle, and sidebar advancement.
@@ -2855,7 +2866,7 @@ export default function ChatView(props: ChatViewProps) {
       focusComposerStable();
     },
     commands: {
-      ...chatPickerCommands,
+      ...mesuraPickerCommands,
       ...terminalShortcuts,
       ...rightPanelShortcuts,
       "treeDiff.toggle": toggleTreeDiff,
