@@ -188,6 +188,36 @@ function navStops(scroller: HTMLElement): HTMLElement[] {
   );
 }
 
+export function moveThreadListFocus(key: "ArrowDown" | "ArrowUp"): boolean {
+  const scroller = threadListScroller();
+  const active = document.activeElement;
+  if (scroller === null || !(active instanceof HTMLElement)) return false;
+  const fromEmptySearch =
+    key === "ArrowDown" &&
+    active instanceof HTMLInputElement &&
+    active.matches(THREAD_SEARCH_SELECTOR) &&
+    active.value === "";
+  if (!fromEmptySearch && !scroller.contains(active)) return false;
+  // A row's own controls (rename field, menus) keep their arrows.
+  const current = fromEmptySearch ? null : active.closest<HTMLElement>(NAV_STOP_SELECTOR);
+  if (current !== null && current !== active) return false;
+  const rows = navStops(scroller);
+  const index = current === null ? -1 : rows.indexOf(current);
+  // Up from the top stop returns to Search, the way Down came in.
+  const next =
+    key === "ArrowDown"
+      ? rows[index + 1]
+      : index === -1
+        ? rows.at(-1)
+        : index === 0
+          ? document.querySelector<HTMLElement>(THREAD_SEARCH_SELECTOR)
+          : rows[index - 1];
+  if (next === undefined || next === null) return true;
+  next.focus({ preventScroll: true });
+  next.scrollIntoView({ block: "nearest" });
+  return true;
+}
+
 /**
  * Up and Down move the keyboard focus over the thread rows and section
  * headers, which shows a row's hover tint and its details tooltip without
@@ -201,33 +231,7 @@ export function useThreadRowArrowKeys(): void {
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.shiftKey) return;
-      const scroller = threadListScroller();
-      const active = document.activeElement;
-      if (scroller === null || !(active instanceof HTMLElement)) return;
-      const fromEmptySearch =
-        event.key === "ArrowDown" &&
-        active instanceof HTMLInputElement &&
-        active.matches(THREAD_SEARCH_SELECTOR) &&
-        active.value === "";
-      if (!fromEmptySearch && !scroller.contains(active)) return;
-      // A row's own controls (rename field, menus) keep their arrows.
-      const current = fromEmptySearch ? null : active.closest<HTMLElement>(NAV_STOP_SELECTOR);
-      if (current !== null && current !== active) return;
-      event.preventDefault();
-      const rows = navStops(scroller);
-      const index = current === null ? -1 : rows.indexOf(current);
-      // Up from the top stop returns to Search, the way Down came in.
-      const next =
-        event.key === "ArrowDown"
-          ? rows[index + 1]
-          : index === -1
-            ? rows.at(-1)
-            : index === 0
-              ? document.querySelector<HTMLElement>(THREAD_SEARCH_SELECTOR)
-              : rows[index - 1];
-      if (next === undefined || next === null) return;
-      next.focus({ preventScroll: true });
-      next.scrollIntoView({ block: "nearest" });
+      if (moveThreadListFocus(event.key)) event.preventDefault();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);

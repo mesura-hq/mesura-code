@@ -1,7 +1,11 @@
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import { useProjectScopeStore } from "../projectScopeStore";
 import { useCommandHandlers } from "../commands/commandRegistry";
-import { scrollThreadList, useThreadRowArrowKeys } from "../lib/sidebarThreadViewport";
+import {
+  moveThreadListFocus,
+  scrollThreadList,
+  useThreadRowArrowKeys,
+} from "../lib/sidebarThreadViewport";
 import { ThreadJumpHintModifierSync } from "./sidebar/ThreadJumpHintModifierSync";
 import { useThreadJumpTargets } from "./sidebar/threadJumpTargets";
 import { sortActiveThreadsForSidebar } from "./sidebar/activeThreadOrder";
@@ -184,6 +188,7 @@ import {
   resolveSidebarDropVerb,
   resolveSidebarThreadSection,
   searchSidebarThreads,
+  pullRequestMatchesSearchQuery,
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
   sidebarListItemId,
@@ -927,6 +932,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const [optimisticDrop, setOptimisticDrop] = useState<SidebarOptimisticDrop | null>(null);
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
+  const pendingSearchAction = useRef<{
+    query: string;
+    highlightStep: number;
+    listKeys?: Array<"ArrowDown" | "ArrowUp" | "Enter">;
+    selection: { threadKey: string | null } | null;
+  } | null>(null);
   const [searchHighlightKey, setSearchHighlightKey] = useState<string | null>(null);
   const searchEnvironmentIds = useConnectedEnvironmentIds();
   const queuePendingFileDrop = useSidebarPendingFileDropStore((s) => s.queuePendingFileDrop);
@@ -1302,10 +1313,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
 
   const handleAgentSearchKey = useAgentSearchFieldKeyDown();
   const clearThreadSearch = () => {
+    pendingSearchAction.current = null;
     setThreadSearchQuery("");
     setSearchHighlightKey(null);
   };
-  const selectThreadSearchResult = (thread: EnvironmentThreadShell) => {
+  const highlightThreadSearchResult = useStableCallback((thread: EnvironmentThreadShell) => {
+    setSearchHighlightKey(threadShellKey(thread));
+  });
+  const selectThreadSearchResult = useStableCallback((thread: EnvironmentThreadShell) => {
+    const inputQuery = threadSearchInputRef.current?.value;
+    if (inputQuery !== undefined && inputQuery !== threadSearchQuery) {
+      pendingSearchAction.current = {
+        query: inputQuery,
+        highlightStep: 0,
+        selection: { threadKey: threadShellKey(thread) },
+      };
+      return;
+    }
     const ref = scopeThreadRef(thread.environmentId, thread.id);
     // A row listed for a message match opens find on it, as the palette does.
     const match = threadSearchMatchByKey.get(
@@ -1315,14 +1339,95 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     clearThreadSearch();
     navigateToThread(ref);
     if (match) openThreadFindOnQuery(scopedThreadKey(ref), findForMessageMatch(match, query));
-  };
-  const handleThreadSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+  });
+  // Resolve queued keys against their committed query. Waiting for a remote result
+  // here caused late navigation, unlike Enter after commit, so consume the action now.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: bridge input events to committed search results.
+  useEffect(() => {
+    const pending = pendingSearchAction.current;
+    if (
+      !pending ||
+      pending.query !== threadSearchQuery ||
+      threadSearchInputRef.current?.value !== pending.query
+    )
+      return;
+    pendingSearchAction.current = null;
+    if (pending.listKeys) {
+      if (document.activeElement !== threadSearchInputRef.current) return;
+      for (const key of pending.listKeys) {
+        if (key === "Enter") {
+          if (document.activeElement !== threadSearchInputRef.current)
+            (document.activeElement as HTMLElement | null)?.click();
+          break;
+        }
+        moveThreadListFocus(key);
+      }
+      return;
+    }
+    const count = threadSearchResults.length;
+    const index =
+      count === 0 ? 0 : (activeSearchResultIndex + (pending.highlightStep % count) + count) % count;
+    const highlighted = threadSearchResults[index];
+    const selection = pending.selection;
+    if (selection === null) {
+      if (highlighted) setSearchHighlightKey(threadShellKey(highlighted));
+      return;
+    }
+    const result =
+      selection.threadKey === null
+        ? highlighted
+        : threadSearchResults.find((thread) => threadShellKey(thread) === selection.threadKey);
+    if (result) selectThreadSearchResult(result);
+  }, [threadSearchQuery, threadSearchResults, activeSearchResultIndex, selectThreadSearchResult]);
+  const handleThreadSearchKeyDown = (
+    event: ReactKeyboardEvent<HTMLInputElement>,
+    clearSearch: () => void,
+  ) => {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-    if (handleAgentSearchKey(event, threadSearchQuery)) return;
-    if (event.key === "Escape" && isSearchingThreads) {
+    if (handleAgentSearchKey(event, event.currentTarget.value)) return;
+    // The agent popup owns Escape before a non-empty Search clears.
+    if (event.key === "Escape" && event.currentTarget.value.trim().length > 0) {
       event.preventDefault();
       event.stopPropagation();
-      clearThreadSearch();
+      clearSearch();
+      return;
+    }
+    // The input can paint ahead of the results. Never open a row for an earlier query.
+    if (event.currentTarget.value !== threadSearchQuery) {
+      // Cancelling arrows here lost their position before Enter. Replay them with this query.
+      if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter") {
+        if (
+          event.currentTarget.value === "" &&
+          (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+        )
+          return;
+        event.preventDefault();
+        const pending =
+          pendingSearchAction.current?.query === event.currentTarget.value
+            ? pendingSearchAction.current
+            : null;
+        // Enter fixes the selection at that point; later arrows cannot change it.
+        if (pending?.selection || pending?.listKeys?.at(-1) === "Enter") return;
+        if (event.currentTarget.value === "") {
+          // Clearing unmounts search rows. Replay list keys only after normal rows return.
+          if (!pending?.listKeys && event.key !== "ArrowDown") return;
+          pendingSearchAction.current = {
+            query: "",
+            highlightStep: 0,
+            selection: null,
+            listKeys: [...(pending?.listKeys ?? []), event.key],
+          };
+          return;
+        }
+        // Mutating the queued value disables React Compiler memoization of Sidebar.
+        pendingSearchAction.current = {
+          query: event.currentTarget.value,
+          highlightStep:
+            (pending?.highlightStep ?? 0) +
+            (event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0),
+          selection: event.key === "Enter" ? { threadKey: null } : (pending?.selection ?? null),
+        };
+      }
       return;
     }
     if (threadSearchResults.length === 0) return;
@@ -2898,11 +3003,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}
               onSearchQueryChange={(value) => {
+                pendingSearchAction.current = null;
                 setThreadSearchQuery(value);
                 setSearchHighlightKey(null);
               }}
               onSearchKeyDown={handleThreadSearchKeyDown}
-              searchFieldAccessory={<AgentSearchFieldAccessory query={threadSearchQuery} />}
+              renderSearchFieldAccessory={(query) => <AgentSearchFieldAccessory query={query} />}
               isSearching={isSearchingThreads}
               searchResultCount={threadSearchResults.length}
               activeSearchResultIndex={activeSearchResultIndex}
@@ -2930,6 +3036,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
+                    const searchMatch =
+                      threadSearchMatchByKey.get(
+                        threadSearchMatchKey({
+                          environmentId: thread.environmentId,
+                          threadId: thread.id,
+                        }),
+                      ) ?? null;
+                    // Field matches still consume the query when they show a PR badge.
+                    const searchQuery =
+                      searchMatch || pullRequestMatchesSearchQuery(thread, threadSearchQuery)
+                        ? threadSearchQuery
+                        : "";
                     return (
                       <SidebarSearchResultRow
                         isSettled={settledThreadKeys.has(threadKey)}
@@ -2954,18 +3072,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         isHighlighted={activeSearchResultIndex === index}
                         isRouteActive={routeRowThreadKey === threadKey}
                         resultId={threadSearchResultId(index)}
-                        searchMatch={
-                          threadSearchMatchByKey.get(
-                            threadSearchMatchKey({
-                              environmentId: thread.environmentId,
-                              threadId: thread.id,
-                            }),
-                          ) ?? null
-                        }
-                        searchQuery={threadSearchQuery}
-                        searchMatchQuery={threadSearch.query}
-                        onHighlight={() => setActiveSearchResultIndex(index)}
-                        onSelect={() => selectThreadSearchResult(thread)}
+                        searchMatch={searchMatch}
+                        searchQuery={searchQuery}
+                        searchMatchQuery={searchMatch ? threadSearch.query : ""}
+                        onHighlight={highlightThreadSearchResult}
+                        onSelect={selectThreadSearchResult}
                         onFileDropThreads={handleThreadFileDrop}
                       />
                     );
