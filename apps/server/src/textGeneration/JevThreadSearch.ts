@@ -92,11 +92,9 @@ export const makeJevThreadSearch = Effect.fn("JevThreadSearch.make")(function* (
         },
       },
     };
-    // Evidence checks share the same request and run independently of Choice.
-    // A high Choice probability alone accepted a wrong thread in the pilot.
-    // Requiring unspecified "distinctive details" rejected "rework of model
-    // picker" despite retrieving the original redesign request. Require only
-    // supplied details and accept paraphrases, while still requiring an excerpt.
+    // Evidence checks run independently of Choice: a high Choice probability alone accepted a
+    // wrong thread. Demanding unspecified "distinctive details" rejected true paraphrases, so ask
+    // only for the supplied details, accept paraphrases, and still require an excerpt.
     for (const item of input.evidence) {
       if (item.source === null) continue;
       questions[`supports_${item.ref}`] = {

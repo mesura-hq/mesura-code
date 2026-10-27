@@ -1,9 +1,5 @@
-// Entry point: `startFlash`, `startFlashPick` and `handleFlashKey`
-// (`flashSession.ts`), driven the way the chat and composer surfaces drive
-// them: a provider supplies the targets for each pattern and receives the
-// jump, or a pick labels its targets up front and receives the chosen one.
-// The labels are read the way the overlay reads them, through
-// `useFlashSnapshot`.
+// Driven the way the chat and composer surfaces drive a flash, with labels read
+// through `useFlashSnapshot` as the overlay reads them.
 import { createElement, useLayoutEffect } from "react";
 import { describe, expect, it } from "vite-plus/test";
 

@@ -1,11 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * Mesura: the per-user runtime registry. Every Linux server writes
- * `<registry dir>/<pid>.json` naming its base dir while it runs, so the hosts
- * dock's server discovery can find a server whose base dir is invisible from
- * `/proc`: the desktop app passes its base dir through `--bootstrap-fd`, and
- * discovery cannot read a file descriptor. `server-runtime.json` stays where
- * it is; this is a second, fork-owned record beside it.
+ * Mesura: while it runs, each Linux server writes `<registry dir>/<pid>.json` with its base dir, so
+ * hosts dock discovery finds a server whose base dir `/proc` cannot show (the desktop app passes it
+ * through `--bootstrap-fd`). This fork-owned record sits beside `server-runtime.json`.
  */
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as DateTime from "effect/DateTime";
@@ -89,12 +86,10 @@ const STICKY_BIT = 0o1000;
 const WRITABLE_BY_OTHERS = 0o022;
 
 /**
- * Why one component of a registry path cannot be trusted, or null. `link` is
- * the component itself, `target` what it resolves to. The fallback registry
- * lives in the shared tmpdir, where another user can create
- * `mesura-code-<uid>` first or plant a symlink there: every ancestor must be
- * this user's or root's, and not writable by others unless sticky, as `/tmp`
- * is. The registry directory itself must be this user's.
+ * Why one registry path component cannot be trusted, or null. The fallback registry is in the
+ * shared tmpdir, where another user can pre-create `mesura-code-<uid>` or plant a symlink. So each
+ * ancestor must be this user's or root's and not writable by others unless sticky, as `/tmp` is,
+ * and the registry directory itself must be this user's.
  */
 function componentProblem(
   link: NodeFS.Stats,
@@ -161,14 +156,14 @@ export const readServerRuntimeRegistry = Effect.fn(function* (directory: string)
   if (info === null || (info.mode & WRITABLE_BY_OTHERS) !== 0) return [];
   const names = yield* fs
     .readDirectory(directory)
-    .pipe(Effect.catch(() => Effect.succeed<ReadonlyArray<string>>([])));
+    .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
   const entries = yield* Effect.forEach(
     names.filter((name) => ENTRY_FILE_NAME.test(name)),
     (name) =>
       fs.readFileString(path.join(directory, name)).pipe(
         Effect.flatMap(decodeEntry),
-        Effect.map(Option.some),
-        Effect.catch(() => Effect.succeed(Option.none<ServerRuntimeRegistryEntry>())),
+        Effect.asSome,
+        Effect.orElseSucceed(() => Option.none<ServerRuntimeRegistryEntry>()),
       ),
     { concurrency: 16 },
   );
@@ -196,11 +191,9 @@ export interface RegisterOptions {
 }
 
 /**
- * Writes this server's entry for the life of the scope, then removes it. The
- * directory is created, or tightened, to 0700 once its whole path is trusted
- * (`registryDirectoryProblem`): it lists every server of one user. A failure
- * or an untrusted path is logged, never fatal: the server still runs, and
- * discovery still finds it through `/proc` when its argv names its home.
+ * Writes this server's entry for the life of the scope, then removes it. The directory lists every
+ * server of one user, so it becomes 0700 once its whole path is trusted. A failure or an untrusted
+ * path is logged, never fatal: discovery still finds the server through `/proc` when argv names it.
  */
 export const register = Effect.fn(function* (options: RegisterOptions) {
   const fs = yield* FileSystem.FileSystem;

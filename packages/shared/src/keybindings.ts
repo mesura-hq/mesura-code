@@ -148,24 +148,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+b", command: "sidebar.toggle" },
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },
-  // Two rules share mod+j, and BOTH the context and the order are
-  // load-bearing. Each was got wrong once, so both are spelled out.
-  //
-  // The context, `chatFocus`, is what stops the two being one shortcut
-  // context. Startup backfill skips a default whose context another rule
-  // already holds, so without the clause this row never reaches a config
-  // that has run the app before and the chord silently does nothing.
-  //
-  // The order is what keeps resolution answering `terminal.toggle`.
-  // Resolution is last-wins, so the pane rule must come FIRST. Put second,
-  // it wins whenever the chat has focus, and ChatView — which has no branch
-  // for a pane command — drops the key: the drawer never opens and nothing
-  // says why.
-  //
-  // The pane rule is therefore unreachable by resolution on purpose. Its
-  // consumer is usePaneNavigation, which matches it directly and consumes
-  // the chord only when the drawer is already open. Declining everywhere
-  // else is what leaves the toggle free to open it.
+  // Two rules share mod+j; the context and the order are both load-bearing. Without `chatFocus` backfill
+  // skips this row for an existing config. The pane rule must come FIRST: resolution is last-wins, and
+  // ChatView drops a pane command, so the drawer would never open. usePaneNavigation matches the pane
+  // rule directly and consumes the chord only when the drawer is already open.
   { key: "mod+j", command: "pane.focusDown", when: "chatFocus" },
   { key: "mod+j", command: "terminal.toggle" },
   { key: "mod+alt+b", command: "rightPanel.toggle" },
@@ -204,18 +190,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // A new command on a free chord: the per-command startup backfill installs it.
   // mod+shift+p stays thread.pin.
   { key: "mod+alt+p", command: "projectScope.toggleAll", when: "!terminalFocus" },
-  // Beside mod+k on purpose: the same overlay, narrowed to threads. A new
-  // command on a free chord, so the ordinary per-command startup backfill
-  // installs it; RETIRED_KEYBINDING_DEFAULTS is for moving a rule that already
-  // shipped and ADDED_KEYBINDING_DEFAULTS for a second default on a command a
-  // config already binds, and this is neither.
+  // A new command on a free chord beside mod+k (the same overlay, narrowed to threads), so per-command
+  // backfill installs it without a RETIRED or ADDED entry.
   { key: "mod+alt+k", command: "threadSearch.toggle", when: "!terminalFocus" },
-  // Mesura: upstream binds usage.open to mod+u and theme.select to mod+alt+a.
-  // mod+u is the chat's vim half-page scroll and Neovim's own key in the
-  // editor, where a `!terminalFocus` rule would steal it, so usage.open takes
-  // mod+alt+u, beside alt+u's usage peek. mod+alt+a is composer.attachFiles,
-  // the chord that reaches the app past the developer's global Hyprland
-  // ALT+A, so theme.select ships unbound; the command palette opens it.
+  // Mesura: upstream binds usage.open to mod+u and theme.select to mod+alt+a. mod+u is the chat's vim
+  // half-page scroll and Neovim's key in the editor, so usage.open takes mod+alt+u. mod+alt+a is
+  // composer.attachFiles (it passes the developer's global Hyprland ALT+A), so theme.select ships unbound.
   { key: "mod+alt+u", command: "usage.open", when: "!terminalFocus" },
   { key: "mod+alt+shift+a", command: "appearance.cycle", when: "!terminalFocus" },
   { key: "mod+alt+shift+t", command: "themeEditor.toggle" },
@@ -238,11 +218,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     command: "composer.sendAndNewThread",
     when: "composerFocus && !draftThreadRoute",
   },
-  // Two chords, and the label shows the last. The developer's Hyprland binds
-  // ALT+A globally, so alt+a never reaches the app on that machine; mod+alt+a
-  // matches the mod+alt family (mod+alt+r renames the thread). alt+a stays for
-  // every machine where it still arrives. Existing configs get mod+alt+a from
-  // ADDED_KEYBINDING_DEFAULTS.
+  // Two chords; the label shows the last. The developer's Hyprland binds ALT+A globally, so mod+alt+a
+  // (the mod+alt family) reaches the app there, and alt+a stays for other machines. Existing configs get
+  // mod+alt+a from ADDED_KEYBINDING_DEFAULTS.
   { key: "alt+a", command: "composer.attachFiles", when: "!terminalFocus" },
   { key: "mod+alt+a", command: "composer.attachFiles", when: "!terminalFocus" },
   // Fork addition: a new command on a free chord, installed by the per-command
@@ -254,12 +232,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // Monitor, so mod+alt+e stays as the chord a browser lets through.
   { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
   { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
-  // Fork addition: the Diff surface's Tree diff mode and its mode menu.
-  // Symmetria IDE used mod+shift+g, which composer.branch holds here. alt+g and
-  // alt+c are free in the app and in the developer's Hyprland config, whose G
-  // and C binds all use Super; alt+d was not taken because browsers keep it for
-  // the address bar. New commands, so the per-command startup backfill
-  // installs them.
+  // Fork: Tree diff and its mode menu. composer.branch holds Symmetria IDE's mod+shift+g; alt+g and alt+c
+  // are free in the app and in the developer's Hyprland (its G and C binds use Super). Browsers keep alt+d
+  // for the address bar. New commands, so per-command backfill installs them.
   { key: "alt+g", command: "treeDiff.toggle", when: "!terminalFocus" },
   { key: "alt+c", command: "diff.modeMenu", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
@@ -267,17 +242,18 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // per-command startup backfill installs it; no RETIRED or ADDED entry. No
   // `when` clause, like alt+u: both docks open over a focused terminal too.
   { key: "alt+s", command: "hosts.peek" },
-  // Mesura dictation. Active only while a recording or the last stopped job is
-  // live, and listed after hosts.peek on purpose: resolution is last-wins, so
-  // alt+s selects save during a dictation and stays the Hosts peek otherwise.
-  // dictation.toggle ships unbound; the user guide gives the Hyprland bind.
-  // New commands, so the per-command startup backfill installs them.
+  // Mesura dictation, active only while a recording or the last stopped job is live. Listed after
+  // hosts.peek because resolution is last-wins: alt+s selects save during a dictation and stays the Hosts
+  // peek otherwise. dictation.toggle ships unbound; the user guide gives the Hyprland bind.
   { key: "alt+s", command: "dictation.mode.clipboard", when: "dictationActive" },
   { key: "alt+i", command: "dictation.mode.inject", when: "dictationActive" },
   { key: "alt+enter", command: "dictation.mode.submit", when: "dictationActive" },
   { key: "alt+space", command: "dictation.pause", when: "dictationActive" },
   { key: "alt+r", command: "dictation.restart", when: "dictationActive" },
   { key: "alt+x", command: "dictation.cancel", when: "dictationActive" },
+  // Fork addition: the sidebar's Working section. alt+z is free in the app and in the developer's
+  // Hyprland (checked 2026-10-26), so per-command backfill installs it.
+  { key: "alt+z", command: "sidebar.toggleWorking", when: "!terminalFocus" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
@@ -335,39 +311,19 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // an unconditional rule on it would shadow `chat.new` outright under
   // last-wins. alt+o also joins the alt+letter family the other pickers use.
   { key: "alt+o", command: "editor.openFavorite" },
-  // The sidebar's list chords. These are the only bare letters in the whole
-  // table, which is affordable because `sidebarFocus` is true for a handful
-  // of buttons and nothing else — and because the second clause hands the
-  // key back the moment the keyboard is in a box you type into. Without that
-  // clause the thread search would be unusable for any query holding a j.
-  //
-  // Placed before the two rows below rather than after them, so the chord the
-  // UI advertises for these commands stays the bracket pair: the label
-  // resolver reports the binding that wins, which is the last one, and a bare
-  // `j` is not a chord to put in front of someone who has not focused the
-  // sidebar.
+  // The only bare letters in the table: `sidebarFocus` covers a handful of buttons, and the second clause
+  // returns the key while typing in a box. Listed before the rows below so the label resolver (last
+  // winning binding) advertises the bracket pair, not a bare `j`.
   { key: "j", command: "thread.next", when: "sidebarFocus && !sidebarSearchFocus" },
   { key: "k", command: "thread.previous", when: "sidebarFocus && !sidebarSearchFocus" },
-  // The page step. Same two keys the chat reads as a half-page scroll and the
-  // terminal reads as a split, told apart by which pane has the keyboard —
-  // three panes, three meanings, no chord spent twice. New commands, so the
-  // per-command startup backfill installs them and no ADDED_KEYBINDING_DEFAULTS
-  // entry is needed.
-  //
-  // No search guard on these two: a modifier chord types nothing into a box,
-  // and moving on through the list while a search is narrowing it is the
-  // useful reading rather than a collision.
+  // The page step: the chat reads these keys as a half-page scroll and the terminal as a split, told
+  // apart by which pane has the keyboard. No search guard: a modifier chord types nothing into a box.
+  // New commands, so per-command backfill installs them.
   { key: "mod+d", command: "thread.nextPage", when: "sidebarFocus" },
   { key: "mod+u", command: "thread.previousPage", when: "sidebarFocus" },
-  // Browsers keep ctrl+tab for their own tab strip and never deliver it to a
-  // page, so this pair reaches the desktop app only. It is listed first so the
-  // bracket pair below is the one the UI reports as the shortcut: the label
-  // resolver returns the last binding that wins, and naming a chord that half
-  // the surfaces never receive would be a lie on the other half.
-  //
-  // Unlike the bracket pair, these are gated on terminal focus. Ghostty
-  // encodes ctrl+tab and would otherwise both traverse threads and write the
-  // key into the shell.
+  // Browsers never deliver ctrl+tab to a page, so this pair reaches the desktop app only. Listed first so
+  // the label resolver (last winning binding) reports the bracket pair that every surface receives. Gated
+  // on terminal focus because Ghostty encodes ctrl+tab and the key would also reach the shell.
   { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
   { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
   { key: "mod+shift+[", command: "thread.previous" },
@@ -415,21 +371,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
 ];
 
 /**
- * Defaults that used to ship on a different key.
- *
- * Startup backfill only adds defaults for commands a config does not already
- * mention, so moving a default never reaches anyone who has run the app
- * before: their file keeps the old rule, and whatever took the freed key over
- * silently gets nothing. Each entry here lets startup rewrite that one rule.
- *
- * `from` must match a retired default exactly — key, command, and `when`
- * together. A rule that differs in any of the three is the user's own and is
- * left alone.
- *
- * `toWhen` moves the rule's context instead of, or as well as, its key. A
- * default whose `when` narrows has the same problem a moved key has: the
- * config already mentions the command, so the per-command backfill skips it
- * and the old context survives forever with nothing saying so.
+ * Per-command backfill never moves a default a config already mentions, so the freed key silently gets
+ * nothing. Each entry lets startup rewrite that one rule. `from` must match key, command and `when`
+ * exactly, or the rule is the user's own. `toWhen` moves the context, which has the same problem.
  */
 export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
   readonly from: KeybindingRule;
@@ -479,22 +423,14 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     toKey: "mod+alt+l",
   },
   {
-    // A fork-only command that shipped on a mod+shift+ chord v0.0.42 has since
-    // claimed, against pullRequest.copyNumber. It keeps its letter and takes
-    // mod+alt, so an installed config follows without relearning the mnemonic.
-    // fileTree.miller took the same move once and has no entry any more: it
-    // keeps mod+alt+e and regains mod+shift+e through ADDED and WITHDRAWN.
+    // A fork-only command whose mod+shift+ chord v0.0.42 claimed for pullRequest.copyNumber. It keeps its
+    // letter on mod+alt, so an installed config follows without relearning the mnemonic.
     from: { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
     toKey: "mod+alt+k",
   },
   {
-    // Moves aside for the palette, which lands on mod+o below.
-    //
-    // The two are independent, not ordered: a destination is only "claimed"
-    // when another rule holds the same key AND the same `when`, and these
-    // two differ there, so neither blocks the other. Written down because
-    // the opposite is the natural assumption and a test was built on it
-    // before being disproved.
+    // Moves aside for the palette on mod+o below. The two are independent: a destination is claimed only
+    // by a rule with the same key AND the same `when`, and these differ.
     from: { key: "mod+o", command: "editor.openFavorite" },
     toKey: "alt+o",
   },
@@ -506,31 +442,18 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
 ];
 
 /**
- * Defaults introduced for a command that already shipped one.
- *
- * Startup backfill is per command, so a second default never reaches anyone
- * who has run the app before: their file already mentions the command, the
- * new rule is skipped, and the shortcut exists only on a fresh install.
- * Documenting that is not shipping it.
- *
- * Re-adding an *old* default would be wrong — the user may have deleted it on
- * purpose. A default introduced in a release carries no such history: it never
- * existed for them to remove, so adding it once is safe. "Once" is the whole
- * contract, which is why each entry has a stable id the server records after
- * applying it. Delete the shortcut afterwards and it stays deleted.
- *
- * Never edit an id, and never reuse one for a different rule: an installation
- * that already recorded it will skip the new rule forever.
+ * A second default for a command a config already mentions never reaches it through per-command
+ * backfill. A new default never existed for the user to remove, so adding it once is safe; the server
+ * records each stable id after applying it, so a deleted shortcut stays deleted. Never edit or reuse
+ * an id: an installation that recorded it skips the new rule forever.
  */
 export interface AddedKeybindingDefault {
   readonly id: string;
   readonly rule: KeybindingRule;
   /**
-   * The shipped default this addition must sit before, when the command has
-   * more than one. Order decides the label, not the matching:
-   * `shortcutLabelForCommand` reports the binding that wins, which is the last
-   * one. Appending would make an upgraded install advertise a different chord
-   * than a fresh one — and for `ctrl+tab`, one the web client never receives.
+   * The shipped default this addition sits before, when the command has several. Order decides the
+   * label, not matching: `shortcutLabelForCommand` reports the last winning binding, so appending would
+   * make an upgraded install advertise a different chord than a fresh one.
    */
   readonly insertBefore?: KeybindingRule;
 }
@@ -591,18 +514,10 @@ export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = 
 ];
 
 /**
- * Defaults that shipped and were withdrawn with no replacement key.
- *
- * The same problem as a moved default: a config written before the
- * withdrawal keeps the rule, and whatever now ships on its chord silently
- * gets nothing. Startup removes each rule here from a config once, before it
- * rewrites retired defaults and adds introduced ones, so an addition can land
- * on the chord a withdrawal frees in the same startup.
- *
- * Once, like ADDED_KEYBINDING_DEFAULTS and in the same ledger: the id is
- * recorded whether or not the rule was there, so a user who binds it again
- * afterwards keeps it. A rule must match exactly — key, command, and `when` —
- * so one the user edited is theirs and stays. Never edit or reuse an id.
+ * Withdrawn defaults with no replacement key. Startup removes each from a config once, before retired
+ * rewrites and additions, so an addition can land on the freed chord in the same startup. The ledger
+ * records the id even when the rule was absent, so a user who rebinds it keeps it. A rule must match
+ * key, command and `when` exactly. Never edit or reuse an id.
  */
 export interface WithdrawnKeybindingDefault {
   readonly id: string;
@@ -682,15 +597,9 @@ export interface IntroducedKeybindingDefaultsInput {
 }
 
 /**
- * Appends every introduced default the ledger has not recorded yet.
- *
- * An addition is skipped, but still recorded, when its chord already belongs
- * to another rule: forcing it would put two commands on one chord and, under
- * last-wins resolution, quietly disable one. Recording the skip keeps startup
- * from retrying it on every boot.
- *
- * Additions dropped for lack of room come back in `deferred` and are NOT
- * recorded, so they are offered again once the user frees space.
+ * An addition whose chord another rule holds is skipped but recorded: forcing it would silently
+ * disable one command under last-wins resolution, and recording stops a retry on every boot.
+ * Additions dropped for lack of room return in `deferred` and are NOT recorded, so they come back.
  */
 export function addIntroducedKeybindingDefaults(input: IntroducedKeybindingDefaultsInput): {
   readonly config: ReadonlyArray<KeybindingRule>;
@@ -761,21 +670,10 @@ function claimsShortcutContext(
 }
 
 /**
- * Rewrites any retired default still present in a user config onto its current
- * key. Returns the config unchanged when nothing moved, so callers can skip the
- * write.
- *
- * Three things keep this from damaging a config:
- *
- * - `from` must match a retired default exactly, so a rule the user edited in
- *   any of key, command, or `when` is left alone.
- * - A rewrite is skipped when the destination shortcut context already belongs
- *   to some other rule. Moving onto it would leave two rules on one chord, and
- *   since resolution is last-wins one of the two commands would quietly stop
- *   working — the same silent failure this function exists to remove. Those
- *   cases come back in `blocked` so the caller can say so.
- * - A rewritten rule no longer matches its `from`, which makes the pass
- *   idempotent, and rewrites that collapse onto an identical rule are deduped.
+ * Returns the config unchanged when nothing moved, so callers can skip the write. `from` must match
+ * exactly, so a user-edited rule stays. A rewrite onto a context another rule holds is skipped and
+ * returned in `blocked`: under last-wins resolution it would silently disable one command. The pass is
+ * idempotent, and rewrites that collapse onto an identical rule are deduped.
  */
 export function migrateRetiredKeybindingDefaults(config: ReadonlyArray<KeybindingRule>): {
   readonly config: ReadonlyArray<KeybindingRule>;

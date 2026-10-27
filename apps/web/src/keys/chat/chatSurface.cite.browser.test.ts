@@ -1,10 +1,7 @@
-// Entry point: `installKeyEngine` (`keyEngine.ts`) with the real `chatSurface`
-// registered, as `KeyEngineHost` registers it. Every spec types `<leader>c`
-// as real `KeyboardEvent`s from a focused element in the chat column, over a
-// timeline fixture shaped like the one the chat renders, then types the labels
-// the flash store shows. The cite pipeline's entry, `requestChatCite`, is
-// mocked to record the selected text. Fixed geometry isolates the reading
-// area and off-screen guards from the runner's viewport size.
+// Specs type `<leader>c` and the flash labels as real `KeyboardEvent`s over a
+// timeline-shaped fixture; `requestChatCite` is mocked to record the selection.
+// Fixed geometry isolates the reading area and off-screen guards from the
+// runner's viewport size.
 import { createElement, useLayoutEffect } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 

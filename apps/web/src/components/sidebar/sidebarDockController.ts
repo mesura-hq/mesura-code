@@ -1,17 +1,11 @@
 /**
- * Mesura: the controller behind the sidebar's two docks, usage (Alt+U) and
- * hosts (Alt+S). Each dock opens while its chord is held, while a mouse or pen
- * rests on its footer icon or the dock, or while it is pinned. A phone has no
- * hover: a long press on the icon pins the dock, and a touch anywhere outside
- * the dock and its icon unpins it.
- *
- * Only one dock is open at a time. Whichever opened last owns
- * `activeSidebarDockAtom`, and a dock that sees another take it closes itself
- * outright — it drops its hover, its held chord and its pin — so nothing
- * reopens on its own when the other one closes.
+ * Mesura: the controller behind the sidebar's usage (Alt+U) and hosts (Alt+S) docks. A dock opens
+ * while its chord is held, while a pointer rests on its icon or the dock, or while pinned (a long
+ * press on a phone; a touch outside unpins). One dock is open at a time: one that sees the other
+ * take `activeSidebarDockAtom` drops its hover, chord and pin, so nothing reopens on its own.
  */
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import { Atom } from "effect/reactivity";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -32,6 +26,7 @@ import {
   type UsagePeekKeyboardLifecycle,
   type UsagePeekState,
 } from "./AccountLimitsPanel.logic";
+import { isAppModalPage, useCloseAppModal } from "./mainAppLocation";
 import { createTouchLongPress, type TouchLongPressHandlers } from "./touchLongPress";
 
 export type SidebarDockId = "usage" | "hosts";
@@ -64,17 +59,17 @@ export function requestSidebarDockPin(dock: SidebarDockId): void {
 }
 
 /**
- * Carries out a palette request for this dock. The dock exists only on the
- * thread list with a wide viewport, so the controller first leaves a Settings,
- * Usage or pull-requests page for the thread list, expands a collapsed
- * sidebar, and pins only once the dock can show. A mobile-width viewport never
- * has the dock; the palette does not offer the entry there, and a request that
- * arrives anyway is dropped rather than held.
+ * Carries out a palette request for this dock. The dock shows only on the wide thread list, so the
+ * controller first leaves for it (closing a Settings or Usage modal, which covers the sidebar) and
+ * expands a collapsed sidebar, then pins once the dock can show. A mobile request is dropped.
  */
 function useSidebarDockRequest(dock: SidebarDockId, enabled: boolean): void {
   const request = useAtomValue(sidebarDockRequestAtom);
   const { isMobile, open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
   const navigate = useNavigate();
+  const closeAppModal = useCloseAppModal();
+  const modalOpen = useLocation({ select: (location) => isAppModalPage(location.pathname) });
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: carries out a palette request from the external atom once the dock can show
   useEffect(() => {
     if (request !== dock) return;
     if (isMobile) {
@@ -82,6 +77,10 @@ function useSidebarDockRequest(dock: SidebarDockId, enabled: boolean): void {
       return;
     }
     if (!sidebarOpen) setSidebarOpen(true);
+    if (modalOpen) {
+      void closeAppModal();
+      return;
+    }
     if (!enabled) {
       void navigate({ to: "/" });
       return;
@@ -89,7 +88,17 @@ function useSidebarDockRequest(dock: SidebarDockId, enabled: boolean): void {
     appAtomRegistry.set(sidebarDockRequestAtom, null);
     appAtomRegistry.set(pinnedSidebarDockAtom, dock);
     appAtomRegistry.set(activeSidebarDockAtom, dock);
-  }, [dock, enabled, isMobile, navigate, request, setSidebarOpen, sidebarOpen]);
+  }, [
+    closeAppModal,
+    dock,
+    enabled,
+    isMobile,
+    modalOpen,
+    navigate,
+    request,
+    setSidebarOpen,
+    sidebarOpen,
+  ]);
 }
 
 interface PointerTypeEvent {
@@ -183,6 +192,7 @@ export function useSidebarDockController(input: {
     }),
   );
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: window and document key listeners for the dock chord, disposed on cleanup
   useEffect(() => {
     if (!enabled) return;
     const platform = navigator.platform;
@@ -196,12 +206,8 @@ export function useSidebarDockController(input: {
     keyboardLifecycleRef.current = lifecycle;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isKeybindingCaptureTarget(event.target)) return;
-      // The popover dismissed itself on Escape and on an outside press. A plain
-      // div does neither, and a hover-opened panel can outlive the pointer that
-      // opened it — Alt+Tab away mid-hover and no `pointerleave` ever arrives.
-      // Escape is the way out, and it unpins a pinned dock too. It is never
-      // consumed: the panel may not be open, and whatever else Escape closes
-      // has to keep closing.
+      // A hover-opened panel can outlive its pointer (Alt+Tab away, no `pointerleave`), so
+      // Escape closes and unpins it. Never consumed: whatever else Escape closes keeps closing.
       if (event.key === "Escape") {
         closePanel();
         return;
@@ -234,6 +240,7 @@ export function useSidebarDockController(input: {
   // The pin and the active dock live in module-level atoms that outlive any one
   // sidebar. A dock that unmounts gives up both, so the next sidebar starts
   // closed instead of inheriting a pin nobody saw set.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: releases the module-level pin and active-dock atoms when this dock unmounts
   useEffect(
     () => () => {
       hoverBridgeRef.current?.dispose();
@@ -253,6 +260,7 @@ export function useSidebarDockController(input: {
   // A pinned dock on a phone has no pointer to leave it and no Escape key: a
   // touch outside the dock and its icon is the way out. Mouse clicks keep the
   // desktop behaviour, where only the icon, Escape or the other dock unpin.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: document touch listener that unpins the dock on an outside press
   useEffect(() => {
     if (!pinned) return;
     const onPointerDown = (event: PointerEvent) => {
@@ -267,6 +275,7 @@ export function useSidebarDockController(input: {
 
   // A pin only means something where the dock can show. Leaving for a page
   // without it drops the pin, so the dock does not greet the user on return.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: clears the module-level pin when the dock is disabled by a route change
   useEffect(() => {
     if (!enabled && pinned) appAtomRegistry.set(pinnedSidebarDockAtom, null);
   }, [enabled, pinned]);
@@ -276,15 +285,18 @@ export function useSidebarDockController(input: {
   // Layout effects, so the dock that opens and the dock that yields change in
   // the same frame instead of one frame apart. They run in this order: the
   // ref is current before the effect below reads it.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-ref, current before the takeover effect below reads it in the same commit
   useLayoutEffect(() => {
     wantsOpenRef.current = wantsOpen;
   });
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: claims the module-level active-dock atom in the same frame the dock opens
   useLayoutEffect(() => {
     if (wantsOpen) appAtomRegistry.set(activeSidebarDockAtom, dock);
   }, [dock, wantsOpen]);
   // Keyed on the active dock alone: this runs when another dock takes over,
   // not when this one starts wanting to open while the atom still names the
   // other.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: closes this dock in the same frame another dock takes the active atom
   useLayoutEffect(() => {
     if (activeDock !== null && activeDock !== dock && wantsOpenRef.current) closePanel();
   }, [activeDock, closePanel, dock]);

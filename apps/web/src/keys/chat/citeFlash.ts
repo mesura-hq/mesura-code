@@ -1,16 +1,8 @@
 /**
- * A short flash over chat text that was just cited, so the reader sees what
- * went to the composer before the keys move there.
- *
- * One CSS animation of opacity on one element (`mesura.css`,
- * `[data-mesura-cite-flash]`), removed when it ends: no frame loop, and the
- * compositor runs it. It is drawn in the timeline row the text is in, from an
- * anchor at its static position, as the widened cursor is (`blockCursor.ts`),
- * so it moves and clips with the text if the timeline shifts while it shows.
- *
- * Every cite flashes through `citeAndFlash`, which the selection toolbar's
- * cite path calls for the mouse's Cite button and the keys' cite requests
- * alike, so each cite flashes once and looks the same.
+ * One compositor-run opacity animation (`[data-mesura-cite-flash]` in `mesura.css`), removed when
+ * it ends: no frame loop. Drawn in the cited text's timeline row from an anchor, as the widened
+ * cursor is, so it moves and clips with the text. Mouse and key cites both go through
+ * `citeAndFlash`, so each cite flashes once and looks the same.
  */
 
 import type { AssistantCitation } from "@t3tools/contracts";

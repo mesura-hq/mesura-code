@@ -1,48 +1,10 @@
 import { page, userEvent } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout — and in it the real
- * `Sidebar`, listing threads from two projects — and whose chat layout is the
- * real `_chat.tsx` route component around the real ChatView
- * (`test/appRootFenceApp.tsx`). The key engine is installed on `window`
- * before React renders, as `main.tsx` does. Keys are real `keydown` events
- * dispatched from the focused element.
- *
- * Phase 1 of the search unification cycle ("Make the sidebar Search the one
- * thread search and put the project filter on keys"):
- * - Criterion 1: with a project filter active, a sidebar query lists matching
- *   threads from every project; clearing it shows the filtered project again.
- * - Criterion 2: field matches before message matches, each in the sidebar's
- *   own order, across projects.
- * - Criterion 3: `threadSearch.toggle` (its chord, `<leader>ft` and the
- *   palette's Search threads row) focuses the sidebar Search field, opening
- *   the drawer first at Pixel 7 width.
- * - Criterion 4: `projectScope.toggle` (its chord and `<leader>fp`) opens the
- *   sidebar's project filter combobox with its search input focused.
- * - Criterion 5: `projectScope.toggleAll` on Mod+Alt+P flips to All projects
- *   and back to the last project, and does nothing with no last project.
- * - Criterion 6, guard: a freshly loaded scope store starts on All projects
- *   whatever the session wrote to localStorage.
- * - Criterion 7, guard: Mod+O palette thread rows still open their thread.
- * - Review P1-1: on Settings the focus commands return to the main app and
- *   land there; with the legacy sidebar they open the command palette; the
- *   scope toggle writes the store in both.
- * - Review P1-2: a focus chord pressed over the open palette closes it and
- *   lands, the phone's closed drawer included.
- * - The way back: `threadSearch.toggle` again, or Escape on the empty field,
- *   returns the keyboard to where the command took it from (the composer at
- *   its caret and Vim mode, the chat buffer) and hides the sidebar again if
- *   the command showed it; on the phone it closes the drawer.
- *
- * Boundaries the fixture replaces, and nothing else: the environment, project
- * and thread reads (two projects, thread shells from both), the server's
- * message search (`useThreadSearch`, answered from the fixture), every RPC
- * command, the chords (the shipped defaults, as a fresh keybindings file
- * resolves them) and unrelated chrome. The setup follows
- * `AppRoot.editorKeySidebarCost.fence.browser.test.tsx`, without its editor.
- */
+// Sidebar Search as the one thread search, project filter on keys (search unification phase 1),
+// through AppRoot, the real Sidebar over two projects, CommandPalette and ChatView. Message search
+// (`useThreadSearch`) answers from the fixture; chords are the shipped defaults. The setup follows
+// `AppRoot.editorKeySidebarCost.fence.browser.test.tsx`, without its editor. Also the Search way back.
 import { describe, expect, it, vi } from "vite-plus/test";
 
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
@@ -192,6 +154,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
+import { startMainAppLocationTracking } from "./components/sidebar/mainAppLocation";
 import { installKeyEngine } from "./keys/keyEngine";
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
 import { useProjectScopeStore } from "./projectScopeStore";
@@ -214,6 +177,7 @@ const OPEN_THREAD_ID = "search-fence-open";
 
 let root: Screen | undefined;
 let router: FenceRouter | undefined;
+let stopLocationTracking: (() => void) | undefined;
 let container: HTMLDivElement;
 
 async function setupBrowserFixture0() {
@@ -228,6 +192,8 @@ async function setupBrowserFixture0() {
 
   return {
     async [Symbol.asyncDispose]() {
+      stopLocationTracking?.();
+      stopLocationTracking = undefined;
       await act(async () => root?.[Symbol.asyncDispose]());
       root = undefined;
       router = undefined;
@@ -305,6 +271,8 @@ async function mountWithThreads(
   ({ root, router } = await renderFenceApp(container, openThreadId, {
     vimMode: options.vimMode ?? false,
   }));
+  // `appInit` starts this in the app: it is where closing the Settings modal returns to.
+  stopLocationTracking = startMainAppLocationTracking(router);
   await settle();
   // The composer takes focus on mount and claims some chords for itself; a
   // chord under test starts from the page, as the sidebar fences do.
@@ -895,7 +863,7 @@ describe("search unification regression: the commands on Settings and with the l
       await router!.navigate({ to: "/settings" });
     });
     await settle();
-    expect(sidebarSearchField(), "Settings shows its own navigation").toBeNull();
+    expect(document.querySelector("[data-app-modal]"), "the Settings modal").not.toBeNull();
     document.querySelector<HTMLElement>('[data-testid="settings-control"]')?.focus();
 
     await press(THREAD_SEARCH_CHORD);
@@ -1036,7 +1004,7 @@ describe("search unification regression: the chat keeps its own focus after a se
       expect(
         (document.activeElement as HTMLElement | null)?.getAttribute("aria-label"),
         `focus is on ${describeFocus()}`,
-      ).toBe("Message"),
+      ).toBe("Message Rename target thread"),
     );
   });
 });

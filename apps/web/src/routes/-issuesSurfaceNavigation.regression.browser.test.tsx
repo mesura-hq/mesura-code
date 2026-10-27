@@ -3,16 +3,9 @@ import "../mesura.css";
 
 import { act, render as renderBrowser, type Screen } from "../../test/render";
 /**
- * Entry point: the real `/_chat/pull-requests` file route (`_chat.pull-requests.tsx`), mounted at
- * `/pull-requests` beside a stand-in `/issues` page, with the shared pull-request panel open in
- * the real right-panel store. The reader opens the real Add surface launcher in the panel's tab
- * strip and chooses Issues.
- *
- * The fixture replaces boundaries only: the environment and project hooks, the pull-request list
- * reads, the live-refresh subscription, and the pull-request detail panel the open tab renders.
- *
- * Issues pane, phase 2, regression: the pull-request page has no thread to hold an Issues pane, so
- * its Add surface entry navigates to the standalone page, and only when a server can read issues.
+ * Regression: the pull-request page has no thread to hold an Issues pane, so its Add surface
+ * entry navigates to the standalone `/issues` page, and only when a server can read issues.
+ * The fixture replaces boundaries only; the route, panel store and launcher are real.
  */
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import {

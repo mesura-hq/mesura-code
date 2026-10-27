@@ -7,15 +7,9 @@ import { assert, describe, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * The modal key layer's block cursor is static: it is repainted on the events
- * that move it (a key, a scroll, a composer layout change) and never by a
- * loop. AGENTS.md ("Taste") bans continuously repainting animations because
- * they peg the GPU on high-refresh displays, and a frame loop that keeps a
- * cursor overlay in place works, so no behavioural test notices it. These
- * assertions read the sources.
- *
- * Phase 7 of the modal keys production cycle, criterion 6: no continuous
- * animation is added for the widened cursor on narrow glyphs.
+ * The modal key layer's block cursor repaints only on the events that move it, never in a loop:
+ * AGENTS.md ("Taste") bans continuous repaint animations, and a frame loop works, so no
+ * behavioural test notices it. These assertions read the sources.
  */
 
 const keysSource = NodePath.join(repositoryRoot, "apps/web/src/keys");

@@ -112,11 +112,8 @@ describe("ConnectionStorage.makeCatalogBackend", () => {
     }),
   );
 
-  // Regression guard. The write failure used to hardcode "Desktop secure
-  // storage is unavailable in this system context", which names no keyring and
-  // no remedy — so a user on a session Electron does not recognize (Hyprland,
-  // for one) read a dead end. The main process knows which keyring it looked
-  // for; ask it. Do not inline a fixed sentence here again.
+  // Regression guard: a fixed sentence names no keyring and no remedy, a dead end on a session
+  // Electron does not recognize (Hyprland). Ask the main process; do not inline a sentence again.
   it.effect("reports the reason the desktop gives for refusing the catalog", () =>
     Effect.gen(function* () {
       vi.stubGlobal("window", {
@@ -343,8 +340,8 @@ describe("browser GitHub routing permissions", () => {
       };
       const firstBrowser = Object.assign(new EventTarget(), { localStorage });
       const secondBrowser = Object.assign(new EventTarget(), { localStorage });
-      const first = ConnectionStorage.makeBrowserGitHubRoutingPermissions(firstBrowser);
-      const second = ConnectionStorage.makeBrowserGitHubRoutingPermissions(secondBrowser);
+      const first = ConnectionStorage.makeBrowserPullRequestRoutingPermissions(firstBrowser);
+      const second = ConnectionStorage.makeBrowserPullRequestRoutingPermissions(secondBrowser);
       const entry = {
         target: new PrimaryConnectionTarget({
           environmentId: EnvironmentId.make("first"),
@@ -392,7 +389,7 @@ describe("browser GitHub routing permissions", () => {
       expect(yield* second.get(entry)).toBe("off");
       expect(yield* first.get(other)).toBe("read");
       expect(
-        yield* ConnectionStorage.makeBrowserGitHubRoutingPermissions(firstBrowser).get(entry),
+        yield* ConnectionStorage.makeBrowserPullRequestRoutingPermissions(firstBrowser).get(entry),
       ).toBe("off");
 
       yield* first.set(entry, "read-write");

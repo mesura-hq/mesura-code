@@ -15,13 +15,9 @@ import { runFileManagerToggle } from "../mesuraFileManager/fileManagerToggle";
 import { runFileTreeToggle } from "./fileTreeFocusMoves";
 
 /**
- * `fileTree.toggle` and `fileTree.miller`, dispatched from a window
- * capture-phase listener.
- *
- * Capture, because the tree consumes bare letters and the editor consumes
- * everything: a bubbling handler would never see the chord from either. The
- * shortcut context mirrors the chat route's own listener so `when` clauses
- * read the same.
+ * `fileTree.toggle` and `fileTree.miller` on a window capture-phase listener: the tree eats
+ * bare letters and the editor eats everything, so bubbling would never see the chord. The
+ * context mirrors the chat route's listener so `when` clauses read the same.
  */
 export function useFileTreeShortcut(routeThreadRef: ScopedThreadRef | null): void {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -36,10 +32,12 @@ export function useFileTreeShortcut(routeThreadRef: ScopedThreadRef | null): voi
       : false,
   );
   const latest = useRef({ routeThreadRef, keybindings, terminalOpen, previewOpen });
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref so the window listener attaches once
   useEffect(() => {
     latest.current = { routeThreadRef, keybindings, terminalOpen, previewOpen };
   });
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: window capture-phase keydown subscription
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isCommandPaletteOpen()) return;

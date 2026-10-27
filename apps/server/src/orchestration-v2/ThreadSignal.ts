@@ -72,13 +72,10 @@ const RUN_UNFINISHED_STATUSES: ReadonlySet<OrchestrationV2Run["status"]> = new S
 ]);
 
 /**
- * Whether `event` resolves `signal`:
- * - a message the user wrote answers or redirects whatever the agent declared;
- * - a new run means the work continues, so the thread is no longer ready to close;
- * - a run that failed or was interrupted takes back the `ready_to_close` it set.
- *
- * Automatic wakes and other agents' messages start runs but are not user-authored, so they
- * never clear `needs_input`: the user has not answered yet.
+ * Whether `event` resolves `signal`: a user-written message answers any signal, a new run means
+ * the thread is no longer ready to close, and a failed or interrupted run takes back its own
+ * `ready_to_close`. Automatic wakes and other agents' messages start runs but are not
+ * user-authored, so they never clear `needs_input`.
  */
 export function agentSignalClearedBy(
   signal: ThreadAgentSignal,
@@ -119,15 +116,10 @@ function mayClearAgentSignal(event: OrchestrationV2DomainEvent): boolean {
 }
 
 /**
- * Follows each event that clears a thread's signal with a `thread.agent-signal-cleared` event in
- * the same batch. Every writer commits through the event sink, so this one place sees every run
- * start, run failure and interrupt, whichever service wrote it; the cleared state is in the event
- * log, so replays and clients agree with the projection.
- *
- * The clearing event carries the whole thread, so its payload must be the thread as the batch
- * leaves it at that point. Each affected thread is therefore folded through the projection's own
- * reducer: a copy of the stored row would undo earlier events in the batch, such as a new
- * provider binding or the activity time.
+ * Follows each event that clears a signal with a `thread.agent-signal-cleared` event in the same
+ * batch; every writer commits through the event sink, so replays agree with the projection. The
+ * payload is the thread folded through the projection's reducer up to that point: a copy of the
+ * stored row would undo earlier events in the batch.
  */
 export const withAgentSignalClearings = Effect.fnUntraced(function* <E>(
   events: ReadonlyArray<OrchestrationV2DomainEvent>,

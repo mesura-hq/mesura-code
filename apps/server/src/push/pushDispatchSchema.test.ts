@@ -1,10 +1,6 @@
 /**
- * Phase 3 fence of phone push notifications: the table behind acceptance
- * criterion 3, every send key a thread announced, which survives a server
- * restart, is fork DDL.
- *
- * Entry point: `runMigrations`, which every server boot runs and which ends
- * with `MESURA_SCHEMA_STATEMENTS` (`persistence/mesuraSchema.ts`).
+ * Push fence, acceptance criterion 3: the table of announced send keys, which must survive a
+ * restart, is fork DDL that `runMigrations` applies on every boot via `MESURA_SCHEMA_STATEMENTS`.
  */
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";

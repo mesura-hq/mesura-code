@@ -11,26 +11,10 @@ import type {
 } from "@t3tools/contracts";
 
 /**
- * The fixture the `AppRoot.*.fence` tests mount the real app over: the state
- * the replaced boundaries read, and one `vi.mock` factory per boundary.
- * Vitest hoists `vi.mock` per test module, so each fence wires the factories
- * up itself, loading this module from inside the factory through a hoisted
- * loader (a plain top-level `const` is not initialised yet when they run):
- *
- * ```ts
- * const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
- * vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
- * ```
- *
- * This module must stay free of runtime imports of the app: it is loaded from
- * inside those factories, and an app import would reach a module whose mock
- * is still being built. Mounting helpers live in `appRootFenceApp.tsx`.
- *
- * Boundaries replaced, and nothing else: the environment and thread reads
- * (looked up by the thread ref), HTTP session grants, every RPC command and
- * query, the chords (the shipped defaults), unrelated chrome, the CSS highlight registry happy-dom
- * lacks (recorded instead of painted), the sidebar's thread list, the file
- * manager layer and the virtual list's measurement.
+ * Fixture for the `AppRoot.*.fence` tests, loaded from inside their `vi.mock` factories through
+ * `vi.hoisted(() => () => import(...))`, since a top-level `const` is not initialised when they run.
+ * It must have no runtime imports of the app: one would reach a module whose mock is still being
+ * built. Mounting helpers live in `appRootFenceApp.tsx`.
  */
 
 export const FENCE_ENVIRONMENT_ID = "app-root-fence-environment";

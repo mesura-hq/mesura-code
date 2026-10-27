@@ -1,13 +1,8 @@
 /**
- * Mesura: bounded reads for agent thread search, on the V2 projection tables.
- *
- * Upstream's `ThreadSearch` answers the lexical picker: active threads only,
- * one best match per thread. Agent thread search needs more history than that,
- * read page by page: a catalog of every undeleted thread, active and archived,
- * and per-message evidence with an excerpt around each match. Every page,
- * cursor, title, and excerpt is bounded, and each evidence request scans at most
- * THREAD_SEARCH_EVIDENCE_SCAN_BUDGET messages, so no request reads or returns an
- * unbounded share of the history.
+ * Mesura: bounded reads for agent thread search on the V2 projection tables: a
+ * catalog of every undeleted thread (archived included) and per-message evidence.
+ * Every page, cursor, title and excerpt is bounded, and each evidence request
+ * scans at most THREAD_SEARCH_EVIDENCE_SCAN_BUDGET messages.
  */
 import {
   IsoDateTime,
@@ -116,11 +111,9 @@ const EvidenceRow = Schema.Struct({
 const CATALOG_DEFAULT_PAGE_SIZE = 100;
 const EVIDENCE_DEFAULT_PAGE_SIZE = 20;
 /**
- * Messages one evidence request may examine. A leading-wildcard LIKE cannot use
- * an index, so the page limit alone would not bound the scan: a rare term
- * would read the whole history before LIMIT applies. Each request instead
- * reads at most this many messages, newest first, and its cursor resumes the
- * scan. A page can therefore hold no matches yet still return a `nextCursor`.
+ * Messages one evidence request may examine, newest first. A leading-wildcard LIKE
+ * cannot use an index, so LIMIT alone would let a rare term read the whole history.
+ * The cursor resumes the scan, so a page can hold no matches yet return a `nextCursor`.
  */
 export const THREAD_SEARCH_EVIDENCE_SCAN_BUDGET = 2_000;
 // Exclusive upper rowid bound for a first global page; SQLite rowids are signed 64-bit.
@@ -215,7 +208,7 @@ export class ThreadSearchEvidence extends Context.Service<
   }
 >()("t3/orchestration-v2/ThreadSearchEvidence") {}
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -251,20 +244,10 @@ export const make = Effect.gen(function* () {
     `,
   });
 
-  // The scan route of one evidence request (see ThreadSearchEvidencePosition).
-  // A global walk reads the messages table by rowid. A walk inside one thread
-  // reads orchestration_v2_projection_messages_thread_created_idx in
-  // (created_at, message_id) order; sorting that thread by rowid instead would
-  // read all of its messages before LIMIT applies. Row-value comparisons let
-  // SQLite turn the keyset bounds into a range on that index. A thread cursor
-  // stores the boundary's rowid instead of its message_id, which has no length
-  // limit and would outgrow the cursor; findBoundary recovers the id.
-  //
-  // When the boundary row is gone (a projection rebuild renumbers rowids), the
-  // walk resumes at `created_at <= boundary timestamp`: matches sharing that
-  // timestamp can repeat, and none are skipped. A sentinel id above every real
-  // id cannot do this: SQLite compares TEXT as UTF-8 bytes, and a U+FFFF
-  // sentinel (EF BF BF) sorts below every id that starts above U+FFFF (F0 and up).
+  // A thread walk uses row-value bounds on messages_thread_created_idx; rowid order would
+  // read the whole thread before LIMIT. Its cursor holds the boundary rowid (message_id is
+  // unbounded). A lost boundary resumes at `created_at <=` (repeats, never skips): a U+FFFF
+  // sentinel id fails, since SQLite compares UTF-8 bytes and ids from F0 up sort above it.
   const threadUpperBound = (bound: {
     readonly beforeCreatedAt: string | null;
     readonly beforeMessageId: string | null;
@@ -333,14 +316,10 @@ export const make = Effect.gen(function* () {
     },
   });
 
-  // Unlike ThreadSearch this includes archived threads, returns every matching
-  // message, and scans one window per request. A message counts once it has
-  // finished streaming. An assistant message counts only once its run has
-  // settled, so text of a run still in progress never becomes evidence; a
-  // runless one counts. Messages of a rolled-back run are left out: a revert
-  // keeps them in the projection, but the transcript no longer shows them. The
-  // run lookup is by primary key, so its cost follows the window size. Only
-  // the page's rows are joined back for a bounded window around the match.
+  // Only finished text is evidence: streaming messages wait, an assistant message waits for
+  // its run to settle (runless ones count), and rolled-back runs are excluded because a
+  // revert keeps them in the projection but the transcript hides them. Only the page's rows
+  // are joined back for the match window.
   const searchEvidenceRows = SqlSchema.findAll({
     Request: EvidenceRequest,
     Result: EvidenceRow,

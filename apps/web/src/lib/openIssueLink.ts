@@ -7,31 +7,57 @@ import {
   type IssueReference,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import {
-  parseChangeRequestUrl,
-  pullRequestCandidateUrlFromReferenceAutolink,
-  type ChangeRequestLink,
-} from "@t3tools/shared/changeRequestUrl";
+import { findProjectForChangeRequest } from "@t3tools/client-runtime/change-request-links";
+import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { type MouseEvent, useCallback, useEffect, useMemo, useRef } from "react";
 import type { Options as ReactMarkdownOptions } from "react-markdown";
 
 import { issuesAvailability } from "../components/issues/issues.logic";
-import { remarkPullRequestAutolinks } from "../components/pullRequest/pullRequestMarkdown.logic";
+import {
+  remarkPullRequestAutolinks,
+  sameRepositoryReferenceAutolinker,
+} from "../components/pullRequest/pullRequestMarkdown.logic";
 import { type IssuesPanelSelection, useRightPanelStore } from "../rightPanelStore";
 import { useProjects, useThreadShell } from "../state/entities";
 import { useEnvironment } from "../state/environments";
 import { issueReference } from "../state/issues";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
-import { findProjectForChangeRequest } from "./openPullRequestLink";
 
 /**
  * The repository and number behind a GitHub issue URL, or null for anything else. GitHub serves
  * pull requests under `/issues/` too, so this names a number, not a kind: only the server's
  * classification can say which surface opens it.
  */
+type ChangeRequestLink = NonNullable<
+  ReturnType<typeof sourceControlClients.parseChangeRequestUrl>
+>["link"];
+
 export function parseIssueUrl(targetUrl: string): ChangeRequestLink | null {
   const candidate = pullRequestCandidateUrlFromReferenceAutolink(targetUrl);
-  return candidate === null ? null : parseChangeRequestUrl(candidate);
+  return candidate === null
+    ? null
+    : (sourceControlClients.parseChangeRequestUrl(candidate)?.link ?? null);
+}
+
+/** GitHub serves pull requests under `/issues/` too: read such a link as a pull request URL. */
+function pullRequestCandidateUrlFromReferenceAutolink(targetUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(targetUrl);
+  } catch {
+    return null;
+  }
+  const hostname = url.hostname.toLowerCase();
+  if (
+    (url.protocol !== "https:" && url.protocol !== "http:") ||
+    !(hostname === "github.com" || hostname.split(".").includes("github"))
+  ) {
+    return null;
+  }
+  const match = /^\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/|$)/u.exec(url.pathname);
+  if (match?.[1] === undefined || match[2] === undefined) return null;
+  url.pathname = `/${match[1]}/pull/${match[2]}`;
+  return url.toString();
 }
 
 /**
@@ -85,7 +111,7 @@ function answersLink(reference: IssueReference, link: ChangeRequestLink): boolea
   const answered =
     reference.kind === "issue"
       ? parseIssueUrl(reference.url)
-      : parseChangeRequestUrl(reference.url);
+      : (sourceControlClients.parseChangeRequestUrl(reference.url)?.link ?? null);
   return (
     answered !== null &&
     reference.number === link.number &&
@@ -125,6 +151,7 @@ export function useOpenIssueReference(
   });
   const owner = useRef({});
   const threadKey = threadRef === undefined ? null : scopedThreadKey(threadRef);
+  // oxlint-disable-next-line t3code/react-effect-budget -- cleanup only: an unmounting message drops the activation it still owns
   useEffect(
     () => () => {
       if (threadKey !== null && latestActivationByThread.get(threadKey)?.owner === owner.current) {
@@ -212,11 +239,9 @@ type RemarkPlugins = NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 const NO_REMARK_PLUGINS: RemarkPlugins = [];
 
 /**
- * Remark plugins that turn `#123` in a thread's agent prose into a link to the thread project's
- * repository, or none when that repository is not known: the thread's own project decides, never
- * a title or a working directory. `enabled: false` returns none too, for a streaming message:
- * any extra plugin turns off incremental parsing, which keeps a long answer from reparsing its
- * finished code blocks.
+ * Remark plugins that link `#123` in agent prose to the thread project's repository (never one
+ * read from a title or working directory), or none when it is unknown. `enabled: false` returns
+ * none for a streaming message: any extra plugin turns off incremental parsing.
  */
 export function useIssueReferenceAutolinks(
   threadRef: ScopedThreadRef | null | undefined,
@@ -239,7 +264,12 @@ export function useIssueReferenceAutolinks(
     () =>
       repositoryUrl === null || !enabled
         ? NO_REMARK_PLUGINS
-        : [[remarkPullRequestAutolinks, { repositoryUrl, commits: false }]],
+        : [
+            [
+              remarkPullRequestAutolinks,
+              { autolinks: sameRepositoryReferenceAutolinker(repositoryUrl) },
+            ],
+          ],
     [enabled, repositoryUrl],
   );
 }

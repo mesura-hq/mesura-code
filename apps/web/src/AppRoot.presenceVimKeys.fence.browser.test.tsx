@@ -1,12 +1,6 @@
-/**
- * Entry point: AppRoot, mounted as `AppRoot.presence.fence.browser.test.tsx`
- * mounts it, after the two installs `main.tsx` runs before React mounts and in
- * the same order: the page input observer, then the key engine. A file of its
- * own, because the key engine installs once per module.
- *
- * Phone push phase 4, criterion 1: a Vim key the key engine consumes is still
- * input from the developer.
- */
+// Phone push phase 4: a Vim key the key engine consumes still counts as developer input. The
+// installs follow `main.tsx`'s order (page input observer, then key engine). This is a file of its
+// own because the key engine installs once per module.
 import { expect, it, vi } from "vite-plus/test";
 
 const fenceMocks = vi.hoisted(() => () => import("./test/presenceFenceMocks"));

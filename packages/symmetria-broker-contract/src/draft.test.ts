@@ -70,11 +70,8 @@ describe("SymmetriaDraft", () => {
       attachments: [{ dataUrl: "data:image/png;base64,AAAA" }],
       images: [{ dataUrl: "data:image/png;base64,AAAA" }],
     };
-    // Both directions, because a producer that builds a draft from the client
-    // store encodes one as often as it decodes one. The cast is the point of
-    // the second half: it stands for a producer handing the encoder a value
-    // fatter than this schema names, which is the mistake the allowlist has to
-    // catch on the way out too.
+    // A producer encodes drafts as often as it decodes them. The cast stands for a producer
+    // that hands the encoder extra fields, which the allowlist must also strip on the way out.
     const encoded = encodeDraft(leaky as unknown as SymmetriaDraft);
     for (const value of [decodeDraftOrThrow(leaky), encoded]) {
       for (const field of SYMMETRIA_DRAFT_EXCLUDED_FIELDS) {

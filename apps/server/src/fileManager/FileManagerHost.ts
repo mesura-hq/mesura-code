@@ -22,17 +22,10 @@ import { createHostOperations } from "./hostOperations.ts";
 import { createWsIpcSurface } from "./wsIpcSurface.ts";
 
 /**
- * The file manager's privileged half, hosted by this server.
- *
- * Runs the vendored registry (`@symmetria/fm-main`) over a WebSocket-shaped
- * surface, so the file manager's UI in any client talks to this machine's
- * filesystem through the same 28 channels it uses against its Electron host.
- * Every payload is decoded by the file manager's own decoders inside the
- * registry; this service carries envelopes and sessions, nothing more.
- *
- * Every method takes the RPC client id first: a session belongs to the
- * connection that opened it, and the id the client chose is private to that
- * connection.
+ * The file manager's privileged half: runs the vendored registry (`@symmetria/fm-main`) over a
+ * WebSocket-shaped surface. The registry's own decoders decode every payload; this service only
+ * carries envelopes and sessions. Every method takes the RPC client id first, because a session
+ * belongs to the connection that opened it and its id is private to that connection.
  */
 
 /**
@@ -42,13 +35,10 @@ import { createWsIpcSurface } from "./wsIpcSurface.ts";
 export const FILE_MANAGER_PREVIEW_ROUTE_PREFIX = "/api/file-manager/preview/";
 
 /**
- * How many pushes a session may have waiting for its client. A watched
- * directory under churn emits one `changed` per event and a transfer one
- * progress tick per chunk; a client on a slow link must not grow the server.
- * Sliding, so a storm drops its OLDEST ticks: every consumer coalesces (a
- * later `changed` re-lists the same directory, a later progress tick
- * supersedes the earlier one), and the file manager's UI never asks for the
- * streamed listing that would care about order.
+ * Bounds the pushes waiting for a session's client, so a slow client cannot grow the server.
+ * The queue slides and drops the OLDEST pushes: every consumer coalesces (a later `changed`
+ * re-lists the directory, a later progress tick supersedes earlier ones), and the UI never
+ * requests the order-sensitive streamed listing.
  */
 const SESSION_EVENT_CAPACITY = 1024;
 
@@ -90,11 +80,10 @@ export class FileManagerHost extends Context.Service<
 >()("t3/fileManager/FileManagerHost") {}
 
 /**
- * What a host may change about the registry's dependencies. Production passes
- * nothing: the bookmark and listing stores are the standalone file manager's
- * own files, so both applications share them, and the operations reach the
- * real desktop. Tests confine the stores to a temporary directory and hand in
- * operations whose `gio` and `xdg-open` never run.
+ * What a host may override in the registry's dependencies. Production overrides nothing, so it
+ * shares the standalone file manager's bookmark and listing stores and reaches the real desktop.
+ * Tests confine the stores to a temporary directory and pass operations that never run `gio` or
+ * `xdg-open`.
  */
 export type HostOverrides = Pick<
   Dependencies,
@@ -175,8 +164,12 @@ export const make = Effect.fn(function* (overrides: HostOverrides = {}) {
 
   return FileManagerHost.of({
     host: Effect.sync(() => ({ homePath: NodeOS.homedir() })),
-    query: (clientId, input) => invoke(clientId, input.sessionId, input.channel, input.payload),
-    mutate: (clientId, input) => invoke(clientId, input.sessionId, input.channel, input.payload),
+    query: Effect.fn("FileManagerHost.query")(function (clientId, input) {
+      return invoke(clientId, input.sessionId, input.channel, input.payload);
+    }),
+    mutate: Effect.fn("FileManagerHost.mutate")(function (clientId, input) {
+      return invoke(clientId, input.sessionId, input.channel, input.payload);
+    }),
     openSession,
     events: (clientId, input) => Stream.unwrap(openSession(clientId, input)),
     trackedSessions: Effect.sync(() => registry.trackedWindows()),

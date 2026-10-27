@@ -1,19 +1,7 @@
 /**
- * Mesura: Software Factory cards under orchestrator v2.
- *
- * A plan, run or report card is a `factory_card` turn item recorded by the
- * internal `factory_card.record` command. The callers (the factory MCP tools
- * and the run tracker) know only the thread, so the orchestrator anchors a new
- * card to the thread's active run, else its latest run. A card is upserted by
- * its turn item id: a later record keeps the card's anchor, ordinal and
- * `startedAt`, and replaces its payload. The event sink pins every turn item's
- * ordinal on first record (`TurnItemPositionStore`), so a card never moves in
- * the timeline once it exists.
- *
- * A card is always `completed`: restart recovery cancels open items of a run,
- * and the shell counts open items as pending work. The run's own state lives
- * in the card's payload, not in the item status.
- *
+ * Mesura: Software Factory cards. A new card anchors to the thread's active run,
+ * else its latest; a re-record replaces only the payload. Always `completed`:
+ * restart recovery cancels open items, and the shell counts them as pending.
  * @module FactoryCards
  */
 import type {
@@ -188,11 +176,9 @@ function withFactoryRunShellSummary(
 }
 
 /**
- * Labels thread shells from `FactoryRunShellSummaries`, read once when the
- * projection store is built. Optional, so a runtime without the factory (most
- * tests) builds shells without a label. The run tracker sets a summary before
- * it records the run card, and that card's `turn-item.updated` event is what
- * makes the shell streams read the thread's shell again.
+ * Labels thread shells from the optional `FactoryRunShellSummaries`. The run
+ * tracker sets a summary before it records the run card, because that card's
+ * `turn-item.updated` event is what makes the shell streams re-read the shell.
  */
 export const factoryRunShellLabeler = Effect.serviceOption(FactoryRunShellSummaries).pipe(
   Effect.map(

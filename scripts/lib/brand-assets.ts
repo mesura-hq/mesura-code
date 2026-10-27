@@ -53,15 +53,9 @@ export const BRAND_ASSET_PATHS = {
 export const MASTER_RASTER_SIZE = 1254;
 
 /**
- * First row of the strip a channel master may treat as its own. Above it the
- * development and nightly masters are the production artwork verbatim, which
- * is what rules out a coloured frame around the cube; below it they carry the
- * uppercase channel wordmark. The guard in `brand-icon-source.test.ts`
- * derives its bounds from this.
- *
- * The band sits outside Android's adaptive-icon safe zone, so an adaptive
- * launcher clips the wordmark. That is not a regression: the coloured frame
- * this replaced sat further out still and was clipped too.
+ * First row a channel master may own: above it the development and nightly masters must equal the
+ * production artwork; below it they carry the channel wordmark. `brand-icon-source.test.ts` reads it.
+ * Android adaptive launchers clip this band; that is expected, not a regression.
  */
 export const CHANNEL_WORDMARK_BAND_TOP = 1097;
 
@@ -83,25 +77,10 @@ export function resolveDesktopLinuxIdentity(isDevelopment: boolean) {
 }
 
 /**
- * Electron scopes its single-instance lock to the userData directory. Upstream
- * names that directory `t3code`, which the separately installed T3 Code claims
- * too, so whichever application started second read itself as a secondary
- * instance and quit before opening a window — silently, because
- * `DesktopClerk.configure` exits through `Effect.interrupt` on that path.
- *
- * `legacyUserDataDirName` repeats `userDataDirName` on purpose, and
- * `resolveUserDataPath` adopts the legacy directory whenever it exists. Mesura
- * Code shared `t3code` with the installed T3 Code rather than owning a
- * directory of its own, so there is nothing to migrate: the old Chromium
- * profile stays with T3 Code and Mesura Code starts a fresh one, which costs a
- * one-time renderer-state reset. Pointing the field at `t3code`, or at
- * upstream's older `T3 Code (Alpha)`, would hand both applications the same
- * directory again and restore the collision this exists to remove.
- *
- * Equal names leave `resolveUserDataPath` (apps/desktop/src/app/DesktopUserData.ts)
- * probing a directory it returns either way. The probe cannot change the
- * result, but it can still fail: an unreadable userData directory surfaces as
- * a boot-time `DesktopUserDataInitializationError` rather than a window.
+ * Electron scopes its single-instance lock to the userData directory; sharing upstream's `t3code`
+ * with the installed T3 Code made the second app to start quit silently. `legacyUserDataDirName`
+ * repeats `userDataDirName` on purpose: pointing it at `t3code` or `T3 Code (Alpha)` would make
+ * `resolveUserDataPath` adopt T3 Code's directory and restore that collision.
  */
 export const DESKTOP_USER_DATA_IDENTITY = {
   development: {

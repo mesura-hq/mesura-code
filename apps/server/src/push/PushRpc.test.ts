@@ -1,10 +1,7 @@
 /**
- * Phase 1 fence of phone push notifications: acceptance criterion 6 on the
- * server, which stays authoritative whatever a client checks first.
- *
- * Entry points: `WsRpcGroup`, the group the WebSocket server serves, and
- * `RpcAuthorization.layer`, the middleware every request passes before its
- * handler. A client is an `RpcTest` client holding a grant's scopes.
+ * Phone push criterion 6 on the server, which stays authoritative whatever a client checks
+ * first: `RpcTest` clients holding a grant's scopes call `WsRpcGroup` through
+ * `RpcAuthorization.layer`.
  */
 import {
   AuthOrchestrationOperateScope,

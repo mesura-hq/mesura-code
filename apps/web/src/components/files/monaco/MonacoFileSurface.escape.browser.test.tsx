@@ -1,29 +1,9 @@
 import { act } from "../../../../test/render";
 /**
- * Entry point: `MonacoFileSurface`, the file panel's editor, mounted whole —
- * its Neovim hook, its status strip, and the dismissal listeners it installs
- * on the document. Keys are dispatched on the focused element, so the
- * dismissal's capture listener sees each one before the editor's own
- * `onKeyDown` does, as in a browser. The session's replies and events are the
- * test's to time. See `mountMonacoFileSurface` in `~/test/nvimEditorHarness`
- * for what is real and what is replaced; below, the surface's save
- * coordinator, comment zones, settings, worker setup and query cache are
- * stubbed, none of which decides where Escape goes.
- *
- * Phase 3 of the editor latency cycle, "Escape never strands Neovim in insert
- * mode":
- * - 1: Escape goes to Neovim, not to dismissal, while a key for the thread is
- *   pending or the client's mode is not confirmed by Neovim; the editor
- *   dismisses on Escape only when Neovim has confirmed plain normal mode and
- *   no key is pending.
- * - 2: the S4 race (A, x, Escape 100 ms apart at 60 ms one-way delay) leaves
- *   Neovim in insert mode with focus outside the editor in 0 of 8 tries, and
- *   no key typed in the editor reaches the chat composer. The 0 of 8 number is
- *   the bench's S4 measurement, run by the coordinator and the verifier
- *   (`bench/bench.sh`, METHOD.md S4); the spec here replays the recorded order
- *   of one try on the client.
- * - 3: guards. Escape in confirmed normal mode with nothing pending still
- *   releases the editor, and flash's `jumping` state still keeps Escape.
+ * Phase 3 of the editor latency cycle: Escape never strands Neovim in insert mode. Mounts the
+ * whole `MonacoFileSurface` (`mountMonacoFileSurface`); keys dispatch on the focused element, so
+ * the dismissal capture listener sees each before the editor's `onKeyDown`. The S4 spec replays
+ * one recorded try of the bench race (`bench/bench.sh`, METHOD.md S4) on the client.
  */
 import type { EditorSessionEvent } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -122,12 +102,9 @@ const stripMode = (container: HTMLElement) =>
   container.querySelector("[data-nvim-status-strip] span")?.textContent ?? null;
 
 /**
- * Neovim reports its mode, as the host plugin's `ModeChanged` push does, and
- * every key batch answered from here on answers it too.
- *
- * Confirmation is the batch's answer (`EditorSessionInputResult`); the stream
- * event is what the strip shows. Where Neovim will be once it consumes keys the
- * test has not answered yet, `editorTransport.setNeovimMode` says alone.
+ * Neovim reports its mode, as the plugin's `ModeChanged` push does, and every later key batch
+ * answers it too. The batch answer is the confirmation; the stream event is what the strip shows.
+ * For keys the test has not answered yet, only `editorTransport.setNeovimMode` sets the mode.
  */
 async function neovimReports(mode: string, extra: { readonly jumping?: boolean } = {}) {
   editorTransport.setNeovimMode({ mode, jumping: extra.jumping ?? false });

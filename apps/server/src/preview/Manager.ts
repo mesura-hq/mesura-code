@@ -1,14 +1,8 @@
 /**
- * In-memory PreviewManager implementation.
- *
- * Sessions are keyed by `(threadId, tabId)`; a single thread can host
- * multiple tabs (browser-style). `open` always creates a new tab — tab
- * lifecycle is owned by the renderer. `openLinkTarget` alone reuses the
- * server-designated thread-link tab under the same lock as open and close.
- *
- * Events are published via Effect's `PubSub`, so subscriber failures are
- * isolated from the publishing call (a closed WS subscriber queue cannot
- * fail an in-progress `navigate()`).
+ * Sessions are keyed by `(threadId, tabId)`. `open` always creates a tab, because the
+ * renderer owns tab lifecycle; only `openLinkTarget` reuses the thread-link tab, under
+ * the same lock as open and close. Events go through a `PubSub`, so a closed WS
+ * subscriber queue cannot fail an in-progress `navigate()`.
  */
 import {
   type PreviewCloseInput,
@@ -138,7 +132,7 @@ const normalizeUrl = (rawUrl: string): Effect.Effect<string, PreviewInvalidUrlEr
 
 const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* PreviewManagerMake() {
   const crypto = yield* Crypto.Crypto;
   const serverEpoch = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
@@ -146,10 +140,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const eventsPubSub = yield* PubSub.unbounded<PreviewEvent>();
   const events: Stream.Stream<PreviewEvent> = Stream.fromPubSub(eventsPubSub);
 
-  /**
-   * The event is published INSIDE the lock so observers see events in the same
-   * order as the underlying state transitions.
-   */
+  /** Publish inside the lock to preserve state-transition order. */
   const mutateExistingSession = <R, E>(
     threadId: string,
     tabId: string,

@@ -1,13 +1,7 @@
 import { act, render as renderBrowser, type Screen } from "../../test/render";
-/**
- * Entry point: the real `RightPanelTabs`, as `ChatView` mounts it for a thread's right panel.
- * With no surfaces it renders the surface launcher; with one surface it renders the tab strip and
- * its Add surface launcher. Keys are dispatched as the browser would deliver them, at the focused
- * element.
- *
- * Issues pane, phase 2: acceptance criteria 1–2 for the contextual `I` shortcut. These are guards:
- * the prototype already routes Issues through the shared surface shortcut machinery.
- */
+// The real `RightPanelTabs` as `ChatView` mounts it: the surface launcher with no surfaces, the tab
+// strip and its Add launcher with one. Issues pane phase 2, criteria 1-2 for the contextual `I`
+// shortcut, as guards: the prototype already routes Issues through the shared surface shortcuts.
 import type { ComponentProps } from "react";
 
 import { describe, expect, it, vi } from "vite-plus/test";

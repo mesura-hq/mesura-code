@@ -7,9 +7,6 @@ import {
   getChangedThreadOrderSettingLabels,
   getChangedTypographySettingLabels,
   hasChangedBackgroundActivitySettings,
-  isProjectGroupingEnabled,
-  projectGroupingModeFromToggle,
-  resolveBackgroundActivityProfileOption,
   THREAD_ORDER_DEFAULT_SETTINGS_PATCH,
 } from "./SettingsPanels.logic";
 

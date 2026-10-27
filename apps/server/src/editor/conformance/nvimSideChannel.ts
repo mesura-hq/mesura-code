@@ -1,17 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - a second msgpack-RPC client on a Unix socket.
 /**
- * A second channel into the Neovim a manager spawned, for asking it what the
- * wire does not say.
- *
- * The manager owns its Neovim's only channel, `--embed`'s stdio, and exposes
- * nothing of it: a conformance test that drives the manager the way the
- * websocket layer does has no way to ask, say, how far the window is scrolled
- * sideways. `win_viewport` reports the topline and never `leftcol`.
- *
- * So the adapter this module provides spawns the same Neovim with `--listen`
- * on a socket the test owns, and `connectSideChannel` speaks msgpack-RPC on it.
- * Everything the manager sends still goes over stdio, untouched; the side
- * channel only asks. A probe that changes Neovim's state says so in its name.
+ * A second channel into a manager's Neovim, for state the wire omits (`win_viewport` has no
+ * `leftcol`). The adapter adds `--listen` on a test-owned socket, and the manager's own traffic
+ * stays on `--embed` stdio. The side channel only asks; a probe that changes state says so.
  *
  * @module nvimSideChannel
  */
@@ -27,12 +18,9 @@ import { NvimAdapter } from "../NvimAdapter.ts";
 // there); the probes below return plain tables and numbers, never handles.
 
 /**
- * The real adapter, with `--listen <socketPath>` put in front of the
- * manager's own arguments. In front, because the launch ends with `--` and the
- * file to open: anything after that is a file name.
- *
- * `onRequest`, when given, hears the method of every request the manager
- * writes to Neovim, which is how a test counts the grid resizes it caused.
+ * The real adapter with `--listen <socketPath>` before the manager's arguments, because the launch
+ * ends with `--` and a file name. `onRequest` hears the method of every request the manager writes
+ * to Neovim, so a test can count the grid resizes it caused.
  */
 export const listeningAdapterLayer = (socketPath: string, onRequest?: (method: string) => void) =>
   Layer.effect(
@@ -40,8 +28,8 @@ export const listeningAdapterLayer = (socketPath: string, onRequest?: (method: s
     Effect.gen(function* () {
       const real = yield* NvimAdapter;
       return NvimAdapter.of({
-        spawn: (input) =>
-          real.spawn({ ...input, args: ["--listen", socketPath, ...input.args] }).pipe(
+        spawn: Effect.fn("NvimAdapter.spawn")(function (input) {
+          return real.spawn({ ...input, args: ["--listen", socketPath, ...input.args] }).pipe(
             Effect.map((process) =>
               onRequest === undefined
                 ? process
@@ -61,7 +49,8 @@ export const listeningAdapterLayer = (socketPath: string, onRequest?: (method: s
                     },
                   },
             ),
-          ),
+          );
+        }),
       });
     }),
   );

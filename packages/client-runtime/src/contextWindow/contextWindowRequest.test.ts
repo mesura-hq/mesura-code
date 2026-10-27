@@ -1,9 +1,6 @@
 /**
- * Phase 3 fence, acceptance criteria 1–6: the shared context-window logic the
- * web pill reads. Entry point: the public subpath
- * `@t3tools/client-runtime/context-window`, imported by name so the export
- * surface itself is under test. Expected values are written out from the
- * approved plan, never computed from the module under test.
+ * Imports the public `@t3tools/client-runtime/context-window` subpath by name, so the export
+ * surface is under test too. Expected values come from the approved plan, never from the module.
  */
 import { describe, expect, it } from "vite-plus/test";
 

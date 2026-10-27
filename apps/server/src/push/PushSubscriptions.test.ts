@@ -1,15 +1,8 @@
 /**
- * Phase 1 fence of phone push notifications: acceptance criteria 2 to 5.
- *
- * Entry point: the `PushSubscriptions` service, the one method each push RPC
- * handler in `wsMesura.ts` calls, built over the layers `server.ts` wires:
- * `PushSender.layer`, `VapidKeys.layer` over the real secret store, and the
- * in-memory SQLite database with upstream's migrations and the fork's
- * `MESURA_SCHEMA_STATEMENTS` applied.
- *
- * The push service is a `node:http` server in the test process. The body is
- * decrypted and the VAPID header verified with code written from RFC 8291 and
- * RFC 8292 (`fakePushService.testFixtures.ts`), never with `web-push`.
+ * Push fence, acceptance criteria 2 to 5, through `PushSubscriptions` over the layers
+ * `server.ts` wires (real secret store, in-memory SQLite with `MESURA_SCHEMA_STATEMENTS`).
+ * The push service is a local `node:http` server. Bodies are decrypted and VAPID verified by
+ * `fakePushService.testFixtures.ts`, written from RFC 8291 and RFC 8292, never with `web-push`.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { PushNotificationPayload } from "@t3tools/contracts";

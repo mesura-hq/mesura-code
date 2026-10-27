@@ -55,9 +55,7 @@ export function SidebarThreadHeader({
   searchFieldAccessory,
 }: SidebarThreadHeaderProps) {
   const resultsVisible = isSearching && searchResultCount > 0;
-  // Results shrink as the query narrows, so the active index can outrun the
-  // list; pointing aria-activedescendant at a removed option strands the
-  // screen reader on nothing.
+  // Shrinking results can remove the active option; never leave aria-activedescendant pointing at it.
   const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
   const newThreadLabel = newThreadShortcutLabel
     ? `New thread (${newThreadShortcutLabel})`
@@ -81,6 +79,8 @@ export function SidebarThreadHeader({
           onKeyDown={onSearchKeyDown}
           placeholder="Search"
           aria-label="Search threads"
+          // Mesura: Down from the empty field enters the thread list (sidebarThreadViewport.ts).
+          data-mesura-thread-search=""
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={resultsVisible}

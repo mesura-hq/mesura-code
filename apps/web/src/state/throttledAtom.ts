@@ -2,16 +2,10 @@ import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 
 /**
- * Mesura, phase 6 of the editor latency cycle: views that need the shell state
- * eventually, not on every streamed update, read through this. Each streamed
- * shell update otherwise re-rendered them inside the WebSocket message task that
- * delivered it, a React commit per update that the editor's keys queued behind.
- *
- * The one place that decides when a view sees a change. A change after a quiet
- * `intervalMs` is published at once; a burst publishes its latest value at most
- * once per `intervalMs`, from a timer of its own. Readers hear only of values
- * that differ from the one they hold. How a reader renders it — urgently, or as
- * a React transition — is the reader's (`useAtomValueInTransition`).
+ * Mesura: for views that need shell state eventually, not on every streamed update that would
+ * otherwise commit inside the WebSocket message task ahead of editor keys. A change after a quiet
+ * `intervalMs` publishes at once; a burst publishes its latest value at most once per `intervalMs`.
+ * Readers hear only of values that differ from the one they hold.
  */
 export function throttledAtom<A>(source: Atom.Atom<A>, intervalMs: number): Atom.Atom<A> {
   let publishedAt = Number.NEGATIVE_INFINITY;

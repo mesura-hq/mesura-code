@@ -61,17 +61,10 @@ export const DictationStripBanner = memo(function DictationStripBanner(props: {
   const phase = dictationRecordingPhase(session);
   const mode = session.mode;
 
-  // Attached composer banner, never a hand-styled surface — the dictation
-  // strip block in mesura.css records why. Placement contract: the strip must
-  // render as a direct child of the composer's `ComposerBanner.Column`
-  // (ChatComposer's `dictationStrip` prop). There it joins the banner stack,
-  // and the Dock's side tabs such as Stash sit beside it. Rendered above the
-  // form instead, it fused onto the Dock and left the Stash tab hanging below
-  // it as a separate step. Column's child selectors (`w-full`,
-  // `last-child:mb-0`) match only a direct `composer-banner-attachment`
-  // child, so do not wrap the strip, and keep it last. Inside the form, the
-  // collapsed-controls marker stops a click on the strip from expanding a
-  // resting composer.
+  // Attached composer banner (mesura.css records why). It must render as the last direct child of
+  // `ComposerBanner.Column` (ChatComposer's `dictationStrip` prop), unwrapped: Column's child
+  // selectors match only a direct `composer-banner-attachment`, and above the form it fused onto
+  // the Dock. The collapsed-controls marker stops a strip click from expanding a resting composer.
   return (
     <ComposerBanner.Attachment
       className="mesura-dictation-strip"

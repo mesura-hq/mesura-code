@@ -7,21 +7,9 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * ADR-003 retired this fork's own attachment stack in favour of upstream's.
- * These pin the shape of that retirement, because the two ways it goes wrong
- * are both silent.
- *
- * The first is under-reverting: a file of the fork's stack survives, and the
- * fork carries two upload paths again with nothing failing.
- *
- * The second is over-reverting, which is worse. `attachmentStore.ts` and
- * `PROVIDER_SEND_TURN_MAX_IMAGE_BYTES` predate the fork's stack — they are
- * upstream's, and image attachments depend on them. Deleting them along with
- * the fork's own code takes image attachments out, and the suites would not
- * necessarily notice.
- *
- * These live in `tests/unit`, which upstream never touches, so they cost
- * nothing at the next merge.
+ * ADR-003 retired the fork's attachment stack for upstream's. Both failure modes are silent:
+ * a surviving fork file leaves two upload paths, and deleting upstream's `attachmentStore.ts` or
+ * `PROVIDER_SEND_TURN_MAX_IMAGE_BYTES` with it takes image attachments out without a suite failing.
  */
 
 const read = (relativePath: string) =>
@@ -42,12 +30,9 @@ const RETIRED_STACK_FILES = [
   "apps/web/src/lib/attachmentUpload.ts",
   "apps/web/src/components/chat/composerAttachments.ts",
   "apps/web/src/components/chat/ComposerAttachmentList.tsx",
-  // Two paths the fork's stack owned are deliberately absent from this list:
-  // apps/mobile/src/lib/attachmentUpload.ts and composerAttachmentFiles.ts.
-  // Upstream independently chose the same filenames for its own mobile
-  // attachment work, and the 2026-W35 merge brought their versions in
-  // byte-identically. Asserting on those paths would now fail on upstream's
-  // code rather than on a resurrected fork file.
+  // `apps/mobile/src/lib/attachmentUpload.ts` and `composerAttachmentFiles.ts` are absent on purpose:
+  // upstream chose the same filenames for its own mobile code, so asserting on them would fail on
+  // upstream's files rather than on a resurrected fork file.
   "apps/mobile/src/state/attachment-upload-progress.ts",
   "packages/client-runtime/src/state/attachmentUploadHttp.ts",
 ];

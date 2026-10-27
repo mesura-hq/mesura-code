@@ -9,15 +9,9 @@ beforeEach(() => {
 
 describe("projectScopeStore", () => {
   it("starts on every project, so a filter can never hide threads at boot", () => {
-    // Read the module's own initial state rather than what beforeEach just
-    // wrote, or the assertion proves nothing about a fresh session.
-    //
-    // This does NOT prove the scope is unpersisted. That property lives in the
-    // store's construction — it is built without zustand's persist middleware —
-    // and this suite runs with no localStorage, so nothing here could observe a
-    // rehydration either way. An earlier version of this file asserted the
-    // absence of the middleware's `persist` key and claimed that as proof; it
-    // was testing zustand's API surface, not our behaviour.
+    // Read the module's own initial state, not what beforeEach wrote. This does NOT prove
+    // the scope is unpersisted: this suite has no localStorage, and asserting the absence
+    // of zustand's `persist` key would test zustand's API surface, not our behaviour.
     expect(useProjectScopeStore.getInitialState().projectScopeKey).toBe(null);
   });
 

@@ -20,18 +20,10 @@ import {
   vitePlusPath,
 } from "./contractHarness.ts";
 
-// ⚠ NO MOVER ESTE ARCHIVO DENTRO DE packages/symmetria-broker-contract.
-//
-// Abajo, este test lanza `vp test run` CONTRA ESE PAQUETE como subproceso, para
-// comprobar desde afuera que su suite pasa. Si el archivo vive dentro del
-// paquete, el comando lo recolecta, él relanza el comando, y eso lo recolecta de
-// nuevo: recursión con abanico de procesos que agota la RAM. Probado el
-// 2026-08-20 — el intento colgó 600 s y no emitió una sola línea.
-//
-// Su ubicación fuera del paquete es load-bearing, no un descuido. El costo
-// conocido es que `vp run -r test` no lo recolecta, porque tests/ no es un
-// paquete del workspace; la salida correcta es darle a tests/ su propio
-// package.json y declararlo en pnpm-workspace.yaml, no mudar el archivo.
+// ⚠ NO MOVER ESTE ARCHIVO DENTRO DE packages/symmetria-broker-contract. Este test lanza `vp test run`
+// contra ese paquete; adentro, el comando se recolectaría a sí mismo en recursión hasta agotar la RAM.
+// Costo conocido: `vp run -r test` no lo recolecta. La salida correcta es darle a tests/ su propio
+// package.json en pnpm-workspace.yaml, no mudar el archivo.
 const acceptanceTestsRoot = NodePath.join(repositoryRoot, "tests");
 const PACKAGE_REPAIR_SUITE_PROCESS_TIMEOUT_MS = 45_000;
 const PACKAGE_REPAIR_SUITE_TEST_TIMEOUT_MS = 60_000;
@@ -88,20 +80,10 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     PACKAGE_REPAIR_SUITE_TEST_TIMEOUT_MS,
   );
 
-  // Este guard comprueba que el paquete que agregamos no rompe la suite de
-  // contracts de UPSTREAM. Eso es lo que afirma, y nada más.
-  //
-  // ⚠ NO VOLVER A FIJAR EL CONTEO EXACTO. La primera versión afirmaba
-  // `Tests 257 passed (257)`. El primer merge con upstream lo rompió: el commit
-  // fe8750208 ("fix(contracts): reconcile provider default tests") agregó UN
-  // test, la suite pasó 257 → 258, y este guard falló con todo en verde. La
-  // igualdad no medía nuestra regresión, medía el ritmo de desarrollo de
-  // upstream, que sube cada semana y no es asunto nuestro.
-  //
-  // El piso sí es nuestro. El riesgo real es que la suite se ENCOJA — que un
-  // cambio del fork haga que dejen de recolectarse archivos, que es la forma en
-  // que "todo verde" puede mentir. Un piso lo detecta y no le cobra nada a
-  // upstream por crecer.
+  // Afirma que nuestro paquete no rompe la suite de contracts de UPSTREAM, y nada más.
+  // ⚠ NO VOLVER A FIJAR EL CONTEO EXACTO: upstream agregó un test y el guard falló con todo en verde.
+  // El piso sí es nuestro: detecta una suite que se ENCOGE (archivos que dejan de recolectarse) y no
+  // le cobra nada a upstream por crecer.
   const CONTRACT_SUITE_FLOOR = { files: 19, tests: 257 } as const;
 
   // ⚠ JSON, NUNCA la salida de texto del reporter. La segunda versión de este
@@ -409,22 +391,8 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     }
   });
 
-  // NO REPONER: acá vivía "keeps unrelated registry metadata out of the
-  // phase-one lockfile change", que leía pnpm-lock.yaml y exigía que los bloques
-  // de @xmldom/xmldom no tuvieran una línea `deprecated:`.
-  //
-  // Era imposible de pasar por construcción. pnpm reescribe esa metadata cada vez
-  // que resuelve contra el registro, y eso ocurre en la cadena `prepare` de la
-  // raíz — que dispara el propio `pnpm test`. Medido el 2026-08-20: el lockfile
-  // pasaba de 25 a 27 inserciones durante la misma corrida que lo verificaba, así
-  // que ejecutar el test era lo que lo rompía.
-  //
-  // La premisa también era equivocada. Esas líneas no son contaminación: son
-  // hechos del registro que pnpm mantiene al día. Se las trató como basura porque
-  // aparecieron por primera vez en un diff junto a un cambio ajeno, y de ahí salió
-  // un guardián permanente contra el comportamiento normal de la herramienta.
-  //
-  // Si alguna vez hace falta proteger el lockfile, hay que afirmar sobre el diff
-  // COMMITEADO, no sobre el árbol de trabajo que las herramientas del proyecto
-  // reescriben mientras el test corre.
+  // NO REPONER el test que exigía que los bloques de @xmldom/xmldom en pnpm-lock.yaml no tuvieran
+  // `deprecated:`. pnpm reescribe esa metadata del registro en la cadena `prepare` que dispara el
+  // propio `pnpm test`, así que correrlo lo rompía. Para proteger el lockfile, afirmar sobre el diff
+  // COMMITEADO, no sobre el árbol de trabajo.
 });

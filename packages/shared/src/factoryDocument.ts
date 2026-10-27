@@ -1,10 +1,6 @@
 /**
- * Reads the Software Factory's markdown documents (a plan, later a report) the
- * way the server and both clients need them: the title, every level-two
- * section in document order, and the plan's phase list.
- *
- * Pure and Hermes-safe: the phone imports it, so no Node APIs and no ES2023
- * array methods.
+ * Reads Software Factory markdown documents for the server and the clients: the title, every
+ * level-two section in order, and the plan's phase list. Pure, with no Node APIs.
  */
 
 export interface FactoryDocumentSection {
@@ -309,11 +305,9 @@ function paragraphsOf(body: string): ReadonlyArray<ReadonlyArray<string>> {
 }
 
 /**
- * One decision per prose paragraph of a `Decisions` section: its first line is
- * the verdict, the rest its argument. A paragraph that opens a list, a quote,
- * a fence or an indented block continues the argument above it. A section
- * whose first paragraph is not prose has no verdict to fold under, and yields
- * no decisions, so the caller shows it as plain markdown.
+ * One decision per prose paragraph of a `Decisions` section: first line verdict, rest argument. A list,
+ * quote, fence or indented block continues the argument above. A section that opens with non-prose
+ * yields no decisions, so the caller shows it as plain markdown.
  */
 export function splitFactoryDecisions(body: string): ReadonlyArray<FactoryDecision> {
   const decisions: Array<{ verdict: string; argument: Array<string> }> = [];

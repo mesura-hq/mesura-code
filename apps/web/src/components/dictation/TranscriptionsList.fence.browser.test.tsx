@@ -1,13 +1,6 @@
-/**
- * Entry point: AppRoot → CommandPalette, through `test/commandPaletteFence.testMount.tsx`.
- * The user opens the palette with Ctrl+O and picks the Transcriptions action;
- * the list it opens is the real `TranscriptionsList`. The fixture replaces data
- * sources only: environments, entities, settings, the RPC command boundary, and
- * the dictation jobs read (`useDictationJobs` in `~/state/dictation`).
- *
- * Phase 2 of the STT redesign, criteria 5 and 6. The list is found by
- * `data-testid="transcriptions-list"` and its rows are its `li` elements.
- */
+// STT redesign phase 2, criteria 5 and 6: Ctrl+O, then the Transcriptions action, opens the real
+// `TranscriptionsList` (`test/commandPaletteFence.testMount.tsx`). Only data sources are replaced.
+// The list is `data-testid="transcriptions-list"`, and its rows are its `li` elements.
 import { fakeTimers } from "../../../test/render";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";

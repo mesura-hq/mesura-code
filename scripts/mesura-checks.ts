@@ -1,25 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off - A plain CLI over git and the repository toolchain; no Effect runtime.
 /**
- * The change gate behind AGENTS.md's `Deterministic Checks` section, one check per
- * invocation so consumers can run each line in a fresh shell:
- *
- *   node scripts/mesura-checks.ts <fmt|lint|typecheck|knip> [<base> | --all]
- *
- * `<base>` is the commit the change is compared against; it defaults to the merge
- * base with `origin/dev`. The change set is that diff plus untracked files, so the
- * same line works on a commit range and on a dirty tree. `--all` checks the whole
- * repository instead, as CI's `Check` job does.
- *
- * Exit codes: 0 clean, 1 findings, 2 tooling failure (missing install, bad ref).
- *
- * Three things the plain package scripts get wrong on a shared host, and the reason
- * this file exists rather than a list of `vp` commands:
- * - `vp` and the pinned Node are often not on an agent shell's PATH. This resolves
- *   both from `node_modules/.bin` and nvm before running anything.
- * - TypeScript 7's multithreaded `tsc` on several packages at once exhausted the
- *   host's memory. Each package is checked alone, one checker, under a host-wide
- *   lock, with a hard kill after the timeout (TS 7 can ignore SIGTERM).
- * - Lint warnings: only the ones on lines this change wrote are reported.
+ * AGENTS.md `Deterministic Checks`, one check per run: `<fmt|lint|typecheck|knip> [<base> | --all]`.
+ * `<base>` defaults to the merge base with `origin/dev`; untracked files count as changed.
+ * It resolves `vp` and Node itself, and type-checks one package at a time under a host-wide lock with
+ * a hard kill, because parallel TypeScript 7 `tsc` runs exhausted host memory and TS 7 can ignore SIGTERM.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -317,28 +301,17 @@ function checkTypes(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEnv
   const isTypeScript7 = /Version 7\./u.test(tscVersion);
   let worst = EXIT_CLEAN;
   for (const workspacePackage of selected) {
-    const usesRustTsc = workspacePackage.typecheckScript === "tsc-rs --noEmit";
     const usesPlainTsc = workspacePackage.typecheckScript === "tsc --noEmit";
-    const command = usesRustTsc
+    const command = usesPlainTsc
       ? [
-          "tsc-rs",
-          "--singleThreaded",
-          "--checkers",
-          "1",
+          ...(isTypeScript7 ? ["env", "GOMEMLIMIT=1536MiB"] : []),
+          "tsc",
+          ...(isTypeScript7 ? ["--checkers", "1"] : []),
           "-p",
           `${workspacePackage.directory}/tsconfig.json`,
           "--noEmit",
         ]
-      : usesPlainTsc
-        ? [
-            ...(isTypeScript7 ? ["env", "GOMEMLIMIT=1536MiB"] : []),
-            "tsc",
-            ...(isTypeScript7 ? ["--checkers", "1"] : []),
-            "-p",
-            `${workspacePackage.directory}/tsconfig.json`,
-            "--noEmit",
-          ]
-        : ["vp", "run", "--filter", workspacePackage.name, "typecheck"];
+      : ["vp", "run", "--filter", workspacePackage.name, "typecheck"];
     const [executable, ...args] = [...lock, ...timeout, ...command];
     const startedAt = Date.now();
     const result = run(executable!, args, environment);

@@ -305,19 +305,10 @@ describe("Symmetria broker contract phase-six guards", () => {
         NodePath.join(temporaryPackageRoot, "schema/index.json"),
       );
 
-      // ⚠ The mutation target moved, and the reason is the point of the test.
-      // It used to be `title: TrimmedNonEmptyString`, chosen because JSON
-      // Schema could not express the difference between that and a bare
-      // string — the check sits after a transformation and is dropped on
-      // emission. Issue #2 fixed exactly that for `title`, which now carries
-      // `minLength` and a pattern into the artifact, so mutating it would move
-      // BOTH checksums and prove nothing.
-      //
-      // `threadId` is the same case untouched: `ThreadId` is
-      // `TrimmedNonEmptyString.pipe(Schema.brand(...))`, so it still emits a
-      // bare string and its difference from `Schema.String` is still
-      // inexpressible. The assertion below is unchanged — only the field it
-      // reaches for.
+      // ⚠ The mutation targets `threadId`, not `title`: `title` now emits `minLength` and a pattern, so
+      // mutating it moves BOTH checksums and proves nothing. `ThreadId` is a branded
+      // `TrimmedNonEmptyString` that still emits a bare string, so its difference from `Schema.String`
+      // is still inexpressible in JSON Schema.
       const threadSummaryPath = NodePath.join(temporaryPackageRoot, "src/threadSummary.ts");
       const source = NodeFS.readFileSync(threadSummaryPath, "utf8");
       const checkedIdentity = "  threadId: ThreadId,";

@@ -1,10 +1,6 @@
 /**
- * Phase 1 fence of the hosts dock plan: acceptance criterion 4, and criterion 8
- * at the level of each reader.
- *
- * Entry point: the reader functions in `linuxReaders.ts`, which
- * `HostStatsCollector.make` composes. Nothing in the server calls them during
- * phase 1, so these specs drive them directly against `./fixtures`.
+ * Drives the reader functions that `HostStatsCollector.make` composes directly against
+ * `./fixtures`.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";

@@ -56,6 +56,7 @@ export function AgentSearchHost() {
 function FirstMessageSender({ search }: { search: ScopedThreadRef }) {
   const shell = useQuietThreadShell(search);
   const startTurn = useOrchestrationCommand(threadEnvironment.startTurn);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: sends the queued first message once the search's thread shell arrives from the server
   useEffect(() => {
     if (shell === null) return;
     const text = takeSearchFirstMessage(search);
@@ -89,6 +90,7 @@ interface SearchSnapshot {
 function SearchLifecycle() {
   const threads = useQuietThreadShells();
   const previous = useRef<Map<string, SearchSnapshot> | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: diffs server thread shells against the previous render to announce ended searches
   useEffect(() => {
     const next = new Map<string, SearchSnapshot>();
     for (const thread of threads) {
@@ -141,6 +143,7 @@ function announceSettled({ search, title }: SearchSnapshot): void {
 /** The popup shows every finished search, so their toasts make way for it. */
 function CloseSearchToastsOnOpen() {
   const open = useAgentSearchPopupStore((state) => state.open);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: closes search toasts when the popup store opens, from any entry point
   useEffect(() => {
     if (!open) return;
     for (const toastId of shownSearchToasts) toastManager.close(toastId);
@@ -153,6 +156,7 @@ function CloseSearchToastsOnOpen() {
 function ClosePopupOnNavigation() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const shownPathname = useRef(pathname);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: closes the popup when the router's pathname changes
   useEffect(() => {
     if (shownPathname.current === pathname) return;
     shownPathname.current = pathname;
@@ -162,13 +166,12 @@ function ClosePopupOnNavigation() {
 }
 
 /**
- * A move into the workspace behind the popup closes it first: opening the file manager, a
- * deferred move to the file tree, or any user action on a right panel. A direct move to a mounted
- * tree and the pane chords call `closeAgentSearchPopupForWorkspace` themselves. The workspace
- * acts on the project, which a search conversation has none of, and a surface stacked under the
- * modal popup would take the keyboard where nobody can see it.
+ * A move into the workspace behind the popup closes it first: opening the file manager, a deferred
+ * move to the file tree, or a user action on a right panel. A search has no project to act on,
+ * and a surface stacked under the modal popup would take the keyboard where nobody can see it.
  */
 function ClosePopupForWorkspace() {
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the file manager, tree and right panel stores for the mount's lifetime
   useEffect(() => {
     const closePopup = closeAgentSearchPopupForWorkspace;
     const offManager = useFileManagerStore.subscribe((state, previous) => {

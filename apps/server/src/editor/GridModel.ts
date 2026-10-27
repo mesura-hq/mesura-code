@@ -1,31 +1,8 @@
 /**
- * What Neovim draws, read against what the buffer actually contains.
- *
- * Neovim's UI protocol reports a grid of cells: characters and highlight ids at
- * screen positions. That is a drawing, not a meaning — nothing in it says which
- * characters are the file and which are decoration a plugin painted over it. The
- * classification `vscode-neovim` uses, and this uses, recovers the difference by
- * comparing each cell against the buffer line underneath it:
- *
- * - the cell's character differs from the buffer's → something drew over the
- *   text, so it is **virtual**: a flash label, inline diagnostics, a git blame;
- * - the characters match but the cell carries a highlight → the text is the
- *   file's own, marked: a search match, an incremental-substitution preview;
- * - a blank is neither.
- *
- * **Grid columns are screen cells, not buffer columns.** A tab is several
- * cells, a wide character is two (the second drawn as an empty string), and a
- * character outside ASCII is one cell but several bytes and possibly two
- * UTF-16 units. `classifyRow` walks the buffer line and the row together, so
- * what it reports is in UTF-16 columns — Monaco's unit — whatever the line
- * holds. Comparing index for index read every character after the first tab
- * or accent on a line as a phantom label.
- *
- * **This only holds while Neovim draws no gutter.** With line numbers on, grid
- * column N is not buffer column N, every character on the line differs from the
- * one it is compared against, and a single flash jump produced 132 phantom
- * labels when the prototype measured it. The host draws the gutter; the host
- * plugin forces Neovim's off. A test pins that reasoning in place.
+ * Classifies Neovim's grid against the buffer line under each row, as `vscode-neovim` does:
+ * a differing character is virtual text, a matching character with a highlight is a mark.
+ * Grid columns are screen cells (tabs, wide characters), so `classifyRow` reports UTF-16 columns.
+ * This holds only while Neovim draws no gutter; the host plugin forces it off.
  */
 
 export interface GridOverlay {
@@ -94,12 +71,7 @@ export class GridModel {
   #leftColumn = 0;
   /**
    * Whether anything the classification reads moved since the last collect.
-   *
-   * How often an idle Neovim flushes depends on the configuration: the
-   * developer's at `~/.neovim` `c730dae` flushes not at all, while an earlier
-   * state of it flushed about 230 times a second, nearly always drawing
-   * nothing. Re-reading the whole grid on every such flush is work for no
-   * answer.
+   * Some configurations flush about 230 times a second while idle, drawing nothing.
    */
   #dirty = true;
   #overlays: GridOverlay[] = [];
@@ -114,19 +86,15 @@ export class GridModel {
     return this.#highlightDefinitions;
   }
 
-  /**
-   * The grid Neovim draws the developer's window on, once it has said so.
-   *
-   * `null` until the first `win_pos`. Resizing a grid needs this number and
-   * there is no API that answers it: with `ext_multigrid` the id is assigned
-   * by the redraw stream, so the only place that knows is whatever has been
-   * reading that stream.
-   */
   /** One past the last buffer line Neovim drew, zero-based as it reports it. */
   get botLine(): number {
     return this.#botLine;
   }
 
+  /**
+   * The grid of the developer's window, `null` until the first `win_pos`.
+   * With `ext_multigrid` only the redraw stream assigns this id; no API answers it.
+   */
   get bufferGridId(): number | null {
     return this.#bufferGridId;
   }
@@ -146,30 +114,17 @@ export class GridModel {
   }
 
   /**
-   * How many cells Neovim has drawn since this model was made.
-   *
-   * Monotonic, and counted across every grid rather than only the buffer's,
-   * because what it measures is how much work a keystroke caused — a float
-   * that repaints costs the same as a line that does. Two samples either side
-   * of a key give that key's cost, and a sample that did not move says the
-   * frame drew nothing, which is how the bench tells a key's own frame from a
-   * status line redrawing on its own.
-   */
-  /**
-   * How often the cursor has moved, counted only when it actually moved.
-   *
-   * The companion to `cellsDrawn`, and needed because a great many keys draw
-   * no cells at all: with autopairs on, typing the `)` it already inserted
-   * only steps the cursor over it. Between them the two counters answer "did
-   * anything happen", which is what tells a key's own frame from the empty
-   * ones a configuration can emit with no key in flight — an earlier state of
-   * the developer's configuration emitted one about every four milliseconds
-   * while idle; at `~/.neovim` `c730dae` it emits none.
+   * How often the cursor actually moved. Many keys draw no cells (autopairs stepping over `)`),
+   * so with `cellsDrawn` this tells a key's own frame from an empty idle flush.
    */
   get cursorMoves(): number {
     return this.#cursorMoves;
   }
 
+  /**
+   * Cells drawn since this model was made: monotonic, counted across every grid, because it
+   * measures a keystroke's cost. Samples either side of a key give that key's cost.
+   */
   get cellsDrawn(): number {
     return this.#cellsDrawn;
   }
@@ -187,14 +142,9 @@ export class GridModel {
   }
 
   /**
-   * How far Neovim's window is scrolled sideways (`leftcol`), in screen cells.
-   *
-   * The redraw stream never says: `win_viewport` carries the topline and the
-   * cursor, not `leftcol`. The host plugin pushes it with the cursor, from
-   * the autocommands that run after a key and before the frame that draws it,
-   * so the frame is read against the shift it was drawn with. The host sizes
-   * the grid so this stays 0 (`gridWidth.ts`); it is the case a line wider
-   * than the grid's bound still reaches.
+   * Neovim's `leftcol`, in screen cells. `win_viewport` does not carry it, so the host plugin
+   * pushes it with the cursor before the frame that draws the key. The host sizes the grid so
+   * this stays 0 (`gridWidth.ts`); only a line wider than the grid's bound reaches it.
    */
   setLeftColumn(leftColumn: number): void {
     if (!Number.isInteger(leftColumn) || leftColumn < 0 || leftColumn === this.#leftColumn) return;
@@ -252,11 +202,8 @@ export class GridModel {
         return;
       }
       case "grid_scroll": {
-        // Neovim scrolls by moving rows it already sent and drawing only the
-        // ones that came into view. Ignoring this left every moved row holding
-        // what it showed before the scroll, read against the line now under
-        // it: one `<C-d>` in a 442-line file produced 915 phantom overlays, and
-        // a closing tag from the top of the screen appeared mid-file.
+        // Neovim moves rows it already sent and draws only the new ones. Ignoring this read
+        // stale rows against new lines: one `<C-d>` produced 915 phantom overlays.
         const [gridId, top, bottom, left, right, rows] = batch as [
           number,
           number,
@@ -290,16 +237,9 @@ export class GridModel {
         return;
       }
       case "win_pos": {
-        // The grid that belongs to the window the developer is in.
-        //
-        // Taking the most recent `win_pos` instead looks equivalent and is
-        // not: a real configuration opens several ordinary windows — a file
-        // tree, a symbol list — and each reports its own `win_pos`, so the
-        // last one reported is usually a sidebar. Read against the file's
-        // lines, a sidebar's cells differ everywhere and the whole window
-        // becomes virtual text belonging to no line. Floats (which-key,
-        // snacks, noice) never arrive here at all; they report
-        // `win_float_pos`, which is ignored.
+        // Map the grid to the current window. Do not take the latest `win_pos`: sidebars
+        // (file tree, symbol list) report their own, and a sidebar read against the file
+        // becomes all virtual text. Floats report `win_float_pos`, which is ignored.
         const [gridId, window] = batch as [number, { id?: number } | undefined];
         this.#dirty = true;
         if (typeof window?.id === "number") {
@@ -417,11 +357,8 @@ export class GridModel {
     for (let row = 0; row < grid.height; row += 1) {
       const bufferLine = this.#bufferLines[this.#topLine + row];
       const line = this.#topLine + row + 1;
-      // The line and its text are part of the hash, not only the drawing: a
-      // row that shows a different line after a scroll owes the client that
-      // line's decorations even when the cells happen to be the same.
-      // `leftcol` too: a shift reads the same cells against other text, so a
-      // row whose drawing did not change still owes the client new overlays.
+      // The line, its text and `leftcol` are in the hash: after a scroll or a sideways shift,
+      // the same cells read against other text still owe the client new decorations.
       const hash = `${line}\u0000${this.#leftColumn}\u0000${bufferLine ?? ""}\u0000${grid.cells[row]!.join("")}\u0000${grid.highlights[row]!.join(",")}`;
       if (this.#rowHashes[row] !== hash) {
         this.#rowHashes[row] = hash;
@@ -602,27 +539,10 @@ export interface ClassifyRowInput {
 }
 
 /**
- * Reads one drawn row against the buffer line under it.
- *
- * Walks both at once: a cell that holds the buffer's next character is the
- * file's own text, and advances the buffer by that character's UTF-16 length;
- * a tab is however many blank cells reach the next tab stop; an empty cell is
- * the right half of a wide character and stands for nothing. What is left is
- * drawn over the text or past its end, and is reported as an overlay at the
- * UTF-16 column of the character it covers.
- *
- * Adjacent virtual cells on one highlight are one overlay, because each one
- * becomes a node on the client: git blame at the end of a line is one label,
- * not forty. Past the end of the line the overlay starts at the line's end and
- * carries the blank gap before it in its text, since Monaco has no column
- * there to put it at.
- *
- * A window scrolled sideways (`leftColumn` above 0) shows the line from that
- * screen column on, so the walk starts there: the characters scrolled out of
- * view are skipped, and a tab cut by the edge is read from the cells it still
- * has. Read from column 0 instead, every visible character differed from the
- * one it was compared against — 15,120 phantom overlays for 41 keys on the
- * bench's Markdown.
+ * Walks one drawn row and its buffer line together (tabs, wide characters) and reports overlays
+ * at UTF-16 columns. Adjacent virtual cells on one highlight merge into one overlay, one client
+ * node; past the line's end the overlay starts there and carries the blank gap in its text.
+ * The walk starts at `leftColumn`: read from column 0, a shifted row is all phantom overlays.
  */
 export function classifyRow(input: ClassifyRowInput): {
   readonly overlays: GridOverlay[];

@@ -1,13 +1,7 @@
 /**
- * Flash label assignment, after flash.nvim's `labeler.lua`.
- *
- * The user types a search pattern; every match gets a label. Each further key
- * is either a label (jump) or more pattern (narrow). That is unambiguous
- * because a label is never a character that could continue the pattern at any
- * match: those characters are removed from the label set first.
- *
- * Labels stay stable while the user types: a match keeps the label it had on
- * the previous keystroke when that label is still allowed.
+ * Flash label assignment, after flash.nvim's `labeler.lua`. A label is never a character that could
+ * continue the pattern at any match, so each key is unambiguously a jump or a narrowing. A match
+ * keeps its previous label while that label is still allowed.
  */
 
 const DEFAULT_FLASH_LABELS = "asdfghjklqwertyuiopzxcvbnm";
@@ -52,14 +46,9 @@ export function assignFlashLabels(
 }
 
 /**
- * Labels for a jump with no search pattern, after hop.nvim: every target is
- * labelled up front, so no character is reserved for narrowing.
- *
- * Targets come nearest first. While they fit, each gets one character. Past
- * that, the last characters of the set become prefixes: the nearest targets
- * keep one-character labels and the farthest get two, the prefix then one
- * more character. Returns one label per target, in order; targets beyond
- * what two characters can label get none.
+ * Labels every target up front, after hop.nvim, so no character is reserved for narrowing. Targets
+ * come nearest first; when one character each does not fit, the set's last characters become
+ * prefixes and the farthest targets get two-character labels. Targets beyond two characters get none.
  */
 export function assignJumpLabels(count: number, labels: string = DEFAULT_FLASH_LABELS): string[] {
   const alphabet = [...labels];

@@ -15,6 +15,8 @@ import {
   type FactoryRunTimelineItem,
 } from "./runActivities.ts";
 
+import type { ThreadStructureTurnItem } from "../state/models.ts";
+
 /** One presented plan file, as a thread's timeline or feed places it: its latest activity. */
 export interface FactoryPlanTimelineItem {
   readonly kind: "plan";
@@ -188,7 +190,7 @@ export function factoryTimelineItemFromCard(
 
 /** The plan and report cards of a thread's turn items, in turn item order. */
 export function deriveFactoryTimelineItemsFromTurnItems(
-  entries: ReadonlyArray<{ readonly item: OrchestrationV2TurnItem }>,
+  entries: ReadonlyArray<{ readonly item: ThreadStructureTurnItem }>,
 ): ReadonlyArray<FactoryTimelineItem> {
   const runsById = deriveFactoryRunItemsByIdFromTurnItems(entries);
   const items: FactoryTimelineItem[] = [];

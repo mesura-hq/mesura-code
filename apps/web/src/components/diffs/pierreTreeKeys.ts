@@ -4,15 +4,9 @@ import { useCallback, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { halfPageDirection, setPaneEntryFocus } from "~/lib/panelSurfaceFocus";
 
 /**
- * Fork addition: the keyboard way into a Pierre file tree (the Diff surface's
- * file list and Tree diff), and `Ctrl+D` / `Ctrl+U` in it.
- *
- * Pierre renders its rows in a shadow root and moves a roving `tabindex="0"`
- * over them; its own keys cover the arrows, Home and End, and a row is a
- * button, so Enter opens it. Focusing the tree means focusing that row, which
- * a selector from the page cannot reach. Pierre has no half-page move, so
- * `Ctrl+D` / `Ctrl+U` scroll its viewport half a page and focus the row that
- * scrolled to where the focused one was, as Vim moves the cursor with the text.
+ * Pierre renders rows in a shadow root with a roving `tabindex="0"`, which a page selector cannot reach,
+ * so focusing the tree means focusing that row. Pierre has no half-page move: `Ctrl+D` / `Ctrl+U`
+ * scroll half a page and focus the row now where the focused one was, as Vim does.
  */
 
 const ROW_SELECTOR = "button[data-item-path]:not([data-file-tree-sticky-row])";

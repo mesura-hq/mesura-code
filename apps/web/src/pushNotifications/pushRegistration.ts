@@ -6,11 +6,8 @@ import type {
 } from "@t3tools/contracts";
 
 /**
- * Mesura: the browser half of Web Push. It registers `public/push-sw.js`,
- * subscribes this device with the host's VAPID key, and turns the worker's
- * `mesura-push-open` message into a navigation. The desktop shell never
- * registers the worker: it keeps its page notifications, and its window is
- * the screen the phone stays quiet for.
+ * Mesura: the browser half of Web Push. The desktop shell never registers the worker:
+ * it keeps its page notifications, and its window is the screen the phone stays quiet for.
  */
 
 const PUSH_WORKER_URL = "/push-sw.js";

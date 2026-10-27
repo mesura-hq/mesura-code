@@ -1,10 +1,6 @@
 /**
- * Phase 1 fence of phone push notifications: the wire contract, and acceptance
- * criterion 6 on the client side.
- *
- * Entry points: `PushSubscriptionInput`, the schema every `push.subscribe`
- * request is decoded with, and `clientRpcRequiredScopes`, which
- * `createEnvironmentRpcCommand` consults before a client sends a guarded RPC.
+ * Phone push contract: `PushSubscriptionInput` decodes every `push.subscribe` request, and
+ * `clientRpcRequiredScopes` is what `createEnvironmentRpcCommand` checks before a guarded RPC.
  */
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";

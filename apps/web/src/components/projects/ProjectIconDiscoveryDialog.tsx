@@ -130,6 +130,7 @@ function ProjectIconDiscoveryDialog({ target }: { target: DiscoveryTarget }) {
   const stopRequested = useRef(false);
   const alive = useRef(true);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: tracks mount so async discovery replies never set state after close
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -137,6 +138,7 @@ function ProjectIconDiscoveryDialog({ target }: { target: DiscoveryTarget }) {
     };
   }, []);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: loads the discovery preview from the server when the dialog opens for a target
   useEffect(() => {
     let cancelled = false;
     void preview({
@@ -204,6 +206,7 @@ function ProjectIconDiscoveryDialog({ target }: { target: DiscoveryTarget }) {
   );
   // Each accepted job advances the batch once, however often its outcome re-renders.
   const advancedJob = useRef<CommandId | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: advances the batch when the server reports the current job's outcome
   useEffect(() => {
     if (currentProjectId === undefined || currentJob === null || currentOutcome === null) return;
     if (advancedJob.current === currentJob.jobToken) return;

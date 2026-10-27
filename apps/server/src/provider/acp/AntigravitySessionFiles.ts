@@ -52,12 +52,8 @@ export const removeAntigravitySessionFiles = (
   removeAntigravitySessionFilesOrFail(input).pipe(
     Effect.catch(() => Effect.logWarning("Could not remove temporary Antigravity session files.")),
   );
-/**
- * Call once when the driver starts, before it launches any process, so a previous server that was
- * killed mid-session cannot leave unpacked runtimes behind. The system temp directory belongs to
- * other programs and Windows does not lock data files, so sweeping it could gut a live
- * extraction.
- */
+
+/** Sweep only private runtimes before launch; Windows does not protect live extracted data files from deletion. */
 export const removeAntigravityRuntimeTempDirs = Effect.fn("removeAntigravityRuntimeTempDirs")(
   function* (tempDirectory: string) {
     const fs = yield* FileSystem.FileSystem;

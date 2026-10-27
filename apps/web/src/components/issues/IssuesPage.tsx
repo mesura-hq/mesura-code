@@ -1,4 +1,5 @@
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { IssueState, IssueSummary } from "@t3tools/contracts";
 import {
@@ -182,6 +183,7 @@ export function IssuesPage({
   const query = typedQuery.source === querySource ? typedQuery.value : search.q;
   const setQuery = (value: string) => setTypedQuery({ source: querySource, value });
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- debounces the typed query into the URL; the timer dies with the draft
   useEffect(() => {
     if (query === search.q) return;
     const timeout = window.setTimeout(() => onSearchChange({ q: query, limit: 100 }, true), 350);
@@ -207,6 +209,7 @@ export function IssuesPage({
   // The issue whose detail was just closed: its row takes focus back once the list is visible
   // again, so keyboard and screen-reader users land where they left the list.
   const returnFocusToIssueRef = useRef<number | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- focus needs the list rows mounted, which happens after the commit that closes the detail
   useEffect(() => {
     const number = returnFocusToIssueRef.current;
     if (search.issue !== undefined || number === null) return;
@@ -527,7 +530,16 @@ function IssueDetailPane({
     issueDetail({ environmentId: project.environmentId, input: { projectId: project.id, number } }),
   );
   const issue = detail.data ?? summary;
-  const markdownContext = useMemo(() => ({ repositoryUrl, threadRef: null }), [repositoryUrl]);
+  const markdownContext = useMemo(() => {
+    const findAutolinks = sourceControlClients.get("github").referenceAutolinks;
+    return {
+      autolinks:
+        repositoryUrl !== null && findAutolinks !== undefined
+          ? (text: string) => findAutolinks(text, repositoryUrl)
+          : null,
+      threadRef: null,
+    };
+  }, [repositoryUrl]);
   // A detail opens because the reader chose an issue, so it takes focus: on a narrow pane the
   // row that was clicked is hidden, and keys must still reach this view. `key` remounts the
   // section for each issue, so choosing another one moves focus again.

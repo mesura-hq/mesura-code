@@ -1,17 +1,9 @@
 import { parseKeySequence } from "./keyToken.ts";
 
 /**
- * Keymaps: bindings per mode and per scope, compiled into key tries.
- *
- * **A key is a command or a prefix, never both** (Helix, Tridactyl, Vimium).
- * Inside one layer — one mode and one scope — a binding that would make a key
- * both is a conflict: it is reported and the later binding is dropped. Because
- * of this rule a pending prefix never has to time out to decide what the user
- * meant, which matches Symmetria's chord model ("there is no chord timeout,
- * and there never was").
- *
- * Across layers a deeper scope shadows an outer one: a scope that binds `g` as
- * a command hides every outer `g…` sequence while that scope has focus.
+ * A key is a command or a prefix, never both, within one mode and scope: a conflicting binding is
+ * reported and dropped, so a pending prefix never needs a timeout (Symmetria's chord model). A deeper
+ * scope that binds `g` as a command hides every outer `g…` sequence while it has focus.
  */
 
 export type KeyMode = "normal" | "visual" | "insert";

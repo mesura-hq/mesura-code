@@ -7,14 +7,9 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * The client half of the attachment work this fork adopted in place of its own.
- * ADR-003 justified the switch partly on breadth — upstream's stack does things
- * the retired one never did — so those capabilities are worth asserting rather
- * than assuming a merge carried them.
- *
- * Reads the sources rather than driving a browser: what these pin is that the
- * merge kept upstream's implementations, and a resolution that dropped one
- * would leave the tree building and every other suite green.
+ * The client half of the upstream attachment work ADR-003 adopted partly for its breadth. Reads
+ * source, because a merge resolution that dropped an implementation would leave the tree building
+ * and every other suite green.
  */
 
 const read = (relativePath: string) =>
@@ -30,10 +25,8 @@ it("tells a user when an attachment is too large instead of failing silently", (
   );
 });
 
-// Upstream moved this table out of `apps/web/src/types.ts` into the shared
-// package when it added mobile video playback (#8919). The capability is the
-// same; only its home changed, so this asserts the shared module rather than the
-// web file it started in.
+// Upstream moved this table from `apps/web/src/types.ts` into the shared package when it added
+// mobile video playback, so this asserts the shared module.
 it("recognises video attachments so they can be played rather than downloaded", () => {
   const video = read("packages/shared/src/video.ts");
   assert.include(

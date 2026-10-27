@@ -22,15 +22,8 @@ import {
 } from "./Manager.testkit.ts";
 
 /**
- * The manager, driven against a Neovim that is not there.
- *
- * The fake answers msgpack-RPC rather than standing in for the bridge, so
- * everything between the manager and the wire — the framing from phase 1, the
- * mirror, the launch resolution from phase 2 — is exercised here too. What it
- * cannot do is behave like Neovim; that is the conformance harness's job, and
- * the two are deliberately separate. A fake that tried to be Neovim would be a
- * second implementation of it, and the tests would agree with whichever of the
- * two was wrong.
+ * The manager, driven against the msgpack-RPC fake Neovim in `Manager.testkit.ts`.
+ * Neovim's own behaviour belongs to the conformance harness, not to this fake.
  */
 
 const layer = NodeServices.layer;
@@ -235,17 +228,9 @@ it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
     Effect.gen(function* () {
       const { manager, fake, root } = yield* createManager();
 
-      // Nothing else moves the mirror. The `BufEnter` announcement that used
-      // to was removed — Neovim announces a plugin's picker exactly the way it
-      // announces a file — so this call is the *only* thing that puts the
-      // mirror on the file the client asked for. Without it `open` answers
-      // with a snapshot built from whichever buffer the mirror was left on:
-      // the new file's name over the previous file's text, which the client
-      // then writes to disk. That happened to three real files.
-      //
-      // The conformance suite cannot hold this. Its own helper does the
-      // following itself, so deleting this call from the manager leaves every
-      // conformance test green.
+      // Only this call moves the mirror onto the opened file. Without it `open` snapshots the
+      // previous buffer's text under the new name, and the client writes that to disk.
+      // The conformance helper repeats the call itself, so only this test catches its loss.
       yield* manager.open({
         threadId: "thread-1",
         cwd: root,
@@ -612,7 +597,7 @@ it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
       const first = yield* manager
         .input({ threadId: "thread-cut", keys: "x", sequence: { lane: "A", index: 1 } })
         .pipe(Effect.forkChild);
-      while (inputs().length === 0) yield* Effect.yieldNow;
+      yield* fake.awaitHeldReply();
       const interrupting = yield* Fiber.interrupt(first).pipe(Effect.forkChild);
       yield* Effect.yieldNow;
       fake.releaseReplies();

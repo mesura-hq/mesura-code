@@ -72,12 +72,9 @@ export function AgentSearchPopup() {
         </div>
         <div className="flex min-h-0 flex-1">
           {/*
-           * WORKAROUND: ChatView's window controls (terminal, right panel) are
-           * `position: fixed` at the window's top right; inside the dialog the
-           * popup's transform makes it their containing block, so they would
-           * cover the popup header. Its own position variables move them to the
-           * conversation's top right instead. Remove once ChatView takes an
-           * embedded mode that omits window controls (an upstream ChatView edit).
+           * WORKAROUND: the dialog's transform makes the popup the containing block of ChatView's
+           * fixed window controls, so its own position variables move them off the header.
+           * Remove once ChatView takes an embedded mode without window controls (upstream edit).
            */}
           <div
             ref={setConversation}
@@ -122,6 +119,7 @@ function SearchConversation({ search }: { search: ScopedThreadRef }) {
   // The palette's composer handle belongs to the main conversation; this one
   // has its own, so neither composer overwrites or clears the other's.
   const composerHandle = useRef<ChatComposerHandle | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers this composer handle in the module registry, removed on unmount
   useEffect(() => registerAgentSearchComposer(composerHandle), []);
   if (!shell) {
     return <p className="m-auto text-sm text-muted-foreground">Starting the search…</p>;

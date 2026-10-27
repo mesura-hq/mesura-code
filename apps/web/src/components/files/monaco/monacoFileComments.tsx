@@ -39,16 +39,9 @@ export interface SelectedLineRange {
 }
 
 /**
- * Line selection by dragging down the line-number gutter.
- *
- * Monaco has no such gesture of its own — dragging the gutter moves the text
- * cursor — so this is built from the editor's mouse events. It reports the
- * range as it grows so the caller can highlight it, and once more when the
- * button comes up, which is what opens a comment form.
- *
- * The pointer often leaves the gutter mid-drag, and it may leave the editor
- * entirely, so the end of the gesture is taken from the window rather than
- * from Monaco: `onMouseUp` never fires for a release over another element.
+ * Line selection by dragging the line-number gutter, built from mouse events because Monaco has no
+ * such gesture. Reports the range as it grows and on release, which opens a comment form. The end
+ * is taken from the window: `onMouseUp` never fires for a release over another element.
  */
 export function installGutterLineSelection(
   editor: monaco.editor.IStandaloneCodeEditor,
@@ -75,13 +68,8 @@ export function installGutterLineSelection(
   };
 
   /**
-   * Grows the range as the pointer moves.
-   *
-   * Bound to the window rather than to `editor.onMouseMove`, which Monaco stops
-   * emitting as soon as a button goes down — it routes those moves into its own
-   * drag handling instead. Listening on the window and asking the editor what
-   * is under the pointer keeps the gesture alive, and keeps it alive when the
-   * pointer wanders off the gutter or out of the editor entirely.
+   * Grows the range as the pointer moves. On the window, because Monaco stops emitting
+   * `onMouseMove` once a button is down; hit-testing from here survives leaving the gutter.
    */
   function extend(event: PointerEvent): void {
     if (anchorLine === null) return;
@@ -105,11 +93,8 @@ export function installGutterLineSelection(
     onSelectionChange({ start: line, end: line });
   });
 
-  // `pointerup` on the window rather than on the editor, because a release over
-  // another element never reaches Monaco. `pointercancel` and `blur` end the
-  // gesture too: a release outside the browser window delivers neither a
-  // pointerup nor anything else, and without them the highlight would sit on
-  // screen until the next drag.
+  // On the window, because a release over another element never reaches Monaco. `pointercancel`
+  // and `blur` also end it: a release outside the browser window delivers no pointerup at all.
   const endGesture = () => finish();
   for (const type of ["pointerup", "pointercancel", "blur"] as const) {
     window.addEventListener(type, endGesture);
@@ -153,16 +138,9 @@ export interface MonacoFileComments {
 }
 
 /**
- * File comments, drawn as Monaco view zones.
- *
- * Each comment owns a tracked decoration over the lines it covers, which is
- * what makes it follow an edit: Monaco remaps the decoration, and the zone is
- * re-anchored to wherever it ended up. When the commented lines are deleted the
- * decoration collapses and the comment goes with them.
- *
- * The comments live in this hook's state rather than in the composer store,
- * which matches what the Pierre surface did. The store holds only submitted
- * comments, and it is written to on submit and on delete.
+ * File comments as Monaco view zones. Each comment owns a tracked decoration, so it follows edits
+ * and goes when its lines are deleted. Comments live in hook state; the composer store holds only
+ * submitted ones, written on submit and delete.
  */
 export function useMonacoFileComments({
   editor,
@@ -195,18 +173,21 @@ export function useMonacoFileComments({
   // work inside an updater means doing it during render, and writing to the
   // composer store from there updates another component mid-render.
   const entriesRef = useRef(entries);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref that Monaco callbacks read outside render
   useLayoutEffect(() => {
     entriesRef.current = entries;
   }, [entries]);
 
   const hasOpenDraft = entries.some((entry) => entry.kind === "draft");
   const hasOpenDraftRef = useRef(hasOpenDraft);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref that Monaco callbacks read outside render
   useLayoutEffect(() => {
     hasOpenDraftRef.current = hasOpenDraft;
   }, [hasOpenDraft]);
 
   // The editor owns the decorations. Only release the anchor registry here:
   // the surface can dispose the editor before passive cleanups run.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: releases the anchor registry when the model changes or unmounts
   useEffect(() => {
     if (model === null) return;
     const anchors = anchorsRef.current;
@@ -271,6 +252,7 @@ export function useMonacoFileComments({
   );
 
   // Gutter drag selects the lines to comment on.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: installs the gutter drag listeners on the editor for its lifetime
   useEffect(() => {
     if (editor === null) return;
     return installGutterLineSelection(editor, {
@@ -284,6 +266,7 @@ export function useMonacoFileComments({
   }, [editor, beginComment]);
 
   // The live gutter selection, drawn as whole lines.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: mirrors the gutter selection into a Monaco decorations collection
   useEffect(() => {
     if (editor === null) return;
     const decorations = editor.createDecorationsCollection();
@@ -302,6 +285,7 @@ export function useMonacoFileComments({
   // Follow the text. Monaco has already remapped the anchors; this reads where
   // they landed, drops the comments whose lines are gone, and tells the composer
   // about the ones that moved.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to model content changes to follow the comment anchors
   useEffect(() => {
     if (model === null) return;
     const subscription = model.onDidChangeContent(() => {
@@ -433,11 +417,13 @@ function useCommentZones(
   // Monaco zone reconciliation and a new resize subscription.
   const zoneLines = groups.map((group) => group.endLine).join(",");
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reconciles Monaco view zones (an external system) with the comment groups
   useEffect(() => {
     if (editor === null) return;
     return store.synchronize(editor, zoneLines);
   }, [editor, store, zoneLines]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: clears the Monaco view zones when the editor changes or unmounts
   useEffect(() => {
     if (editor === null) return;
     return () => store.clear();

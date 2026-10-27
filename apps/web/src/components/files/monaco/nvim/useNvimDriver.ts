@@ -46,54 +46,10 @@ import {
 } from "./nvimViewport.ts";
 
 /**
- * Monaco, driven by the thread's Neovim.
- *
- * The naive branch, which phase 3's measurements chose: every key goes to
- * Neovim and the text comes back. Monaco never decides what a keystroke means,
- * so the developer's own mappings, operators and plugins are the ones running.
- *
- * Four things in here are less obvious than they look.
- *
- * **Winning the key race.** `editor.onKeyDown` fires from the listener Monaco
- * installs on its `native-edit-context` node, which is below the keybinding
- * service's own listener on the container. Calling `preventDefault` and
- * `stopPropagation` on the browser event there stops both Monaco's commands
- * and the text insertion that would otherwise follow. It also closes the
- * composer hazard by construction: `onKeyDown` only fires while Monaco has
- * text focus, so a key typed into the composer, the search box or a comment
- * form is never seen here at all.
- *
- * **Reconciling to the state, not applying the event.** The session's state is
- * absolute — it carries the lines themselves. A `lines` event is taken as a
- * shortcut to the same answer and only when the driver can see it missed
- * nothing, and the result is checked against the state afterwards. Anything
- * else is a full reconcile. Two events landing between two renders, an event
- * whose arithmetic is wrong, a client that reattached mid-edit: all of them
- * end at the same place instead of at a model that has quietly drifted. An
- * event that changed no text costs nothing here: the fold keeps the same
- * `lines` array for it, and the driver compares that identity before it
- * reads the model at all.
- *
- * **Keeping Monaco's undo stack empty.** Edits are applied with `applyEdits`
- * and never `pushEditOperations`. Undo belongs to Neovim while Neovim is
- * driving, and a Monaco stack with anything on it would let `Ctrl+Z` undo
- * something Neovim still believes is there.
- *
- * **With `enabled` false, this file has nothing to do with the editor.** That
- * is the invariant the fallback rests on: every effect below returns before it
- * touches anything, the cleanups take down the widgets, the decorations and
- * the stylesheet, and what is left is the plain Monaco the panel was before
- * modal editing existed — the same code, with no branch added to it. A
- * developer who turns the setting off, and a Neovim that would not start, land
- * in exactly the same place.
- *
- * **Letting composition through.** A dead-key accent is not routed when the
- * browser reports one: those keydowns return null from `toNvimKey`, Monaco
- * inserts the composed character locally, and the resulting model change is
- * caught below, undone, and sent to Neovim as text. On Chromium under a
- * Latin-American layout the accent usually resolves in the layout instead and
- * arrives as an ordinary keydown for `á`, which is routed as itself. Both
- * paths put the character in the buffer once.
+ * Monaco driven by the thread's Neovim: every key goes to Neovim and the text comes back, so the
+ * developer's own mappings and plugins run. Invariant: with `enabled` false every effect returns
+ * before touching the editor and the cleanups remove all widgets, decorations and the stylesheet,
+ * so a disabled setting and a Neovim that would not start both leave plain Monaco.
  */
 
 export interface NvimDriverOptions {
@@ -120,12 +76,8 @@ export interface NvimDriverOptions {
   /** Writes the pending save now, which is what `:w` means. */
   readonly flushSave: () => void;
   /**
-   * The surface's own "this edit is not the developer typing" flag.
-   *
-   * `isApplying` keeps the driver from reading an agent's write as composed
-   * input, undoing it and typing it into Neovim one character at a time.
-   * `run` lets the driver make an edit of its own under the same flag, which
-   * is how the undo-stack reset below avoids being taken for a save.
+   * The surface's "not the developer typing" flag: `isApplying` keeps an agent's write from being
+   * read as composed input, and `run` applies an edit under the same flag.
    */
   readonly externalEdits: {
     readonly isApplying: () => boolean;
@@ -143,12 +95,9 @@ export interface NvimDriverOptions {
   /** The session's state, as the attach subscription folded it. */
   readonly state: NvimDriverState;
   /**
-   * The same state, read and followed outside React.
-   *
-   * Text, caret and mode are applied from this subscription as each event
-   * arrives, not from an effect after the render it causes: a passive effect
-   * runs a commit later, and a `j` that left the visible lines painted its
-   * caret about 160 ms after the key on the developer's laptop.
+   * The same state, followed outside React: text, caret and mode apply as each event arrives,
+   * because a passive effect runs a commit later (a `j` leaving the view painted its caret about
+   * 160 ms late).
    */
   readonly stateSource: NvimDriverStateSource;
 }
@@ -189,12 +138,9 @@ export interface NvimDriverResult {
   readonly cmdline: EditorCmdline | null;
   readonly message: { readonly kind: string; readonly text: string } | null;
   /**
-   * Offers an agent's write to Neovim, and says whether it took it.
-   *
-   * True means the caller must not touch the model: the edit is on its way to
-   * Neovim and comes back as a `lines` event, which is what makes it one undo
-   * step in the only undo stack that is running. False means the driver is not
-   * active and the caller owns the edit as it always did.
+   * Offers an agent's write to Neovim. True: the caller must not touch the model; the edit returns
+   * as a `lines` event and is one undo step in Neovim. False: the driver is inactive and the caller
+   * applies the edit.
    */
   readonly takeExternalEdit: (edit: EditorTextEdit) => boolean;
 }
@@ -226,30 +172,17 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   /** The last `state.sequence` this driver reconciled to, for this model. */
   const appliedSequenceRef = useRef<number | null>(null);
   /**
-   * The `state.lines` this driver last made the model agree with.
-   *
-   * The fold keeps the same array for every event that changes no text — a
-   * cursor, a mode, a decoration, a message — so an unchanged identity is
-   * proof the model needs nothing, and the whole-model read and diff are
-   * skipped. Cleared whenever the model may have moved without Neovim.
+   * The `state.lines` the model last agreed with. The fold reuses the array for events that change
+   * no text, so an unchanged identity skips the model read and diff. Cleared whenever the model may
+   * have moved without Neovim.
    */
   const appliedLinesRef = useRef<ReadonlyArray<string> | null>(null);
   /** The model those refs describe. */
   const reconciledModelRef = useRef<monaco.editor.ITextModel | null>(null);
   /**
-   * The open this driver is waiting on: the model it handed Neovim, the
-   * snapshot count when it did, and the lines the session answered with.
-   *
-   * Nothing is reconciled into a model until the session's state carries that
-   * open's answer, because until then it describes the text from before it — a
-   * snapshot the attachment cached, or one an attachment made before the open
-   * delivers late, either older than an edit the model kept while modal
-   * editing was off. Reconciling to it would overwrite the edit, and an open
-   * sent after that would hand Neovim the stale text.
-   *
-   * The answer is recognised as a snapshot newer than the open that carries
-   * the lines the open's reply carried: the server publishes the open's
-   * snapshot to every attachment and answers with the same one.
+   * The pending open: the model handed to Neovim, the snapshot count then, and the reply's lines.
+   * Nothing reconciles until the state carries that answer (a newer snapshot with the reply's
+   * lines); an older snapshot would overwrite edits made while modal editing was off.
    */
   const openRef = useRef<PendingOpen | null>(null);
   /** The reconcile the subscription runs, for the open's reply to run too. */
@@ -267,13 +200,9 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   const styleRef = useRef<HTMLStyleElement | null>(null);
   const hadSelectionRef = useRef(false);
   /**
-   * Who moved the view last: a key sent to Neovim, or the pointer.
-   *
-   * Both sides can scroll, so both sides' echoes arrive. A wheel scroll moves
-   * Neovim's cursor into the new window, and that cursor comes back; revealing
-   * it, or following Neovim's topline, then scrolled the view back to where the
-   * wheel had just left it — the "scroll down and it jumps up" the developer
-   * hit. The view follows Neovim only while keys are what is moving it.
+   * Who moved the view last. Both sides' scroll echoes arrive, and following Neovim after a wheel
+   * scroll jumped the view back ("scroll down and it jumps up"), so the view follows Neovim only
+   * while keys move it.
    */
   const scrollOwnerRef = useRef<"keys" | "pointer">("keys");
   const flushedWriteRequestsRef = useRef(0);
@@ -283,46 +212,22 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     [reactId],
   );
 
-  // Hand the file over whenever the model changes identity. The lines come
-  // from the model rather than from the `contents` prop, because the model is
-  // what the developer is looking at — it may already carry edits the prop
-  // does not.
-  //
-  // This also covers coming back to a model that was kept while the developer
-  // was somewhere else. The model outlives the panel now, so a return finds it
-  // with its undo stack intact, and the session answers the open with a
-  // snapshot that the driver reconciles against — no reset, and nothing that
-  // would empty a stack the whole registry exists to keep.
+  // Hand the file over whenever the model changes identity, with the model's lines (they may carry
+  // edits the `contents` prop lacks). A kept model coming back is reconciled against the session's
+  // snapshot, never reset, so its undo stack survives.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: opens the file in the thread's Neovim session when the model changes identity
   useEffect(() => {
     if (!enabled || model === null) return;
 
-    // The path and the model come from different hooks and do not land on the
-    // same render. `openFile` closes over the path, so it is new as soon as
-    // the panel switches file, while `model` is still the one the panel was
-    // showing a moment ago — and this effect would then hand the session the
-    // previous file's text under the new file's name.
-    //
-    // That is not a cosmetic race. The server writes those lines into the
-    // buffer it opens, answers with a snapshot carrying the new path and the
-    // old text, and the panel reconciles its model to it and saves. Measured
-    // on the wire: `open` asked for `browserFaviconLogic.test.ts` and carried
-    // `import { v4 as uuid } from "uuid";` as its first line, which belongs to
-    // the file opened before it. A source file was overwritten with another
-    // file's contents this way.
-    //
-    // Waiting costs nothing: the model arrives a render later and this effect
-    // runs again with the pair agreeing.
-    // Both sides parsed the same way. The model's URI is the key put through
-    // `monaco.Uri.parse`, which normalises it, so comparing the raw key
-    // against the parsed one never matches and the session would never open
-    // at all.
+    // The path and the model land on different renders: `openFile` changes with the path while
+    // `model` is still the previous file's. Opening then sent the old file's text under the new
+    // path and overwrote a source file. Wait instead; the matching model arrives a render later.
+
+    // Both sides parsed: the model's URI went through `monaco.Uri.parse`, which normalises it.
     const expected = monaco.Uri.parse(monacoFileModelKey(environmentId, cwd, relativePath));
     if (model.uri.toString() !== expected.toString()) {
-      // Normally true for exactly one render while the panel switches file,
-      // and the effect runs again when the model catches up. If it is true
-      // forever — a `cwd` or `environmentId` the panel and the driver disagree
-      // about, a model some other path created — then modal editing never
-      // starts and looks exactly like the setting being off.
+      // Normally true for one render during a file switch. If it stays true (a `cwd` or
+      // `environmentId` mismatch, a model from another path), modal editing silently never starts.
       if (import.meta.env.DEV) {
         console.warn("nvim: the model does not belong to the open path, so no session was opened", {
           model: model.uri.toString(),
@@ -361,7 +266,11 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `openGeneration`, above.
   }, [enabled, model, openFile, openGeneration, environmentId, cwd, relativePath, stateSource]);
 
-  // Keys.
+  // Keys. `onKeyDown` fires on Monaco's `native-edit-context` node, below the keybinding
+  // service's listener, so `preventDefault` and `stopPropagation` here stop both Monaco's commands
+  // and the text insertion. It fires only while Monaco has text focus, so keys typed in the
+  // composer, the search box or a comment form never reach it.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: routes editor keydowns to Neovim while the driver is active
   useEffect(() => {
     if (!enabled || editor === null) return;
     const subscription = editor.onKeyDown((event) => {
@@ -392,11 +301,11 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     return () => subscription.dispose();
   }, [enabled, editor, sendKeys, isAppShortcut]);
 
-  // Composed text. Anything that reaches the model while Neovim is driving,
-  // and is neither Neovim's own edit nor the surface writing an agent's
-  // change, was composed by the browser — a dead-key accent, an input method.
-  // Monaco's undo stack holds only that edit, because nothing else pushes to
-  // it here, so undoing it is exact.
+  // Composed text (dead-key accent, input method): a model change that is neither Neovim's edit nor
+  // an agent's write is undone locally and sent to Neovim as text; Monaco's undo stack holds only
+  // that edit, so the undo is exact. Chromium on a Latin-American layout usually sends `á` as a
+  // plain keydown instead, routed as itself.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: sends browser-composed text to Neovim and undoes it locally
   useEffect(() => {
     if (!enabled || model === null) return;
     const subscription = model.onDidChangeContent((event) => {
@@ -422,12 +331,10 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     return () => subscription.dispose();
   }, [enabled, model, sendKeys, externalEdits]);
 
-  // Text, cursor and mode coming back, applied as each state arrives.
-  //
-  // Subscribed rather than read in an effect: see `stateSource`. The layout
-  // effect only sets the subscription up, and reconciles once to whatever the
-  // state is by then, so a model, a file or an activation that changed between
-  // two events is caught up at once rather than at the next event.
+  // Applied per event from the subscription (see `stateSource`), and once at setup so a changed
+  // model, file or activation catches up at once. Reconciles to the absolute state: a `lines`
+  // event is a shortcut only when nothing was missed, checked afterwards; else a full reconcile.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to session state outside React so text and caret apply per event
   useLayoutEffect(() => {
     if (!enabled || editor === null || model === null) return;
     if (reconciledModelRef.current !== model) {
@@ -530,6 +437,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Coalesced to one animation frame because a wheel produces scroll events far
   // faster than a frame, and every one of them would otherwise be a message on
   // the wire and a `winrestview` in Neovim.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: publishes the editor viewport to Neovim, coalesced per animation frame
   useEffect(() => {
     if (!enabled || editor === null || model === null) return;
 
@@ -567,13 +475,10 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     };
   }, [enabled, editor, model, sendViewport]);
 
-  // `:w`. Neovim asks the host to write, because the host owns the file.
-  //
-  // Counted rather than read off the latest event. A write request followed in
-  // the same render by anything at all — a cursor move, the mode leaving the
-  // command line, the redraw the write itself caused — leaves the latest event
-  // pointing at that other thing, and the save is never flushed while the
-  // developer has been told it was.
+  // `:w`: Neovim asks the host to write. Counted, not read off the latest event, because any event
+  // in the same render (cursor, mode, the write's own redraw) would hide the request and the save
+  // would never flush.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: flushes a save for each write request Neovim sends
   useEffect(() => {
     if (!enabled) return;
     if (state.writeRequests === flushedWriteRequestsRef.current) return;
@@ -587,6 +492,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Only when a key caused it. `shouldEchoViewport` drops a topline that is
   // either the one this client just sent or the one Neovim last sent, which is
   // what stops the two scrolling each other forever.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: follows Neovim's topline when a key moved the view
   useEffect(() => {
     if (!enabled || editor === null) return;
     if (state.relativePath !== relativePath) return;
@@ -617,6 +523,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 
   // The pointer takes the view the moment it touches it: a wheel, a trackpad
   // swipe, a drag on the scrollbar, a click in the text.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: hands view ownership to the pointer on wheel, scrollbar drag or click
   useEffect(() => {
     if (!enabled || editor === null) return;
     const container = editor.getContainerDomNode();
@@ -636,6 +543,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 
   // The labels are set in the editor's font when they are made, so a zoom or a
   // font change has to reach the ones already on screen too.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: re-fonts the labels on screen when the editor font changes
   useEffect(() => {
     if (!enabled || editor === null) return;
     const subscription = editor.onDidChangeConfiguration((event) => {
@@ -645,30 +553,15 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     return () => subscription.dispose();
   }, [enabled, editor]);
 
-  // Undo has one owner, and never both at once — and the way to keep it that
-  // way is to take nothing away rather than to reset anything.
-  //
-  // Monaco's `undo` cannot act while the driver is running: `Ctrl+Z` reaches
-  // `toNvimKey` and is stopped before the keybinding service sees it, and
-  // every edit from Neovim goes through `applyEdits`, which records nothing.
-  //
-  // REGRESSION: an earlier version of this phase cleared the model's history on
-  // both edges of activation with `model.setValue(model.getValue())`, which is
-  // the only public way to clear it. Monaco's `setValue` destroys every
-  // decoration on the model before it clears the history — `textModel.js`
-  // says so in as many words, "Destroy all my decorations" — and the file
-  // comments' anchors are decorations. Toggling modal editing on a file with
-  // comments silently detached every one of them. Do not put it back: the
-  // history it removed was inert, and the decorations it removed were not.
-  // Everything Neovim drew over the text, as Monaco's own furniture: the
-  // labels as content widgets, the highlight runs as decorations.
-  //
-  // Diffed against what is on screen rather than rebuilt. A content widget
-  // taken out and put back flickers, and flash rewrites its labels on every
-  // keystroke of a search — so a label that was already in the right place
-  // keeps its node and only its text changes.
-  // The decorations collection, and the one place everything drawn is taken
-  // down: a file switch, the driver going quiet, the surface going away.
+  // Undo has one owner: `Ctrl+Z` stops at `toNvimKey`, and Neovim's edits go through `applyEdits`,
+  // so Monaco's history stays inert. REGRESSION: never clear it with `model.setValue(...)` on
+  // activation; `setValue` destroys every decoration first, which detached all file comment
+  // anchors.
+
+  // Neovim's drawing as Monaco widgets and decorations, diffed against the screen because a
+  // re-added widget flickers. This collection is where it all comes down: file switch, driver off,
+  // unmount.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: owns the decorations collection and tears down everything drawn
   useEffect(() => {
     if (!enabled || editor === null) return;
     if (model === null) return;
@@ -684,14 +577,12 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     };
   }, [enabled, editor, model]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: diffs Neovim's overlays into Monaco content widgets and decorations
   useEffect(() => {
     if (!enabled || editor === null) return;
 
-    // Nothing is drawn for a file the session is not on, and — the part that
-    // was missing — whatever was drawn for the last one comes down. Returning
-    // early left the previous file's labels on screen, anchored to line and
-    // column numbers that now mean something else entirely, which is how a
-    // hint belonging to another file came to sit in the middle of this one.
+    // Nothing is drawn for a file the session is not on, and the last file's drawing comes down:
+    // returning early once left another file's labels at line numbers that mean something else.
     const desired =
       state.relativePath === relativePath
         ? widgetsFor(state.decorations)
@@ -753,6 +644,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Scoped by a class on the editor's own container, because two file panels
   // on two threads are two Neovims and highlight id 7 means something
   // different in each.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: installs the scoped highlight stylesheet on the editor container
   useEffect(() => {
     if (!enabled || editor === null) return;
     const container = editor.getContainerDomNode();
@@ -770,6 +662,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 
   // flash's backdrop fades while it waits for a label; the rule that fades it
   // is in the highlight stylesheet and keys on this class.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: toggles the flash jumping class on the editor container
   useEffect(() => {
     if (!enabled || editor === null) return;
     const container = editor.getContainerDomNode();
@@ -777,6 +670,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     return () => container.classList.remove(NVIM_JUMPING_CLASS);
   }, [enabled, editor, state.jumping]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: writes Neovim's highlight definitions into the scoped stylesheet node
   useEffect(() => {
     const style = styleRef.current;
     if (style === null) return;
@@ -786,6 +680,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Visual mode is Monaco's selection, not a decoration. Neovim's own `Visual`
   // group is on the classifier's deny list for the same reason: two things
   // painting one selection disagree about its edges.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: mirrors Neovim's visual selection as Monaco selections
   useEffect(() => {
     if (!enabled || editor === null || model === null) return;
     if (state.relativePath !== relativePath) return;
@@ -803,6 +698,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 
   // The mouse is the one place the client tells Neovim where the caret is.
   // Every other cursor movement here is Neovim's own echo coming back.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: sends mouse caret moves to Neovim, the one cursor change the client originates
   useEffect(() => {
     if (!enabled || editor === null) return;
     const subscription = editor.onDidChangeCursorPosition((event) => {
@@ -816,12 +712,8 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   const takeExternalEdit = useCallback(
     (edit: EditorTextEdit) => {
       if (!enabled) return false;
-      // The session has to have *this* file open. One session serves the whole
-      // thread, so between a file switch and the session catching up, an edit
-      // sent now would be written into the buffer that is still attached —
-      // corrupting the file the developer just left, and losing the write for
-      // the one they are looking at, because the caller trusts this answer and
-      // leaves its own model alone.
+      // The session must have this file open: one session serves the thread, so after a file
+      // switch the edit would land in the old file's buffer and be lost for this one.
       if (state.relativePath !== relativePath) return false;
       // One edit, applied inside Neovim, which is what makes it one `u`. The
       // model is deliberately left alone: the `lines` event coming back is what
@@ -844,13 +736,8 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 }
 
 /**
- * Whether the model now says what the state says, for the lines an event
- * touched.
- *
- * The cheap half of a comparison nobody wants to make in full on every
- * keystroke: the line count, plus the lines the event claimed to write. An
- * edit that reached the wrong range fails one of the two, and a 100,000-line
- * file costs the same as a three-line one.
+ * Whether the model matches the state for the lines an event touched: the line count plus the
+ * written lines. A wrong-range edit fails one of the two, at a cost independent of file size.
  */
 function modelAgreesAbout(
   model: monaco.editor.ITextModel,
@@ -884,16 +771,9 @@ function positionAsRange(position: monaco.IPosition) {
 }
 
 /**
- * Neovim's selection, as Monaco's.
- *
- * Three shapes, and the differences are not cosmetic. Vim's character-wise
- * selection includes the character under the cursor, so the later end gains a
- * column; a line-wise selection is whole lines whatever the columns say; and a
- * block is not one range at all but one per line, which is the only way Monaco
- * can draw a column.
- *
- * Either end can be the earlier one: a selection made upwards has its anchor
- * below its cursor, and taking the anchor as the start would draw nothing.
+ * Neovim's selection as Monaco's. Character-wise includes the cursor's character (the later end
+ * gains a column), line-wise is whole lines, and block is one range per line. Either end can be
+ * the earlier one: an upward selection has its anchor below the cursor.
  */
 function selectionsForVisual(
   visual: EditorVisual,
@@ -960,12 +840,8 @@ function selectionsForVisual(
 const VISUAL_BLOCK_CODE = 22;
 
 /**
- * Sets a node in the editor's own font, so an overlay sits on the text grid.
- *
- * Inheriting it does not work: content widgets live outside `.view-lines`, and
- * the element they inherit from carries the interface font. A label drawn in a
- * proportional font covers the wrong characters and reads as a stray word in
- * the middle of the file.
+ * Sets a node in the editor's own font so an overlay sits on the text grid. Content widgets live
+ * outside `.view-lines` and would inherit the interface font, covering the wrong characters.
  */
 function applyEditorFont(node: HTMLElement, editor: monaco.editor.IStandaloneCodeEditor): void {
   const font = editor.getOption(monaco.editor.EditorOption.fontInfo);

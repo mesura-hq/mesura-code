@@ -1,16 +1,8 @@
 /**
- * FactoryRunShellSummaries - the Software Factory run label of each thread, in memory.
- *
- * The run tracker writes it and the V2 projection store reads it when it maps a
- * thread's shell. It has no dependencies, so the store can read it without
- * pulling the tracker, and the orchestrator behind it, below the store.
- *
- * A reference with a default rather than a required service: the projection
- * store is built in several places, and Effect caches a reference's default,
- * so the tracker and every store share one map without wiring. `layer` gives a
- * test a fresh map.
- *
- * @module FactoryRunShellSummaries
+ * The run tracker writes each thread's Software Factory run label; the V2 projection store reads
+ * it. A `Context.Reference` default, not a required service: Effect caches the default, so the
+ * tracker and every store share one map without wiring and without pulling the tracker below
+ * the store. `layer` gives a test a fresh map.
  */
 import type { FactoryRunShellSummary } from "@t3tools/contracts";
 import * as Context from "effect/Context";

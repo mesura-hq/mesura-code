@@ -1,32 +1,8 @@
 /**
- * Compile-time locks that bind the runtime vocabularies this projection borrows
- * to the upstream types they project.
- *
- * `packages/contracts/src/providerRuntime.ts` declares every runtime state
- * vocabulary as a module-private `Schema.Literals` value and, for the ones
- * borrowed here, exports only the TypeScript type — so no other package can
- * compose the schema value. Symmetria needs a runtime value — a schema cannot
- * emit JSON Schema without one — so it keeps its own literal tuple here and
- * asserts mutual assignability against the upstream type. Adding or removing a
- * literal upstream collapses `MutuallyAssignable` to `never`, and the
- * assignment of `true` then fails this package's typecheck. That is how the
- * second copy cannot drift in silence.
- *
- * A vocabulary belongs here only when its schema value is genuinely
- * unreachable. `RuntimeTurnState` looks like it belongs and does not: upstream
- * re-exports that exact value as `ProviderRuntimeTurnStatus`
- * (`providerRuntime.ts:1213`), so the projection composes it directly and needs
- * neither a copy nor a lock. Do not add it back — a lock guards against drift
- * between two copies, and composing the upstream value means there is only one.
- * Check for a public alias before adding any vocabulary to this module.
- *
- * The alternative was one `export` keyword added to each upstream constant.
- * That is a smaller diff today and a merge conflict at every weekly upstream
- * synchronization, in the file this migration most wants to leave untouched.
- *
- * Every declaration below is a type-only import or a plain literal tuple. This
- * module deliberately depends on nothing at runtime, so it can be typechecked
- * on its own against a stand-in for the upstream types.
+ * Upstream exports only the types of these vocabularies, so each keeps a local literal tuple
+ * locked to its type: an upstream literal change fails this package's typecheck. Add one only
+ * when no public schema alias exists (`RuntimeTurnState` has `ProviderRuntimeTurnStatus`).
+ * No runtime imports: the module typechecks alone against a stand-in for the upstream types.
  */
 import type {
   ProviderRuntimeEvent,
@@ -37,8 +13,8 @@ import type {
 } from "@t3tools/contracts";
 
 /**
- * Mesura: upstream stopped exporting the event-type vocabulary as its own type
- * (refactor #9917). The union's `type` field is the same set of literals.
+ * Mesura: upstream stopped exporting the event-type vocabulary as its own type.
+ * The union's `type` field is the same set of literals.
  */
 type ProviderRuntimeEventType = ProviderRuntimeEvent["type"];
 

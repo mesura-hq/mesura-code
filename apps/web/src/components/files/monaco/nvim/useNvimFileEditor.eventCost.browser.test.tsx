@@ -1,23 +1,9 @@
 import { act } from "../../../../../test/render";
 /**
- * Entry point: `useNvimFileEditor`, the hook `MonacoFileSurface` mounts for
- * modal editing, rendered under React with a model, over an editor that lays
- * that model out (`HarnessLayout` in `~/test/nvimEditorHarness.tsx`). Neovim's
- * answers arrive on the real attach subscription, folded by the real
- * `editorSessionFold`, and reach Monaco through the real `useNvimDriver`.
- *
- * Phase 4 of the editor latency cycle ("One key costs one small render"):
- *
- * - Criterion 1: a cursor event from Neovim is applied to Monaco without
- *   waiting for a passive React effect. Measured here as React commits: the
- *   caret is on the new line, and the line is in view, before React commits
- *   anything for the event. A passive effect runs only after a commit, so a
- *   cursor applied there is applied one commit late. The investigation
- *   measured that path at about 160 ms on the real client when the cursor
- *   leaves the visible lines (`/tmp/editor-perf/repro/`).
- * - Criterion 4: events that change no text — cursor, mode, decorations,
- *   messages — do not read or diff the whole Monaco model. Counted on the
- *   model: `getLinesContent` and `getValue` are the whole-model reads.
+ * `useNvimFileEditor` under React, over an editor that lays its model out, with Neovim's answers
+ * through the real attach subscription, `editorSessionFold` and `useNvimDriver`. A cursor event
+ * reaches Monaco before React commits for it (a passive effect is one commit late), and events
+ * that change no text never read the whole model (`getLinesContent`, `getValue`).
  */
 import { Profiler } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -119,12 +105,9 @@ async function setupBrowserFixture0() {
 }
 
 /**
- * Mounts the hook inside a `Profiler`, over an editor whose every call is
- * stamped with the number of React commits so far.
- *
- * The stamp is what tells a cursor applied as the event arrives from one
- * applied after React rendered for it: `Profiler.onRender` runs in the commit,
- * after the layout effects and before the passive ones.
+ * Mounts the hook inside a `Profiler` and stamps every editor call with the commit count.
+ * `Profiler.onRender` runs in the commit, after layout effects and before passive ones, so
+ * the stamp tells a cursor applied on arrival from one applied after React rendered for it.
  */
 async function mountProfiled(model: HarnessModel) {
   let commits = 0;

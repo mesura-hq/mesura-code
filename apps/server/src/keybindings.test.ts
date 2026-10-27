@@ -168,13 +168,9 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         return keys[0];
       };
 
-      // The everywhere-works chord is last on purpose: the label resolver
-      // reports the binding that wins, and naming ctrl+tab would be wrong on
-      // every surface that never receives it.
-      //
-      // The sidebar's bare letter is first for the same reason from the other
-      // end. It only works with a thread row focused, so advertising `k` as
-      // the way to reach the previous thread would be wrong everywhere else.
+      // Order matters: the label resolver names the winning (last) binding, so
+      // the everywhere-works chord goes last (ctrl+tab never reaches some
+      // surfaces). The bare letter goes first: it works only on a focused row.
       assert.deepEqual(keysFor("thread.previous"), ["k", "ctrl+shift+tab", "mod+shift+["]);
       assert.deepEqual(keysFor("thread.next"), ["j", "ctrl+tab", "mod+shift+]"]);
       assert.deepEqual(keysFor("thread.nextPage"), ["mod+d"]);
@@ -1181,13 +1177,9 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
   it.effect("keeps the two mod+j defaults in the one order that works", () =>
     Effect.sync(() => {
-      // Both the context and the order were got wrong once, in opposite
-      // directions, so both are asserted here.
-      //
-      // Separate contexts, or backfill skips the pane rule and it never
-      // reaches an existing config. Pane rule first, or last-wins answers it
-      // instead of the toggle and ChatView, which has no branch for a pane
-      // command, drops the key: the drawer never opens.
+      // Regression guard (both broke once). Separate contexts, or backfill
+      // skips the pane rule for existing configs. Pane rule first, or
+      // last-wins resolves it over the toggle and ChatView drops the key.
       const onModJ = Keybindings.DEFAULT_KEYBINDINGS.filter((rule) => rule.key === "mod+j");
       assert.deepEqual(onModJ, [
         { key: "mod+j", command: "pane.focusDown", when: "chatFocus" },
@@ -1198,17 +1190,10 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
   it.effect("ships no default that another default shadows outright", () =>
     Effect.sync(() => {
-      // Resolution is last-wins, so a rule with no `when` makes every earlier
-      // rule on its key unreachable, whatever their clauses say. That is
-      // invisible to the same-context check above, and it is how
-      // editor.openFavorite silently took mod+shift+o away from chat.new.
-      //
-      // One pair is exempt, named as a pair rather than by a `pane.` prefix:
-      // a prefix would wave through the next pane command shadowed by
-      // accident, which is the very class of bug this guard exists to catch.
-      // `pane.focusDown` sits behind `terminal.toggle` on mod+j on purpose:
-      // it is dispatched by usePaneNavigation, which matches it directly, so
-      // being unreachable by resolution is its design rather than a defect.
+      // Last-wins: a rule with no `when` hides every earlier rule on its key
+      // (how editor.openFavorite took mod+shift+o from chat.new). The exemption
+      // names the exact pair, not a `pane.` prefix: usePaneNavigation matches
+      // pane.focusDown directly, so its shadowing on mod+j is by design.
       const INTENTIONALLY_SHADOWED = [{ key: "mod+j", command: "pane.focusDown" }];
 
       const byKey = new Map<string, Array<{ command: string; when?: string }>>();
@@ -1524,11 +1509,9 @@ it("gives the thread search a chord no other default claims in the same context"
   assert.deepEqual(clashes, []);
 });
 
-// This used to assert the opposite: threadSearch.toggle shipped on a free chord,
-// so the per-command startup backfill installed it and no retirement was needed.
-// v0.0.42 gave mod+shift+k to pullRequest.copyNumber, so the chord moved and an
-// installed config now needs the rewrite to follow it. Do not restore the
-// no-entry assertion without moving the default back to a chord upstream leaves
+// Do not restore the old no-retirement assertion: v0.0.42 gave mod+shift+k to
+// pullRequest.copyNumber, so installed configs need this rewrite to follow the
+// move. It is only removable if the default returns to a chord upstream leaves
 // alone.
 it("retires threadSearch.toggle off the chord v0.0.42 claimed", () => {
   assert.deepEqual(

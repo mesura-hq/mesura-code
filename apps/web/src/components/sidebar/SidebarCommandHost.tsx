@@ -19,24 +19,14 @@ import {
 } from "../searches/agentSearchPopupStore";
 import { toastManager } from "../ui/toast";
 import { useSidebar } from "../ui/sidebar";
-import { useNavigateToMainApp } from "./mainAppLocation";
+import { useCloseAppModal } from "./mainAppLocation";
+import { setWorkingSectionExpanded } from "./workingSection";
 
 /**
- * The keyboard's way into the sidebar: `threadSearch.toggle` focuses its Search
- * field, `projectScope.toggle` opens its project filter, and
- * `projectScope.toggleAll` flips that filter between every project and the last.
- *
- * The request is a store, not an event, because the sidebar it targets is not
- * always mounted: at phone width it lives in a drawer whose content unmounts
- * while closed, and on Settings the sidebar shows the settings navigation.
- * `SidebarCommandHost` sits outside both, opens the drawer or returns to the
- * main app, and leaves the request for the sidebar to serve once it mounts.
- * An open command palette is closed first: it makes the rest of the page
- * inert, and its final focus serves the request.
- *
- * The Search field is also a way out: `threadSearch.toggle` again, or Escape
- * on the empty field, hands the keyboard back to where the command took it
- * from and hides the sidebar again if the command had to show it.
+ * The keyboard's way into the sidebar (`threadSearch.toggle`, `projectScope.toggle`,
+ * `projectScope.toggleAll`, `sidebar.toggleWorking`). The request is a store, not an event, because the target may be
+ * unmounted (the phone drawer) or inert (the Settings modal, an open command palette):
+ * `SidebarCommandHost` opens or closes those, and the sidebar serves the request once it can.
  */
 type SidebarFocusTarget = "search" | "projectFilter";
 
@@ -64,8 +54,6 @@ interface SearchFocusOrigin {
   readonly revealedSidebar: boolean;
 }
 let searchFocusOrigin: SearchFocusOrigin | null = null;
-/** Set when a request leaves Settings for the threads; the chat's next mount focus consumes it. */
-let returningFromSettings = false;
 /** Display names by project scope key, kept by the mounted sidebar for the toggle's toast. */
 const projectScopeLabels = new Map<string, string>();
 
@@ -75,19 +63,6 @@ const CLOSE_PALETTE_EVENT = "mesura:sidebar-request-closes-palette";
 export function onSidebarRequestClosesPalette(listener: () => void): () => void {
   window.addEventListener(CLOSE_PALETTE_EVENT, listener);
   return () => window.removeEventListener(CLOSE_PALETTE_EVENT, listener);
-}
-
-/**
- * True once after a focus request left Settings: the chat remounts on the way
- * back and focuses its composer a frame later, after the sidebar has taken the
- * keyboard. The chat's mount focus asks this and skips that one time. Only the
- * return from Settings arms it, so choosing a search result later still hands
- * the keyboard to the composer.
- */
-export function sidebarHoldsRequestedFocus(): boolean {
-  if (!returningFromSettings) return false;
-  returningFromSettings = false;
-  return true;
 }
 
 /**
@@ -170,27 +145,31 @@ const FOCUS_TARGET_BY_COMMAND = {
   "projectScope.toggle": "projectFilter",
 } as const satisfies Partial<Record<KeybindingCommand, SidebarFocusTarget>>;
 
-type SidebarCommand = keyof typeof FOCUS_TARGET_BY_COMMAND | "projectScope.toggleAll";
+const STATE_COMMANDS = ["projectScope.toggleAll", "sidebar.toggleWorking"] as const;
+
+type SidebarCommand = keyof typeof FOCUS_TARGET_BY_COMMAND | (typeof STATE_COMMANDS)[number];
 
 function isSidebarCommand(command: KeybindingCommand | null): command is SidebarCommand {
-  return command === "projectScope.toggleAll" || (command ?? "") in FOCUS_TARGET_BY_COMMAND;
+  return (
+    (STATE_COMMANDS as ReadonlyArray<string | null>).includes(command) ||
+    (command ?? "") in FOCUS_TARGET_BY_COMMAND
+  );
 }
 
 /**
- * Mounted once in the app layout, outside the phone drawer, on every page.
- *
- * `surface` is what the layout's sidebar slot shows. `legacy` has neither a
- * Search field nor a project filter, so both focus commands open the command
- * palette, whose thread rows search every project. The scope toggle writes the
- * store whatever shows; the legacy sidebar does not read it.
+ * Mounted once in the app layout, outside the phone drawer, on every page. The `legacy` sidebar
+ * has neither a Search field nor a project filter, so both focus commands open the command
+ * palette instead; the scope toggle writes the store whatever shows.
  */
 export function SidebarCommandHost(props: { readonly surface: "threads" | "settings" | "legacy" }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMobile, open, openMobile, setOpen, setOpenMobile } = useSidebar();
-  const navigateToMainApp = useNavigateToMainApp();
+  const closeAppModal = useCloseAppModal();
 
   const sidebarHidden = isMobile ? !openMobile : !open;
 
+  // The Search field's way out: `threadSearch.toggle` again, or Escape on the empty field, hands
+  // the keyboard back to where the command took it from and hides a sidebar the command showed.
   const leaveSearch = () => {
     const origin = takeSearchFocusOrigin();
     if (isMobile) {
@@ -211,6 +190,12 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
       toggleAllProjects();
       return;
     }
+    if (command === "sidebar.toggleWorking") {
+      // A hidden sidebar opens on its Working section rather than flipping a state nobody sees.
+      setWorkingSectionExpanded((expanded) => sidebarHidden || !expanded);
+      if (sidebarHidden) (isMobile ? setOpenMobile : setOpen)(true);
+      return;
+    }
     if (props.surface === "legacy") {
       openCommandPalette();
       return;
@@ -224,12 +209,12 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
     }
     // The sidebar is workspace too: a focus request over the agent search popup closes it first.
     closeAgentSearchPopupForWorkspace();
-    useSidebarFocusRequestStore.setState({ target: FOCUS_TARGET_BY_COMMAND[command] });
+    const request = () =>
+      useSidebarFocusRequestStore.setState({ target: FOCUS_TARGET_BY_COMMAND[command] });
     if (isCommandPaletteOpen()) window.dispatchEvent(new Event(CLOSE_PALETTE_EVENT));
-    if (props.surface === "settings") {
-      returningFromSettings = true;
-      void navigateToMainApp();
-    }
+    // The modal keeps the sidebar inert until its route is gone, so the request waits for that.
+    if (props.surface === "settings") void closeAppModal().then(request);
+    else request();
     if (sidebarHidden) (isMobile ? setOpenMobile : setOpen)(true);
   };
 
@@ -237,8 +222,10 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
     "threadSearch.toggle": () => run("threadSearch.toggle"),
     "projectScope.toggle": () => run("projectScope.toggle"),
     "projectScope.toggleAll": () => run("projectScope.toggleAll"),
+    "sidebar.toggleWorking": () => run("sidebar.toggleWorking"),
   });
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: window keydown and focusout listeners for the sidebar commands and the Search way back, re-bound each render to read the latest run
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -294,11 +281,13 @@ export function useSidebarCommandTarget(input: {
   const { searchInputRef, openProjectFilter, projectScopeItems } = input;
   const target = useSidebarFocusRequestStore((store) => store.target);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: publishes the mounted sidebar's project names to the module map the toast reads
   useEffect(() => {
     projectScopeLabels.clear();
     for (const item of projectScopeItems) projectScopeLabels.set(item.value, item.label);
   }, [projectScopeItems]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers this mounted sidebar as the module-level focus server, removed on unmount
   useEffect(() => {
     const target = {
       serve: (focusTarget: SidebarFocusTarget) => {
@@ -313,6 +302,7 @@ export function useSidebarCommandTarget(input: {
     };
   });
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: serves a focus request from the external store once the sidebar can take focus
   useEffect(() => {
     if (target !== null && !isCommandPaletteOpen()) serveSidebarFocusRequest();
   }, [target]);

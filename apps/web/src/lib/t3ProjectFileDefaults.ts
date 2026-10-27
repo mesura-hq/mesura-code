@@ -128,6 +128,7 @@ export function useRepositoryDefaults(
     key: string;
     defaults: Awaited<ReturnType<typeof readRepositoryDefaults>>;
   } | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: async read of the repository defaults per key, with stale results cancelled
   useEffect(() => {
     if (key === null || cwd === null) return;
     let cancelled = false;

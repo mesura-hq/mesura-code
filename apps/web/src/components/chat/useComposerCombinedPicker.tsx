@@ -63,13 +63,9 @@ export interface ComposerPickerApplyEffects {
 }
 
 /**
- * Writes one applied combined-picker choice to the composer, or nothing.
- *
- * A new model goes through the composer's own model-only change first, which
- * runs every thread restriction and writes nothing when it refuses. Only after
- * it accepts does this write the row's options, its access, and the prompt's
- * Ultrathink prefix, through the same draft-store calls the separate traits and
- * access controls used. Returns whether the choice was written.
+ * A new model goes through the composer's model-only change first, which runs every thread
+ * restriction and writes nothing when it refuses. Only then are the row's options, access and
+ * Ultrathink prefix written. Returns whether the choice was written.
  */
 export function applyCombinedPickerCandidateToComposer(
   candidate: CombinedPickerCandidate,
@@ -242,6 +238,7 @@ export function useOpenCombinedPickerOnEffortShortcut(input: {
   openPicker: () => void;
 }) {
   const { enabled, openOnMoreOptions, openPicker } = input;
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the traits picker action while the picker is closed
   useEffect(() => {
     if (!enabled) return;
     return subscribePickerAction("traits", () => {

@@ -1,12 +1,7 @@
 /**
- * Pure helpers for the Diff surface's Tree diff mode: the per-file status the server reports,
- * shaped for the tree, the row accessory and the summary rows.
- *
- * The letters and the three summary rows follow Symmetria IDE's Active Changes
- * panel. Two axes, kept apart on purpose:
- * - the row letter is the operation (added, modified, deleted, renamed),
- * - the summary rows are the side (staged ●, unstaged ○, untracked ✦).
- * Colour belongs to the operation axis only; the side glyphs stay neutral.
+ * Pure helpers for the Diff surface's Tree diff mode, after Symmetria IDE's Active Changes panel.
+ * Two axes kept apart on purpose: the row letter is the operation (colored), and the summary rows
+ * are the side (staged ●, unstaged ○, untracked ✦), whose glyphs stay neutral.
  */
 import type { GitStatus } from "@pierre/trees";
 import type { GitWorkingTreeChange } from "@t3tools/contracts";

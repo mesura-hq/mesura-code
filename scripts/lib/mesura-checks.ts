@@ -49,11 +49,8 @@ export interface LintDiagnostic {
 }
 
 /**
- * Keeps every error, and a warning only where the change wrote that line. The
- * repository carries over a hundred warnings in upstream code; reporting them for
- * every touched file made agents diff warning counts by hand to find their own.
- * Every line of a file in `newFiles` (untracked) counts as changed; a tracked file
- * with no range in `changedLines` has no changed line to report a warning on.
+ * Keeps every error, and a warning only on a line the change wrote: upstream code carries over a
+ * hundred warnings. Every line of a file in `newFiles` (untracked) counts as changed.
  */
 export function selectReportableDiagnostics(
   diagnostics: ReadonlyArray<LintDiagnostic>,
@@ -150,7 +147,7 @@ export function readWorkspacePackages(repositoryRoot: string): WorkspacePackage[
             manifest.scripts?.typecheck ??
             (NodeFS.existsSync(NodePath.join(repositoryRoot, directory, "tsconfig.json"))
               ? manifest.devDependencies?.["@astrojs/check"] === undefined
-                ? "tsc-rs --noEmit"
+                ? "tsc --noEmit"
                 : "astro check"
               : undefined),
           workspaceDependencies,
@@ -186,15 +183,10 @@ const ROOT_TYPECHECK_INPUTS =
   /^(?:tsconfig[^/]*\.json|package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml)$/u;
 
 /**
- * The packages a change can break the types of: each package that owns a changed
- * file, plus every package that depends on one of those, transitively. A changed
- * type in `packages/contracts` fails in `apps/web`, not in `contracts` itself.
- *
- * `changedFiles` includes deleted paths: removing a module breaks its importers.
- * `importingFiles` are files that import a changed file by relative path across a
- * package boundary, which no manifest records (`apps/*\/vite.config.ts` import
- * `scripts/lib/public-config.ts`). A change to a root typecheck input selects
- * every package.
+ * Each package that owns a changed file, plus its transitive dependents. `changedFiles` includes
+ * deleted paths, because removing a module breaks its importers. `importingFiles` cover relative
+ * imports across a package boundary, which no manifest records (`apps/*\/vite.config.ts` import
+ * `scripts/lib/public-config.ts`). A change to a root typecheck input selects every package.
  */
 export function packagesToTypecheck(
   packages: ReadonlyArray<WorkspacePackage>,

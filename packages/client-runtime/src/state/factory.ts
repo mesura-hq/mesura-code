@@ -56,13 +56,9 @@ const FAILED_FACTORY_SNAPSHOT: FactorySnapshotState = { status: "failed" };
 const readySnapshotBySuccess = new WeakMap<object, FactorySnapshotState>();
 
 /**
- * What a client renders from a `factorySnapshot` query: its body, or why there
- * is none. The same success yields the same state object.
- *
- * A digest names fixed bytes, so a body loaded once stays true. When the query
- * fails later, typically because the device went offline and the connection
- * supervisor reports the environment `offline`, the failure's previous success
- * still renders instead of discarding a plan the reader already had.
+ * A digest names fixed bytes, so a body loaded once stays true: when the query later fails (the
+ * device went offline, say), the previous success still renders. The same success yields the same
+ * state object.
  */
 export function readFactorySnapshotState<E>(
   result: AsyncResult.AsyncResult<FactoryReadSnapshotResult, E>,

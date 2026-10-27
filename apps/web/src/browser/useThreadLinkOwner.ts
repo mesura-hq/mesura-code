@@ -11,6 +11,7 @@ export function useThreadLinkOwner(threadRef: ScopedThreadRef | null | undefined
   const key = threadRef ? scopedThreadKey(threadRef) : null;
   const identity = { key };
   const receipt = useRef<{ identity: typeof identity; controller: AbortController } | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- the abort must fire at the commit that leaves this thread, which only layout cleanup observes
   useLayoutEffect(() => {
     const controller = new AbortController();
     receipt.current = { identity, controller };

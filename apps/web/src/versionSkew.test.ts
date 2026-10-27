@@ -19,7 +19,6 @@ import {
   isVersionMismatchDismissed,
   manualServerUpdateCommand,
   manualServerUpdateCommandForPackage,
-  resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
 } from "./versionSkew";
@@ -222,12 +221,8 @@ describe("versionSkew", () => {
     );
   });
 
-  // Regression guard. `manualServerUpdateCommand` used to return
-  // `npx t3@<version>` unconditionally, which is upstream's package, not
-  // Mesura's. A user who copied it replaced their fork server with a different
-  // product that does not implement Mesura's own RPC methods, and nothing said
-  // so. Do not restore a hardcoded command here: while Mesura publishes
-  // nothing, the honest answer is that there is no command.
+  // Regression guard: a hardcoded `npx t3@<version>` installed upstream's server over the fork's.
+  // Do not restore one: while Mesura publishes nothing, the honest answer is no command.
   it("offers no update command while Mesura Code publishes no package", () => {
     expect(manualServerUpdateCommand("9.9.9")).toBeNull();
   });

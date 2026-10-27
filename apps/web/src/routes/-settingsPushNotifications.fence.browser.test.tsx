@@ -1,14 +1,8 @@
 /**
- * Entry point: the real `/settings/general` file route (`settings.general.tsx`)
- * with the real settings scope; Settings → Notifications is its Behavior
- * section. `src/test/pushSettingsFenceMocks.ts` lists the replaced boundaries:
- * the browser's push stack, the push RPCs at `useAtomCommand`, settings
- * persistence and environment discovery.
- *
- * Phone push phase 2, criteria 1 (four switch states), 2 (turning it on) and
- * 3 (turning it off survives a reload). Criterion 7, the desktop shell, is in
- * `-settingsPushNotificationsDesktop.fence.browser.test.tsx`, because the
- * shell is decided when the app's modules load.
+ * Drives the real `/settings/general` route; `src/test/pushSettingsFenceMocks.ts` lists the
+ * replaced boundaries. The desktop shell case lives in its own file
+ * (`-settingsPushNotificationsDesktop.fence.browser.test.tsx`) because `env.ts` decides the
+ * shell when the app's modules load.
  */
 import { describe, expect, it, vi } from "vite-plus/test";
 

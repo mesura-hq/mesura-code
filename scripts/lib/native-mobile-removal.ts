@@ -1,12 +1,8 @@
 /**
- * The paths this fork removed with upstream's native mobile apps
- * (`docs/mesura/adr-008-remove-native-mobile.md`). Each entry is a path prefix.
- *
- * Upstream keeps changing these paths, so every upstream merge brings some of them back:
- * modify/delete conflicts on files upstream edited, and new files that merge without any
- * conflict. `scripts/remove-native-mobile.ts` deletes them again, and
- * `tests/unit/native-mobile-removed.test.ts` fails while any tracked file still matches.
- * Both read this list, so the two cannot drift apart.
+ * Path prefixes this fork removed with upstream's native mobile apps (ADR-008). Every upstream
+ * merge brings some back. `scripts/remove-native-mobile.ts` deletes them again, and
+ * `tests/unit/native-mobile-removed.test.ts` fails while a tracked file still matches. Both read
+ * this list, so the two cannot drift apart.
  */
 export const REMOVED_NATIVE_MOBILE_PREFIXES = [
   "apps/mobile/",
@@ -51,11 +47,10 @@ export function pruneNativeMobileJobNeeds(workflowYaml: string): string {
 }
 
 /**
- * Packages upstream patches only for the native apps, by name so that a version bump is still
- * caught. With the apps gone pnpm installs none of them, and their `patchedDependencies`
- * entries break the install: `ERR_PNPM_UNUSED_PATCH` when the patch file exists, and a bare
- * `ENOENT` when only the entry came back, which is what a merge of upstream's
- * `pnpm-workspace.yaml` does. When pnpm names a new unused patch, add its package here.
+ * Packages upstream patches only for the native apps, listed by name so a version bump is still
+ * caught. pnpm installs none of them, so their `patchedDependencies` entries break the install:
+ * `ERR_PNPM_UNUSED_PATCH` with the patch file, a bare `ENOENT` with only the entry (what a merge
+ * of upstream's `pnpm-workspace.yaml` brings). For a new unused patch pnpm names, add its package.
  */
 export const REMOVED_NATIVE_MOBILE_PATCHED_PACKAGES = [
   "@clerk/expo",
@@ -72,6 +67,7 @@ export const REMOVED_NATIVE_MOBILE_PATCHED_PACKAGES = [
   "expo-modules-core",
   "expo-network",
   "expo-sharing",
+  "expo-video",
   "expo-widgets",
   "react-native-gesture-handler",
   "react-native-image-viewing",

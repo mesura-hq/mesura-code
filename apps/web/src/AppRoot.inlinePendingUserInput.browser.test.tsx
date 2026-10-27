@@ -13,6 +13,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { expect, it, vi } from "vite-plus/test";
+import { userEvent } from "vite-plus/test/browser";
 import {
   EnvironmentId,
   ThreadId,
@@ -758,7 +759,8 @@ it("phase two regression both file pickers preserve normal and question attachme
   for (const input of [normalInput, questionInput]) {
     await act(async () => {
       Object.defineProperty(input, "files", {
-        value: [new File(["svg"], "bad.svg", { type: "image/svg+xml" })],
+        // SVG attaches as a file now; a PSD is still an image type no provider accepts.
+        value: [new File(["psd"], "layers.psd", { type: "image/vnd.adobe.photoshop" })],
         configurable: true,
       });
       input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -770,4 +772,131 @@ it("phase two regression both file pickers preserve normal and question attachme
   expect(useComposerDraftStore.getState().getComposerDraft(normalTarget)?.images).toHaveLength(0);
   expect(useComposerDraftStore.getState().getComposerDraft(questionTarget)?.images).toHaveLength(0);
   useComposerDraftStore.getState().clearComposerContent(questionTarget);
+});
+
+const ONE_PIXEL_PNG = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+  ),
+  (character) => character.charCodeAt(0),
+);
+
+/** Reports a coarse pointer, as a phone does; every other query keeps its real answer. */
+function emulateTouchPointer() {
+  const nativeMatchMedia = window.matchMedia.bind(window);
+  vi.spyOn(window, "matchMedia").mockImplementation((query) =>
+    nativeMatchMedia(query === "(pointer: coarse)" ? "(min-width: 0px)" : query),
+  );
+}
+
+async function pickFiles(input: HTMLInputElement, files: File[]) {
+  await act(async () => {
+    Object.defineProperty(input, "files", { value: files, configurable: true });
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+function openMenuItems() {
+  return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+}
+
+it.each([
+  {
+    scope: "[data-normal-composer]",
+    trigger: 'button[aria-label="Attach files"]',
+    draftTarget: () => scopeThreadRef(environmentId, threadId),
+  },
+  {
+    scope: '[data-question-id="scope"]',
+    trigger: 'button[aria-label^="Attach files to"]',
+    draftTarget: () =>
+      questionAttachmentDraftId(
+        environmentId,
+        threadId,
+        ApprovalRequestId.make(requestId),
+        "scope",
+      ),
+  },
+])(
+  "a touch device opens the media picker first from $scope, and its photos attach like Files",
+  async ({ scope, trigger, draftTarget }) => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
+    emulateTouchPointer();
+    await mountApp();
+
+    const triggerButton = container.querySelector<HTMLButtonElement>(`${scope} ${trigger}`)!;
+    expect(triggerButton).not.toBeNull();
+    const mediaInput = container.querySelector<HTMLInputElement>(
+      `${scope} input[data-attachment-media-input]`,
+    )!;
+    const fileInput = container.querySelector<HTMLInputElement>(
+      `${scope} input[type="file"]:not([data-attachment-media-input])`,
+    )!;
+    // Android Chrome uses its photo picker only for media-only types without `capture`.
+    expect(mediaInput.accept).toBe("image/*,video/*");
+    expect(mediaInput.multiple).toBe(true);
+    expect(mediaInput.hasAttribute("capture")).toBe(false);
+    expect(fileInput.hasAttribute("accept")).toBe(false);
+    expect(fileInput.multiple).toBe(true);
+
+    using mediaClick = vi.spyOn(mediaInput, "click").mockImplementation(() => {});
+    using fileClick = vi.spyOn(fileInput, "click").mockImplementation(() => {});
+    // A real press, not `.click()`: Base UI opens the menu on `mousedown`, which
+    // a `pointerdown` handler calling preventDefault would suppress.
+    await userEvent.click(triggerButton);
+    await vi.waitFor(() =>
+      expect(openMenuItems().map((item) => item.textContent)).toEqual([
+        "Photos and videos",
+        "Files",
+      ]),
+    );
+    await act(async () => openMenuItems()[0]!.click());
+    expect(mediaClick).toHaveBeenCalledTimes(1);
+    expect(fileClick).not.toHaveBeenCalled();
+
+    await userEvent.click(triggerButton);
+    await vi.waitFor(() => expect(openMenuItems()).toHaveLength(2));
+    await act(async () => openMenuItems()[1]!.click());
+    expect(fileClick).toHaveBeenCalledTimes(1);
+    expect(mediaClick).toHaveBeenCalledTimes(1);
+
+    await pickFiles(mediaInput, [new File([ONE_PIXEL_PNG], "gallery.png", { type: "image/png" })]);
+    await pickFiles(fileInput, [new File([ONE_PIXEL_PNG], "files.png", { type: "image/png" })]);
+    await vi.waitFor(() =>
+      expect(
+        useComposerDraftStore
+          .getState()
+          .getComposerDraft(draftTarget())
+          ?.images.map((image) => [image.name, image.mimeType]),
+      ).toEqual([
+        ["gallery.png", "image/png"],
+        ["files.png", "image/png"],
+      ]),
+    );
+    expect(mediaInput.value).toBe("");
+    useComposerDraftStore.getState().clearComposerContent(draftTarget());
+  },
+);
+
+it("a fine pointer keeps one tap from the attach button to the file dialog", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  await mountApp();
+  expect(container.querySelector("input[data-attachment-media-input]")).toBeNull();
+  const triggerButton = container.querySelector<HTMLButtonElement>(
+    '[data-normal-composer] button[aria-label="Attach files"]',
+  )!;
+  const fileInput = container.querySelector<HTMLInputElement>(
+    '[data-normal-composer] input[type="file"]',
+  )!;
+  using fileClick = vi.spyOn(fileInput, "click").mockImplementation(() => {});
+  const pointerDowns: PointerEvent[] = [];
+  const recordPointerDown = (event: PointerEvent) => pointerDowns.push(event);
+  document.addEventListener("pointerdown", recordPointerDown);
+  await userEvent.click(triggerButton);
+  document.removeEventListener("pointerdown", recordPointerDown);
+  expect(fileClick).toHaveBeenCalledTimes(1);
+  expect(openMenuItems()).toHaveLength(0);
+  // The press must not take focus from the composer's editor.
+  expect(pointerDowns.map((event) => event.defaultPrevented)).toEqual([true]);
 });

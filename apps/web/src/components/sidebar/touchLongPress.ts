@@ -1,12 +1,7 @@
 /**
- * Mesura: a long press by touch on a sidebar footer icon. A phone has no hover,
- * so holding the Usage or Hosts icon is how it reaches the card a desktop
- * pointer opens by resting on the icon.
- *
- * Touch only: a mouse or a pen keeps its hover and its click. The press that
- * fires swallows the click the browser sends when the finger lifts, so the
- * icon's own tap action (open the Usage page, pin the Hosts dock) does not run
- * on top of it.
+ * Mesura: a touch long press on a sidebar footer icon, the phone's way to the card a desktop
+ * pointer opens by hovering. Touch only: a mouse or pen keeps hover and click. The press that
+ * fires swallows the click sent on lift, so the icon's own tap action does not also run.
  */
 
 export const TOUCH_LONG_PRESS_MS = 450;

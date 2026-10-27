@@ -6,11 +6,9 @@ import type {
   EditorVisual,
 } from "@t3tools/contracts";
 
-// Reaching into the Monaco folder for one pure module, which is the wrong
-// direction and the right trade. The row bookkeeping has to happen in the fold
-// — an event lost to a coalesced render is a flash label that never goes away
-// — and it is the same arithmetic the renderer needs, so the alternative is
-// two copies of it drifting apart.
+// An import in the wrong direction, kept on purpose: the row bookkeeping must happen in the
+// fold (an event lost to a coalesced render is a flash label that never goes away), and the
+// renderer needs the same arithmetic, so the alternative is two drifting copies.
 import {
   applyDecorationEvent,
   EMPTY_DECORATION_STATE,
@@ -18,30 +16,14 @@ import {
 } from "../components/files/monaco/nvim/nvimDecorations.ts";
 
 /**
- * The thread's editor session, folded into the state a client renders.
- *
- * Pure, and in its own module for the same reason `terminalSession.ts` sits
- * beside `terminal.ts` in the shared client package: the arithmetic is where
- * the mistakes are, and separating it from the atom wiring is what lets it be
+ * Pure and apart from the atom wiring, like `terminalSession.ts`, so the arithmetic can be
  * driven against a real Neovim without a runtime in the way.
  */
 
 /**
- * What the driver reads: the session's state, not the last thing that happened.
- *
- * Absolute rather than a delta, and that is the whole design. Every event
- * other than `snapshot` describes a change against the text Neovim holds, so
- * a state that carried only the latest event would be correct exactly as long
- * as every event reached a render. It does not: `useSyncExternalStore` hands a
- * component the store's current value, and two events that land between two
- * renders produce one render carrying the second — the first is never applied,
- * and every delta after it is then measured against a model that has drifted.
- *
- * So the fold keeps the lines themselves, the way the terminal's fold keeps
- * the whole buffer rather than the last chunk. A coalesced render then costs
- * nothing: the state is still the truth, and the driver reconciles to it.
- * `sequence` is what tells a re-render something arrived, and it is also what
- * tells the driver whether it missed anything.
+ * Absolute state, never a delta: two events between renders reach a component as one
+ * render (`useSyncExternalStore`), so a delta-only state would skip the first and drift.
+ * The driver reconciles to `lines`; `sequence` tells it whether it missed anything.
  */
 export interface EditorSessionState {
   /** The file the session has open, as the last snapshot named it. */
@@ -63,13 +45,9 @@ export interface EditorSessionState {
   /** The selection Neovim is showing, `null` outside visual mode. */
   readonly visual: EditorVisual | null;
   /**
-   * How many times Neovim has asked the host to write the file.
-   *
-   * A count rather than a flag on the latest event, for the same reason the
-   * lines are kept rather than the last delta: a `:w` immediately followed by
-   * any other event shares one render, and a consumer reading the latest event
-   * sees the other one. The write is then never flushed and the developer is
-   * told their file is saved.
+   * How many times Neovim asked the host to write the file. A count, not a flag on the
+   * latest event: a `:w` followed by any other event shares one render, and the write
+   * would never flush while the developer is told the file is saved.
    */
   readonly writeRequests: number;
   /**
@@ -111,12 +89,8 @@ export const EMPTY_EDITOR_SESSION_STATE: EditorSessionState = {
 };
 
 /**
- * A buffer with nothing in it.
- *
- * Neovim has no zero-line buffer: `dG` on a whole file leaves one empty line,
- * and so does a new buffer. Monaco has the same invariant. An empty array is
- * therefore not a buffer either of them can hold, and producing one puts the
- * fold in a state the reconcile below cannot express as edits.
+ * Neither Neovim nor Monaco has a zero-line buffer (`dG` leaves one empty line), so an
+ * empty array is a state the reconcile cannot express as edits.
  */
 const AN_EMPTY_BUFFER: ReadonlyArray<string> = [""];
 
@@ -167,18 +141,9 @@ export function applyEditorSessionEvent(
         ended: null,
       };
     case "lines":
-      // A delta for another file is refused rather than applied. The event
-      // names the file it changes, and three separate defects reached disk by
-      // applying one buffer's change to another file's text — the panel then
-      // renders it as the open file and the save writes it. Each of those was
-      // fixed where it arose; this is the place that does not need to know
-      // which route produced the mismatch.
-      //
-      // Dropped silently, and `sequence` still advances: the driver treats a
-      // sequence it cannot account for as a dropped frame and reconciles in
-      // full against `lines`, which is unchanged here and therefore still the
-      // truth. Before the first snapshot there is no file to compare against
-      // and nothing to apply a delta to.
+      // Regression guard: a delta for another file is refused, since three defects wrote
+      // one buffer's change into another file on save. `sequence` still advances, so the
+      // driver sees a dropped frame and reconciles in full against the unchanged `lines`.
       if (state.relativePath === null || event.relativePath !== state.relativePath) return base;
       return { ...base, lines: applyLinesEvent(state.lines, event) };
     case "cursor":

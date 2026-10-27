@@ -1,10 +1,7 @@
 import { act, render as renderBrowser, type Screen } from "../../test/render";
-// Entry point: `useRightPanelTabCycling` (`rightPanelTabCycling.ts`), the
-// window `keydown` listener the right panel's tab bar mounts. Every spec
-// dispatches a real `KeyboardEvent` from a focused element; the chords resolve
-// through the shipped default keybindings (`ctrl+tab`, `ctrl+shift+tab`,
-// `mod+t`, all `panelFocus && !terminalFocus`), and the specs read which
-// surface was activated and whether the panel launcher opened.
+// Every spec dispatches a real `KeyboardEvent` from a focused element, so the
+// chords resolve through the shipped default keybindings (`ctrl+tab`,
+// `ctrl+shift+tab`, `mod+t`, all `panelFocus && !terminalFocus`).
 import { useLayoutEffect, useRef } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 

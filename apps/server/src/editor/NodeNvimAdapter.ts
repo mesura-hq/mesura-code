@@ -15,19 +15,9 @@ import {
 } from "./NvimAdapter.ts";
 
 /**
- * How long Neovim gets to stop on its own before it is killed outright.
- *
- * Measured, not defensive: sent a plain `SIGTERM` on its own process id, a
- * Neovim with a UI attached and the developer's configuration loaded prints
- * `Caught deadly signal` and then stays alive — lazy.nvim's update checker and
- * its change-detection file watchers leave libuv handles open, and the exit
- * path never finishes. The same Neovim with `--clean`, or with those two
- * features off, exits in a millisecond.
- *
- * In practice this grace has not been seen to elapse, because the spawner
- * signals the whole process group rather than one process id, and that does
- * stop it. The escalation stays for the case where it does not: a session that
- * ends has to be able to end whatever a plugin is doing.
+ * Grace before `SIGKILL`. Measured: a `SIGTERM` to the process id alone leaves a configured Neovim
+ * alive, because lazy.nvim's update checker and file watchers keep libuv handles open. Signalling
+ * the process group, as the spawner does, stops it; the escalation stays for plugins that do not.
  */
 const KILL_GRACE = Duration.seconds(2);
 
@@ -58,18 +48,9 @@ const spawnWith = Effect.fn(function* (
         (cause) =>
           new NvimSpawnError({
             executable: input.executable,
-            // A missing binary is the ordinary case on a machine with no
-            // Neovim, and it deserves to be told apart from a real failure:
-            // one is fixed by installing Neovim and the other is not fixed
-            // by anything the developer can reach from Settings.
-            //
-            // Measured, because the first version of this could never say
-            // so. Effect reports a missing executable as a `PlatformError`
-            // whose tag is `NotFound` — one word, no space — and the test
-            // was `/ENOENT|not found/i`, which matches neither. Every
-            // missing binary came back as a plain spawn failure, and the
-            // developer was told the one thing they could fix was not
-            // fixable.
+            // A missing binary is fixed by installing Neovim; a spawn failure is not, so the two
+            // stay apart. Effect reports a missing executable as tag `NotFound` (no space): an
+            // earlier `/ENOENT|not found/i` test matched neither and misreported every case.
             reason: isMissingBinary(cause) ? "binary-missing" : "spawn-failed",
             message: String(cause),
           }),
@@ -79,7 +60,7 @@ const spawnWith = Effect.fn(function* (
   const outbound = yield* Queue.make<Uint8Array>();
   yield* Stream.fromQueue(outbound).pipe(
     Stream.run(child.stdin),
-    Effect.catchCause(() => Effect.void),
+    Effect.ignoreCause,
     Effect.forkScoped,
   );
 
@@ -103,17 +84,13 @@ const spawnWith = Effect.fn(function* (
           // first and drifting from it.
           forceKillAfter: KILL_GRACE,
         })
-        .pipe(Effect.catchCause(() => Effect.void)),
+        .pipe(Effect.ignoreCause),
   } satisfies NvimProcess;
 });
 
 /**
- * Whether a spawn failure means the binary is not there.
- *
- * Reads the error's own tag first and the rendered string second. The tag is
- * what Effect actually sets; the string forms are kept because the platform
- * layer is free to change how it renders, and a classifier that silently
- * stops matching is exactly what this already did once.
+ * Reads the tag Effect sets first and the rendered string second. The string forms stay because
+ * the platform layer may change how it renders, and this classifier already stopped matching once.
  */
 const isMissingBinary = (cause: unknown): boolean => {
   const tag =
@@ -134,12 +111,13 @@ export const NodeNvimAdapter = {
     NvimAdapter,
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      return NvimAdapter.of({ spawn: (input) => spawnWith(spawner, input) });
+      return NvimAdapter.of({
+        spawn: Effect.fn("NvimAdapter.spawn")(function (input) {
+          return spawnWith(spawner, input);
+        }),
+      });
     }),
-    // The spawner is provided here, not left for the caller. The `Node` in
-    // this module's name has already committed to a platform, so a layer that
-    // still asked for one would make every consumer carry a requirement this
-    // file has an answer for — and the server deliberately keeps platform
-    // imports out of its own module scope.
+    // This module is already Node-specific, so it provides the spawner rather than pushing the
+    // requirement onto every consumer; the server keeps platform imports out of its module scope.
   ).pipe(Layer.provide(NodeChildProcessSpawner.layer)),
 };

@@ -5,21 +5,9 @@ import { STATIC_KEYBINDING_COMMANDS } from "@t3tools/contracts";
 import { DEFAULT_KEYBINDINGS } from "./keybindings.ts";
 
 /**
- * The keybindings this fork adds on top of upstream's defaults.
- *
- * `composer.attachFiles` is the one ADR-003 kept when the fork's attachment
- * stack was retired for upstream's: their attach button survives the switch,
- * but upstream ships no keyboard route to attaching at all. `fileTree.toggle`
- * reaches the Symmetria file tree in the files surface and leaves it again;
- * `fileTree.miller` opens the file manager's Miller columns over the window.
- * `thread.rename` opens the header's title rename, which upstream reaches only
- * by double-click and the thread menu. `treeDiff.toggle` opens the Diff
- * surface on Tree diff and closes it there; `diff.modeMenu` opens that
- * surface's mode menu from the keyboard.
- *
- * Each is cheap to carry and easy to lose: a sync that takes upstream's
- * command list wholesale drops the command, and the shortcut then resolves to
- * nothing while the mouse route keeps working, so no suite notices.
+ * Keybindings this fork adds on top of upstream's defaults, each a keyboard route upstream lacks.
+ * A sync that takes upstream's command list wholesale drops the command; the shortcut then resolves
+ * to nothing while the mouse route keeps working, so no other suite notices.
  */
 
 const FORK_BINDINGS = [
@@ -39,6 +27,9 @@ const FORK_BINDINGS = [
   // project. mod+shift+p stays thread.pin; mod+shift+0 types `=` on the Latin
   // American layout.
   { command: "projectScope.toggleAll", keys: ["mod+alt+p"] },
+  // The sidebar's Working section. alt+z was free in the app and in the
+  // developer's Hyprland when it was chosen (2026-10-26).
+  { command: "sidebar.toggleWorking", keys: ["alt+z"] },
 ] as const;
 
 describe("fork keybindings", () => {

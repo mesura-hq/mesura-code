@@ -6,18 +6,9 @@ import * as NodeFS from "node:fs";
 import type { EditorSessionEvent } from "@t3tools/contracts";
 
 /**
- * A record of what an editor session was asked and what it answered.
- *
- * Off unless `MESURA_EDITOR_TRACE` names a file. It exists for reproducing
- * editor defects that only show up under a person's hands: every call from a
- * client, how long it queued behind the thread's lock (`waitedMs`), how long
- * Neovim took to answer it (`tookMs`), and a summary of every event sent back.
- * The `input` calls carry the keys as typed, so a trace records everything
- * typed while it is on.
- * A Neovim whose main loop is busy shows up as calls whose `tookMs` climbs into
- * seconds, which is what a frozen editor looks like from here.
- *
- * One JSON object per line, appended, never read back by the server.
+ * An append-only JSONL trace of editor session calls (`waitedMs` on the thread's lock, `tookMs`
+ * in Neovim) and the events sent back. Off unless `MESURA_EDITOR_TRACE` names a file.
+ * Warning: `input` entries record every key typed while it is on.
  */
 export interface EditorTrace {
   readonly enabled: boolean;

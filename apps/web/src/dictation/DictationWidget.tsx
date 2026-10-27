@@ -132,11 +132,13 @@ function parseMessage(raw: unknown): WidgetMessage | null {
  */
 export function DictationWidgetPage() {
   const [message, setMessage] = useState<WidgetMessage | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the desktop bridge's widget state for the page's lifetime
   useEffect(
     () => window.mesuraDictationBridge?.onWidgetState((raw) => setMessage(parseMessage(raw))),
     [],
   );
   const ackSequence = message?.ackSequence;
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: acknowledges the widget state to the desktop bridge after commit, so the window shows painted
   useEffect(() => {
     if (ackSequence !== undefined)
       window.mesuraDictationBridge?.acknowledgeWidgetState(ackSequence);

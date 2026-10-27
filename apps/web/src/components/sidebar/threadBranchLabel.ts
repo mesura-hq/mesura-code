@@ -1,14 +1,7 @@
 /**
- * Mesura: the branch as the sidebar card shows it.
- *
- * Every worktree branch the app creates lives under the app's own namespace
- * (`mesura/`, and `t3/` or `t3code/` on threads created before the rename). The
- * namespace is the same on every card, so it only spends the row's width before
- * the part that tells threads apart. Branches the user or an agent named, such
- * as `feat/search`, keep their prefix: there it carries meaning.
- *
- * The full name stays everywhere a branch is copied, checked out or shown in
- * detail; this is only the card's label.
+ * Mesura: the branch as the sidebar card shows it. The app's own namespace (`mesura/`, and `t3/`
+ * or `t3code/` from before the rename) is the same on every card, so the label drops it; a
+ * user-named prefix such as `feat/` carries meaning and stays. Everywhere else shows the full name.
  */
 const APP_BRANCH_NAMESPACES = ["mesura/", "t3code/", "t3/"] as const;
 

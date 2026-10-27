@@ -12,25 +12,10 @@ import { makeScratchManager, recordChunks } from "./managerHarness.ts";
 import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * Entry point: `EditorSessionManager.attachEventStream`, the stream the
- * websocket layer serves for `editorSession.attach` (`wsMesura.ts`), over a
- * real Neovim spawned by `NodeNvimAdapter`.
- *
- * Phase 1 of the editor latency cycle, criterion 4: the text change and the
- * cursor move caused by one key reach the client in the same attach-stream
- * chunk. The RPC server sends one stream chunk per message and waits for the
- * client's Ack before it sends the next, so a cursor event that lands one chunk
- * after its `lines` event reaches the client one round trip after the text:
- * the caret trails the letter it typed.
- *
- * The consumer here pulls the next chunk the moment it has recorded the last
- * one, which is the strictest a consumer can be: anything that arrives
- * separately here would arrive separately over the wire too. A slow consumer
- * would let both events pile into one chunk by accident and pass for the
- * wrong reason.
- *
- * Every wait is on an event. The key is `input` (`nvim_input`), the call a
- * keystroke goes through, not `type`.
+ * One `input` key's `lines` and `cursor` events must share one `attachEventStream` chunk: the RPC
+ * server waits for the client's Ack per chunk, so a split chunk makes the caret trail the text.
+ * The consumer pulls each chunk at once; a slow consumer would merge the events and pass falsely.
+ * Every wait is on an event, never a clock.
  */
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));

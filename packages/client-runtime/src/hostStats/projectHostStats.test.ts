@@ -1,10 +1,6 @@
 /**
- * Phase 4 fence: the shared host stats model, one `describe` per acceptance
- * criterion of the plan, plus the extra cases the plan lists. Entry points:
- * `applyHostStatsMessage` and `accumulateHostStatsMessages` (the stream fold
- * the `hostStats` atom in `state/server.ts` is built with) for the history,
- * and `projectHostStats` for what web and mobile render. Every history here
- * is built by applying real messages, never by hand.
+ * Every history here comes from applying real messages through `applyHostStatsMessage` and
+ * `accumulateHostStatsMessages`, never built by hand.
  */
 import {
   EnvironmentAuthorizationError,

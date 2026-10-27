@@ -1,13 +1,7 @@
 /**
- * Phase 1 fence of the dictation redesign: acceptance criteria 1, 2 and 3 at
- * the OpenAI call.
- *
- * Entry point: `makeOpenAiTranscription`, the constructor `DictationJobs`
- * uses for every attempt. OpenAI is an `HttpClient` built with
- * `HttpClient.make`, as `usage/cliproxyApi.test.ts` stubs its hub, so the
- * multipart fields asserted here are the fields that leave the server. The
- * clock is `TestClock`; retry delays and the per-attempt timeout are measured
- * on it, never slept.
+ * Drives `makeOpenAiTranscription`, which `DictationJobs` uses for every attempt. OpenAI is a
+ * `HttpClient.make` stub, so the multipart fields asserted here are the ones that leave the
+ * server. Retry delays and the per-attempt timeout are measured on `TestClock`, never slept.
  */
 import { assert, describe, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";

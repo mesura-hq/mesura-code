@@ -11,13 +11,9 @@ import { useEnvironmentProviders, useEnvironments } from "../../state/environmen
 import { useSettingsScope } from "./SettingsScopeContext";
 
 /**
- * A model choice fans out to every selected target, so it must exist on all
- * of them. Returns the reason a (instance, model) pair cannot be applied, or
- * null when every target can honor it. The representative's entries decide
- * which driver the instance id names. With `requireTextGeneration`, each
- * target's providers are filtered the way the representative's text
- * generation catalog is, so a provider that cannot generate text on one
- * target is unavailable there.
+ * A model choice fans out to every selected target, so it must exist on all of them. Returns why
+ * an (instance, model) pair cannot be applied, or null. With `requireTextGeneration`, a provider
+ * that cannot generate text on one target is unavailable there.
  */
 export function useScopedModelDisabledReason(
   settings: UnifiedSettings,

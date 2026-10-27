@@ -13,15 +13,10 @@ import {
 } from "./hyprctl.ts";
 
 /**
- * The dictation widget's Hyprland window rules, applied at runtime so no dotfile has to carry
- * them. Hyprland ignores a Wayland client's own position and size unless a rule floats it, and
- * frames every window with the user's border, rounding, shadow and blur.
- *
- * Named rules (`windowrule[name]:effect value`), not anonymous `windowrule` keywords: a second
- * process sets the same keys again instead of stacking another copy, which anonymous runtime
- * rules would do until Hyprland reloads its config (Hyprland 0.56.2 offers no way to remove
- * one). A monitor's placement rule left by an earlier process for an unplugged monitor matches
- * nothing.
+ * Applied at runtime so no dotfile carries them: Hyprland ignores a Wayland client's position and
+ * size unless a rule floats it. Named rules (`windowrule[name]:effect value`), because a second
+ * process then replaces the keys; anonymous runtime rules stack until a reload, and Hyprland
+ * 0.56.2 cannot remove one.
  */
 const RULE_NAME = "mesura-dictation-widget";
 
@@ -38,16 +33,10 @@ export interface WidgetMonitor {
 const SELECTABLE_MONITOR = /^[\w-]+$/;
 
 /**
- * `move` and `size` use the widget's own dimensions, not `window_w`/`window_h`: on first map
- * Hyprland 0.56.2 evaluates those from the client's requested geometry, which for a Wayland
- * window is the whole monitor (measured on vigilia-home: `window_w` read 1920 for a 440 px
- * window). Without the `size` rule Hyprland opens the floating window at the monitor's size.
- *
- * `monitor_h` is the whole monitor, so each monitor gets its own placement rule, selected by
- * `match:workspace m[<name>]` (the window's workspace is the focused monitor's when the rules
- * are matched at map), whose margin includes that monitor's reserved bottom edge. Hyprland
- * applies the later-defined rule's `move` over the base rule's (measured with two headless
- * outputs), and the base rule's plain margin serves a monitor without a rule of its own.
+ * Use the widget's own size, not `window_w`/`window_h`: on first map Hyprland 0.56.2 reads those
+ * from the requested geometry, the whole monitor for a Wayland window, and opens it monitor-sized.
+ * `monitor_h` is the whole monitor, so each monitor gets a placement rule that includes its
+ * reserved bottom; the later rule's `move` wins and the base rule serves unlisted monitors.
  */
 const moveToBottomCentre = (reservedBottom: number) =>
   `(monitor_w*0.5-${WIDGET_WIDTH / 2}) (monitor_h-${WIDGET_HEIGHT}-${

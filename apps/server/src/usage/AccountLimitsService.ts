@@ -59,12 +59,9 @@ const LimitsCacheFile = Schema.Struct({
   snapshots: Schema.Array(AccountLimitsSnapshot),
 });
 /**
- * Version 1 files are read as empty rather than migrated.
- *
- * Every key in a version 1 file is a provider instance id, and a subscription
- * cannot be recovered from one — migrating would invent subscriptions that were
- * never read. The decode fails, the caller's `catchCause` yields an empty cache,
- * and the next poll repopulates it from the providers themselves.
+ * Version 1 files read as empty rather than migrated: their keys are provider instance ids, and
+ * a subscription cannot be recovered from one. The decode fails, the caller's `catchCause`
+ * yields an empty cache, and the next poll repopulates it from the providers.
  */
 const decodeLimitsCache = Schema.decodeUnknownEffect(
   Schema.fromJsonString(LimitsCacheFile as unknown as Schema.Codec<typeof LimitsCacheFile.Type>),
@@ -107,26 +104,25 @@ export class AccountLimitsService extends Context.Service<
 export const layerTest = Layer.succeed(
   AccountLimitsService,
   AccountLimitsService.of({
-    readSummary: () =>
-      Effect.succeed({
+    readSummary: Effect.fn("AccountLimitsService.readSummary")(function () {
+      return Effect.succeed({
         contractVersion: ACCOUNT_LIMITS_CONTRACT_VERSION,
         readAt: "1970-01-01T00:00:00.000Z",
         snapshots: [],
-      }),
-    ingest: () => Effect.void,
+      });
+    }),
+    ingest: Effect.fn("AccountLimitsService.ingest")(function () {
+      return Effect.void;
+    }),
     refreshStale: Effect.void,
     run: Effect.never,
   }),
 );
 
 /**
- * The subscription of a reading whose provider named no account.
- *
- * The subscription registry replaces this in a later phase. Until then a
- * reading whose provider named no account still needs *some* subscription,
- * because the contract now requires one — and the instance it was read through
- * is the only identity available. That keeps today's one-row-per-instance
- * behaviour exactly as it was rather than folding anything new.
+ * The subscription of a reading whose provider named no account. The contract requires a
+ * subscription, and the instance is the only identity available, so such readings keep one row
+ * per instance and fold nothing.
  */
 function instanceSubscription(instance: ProviderInstance, ordinal = 0): AccountLimitsAccount {
   return unfoldableInstanceSubscription({
@@ -181,18 +177,10 @@ function mergeWindows(
 }
 
 /**
- * Date each window with the reading that produced it.
- *
- * A merge carries windows a provider did not report this time, so one
- * observation holds numbers of different ages. Without a per-window date the
- * merged result claims the newest reading's freshness for all of them, which is
- * what made two environments on one subscription disagree while both looked
- * current.
- *
- * The date is when the reading was asked for, not when it came back, so it runs
- * early by however long the provider took to answer — seconds for a poll that
- * spawns a CLI. Readings of one subscription sit minutes apart, so that bias
- * never decides which environment a window comes from.
+ * A merge keeps windows the provider did not report this time, so each window carries the date of
+ * its own reading; otherwise two environments on one subscription disagree while both look current.
+ * The date is when the reading was asked for, so it runs early by the provider's answer time.
+ * Readings of one subscription sit minutes apart, so that bias never picks the wrong environment.
  */
 function stampWindows(
   windows: readonly AccountLimitsWindow[],
@@ -242,15 +230,10 @@ export const makeAccountLimitsService = Effect.fn(function* (input: {
   const inFlight = new Set<ProviderInstance>();
   const knownInstances = new Map<string, ProviderInstance>();
   /**
-   * Which subscriptions each instance last reported, by instance id.
-   *
-   * A set rather than one key, because a reader can see several: an OpenCode
-   * instance drives every plan it is logged into.
-   *
-   * A failed read does not name a subscription, so this is how the failure is
-   * attributed to the right ones. It is also what pruning reads: a snapshot no
-   * live instance claims is orphaned, and a failed read leaves the claims
-   * standing precisely so one blip cannot delete a row.
+   * Subscriptions each instance last reported; a set, because one OpenCode instance reads every
+   * plan it is logged into. A failed read names no subscription, so these claims attribute it.
+   * Pruning drops snapshots no live instance claims, and a failed read leaves the claims
+   * standing so that one blip cannot delete a row.
    */
   const claimedSubscriptions = new Map<string, ReadonlySet<string>>();
   const stateLock = yield* Semaphore.make(1);
@@ -346,7 +329,7 @@ export const makeAccountLimitsService = Effect.fn(function* (input: {
           changed = true;
         }
 
-        if (changed) yield* persist().pipe(Effect.catchCause(() => Effect.void));
+        if (changed) yield* persist().pipe(Effect.ignoreCause);
       }),
     );
   });
@@ -461,7 +444,7 @@ export const makeAccountLimitsService = Effect.fn(function* (input: {
             if (!nextClaims.has(key) && !isClaimed(key)) snapshots.delete(key);
           }
         }
-        yield* persist().pipe(Effect.catchCause(() => Effect.void));
+        yield* persist().pipe(Effect.ignoreCause);
       }),
     );
   });
@@ -518,7 +501,7 @@ export const makeAccountLimitsService = Effect.fn(function* (input: {
             snapshots.delete(key);
             changed = true;
           }
-          if (changed) yield* persist().pipe(Effect.catchCause(() => Effect.void));
+          if (changed) yield* persist().pipe(Effect.ignoreCause);
         }),
       );
     },
@@ -569,7 +552,7 @@ export const makeAccountLimitsService = Effect.fn(function* (input: {
                 lastAttempt: { attemptedAt, status: "succeeded", error: null },
               },
         );
-        yield* persist().pipe(Effect.catchCause(() => Effect.void));
+        yield* persist().pipe(Effect.ignoreCause);
       }),
     );
   });
@@ -578,19 +561,13 @@ export const makeAccountLimitsService = Effect.fn(function* (input: {
     subscription: PolledSubscription,
     nowMs: number,
   ) {
-    // No in-flight guard here, unlike the instance path, and that is safe
-    // rather than an oversight: `refreshLock` makes `refreshStale`
-    // single-flight, and the registry lists each subscription once, so this
-    // never starts a poll that is already running. Calling it from anywhere
-    // else, or letting `listSubscriptions` repeat a key, would end that and
-    // needs a guard added with it — these reads hit real vendor endpoints.
+    // No in-flight guard, deliberately: `refreshLock` makes `refreshStale` single-flight and the
+    // registry lists each subscription once, so no poll starts twice. A new caller, or a repeated
+    // key from `listSubscriptions`, needs a guard: these reads hit real vendor endpoints.
     const attemptedAt = DateTime.formatIso(DateTime.makeUnsafe(nowMs));
-    // A second bound, over the one the vendor readers already carry.
-    //
-    // `read` is an interface, and a reader that ignores its own timeout would
-    // otherwise never let this refresh finish — which holds `refreshLock` and
-    // stops every later tick, so one unbounded subscription wedges the whole
-    // loop rather than only its own row. That was observed, not imagined.
+    // A second bound over the readers' own timeout, not a duplicate: a reader that ignores its
+    // timeout holds `refreshLock` forever and stops every later tick, so one subscription wedges
+    // the whole loop. That happened in practice.
     yield* subscription.read(nowMs).pipe(
       Effect.timeout(subscriptionReadTimeout),
       Effect.matchEffect({
@@ -677,12 +654,9 @@ export const makeAccountLimitsService = Effect.fn(function* (input: {
           instanceId,
           label: knownInstances.get(instanceId)?.displayName,
         });
-        // An event names one instance, not one subscription, so it can only
-        // be applied where that instance reads exactly one. A reader with
-        // several — OpenCode, once it lands — falls through to its own
-        // unfoldable key here, which is wrong but visible rather than
-        // silently filed under one of its real subscriptions. Wiring such a
-        // driver to `ingest` needs the event to name the subscription first.
+        // An event names an instance, not a subscription, so it applies only where the instance
+        // reads exactly one. A multi-subscription reader (OpenCode) falls back to its unfoldable key:
+        // wrong but visible, not misfiled. Its events must name the subscription before `ingest`.
         const claimedKey = claims?.size === 1 ? [...claims][0] : undefined;
         const key = claimedKey ?? fallbackSubscription.key;
         const previous = snapshots.get(key);
@@ -711,7 +685,7 @@ export const makeAccountLimitsService = Effect.fn(function* (input: {
           lastAttempt: { attemptedAt: event.createdAt, status: "succeeded", error: null },
         });
         claimedSubscriptions.set(instanceId, new Set([...(claims ?? []), key]));
-        yield* persist().pipe(Effect.catchCause(() => Effect.void));
+        yield* persist().pipe(Effect.ignoreCause);
       }),
     );
   });
