@@ -1,13 +1,8 @@
 /**
- * Fork addition: the working tree's per-file status for the Git status surface.
- *
- * Three git reads, run together: `status --porcelain=2` for each file's two
- * status letters, then `diff --cached --numstat` and `diff --numstat` for the
- * staged and unstaged line counts. Untracked files have no numstat, so their
- * line count is read from disk, bounded by `UNTRACKED_LINE_COUNT_MAX_BYTES`.
- *
- * Porcelain and numstat paths are relative to the repository root whatever the
- * cwd, so the result carries that root for the client to resolve against.
+ * The working tree's per-file status for the Git status surface: `status --porcelain=2` for the
+ * status letters, `diff [--cached] --numstat` for line counts. Untracked files have no numstat,
+ * so their lines are counted from disk, bounded. Paths are relative to the repository root
+ * whatever the cwd, so the result carries that root for the client to resolve against.
  */
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

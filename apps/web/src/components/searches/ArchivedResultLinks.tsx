@@ -77,6 +77,7 @@ function OpenWhenActive({ thread }: { thread: ScopedThreadRef }) {
   const shell = useThreadShell(thread);
   const navigate = useNavigate();
   const opened = useRef(false);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: navigates once the unarchived thread's active shell arrives from the server
   useEffect(() => {
     if (opened.current || shell === null || shell.archivedAt !== null) return;
     opened.current = true;

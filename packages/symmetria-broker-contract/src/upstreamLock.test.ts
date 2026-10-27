@@ -7,7 +7,7 @@ import type {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-// Mesura: upstream no longer exports the vocabulary as its own type (#9917).
+// Mesura: upstream no longer exports the vocabulary as its own type.
 type ProviderRuntimeEventType = ProviderRuntimeEvent["type"];
 
 import {
@@ -26,14 +26,9 @@ import {
 } from "./upstreamLock.ts";
 
 /**
- * The negative case for every lock in `upstreamLock.ts`.
- *
- * Each pair below drops one literal from a borrowed vocabulary — a stale copy,
- * exactly what a weekly upstream synchronization would leave behind — and
- * asserts the lock refuses it. TypeScript reports an unused `@ts-expect-error`
- * as an error in its own right, so these lines keep the package's typecheck
- * green only while the lock genuinely fires. Deleting the lock, or widening it
- * to something that accepts a stale copy, breaks this file.
+ * Each pair drops one literal from a borrowed vocabulary (a stale copy) and asserts the lock
+ * refuses it. An unused `@ts-expect-error` is itself an error, so the typecheck stays green
+ * only while each lock fires.
  */
 
 type StaleSessionState = Exclude<RuntimeSessionStateLiteral, "waiting">;

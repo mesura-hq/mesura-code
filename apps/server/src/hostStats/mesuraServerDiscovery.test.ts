@@ -1,13 +1,7 @@
 /**
- * Phase 3 fence of the hosts dock plan: acceptance criteria 3, 4 and 5, plus
- * the per-user runtime registry follow-up.
- *
- * Entry point: `MesuraServerDiscovery.make`, the constructor the server's
- * discovery layer wraps with `/proc`, the per-user registry directories, the
- * server's uid, the default state home and the server's own PID. Each spec
- * stages the processes it names from `fixtures/mesura-servers` (see its README
- * for what each PID is), writes the registry entries it names, and runs one
- * discovery against that tree.
+ * Hosts dock discovery through `MesuraServerDiscovery.make`. Each spec stages
+ * its processes from `fixtures/mesura-servers` (the README there names each
+ * PID) and its registry entries, then runs one discovery over that tree.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { HostStatsMesuraServers } from "@t3tools/contracts";

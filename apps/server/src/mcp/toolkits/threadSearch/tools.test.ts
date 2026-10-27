@@ -1,10 +1,6 @@
-// Mesura: the read-only `find_threads` MCP tool of a search conversation
-// (ADR-010). Entry point: the MCP server that `McpHttpServer.toolkitRegistration`
-// builds from `ThreadSearchToolkit` and the production handlers in
-// `./handlers.ts`, called with `McpServer.callTool` under the
-// `McpInvocationContext` the MCP auth middleware provides per request. The
-// broker is a fake that records the forwarded call; the broker itself is
-// specified in `../../ThreadSearchBroker.test.ts`.
+// Mesura: the read-only `find_threads` MCP tool (ADR-010), called through the
+// MCP server `McpHttpServer.toolkitRegistration` builds. The broker is a fake
+// that records the forwarded call; `../../ThreadSearchBroker.test.ts` covers it.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,

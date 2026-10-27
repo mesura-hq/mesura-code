@@ -1,33 +1,8 @@
 /**
- * Phase 3 fence of phone push notifications: acceptance criteria 1 to 6.
- *
- * The harness is in `pushDispatcherHarness.testkit.ts`.
- *
- * Entry point: `PushDispatcher.layer` and its `start()`, which `server.ts`
- * runs as a parked fiber. It is built over the real orchestrator stack:
- * `ProviderReplayHarness` (orchestrator, event sink, projections), the real
- * `ThreadManagementService`, in-memory SQLite with upstream's migrations and
- * `MESURA_SCHEMA_STATEMENTS`, and the real `PushSubscriptions`. Domain events
- * are committed through `EventSinkV2.write`, the path every orchestrator
- * decision takes, so the dispatcher reads them from the live
- * `streamDomainEvents` tail and the thread shells from the projections.
- * Only the edges are fakes: `PushSender` records each send instead of
- * reaching a push service, and `ProjectService` and `ServerEnvironment` answer
- * with one project title and one environment id, as in upstream's relay test.
- *
- * What the specs rely on, from the plan:
- * - `PushDispatcher` has `start(): Effect<void, never, Scope>` and
- *   `drain: Effect<void>`, like `AgentAwarenessRelay`.
- * - `start()` returns after the startup keys are recorded and the dispatcher
- *   is subscribed to the domain events, so an event committed after it
- *   returns is never missed.
- * - Project titles come from `ProjectService.getById` and the environment id
- *   from `ServerEnvironment.getEnvironmentId`, as the relay reads them.
- *
- * No sleeps: `flushSends` commits an approval on a fresh barrier thread, waits
- * for the barrier device to receive it, then drains the dispatcher. Events
- * reach the dispatcher in commit order, so every send caused by an earlier
- * event is recorded by then.
+ * Phone push criteria 1 to 6 over the real orchestrator stack, harness in
+ * `pushDispatcherHarness.testkit.ts`; only `PushSender`, `ProjectService` and
+ * `ServerEnvironment` are fakes. No sleeps: `flushSends` commits an approval on a barrier
+ * thread, waits for its device, then drains; commit order puts every earlier send first.
  */
 import { DEFAULT_PUSH_PREFERENCES, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";

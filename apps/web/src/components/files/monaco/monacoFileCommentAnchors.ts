@@ -47,23 +47,9 @@ export function groupEntriesByEndLine(
 }
 
 /**
- * The decoration that anchors a comment to its lines.
- *
- * A comment has to know two things as the file changes: where its lines moved
- * to, and whether they are gone. Monaco answers the first by remapping a
- * tracked decoration. The second has only one signal — the decoration collapses
- * to an empty range — and that signal is worthless if the range could be empty
- * to begin with.
- *
- * It can be. A comment on a blank line covers no characters, so the obvious
- * range for it is empty from the moment it is created, and the very next
- * keystroke anywhere in the file would read as "these lines were deleted".
- *
- * So the anchor deliberately covers more than the comment does, reaching into
- * the newline that ends the range, or the one before it at the end of a file.
- * That character cannot be edited away while the line still exists, which makes
- * an empty range mean deletion and nothing else. The offsets say how to get the
- * commented lines back out.
+ * The decoration that anchors a comment to its lines. It reaches into the newline that ends the
+ * range (or the one before it at end of file), so it is never empty while the lines exist: an
+ * empty range means deletion and nothing else. The offsets recover the commented lines.
  */
 export function anchorForLines(
   startLine: number,
@@ -128,18 +114,9 @@ export function anchorForLines(
 }
 
 /**
- * Where a comment sits after the text under it moved, or `null` if it is gone.
- *
- * Monaco has already remapped the anchor; this reads the answer out and undoes
- * the widening `anchorForLines` applied. Two cases mean the comment has nothing
- * left to point at, and both end it rather than leaving it stranded on a line it
- * no longer describes:
- *
- * - `null`, when the decoration id is not in the model any more.
- * - An empty range, which `anchorForLines` never creates for a line that exists,
- *   so it means the commented lines were deleted. Monaco keeps the decoration
- *   and collapses it rather than dropping it, which is why emptiness is the
- *   signal to read.
+ * Where a comment sits after Monaco remapped its anchor, or `null` when its lines are gone:
+ * the decoration id is missing, or the range collapsed to empty, which `anchorForLines` never
+ * creates for a line that still exists.
  */
 export function entryAfterModelChange(
   entry: FileCommentAnnotationEntry,

@@ -7,23 +7,9 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * A fork component that styles itself through a class or a data attribute has no
- * compiler and no test to tell it the rule went away. CSS answers a missing rule
- * with silence, so the element renders unstyled and every suite stays green.
- *
- * This happened during the 2026-W35 sync. Upstream moved the composer's glass
- * into `ComposerSurface` and deleted the 548-line block that had held it in
- * `index.css`. Every class in that block was upstream's and genuinely superseded
- * — except `.mesura-dictation-strip`, which is this fork's. Taking the deletion
- * whole left `DictationStrip.tsx` still setting the class and its `data-phase`
- * and `data-dictation-mode-control` hooks with nothing driving them: the strip
- * lost its surface and the delivery pulse never fired.
- *
- * The strip's surface now comes from upstream's `ComposerBanner` primitives;
- * what remains in `mesura.css` — which upstream never touches — is the
- * confirmation pulse, and that is what these hooks feed. What this guards is
- * the other direction from the W35 deletion — that the hooks a fork component
- * sets still have somewhere to land.
+ * CSS answers a missing rule with silence, so a fork class or data attribute whose rule went away
+ * renders unstyled with every suite green; a sync once deleted `.mesura-dictation-strip` with
+ * upstream's glass block. This guards that the hooks a fork component sets still land in a rule.
  */
 
 const read = (relativePath: string) =>
@@ -37,19 +23,10 @@ const STYLED_FORK_COMPONENTS: ReadonlyArray<{
   readonly stylesheet: string;
   readonly hooks: ReadonlyArray<string>;
 }> = [
-  // DictationStripBanner is deliberately absent. It still sets
-  // `mesura-dictation-strip`, `data-phase` and `data-dictation-mode-control`,
-  // but the only rule they fed was the confirmation pulse on Symmetria Shell's
-  // `delivering` and `confirming` phases, which went with the Shell link. A
-  // recording in Mesura is only `recording` or `paused`. The hooks stay as
-  // stable selectors for tests and browser checks.
-  //
-  // AccountLimitsPanel is deliberately absent. It still sets
-  // `data-usage-limits-panel`, but that attribute stopped being a styling hook
-  // when the panel became a band inside the sidebar: the rule it fed existed to
-  // strip upstream's popover glass, and it went with the popover. The attribute
-  // is kept as a stable selector for browser checks, so it has nothing to land
-  // on by design. Listing it here asserts the opposite and fails.
+  // Deliberately absent, because their hooks now feed no rule and stay only as stable selectors for
+  // tests and browser checks: DictationStripBanner (its pulse went with the Symmetria Shell link) and
+  // AccountLimitsPanel (`data-usage-limits-panel` fed a rule that went with the popover).
+  // Listing either here asserts the opposite and fails.
 ];
 
 it.each(STYLED_FORK_COMPONENTS)("styles every hook $component sets", (entry) => {
@@ -113,11 +90,9 @@ it("keeps the fork's stylesheet loaded after upstream's", () => {
 });
 
 it("keeps :has() out of the fork's stylesheet", () => {
-  // The pane mark once used `:has()` anchored on the chat column. Chromium then
-  // re-checks it on every DOM change inside the column, and upstream's
-  // `group-has-*` utilities turn each re-check into a whole-subtree restyle, so
-  // every thread switch paid for it. The "Which pane has the keyboard" block in
-  // mesura.css holds the measurement and the replacement.
+  // A `:has()` anchored on the chat column made Chromium re-check it on every DOM change there, and
+  // upstream's `group-has-*` utilities turned each re-check into a subtree restyle on every thread
+  // switch. The "Which pane has the keyboard" block in mesura.css holds the measurement.
   const rules = read("apps/web/src/mesura.css").replace(/\/\*[\s\S]*?\*\//g, "");
   assert.notInclude(
     rules,
@@ -127,12 +102,9 @@ it("keeps :has() out of the fork's stylesheet", () => {
 });
 
 it("rings the composer for Vim normal and visual mode through an attribute on its surface", () => {
-  // The ring once used `[data-chat-composer-main-surface]:has([data-mesura-vim])`,
-  // which the guard above forbids. `composerSurface.ts` writes the mode onto the
-  // surface itself instead. The colours match the mode indicator and must stay
-  // as they are: the look of the ring is part of the baseline. That the mode
-  // changes write and clear the attribute is pinned by behaviour in
-  // `apps/web/src/keys/composer/composerSurface.test.ts`.
+  // `composerSurface.ts` writes the mode onto the surface, because the `:has()` form is forbidden
+  // above. The colours match the mode indicator and are part of the baseline: keep them.
+  // `apps/web/src/keys/composer/composerSurface.test.ts` pins that mode changes write and clear it.
   const rules = read("apps/web/src/mesura.css").replace(/\/\*[\s\S]*?\*\//g, "");
   const expectedRings = [
     { mode: "normal", outline: "outline: 1.5px solid oklch(68.5% 0.169 237.323);" },

@@ -17,6 +17,7 @@ import type { SidebarThreadStatus } from "./Sidebar.logic";
 export type SidebarThreadAttentionKind =
   | "approval"
   | "input"
+  | "request"
   | "failed"
   | "limited"
   | "factory"
@@ -79,6 +80,7 @@ export function resolveSidebarThreadAttention(
   ) {
     return NEEDS_INPUT;
   }
+  if (status === "request") return { kind: "request", text: "Request", emphasis: "loud" };
   if (status === "failed") return { kind: "failed", text: "Failed", emphasis: "loud" };
   if (status === "limited") return { kind: "limited", text: "Limited", emphasis: "loud" };
   if (factoryRun?.status === "running") {
@@ -107,7 +109,14 @@ export function threadHasOpenPullRequest(links: ReadonlyArray<ThreadPullRequestL
   );
 }
 
-export type SidebarThreadAttentionIcon = "approval" | "input" | "failed" | "done" | "woke" | null;
+export type SidebarThreadAttentionIcon =
+  | "approval"
+  | "input"
+  | "request"
+  | "failed"
+  | "done"
+  | "woke"
+  | null;
 
 export interface SidebarThreadAttentionLook {
   readonly className: string;
@@ -134,6 +143,11 @@ const LOOK_BY_KIND: Readonly<Record<SidebarThreadAttentionKind, SidebarThreadAtt
   input: {
     className: "font-semibold text-needs-input",
     icon: "input",
+    rowEdgeClassName: "",
+  },
+  request: {
+    className: "font-semibold text-guest-foreground",
+    icon: "request",
     rowEdgeClassName: "",
   },
   failed: {

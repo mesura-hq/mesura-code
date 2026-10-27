@@ -1,7 +1,5 @@
-// Entry point: `installKeyEngine` (`keyEngine.ts`), the window `keydown`
-// listener `KeyEngineHost` installs before React renders. Every spec here
-// dispatches a real `KeyboardEvent` from a focused element and reads what the
-// app sees: whether the event was prevented, whether a window listener
+// Every spec dispatches a real `KeyboardEvent` from a focused element and reads
+// what the app sees: whether it was prevented, whether a window listener
 // registered after the engine still received it, and the engine's snapshot.
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { KeyMode } from "@mesura/keys/keymap";

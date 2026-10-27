@@ -14,13 +14,10 @@ import {
 } from "./directedComposerSubmission";
 
 /**
- * Send-when-ready: a draft armed by a recording finished in send mode, or by Send pressed while
- * a marker was pending, sends by itself once its prompt holds no marker. The marker count in the
- * draft decides, not the job list, so a fill, a Discard and a marker the user deleted all count.
- *
- * Every send goes through the directed submission, whether or not the draft's composer is on
- * screen, so a thread the user left still sends. A question card's answer is armed by request
- * and submitted by the card itself, which owns the answer's validation.
+ * Send-when-ready: an armed draft sends by itself once its prompt holds no marker; the draft's
+ * marker count decides, so a fill, a Discard and a deleted marker all count. Every send goes
+ * through the directed submission, so a thread the user left still sends. A question card's
+ * answer is armed by request and submitted by the card, which owns the answer's validation.
  */
 
 interface DraftSendState {

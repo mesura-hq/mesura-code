@@ -1,11 +1,5 @@
-/**
- * Phase 6 fence (thread-attention plan): the dock's policy, as pure functions.
- *
- * Entry point: `pinnedActionDock.logic.ts`, which `PinnedActionDock.tsx` and the composer's
- * banner stack read. What only a browser shows (the pinned plan card at any scroll position,
- * reload, touch and keyboard reach, the composer input never covered) is in
- * `PinnedActionDock.browser.test.tsx`.
- */
+// Thread attention phase 6: the dock's policy, as pure functions in `pinnedActionDock.logic.ts`.
+// What only a browser shows is in `PinnedActionDock.browser.test.tsx`.
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { FactoryPlanTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
 import { formatPlanApprovalMessage } from "@t3tools/client-runtime/factory/plan-approval";

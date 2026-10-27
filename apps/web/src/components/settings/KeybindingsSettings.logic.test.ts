@@ -380,9 +380,8 @@ describe("KeybindingsSettings.logic", () => {
   });
 });
 
-// Mesura: the fork's own capture wrapper (bare Tab passed through, plain
-// letters ignored) was superseded by upstream #14548, which records plain keys
-// and Tab while recording. These keep the chords this fork relies on covered.
+// Mesura: upstream's recorder now records plain keys and Tab, superseding the fork's own capture
+// wrapper. These keep the chords this fork relies on covered.
 describe("keybindingFromKeyboardEvent for the fork's chords", () => {
   const event = (
     key: string,

@@ -3,19 +3,10 @@ import { TextBuffer, type CursorPosition } from "@vimee/core";
 import { projectPrompt } from "./composerProjection";
 
 /**
- * Vim's undo for the composer: one history of prompt states per draft.
- *
- * vimee keeps its undo stack in the buffer of one normal-mode session, and
- * typing in insert mode goes to Lexical, so neither sees the whole edit
- * history of a draft. This history does: `composerSurface.ts` records the
- * prompt when an insert session starts, when normal mode is entered (so one
- * insert session is one step), and after every normal-mode change. A state
- * is the expanded prompt, so every inline token comes back as the same
- * source text.
- *
- * The history lives in memory only, for the most recent drafts. A send starts
- * a fresh one: every send path consumes the draft through the draft store's
- * `clearComposerContent`, which calls `clearComposerUndoHistory`.
+ * Neither vimee (one normal-mode session) nor Lexical (insert typing) sees a draft's whole history,
+ * so this records one: an insert session is one step, each normal-mode change one more. A state is
+ * the expanded prompt, so tokens return as the same source text. A send clears it through
+ * `clearComposerContent`.
  */
 
 const MAX_DRAFTS = 50;

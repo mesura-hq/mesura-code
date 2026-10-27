@@ -1,10 +1,6 @@
 /**
- * Phase 2 fence of the hosts dock plan: acceptance criteria 2, 3, 6 and 7, as
- * the pure bucket functions carry them.
- *
- * Entry point: the pure functions `HostStatsService` folds every sample
- * through. The service-level half of each criterion is in
- * `HostStatsService.test.ts`.
+ * The pure bucket functions `HostStatsService` folds every sample through. The service-level half
+ * of each case is in `HostStatsService.test.ts`.
  */
 import type { HostStatsBucket, HostStatsSample } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";

@@ -3,15 +3,10 @@ import { useEffect } from "react";
 import { create } from "zustand";
 
 /**
- * Mesura: what the timeline's plan card and the composer dock's pinned plan share for one plan's
- * bytes in one thread: the edited route rows, and whether an approval of them is being sent. Two
- * controls approve the same plan, so they read one state: both send the same routes and both
- * disable while either sends.
- *
- * A session lasts while something holds it: a card of the plan, or the dock entry that pins it,
- * collapsed or not. So an edit survives the timeline card leaving the virtualized list and the
- * dock body collapsing at phone width, and resets once nothing shows the plan, as a card's own
- * state did.
+ * Mesura: the plan card and the composer dock's pinned plan share one session per plan and thread
+ * (the edited route rows, and whether an approval is sending), so both send the same routes and
+ * both disable while either sends. It lasts while a card or the dock entry holds it, surviving
+ * virtualization and a collapsed dock, and resets once nothing shows the plan.
  */
 interface FactoryPlanCardSession {
   readonly routes?: FactoryRouteSlots;
@@ -40,6 +35,7 @@ function dropSession(planKey: string) {
 
 /** Keeps one plan's session alive while the caller is mounted; `null` holds nothing. */
 export function useHoldFactoryPlanCardSession(planKey: string | null) {
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reference-counts this mount as a holder of the module-level plan session
   useEffect(() => {
     if (planKey === null) return;
     holdersByPlan.set(planKey, (holdersByPlan.get(planKey) ?? 0) + 1);

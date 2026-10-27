@@ -1,12 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - verifies repository integration boundaries.
 /**
- * Fence for the removal of Symmetria Shell's dictation link.
- *
- * Dictation is Mesura's own now (server transcription, marker tokens,
- * send-when-ready). Shell's dictation sockets, the renderer bridge and the
- * prototype page were removed, and this guard fails if any of them returns to
- * the desktop or web sources. The thread feed's socket stays and is pinned
- * here so that the fence can never catch it by accident.
+ * Fence for the removal of Symmetria Shell's dictation link: dictation is Mesura's own now, and
+ * this fails if Shell's dictation sockets, renderer bridge or prototype page return to the desktop
+ * or web sources. The thread feed's socket stays, and is pinned so the fence never catches it.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -27,11 +23,9 @@ const listSourceFiles = (relativeRoot: string): ReadonlyArray<string> =>
     .map((entry) => NodePath.relative(repositoryRoot, NodePath.join(entry.parentPath, entry.name)));
 
 /**
- * Each removed name, and the pattern that finds it. The legacy STT socket was
- * `symmetria-mesura-<pid>.sock`: its pattern takes any interpolation, placeholder
- * or number in the pid slot directly after the prefix, and requires `.sock`, so
- * the thread socket (`symmetria-mesura-threads-<pid>.sock`) and the per-user
- * runtime fallback directory (`symmetria-mesura-<uid>`, no `.sock`) do not match.
+ * The legacy STT socket was `symmetria-mesura-<pid>.sock`. The pattern takes anything in the pid slot
+ * and requires `.sock`, so `symmetria-mesura-threads-<pid>.sock` and the runtime fallback
+ * directory `symmetria-mesura-<uid>` do not match.
  */
 const REMOVED_NAMES: ReadonlyArray<{ readonly name: string; readonly pattern: RegExp }> = [
   { name: "dictation socket symmetria-mesura-dictation-", pattern: /symmetria-mesura-dictation-/ },

@@ -3,17 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { toNvimKey, type NvimKeyEvent } from "./nvimKeymap.ts";
 
 /**
- * Turning a browser key event into Neovim's key notation.
- *
- * Two things make this harder than the table it looks like. The developer's
- * keyboard is Latin-American, where a great many printable characters are
- * produced with Shift or AltGr — so the modifier flags cannot be read as
- * modifiers, and only `event.key` says what was actually typed. And a key that
- * belongs to the browser's own composition — a dead-key accent — must not be
- * routed at all, or the accent is swallowed and the letter arrives bare.
- *
- * `null` means "this key is not ours": the event goes on to Monaco and to the
- * application, untouched.
+ * On a Latin-American keyboard many printable characters need Shift or AltGr, so only `event.key`
+ * says what was typed, and a dead-key composition must not be routed or the accent is lost.
+ * `null` means the key is not ours and goes on to Monaco and the app untouched.
  */
 
 const event = (overrides: Partial<NvimKeyEvent>): NvimKeyEvent => ({
@@ -119,11 +111,9 @@ describe("toNvimKey", () => {
   });
 
   it("gives Neovim the chords Monaco would otherwise spend on its own undo", () => {
-    // Undo has one owner while Neovim drives. These reach `toNvimKey`, so the
-    // driver stops them before Monaco's keybinding service sees them, and
-    // Neovim gets a key the developer can map. Monaco's own stack is empty by
-    // construction anyway — the driver only ever calls `applyEdits` — so even
-    // if one leaked through, its `undo` would have nothing to take back.
+    // Undo has one owner while Neovim drives: these reach `toNvimKey`, so Monaco's keybinding
+    // service never sees them. Monaco's own stack is empty anyway, since the driver only calls
+    // `applyEdits`.
     expect(toNvimKey(event({ key: "z", ctrlKey: true }))).toBe("<C-z>");
     expect(toNvimKey(event({ key: "y", ctrlKey: true }))).toBe("<C-y>");
     expect(toNvimKey(event({ key: "Z", ctrlKey: true, shiftKey: true }))).toBe("<C-Z>");

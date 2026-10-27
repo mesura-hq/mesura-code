@@ -2,12 +2,8 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 
 /**
- * Which way `thread.toggleSettled` moves the open thread, and what stops a
- * second press from doubling the first.
- *
- * A factory rather than a hook: this repository has no `renderHook` anywhere,
- * so behaviour written as a hook would not be testable in its own idiom. The
- * React binding is `useThreadSettledToggle.ts` and decides nothing.
+ * A factory rather than a hook, because the repository has no `renderHook` to test a
+ * hook with. The React binding, `useThreadSettledToggle.ts`, decides nothing.
  */
 
 /** The open thread as much as the toggle needs it. */
@@ -48,33 +44,15 @@ export interface ThreadSettledToggleDeps {
 }
 
 /**
- * The toggle reads the settled state the user is looking at, which lags the
- * command it just sent. Two fast presses would therefore both read "active"
- * and send settle twice, leaving the thread settled when the user asked for
- * settle-then-active. The window is milliseconds on a local server and real
- * over a relay, so a press that arrives while one is in flight for the same
- * thread is dropped instead.
- *
- * A set with one entry per in-flight thread, not a single slot: threads travel
- * independently, so a press on thread B must neither be blocked by thread A's
- * command nor release it. A single slot got both wrong — B's press overwrote
- * A's entry and left A unlocked while its command was still travelling.
- *
- * Note that ChatView's parked-thread banner keeps its own `unsettlingThreadKey`
- * for the button's pending label. The two guards do not see each other, so a
- * shortcut press during a banner un-settle sends a second one. That is harmless
- * because un-settle is idempotent, and unifying them would mean rewriting the
- * banner's pending state in a file upstream rewrites weekly.
- *
- * A command that never settles holds its thread's entry for the life of the
- * page, and every later press on that thread is dropped in silence. No timer
- * guards it, because any timeout here would be an invented constant: the
- * contract that makes this safe is that `runAtomCommand` settles even on
- * interruption. A change to that contract has to revisit this.
+ * The settled state the user sees lags the command just sent, so two fast presses would
+ * both send settle. A press while one is in flight for the same thread is dropped. No
+ * timer releases a stuck entry: this relies on `runAtomCommand` settling even on interruption.
  */
 export function createThreadSettledToggle(
   deps: ThreadSettledToggleDeps,
 ): () => ThreadSettledToggleOutcome {
+  // One entry per thread, not a single slot: a single slot let B's press release A's lock.
+  // ChatView's banner keeps its own `unsettlingThreadKey`; a double un-settle is idempotent.
   const pendingThreadKeys = new Set<string>();
 
   return () => {

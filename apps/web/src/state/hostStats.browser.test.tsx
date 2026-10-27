@@ -1,12 +1,9 @@
 import { act, render as renderBrowser, type Screen } from "../../test/render";
 import { RegistryContext } from "@effect/atom-react";
 /**
- * Entry point: `useHostStatsSources`, the hook the Hosts dock reads its
- * sources through, mounted in an atom registry of its own. The fixture
- * replaces only the transport: the presentations atom and the
- * `serverEnvironment.hostStats` family, whose atoms stay alive between dock
- * opens as the real ones do for their five-minute idle TTL, and count every
- * time they start.
+ * Mounts `useHostStatsSources` in its own atom registry. The fixture replaces only the transport:
+ * the presentations atom and the `serverEnvironment.hostStats` family, whose atoms outlive a
+ * closed dock (as the real ones do for their idle TTL) and count every start.
  */
 
 import type { EnvironmentPresentation } from "@t3tools/client-runtime/connection";

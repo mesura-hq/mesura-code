@@ -758,7 +758,8 @@ it("phase two regression both file pickers preserve normal and question attachme
   for (const input of [normalInput, questionInput]) {
     await act(async () => {
       Object.defineProperty(input, "files", {
-        value: [new File(["svg"], "bad.svg", { type: "image/svg+xml" })],
+        // SVG attaches as a file now; a PSD is still an image type no provider accepts.
+        value: [new File(["psd"], "layers.psd", { type: "image/vnd.adobe.photoshop" })],
         configurable: true,
       });
       input.dispatchEvent(new Event("change", { bubbles: true }));

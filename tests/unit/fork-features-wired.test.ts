@@ -7,28 +7,10 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * Two fork features that a sync can leave present-but-unwired. Both happened
- * during the 2026-W35 merge and neither made a suite fail:
- *
- * - `/compact` on mobile. Upstream extracted the composer command menu into its
- *   own hook, and grafting the fork's native compaction into it passed a
- *   `hasThread` flag where the fork had computed "does this thread have a
- *   provider session". The command then offered itself on threads that had
- *   never started one.
- * - The sidebar project scope. Upstream replaced the fork's shared store with
- *   local component state, which left `projectScope.toggle` writing a store the
- *   sidebar no longer read — a keybinding that silently did nothing.
- *
- * - The composer attach shortcut. ADR-003 kept `composer.attachFiles` on `alt+a`
- *   when the fork's attachment stack was retired, because upstream ships no
- *   keyboard route to attaching. The binding existing is not the same as the
- *   composer acting on it: a sync that rewrites the composer's shortcut handler
- *   leaves the chord resolving to a command nothing handles, while upstream's
- *   attach button keeps working and no suite notices.
- *
- * Both are wiring rather than behaviour, which is why they are asserted at the
- * call site. A behavioural test would have passed in each case: the function
- * was right and the caller was wrong.
+ * Fork features a sync can leave present but unwired, with every suite green: `/compact` gated on
+ * a provider session, `projectScope.toggle` writing the store the sidebar reads, and
+ * `composer.attachFiles` (ADR-003) reaching the composer's shortcut handler. Each is asserted at
+ * the call site, because a behaviour test passes when the function is right and the caller is wrong.
  */
 
 const read = (relativePath: string) =>
@@ -235,7 +217,7 @@ it("orders the active sidebar list through the fork's sort setting", () => {
   );
   assert.include(
     partitionCall,
-    "clockKey: `${nowMinute}:${snoozeWakeTick}`",
+    "clockKey: `${nowMinute}:${snoozeWakeClock}:",
     "the partition no longer receives snooze wake changes",
   );
   assert.notInclude(
@@ -276,12 +258,8 @@ it("orders the active sidebar list through the fork's sort setting", () => {
   );
 });
 
-// The four footer controls are one row a user reads left to right, but nothing
-// in a build or a behavioural test knows what order they belong in: each one
-// renders correctly wherever it is put. The 2026-W35 sync moved upstream's
-// attach button out of this group, which silently reordered the row and left
-// the microphone separated from send. Asserting the order here is what makes
-// that visible, and the group is the one place that decides it.
+// No build or behaviour test knows the order of the four footer controls: each renders anywhere.
+// A sync once moved the attach button out of this group and separated the microphone from send.
 it("renders the composer footer controls in one group, in order", () => {
   const composer = read("apps/web/src/components/chat/ChatComposer.tsx");
   // The right-hand footer now owns the order. The extracted primary component

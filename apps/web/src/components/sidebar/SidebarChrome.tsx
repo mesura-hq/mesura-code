@@ -170,7 +170,7 @@ function SidebarUtilityItem({
   );
 }
 
-export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
+const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -224,21 +224,10 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   };
 
   return (
-    // The dock and the row it opens from share a column of their own rather
-    // than being two items of the footer's. The footer sets `gap-2`, and a gap
-    // is drawn between adjacent items whatever their size — so a collapsed dock
-    // sitting directly in it would hold eight pixels open for ever. Nested,
-    // the dock contributes nothing while closed and its lower rule lands
-    // against the row while open, which is the delimiter doing its job.
-    //
-    // ACCEPTED MERGE COST. This wrapper re-indents the whole return block of
-    // an upstream component. Six upstream commits in the last six months
-    // touched this exact block, so expect roughly one whitespace conflict a
-    // month here, each resolved by taking upstream's line and re-indenting it.
-    // The cheaper shape — dock in `SidebarChromeFooter`, controller passed
-    // down — was measured and rejected: the utility-page gate is computed here,
-    // so the footer would need its own copy of the route test, and two copies
-    // of a gate drift. A recurring whitespace conflict is the smaller cost.
+    // Own column: in the footer's `gap-2`, a collapsed dock would hold 8px open. ACCEPTED MERGE
+    // COST: this re-indents an upstream return block (about one whitespace conflict a month;
+    // take upstream's line, re-indent). The dock in `SidebarChromeFooter` was rejected: the
+    // utility-page gate is computed here, and a second copy of the route test would drift.
     <div className="flex flex-col">
       {accountLimitsEnabled ? <AccountLimitsDock controller={accountLimitsController} /> : null}
       {accountLimitsEnabled ? <HostsDock controller={hostsController} /> : null}
@@ -260,7 +249,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             {pullRequestsSupported ? (
               <SidebarUtilityItem
                 icon={<PullRequestGlyph.pullRequest />}
-                label="Pull Requests"
+                label="Pull requests"
                 onClick={handlePullRequestsClick}
               />
             ) : null}
@@ -296,10 +285,14 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
 });
 
-export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+export const SidebarChromeFooter = memo(function SidebarChromeFooter({
+  showUndoNotice = false,
+}: {
+  showUndoNotice?: boolean;
+}) {
   return (
     <SidebarFooter>
-      <SidebarThreadUndoNotice />
+      {showUndoNotice ? <SidebarThreadUndoNotice /> : null}
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <SidebarUtilityMenu />

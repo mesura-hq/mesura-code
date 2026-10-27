@@ -1,20 +1,7 @@
 /**
- * The Unix socket Symmetria Shell reads the projected thread list from.
- *
- * A PUSH stream: it writes without being asked, and ignores anything a peer
- * sends. The binding lives in `unixSocket.ts`.
- *
- * The framing is the contract's: **a stream opens with a snapshot**, so every
- * peer receives one the moment it connects and never has to reason about what
- * it missed. Deltas come later; the connection is deliberately held open for
- * them rather than closed after the snapshot.
- *
- * Newline-delimited JSON, one item per line, because that is what the consumer
- * can read with no dependency: QuickShell's `Socket` carries a `SplitParser`
- * and nothing else.
- *
- * Only `node:net` here — the filesystem side is `socketFiles.ts` and the
- * projection is `threadProjection.ts`, each testable in its own idiom.
+ * A PUSH stream of the projected thread list for Symmetria Shell; it ignores what peers send.
+ * Every peer gets a snapshot on connect, then deltas on the same open connection. Newline-delimited
+ * JSON, because QuickShell's `Socket` reads it with only a `SplitParser`.
  */
 import * as NodeNet from "node:net";
 
@@ -41,21 +28,9 @@ export type ThreadStreamOptions = {
 };
 
 /**
- * How much unflushed data one peer may accumulate before it is dropped.
- *
- * A peer that connects and never reads is not hypothetical: any local process
- * owned by this user can open the socket, and the shell itself can stall while
- * its event loop is busy. Node buffers whatever `write` cannot flush, with no
- * bound of its own, so without this the delta path would grow the main
- * process's memory once per stalled reader for as long as it stays connected.
- *
- * Dropping is the right answer rather than a harsh one, and the contract is
- * what makes it cheap: a stream OPENS WITH A SNAPSHOT, so a peer that
- * reconnects is immediately whole again. Waiting for `drain` instead would
- * make the publisher hold state on behalf of a consumer that may never return.
- *
- * A megabyte is far above any real snapshot and far below anything that
- * matters to this process.
+ * Any local process of this user can connect and never read, and Node buffers unflushed writes
+ * without bound. Dropping such a peer is cheap: a stream OPENS WITH A SNAPSHOT, so a reconnect is
+ * whole at once. A megabyte is far above any real snapshot.
  */
 const MAX_PEER_BACKLOG_BYTES = 1024 * 1024;
 
@@ -63,16 +38,8 @@ export type ThreadStreamServer = NodeNet.Server & {
   /** Writes one line to every currently connected peer. Used by the delta path. */
   readonly broadcast: (line: string) => void;
   /**
-   * How many peers are attached right now.
-   *
-   * Exposed because it is the only way to observe that a departed peer was
-   * actually forgotten. Writing to a destroyed socket does NOT throw and does
-   * NOT emit synchronously — Node defers the failure to the next tick — so a
-   * test that watches for an error after a broadcast is vacuously green
-   * whether the cleanup ran or not. That is not hypothetical: it is the exact
-   * defect verification found in the first attempt at that test.
-   *
-   * Useful past the test, too: "n peers attached" is what a log line wants.
+   * The only way to observe that a departed peer was forgotten: a write to a destroyed socket does
+   * not throw or emit synchronously, so watching for an error after a broadcast proves nothing.
    */
   readonly peerCount: () => number;
 };
@@ -89,19 +56,9 @@ export function createThreadStreamServer(options: ThreadStreamOptions): ThreadSt
     // Unhandled, that reaches the process rather than this connection, so a
     // shell restarting would take the publisher down with it.
     connection.on("error", (error) => {
-      // ⚠ This `delete` is DEFENSIVE AND UNTESTED, and both halves of that are
-      // deliberate rather than an oversight. Node destroys a socket that emits
-      // `'error'` and always follows it with `'close'`, so the handler below
-      // already removes the peer — this line is a duplicate of a cleanup that
-      // cannot fail to run.
-      //
-      // No test drives it, and verification established why rather than
-      // leaving it as a gap of unknown shape: a client-side `.destroy()`
-      // produces a clean `'close'` on the server, never an `'error'`, so
-      // reaching this branch needs a real transmission fault. Forcing one is
-      // fiddly and flaky. Whoever wants the coverage should first ask whether
-      // to delete the line instead — one cleanup path is better than two, and
-      // the remaining one IS covered.
+      // ⚠ DEFENSIVE AND UNTESTED, on purpose: Node always follows `'error'` with `'close'`, whose
+      // handler already removes the peer. Reaching this needs a real transmission fault, which a
+      // test cannot force reliably; consider deleting this line before adding coverage for it.
       peers.delete(connection);
       onError?.(error);
     });
@@ -125,11 +82,8 @@ export function createThreadStreamServer(options: ThreadStreamOptions): ThreadSt
     peerCount: (): number => peers.size,
     broadcast: (line: string): void => {
       for (const peer of peers) {
-        // Checked BEFORE the write, not after: `write` returning false means
-        // "above the high-water mark", which is the ordinary state of a
-        // healthy peer mid-flush and says nothing about whether it is stuck.
-        // The backlog that has actually accumulated is what distinguishes the
-        // two.
+        // Check the backlog BEFORE the write: `write` returning false only means "above the
+        // high-water mark", the ordinary state of a healthy peer mid-flush.
         if (peer.writableLength > MAX_PEER_BACKLOG_BYTES) {
           peers.delete(peer);
           onError?.(

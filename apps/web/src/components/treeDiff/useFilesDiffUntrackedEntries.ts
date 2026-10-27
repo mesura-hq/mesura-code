@@ -7,17 +7,9 @@ import type { DiffFileTreeEntry } from "../diffs/diffFileTree.logic";
 import { markUntrackedTreeEntries } from "./treeDiff.logic";
 
 /**
- * Fork addition: Files diff's tree entries with untracked files marked as such.
- *
- * The server adds untracked files to the working-tree patch with
- * `--intent-to-add`, so the patch reports them as new files, the same as a
- * staged addition. The working tree's own status says which of them git does
- * not track yet. Only Files diff needs this: in a branch range or a turn, a new
- * file is an added one.
- *
- * One read per working-tree patch that has a new file: `preview` is the patch result the entries
- * came from, and a new one (a refresh, focus, a finished tool call) re-reads
- * the status beside it, at the cwd the server accepted for that patch.
+ * Fork addition: Files diff's tree entries with untracked files marked. The server adds them to
+ * the working-tree patch with `--intent-to-add`, so they look like staged additions; the working
+ * tree's status tells them apart. It is re-read once per new patch result that has a new file.
  */
 export function useFilesDiffUntrackedEntries(input: {
   readonly enabled: boolean;
@@ -35,6 +27,7 @@ export function useFilesDiffUntrackedEntries(input: {
   );
   const refreshChanges = changes.refresh;
   const lastPreviewRef = useRef(preview);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: re-reads the status when a new patch result arrives from the server
   useEffect(() => {
     const previous = lastPreviewRef.current;
     lastPreviewRef.current = preview;

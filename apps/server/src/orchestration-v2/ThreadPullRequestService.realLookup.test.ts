@@ -1,12 +1,8 @@
 /**
- * The sweep's retry policy and remote changes through the real GitManager, its
- * pull-request lookup cache and repository identity resolver: an event looks a
- * backed-off group up at once even while GitManager holds its cached failure, a
- * transient failure reaches the provider on every sweep, and repointing a
- * remote makes the next sweep apply the new repository's pull request. Entry
- * point: `ThreadPullRequestService.make` started through
- * `ThreadPullRequestService.testkit.ts`, over `GitManager.testkit.ts` with a
- * GitHub provider whose answers the test switches.
+ * The sweep through the real GitManager, its lookup cache and identity resolver:
+ * an event looks a backed-off group up at once even while GitManager caches the
+ * failure, a transient failure reaches the provider on every sweep, and a
+ * repointed remote makes the next sweep apply the new repository's pull request.
  */
 import { describe, expect, it } from "@effect/vitest";
 import {
@@ -15,7 +11,7 @@ import {
   SourceControlProviderError,
   type ChangeRequest,
 } from "@t3tools/contracts";
-import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
+import * as GitHubRequestPolicy from "../../../../packages/source-control-github/src/server/GitHubRequestPolicy.ts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";

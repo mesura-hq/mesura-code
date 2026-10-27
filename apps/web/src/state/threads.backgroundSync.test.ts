@@ -1,21 +1,8 @@
 /**
- * Entry point: `createRunningThreadKeepAliveAtom` (the factory behind
- * `runningThreadKeepAliveAtom`, which `RunningThreadKeepAlive` mounts on
- * desktop) composed with the real client-runtime thread state atoms
- * (`createEnvironmentThreadStateAtoms`) and the detail atoms a thread view
- * reads (`createEnvironmentThreadDetailAtoms`). Only the environment's
- * transport is fake: each thread's `subscribeThread` stream is a queue the
- * test fills, as the server would while a provider streams a turn.
- *
- * Phase 6 of the editor latency cycle ("Desktop background thread sync does
- * not tax the editor"). Guards, green at the phase's base:
- * - criterion 3: a running thread kept alive in the background is current
- *   the moment the developer opens it, with no second subscription and no
- *   snapshot reload;
- * - criterion 2, the isolation half: ten background streams neither rebuild
- *   the keep-alive set nor notify the thread the developer has open.
- * The latency half of criterion 2 is measured by the editor bench, scenario
- * S8 (`/home/dev/projects/factory-runs/editor-latency-fixes/bench/METHOD.md`).
+ * Drives `createRunningThreadKeepAliveAtom` with the real thread state and detail atoms; only each
+ * thread's `subscribeThread` stream is fake. Guards that a background thread kept alive is current
+ * when opened (no second subscription, no snapshot reload), and that background streams neither
+ * rebuild the keep-alive set nor notify the open thread.
  */
 import {
   AVAILABLE_CONNECTION_STATE,

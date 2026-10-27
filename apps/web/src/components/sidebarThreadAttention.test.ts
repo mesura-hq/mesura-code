@@ -1,8 +1,7 @@
-// Entry point: `resolveSidebarThreadAttention` (sidebarThreadAttention.ts), the one decision the
-// current sidebar's top status slot and the in-tab notifications read. Its input is the status
-// `resolveSidebarThreadStatus` returns plus the shell facts the status does not carry: the agent
-// signal, the Software Factory run summary and whether an open pull request remains. The
-// precedence follows the prototype's `statusAfter` (/home/dev/plans/thread-attention/prototype).
+// `resolveSidebarThreadAttention` is the one decision the sidebar's top status slot and the
+// in-tab notifications read. Its input is `resolveSidebarThreadStatus`'s status plus the shell
+// facts it does not carry: the agent signal, the Software Factory run summary and whether an
+// open pull request remains.
 import { RunId, type FactoryRunShellSummary, type ThreadAgentSignal } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 

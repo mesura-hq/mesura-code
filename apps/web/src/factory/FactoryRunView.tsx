@@ -27,6 +27,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 /** The client clock, ticking once a second while `live`; frozen otherwise. */
 function useSecondClock(live: boolean): number {
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: one-second interval timer while the run is live, cleared on cleanup
   useEffect(() => {
     if (!live) return;
     const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
@@ -68,7 +69,7 @@ const FactoryPhaseRecord = memo(function FactoryPhaseRecord({
                 <span className="font-medium text-foreground">
                   {verdict.label} {verdict.verdict.replaceAll("_", " ")}
                 </span>
-                <span className="text-muted-foreground"> — {verdict.deciding}</span>
+                <span className="text-muted-foreground">: {verdict.deciding}</span>
               </li>
             ))}
           </ul>
@@ -83,8 +84,8 @@ const FactoryPhaseRecord = memo(function FactoryPhaseRecord({
                 <span className="text-muted-foreground">{finding.severity}</span> {finding.title}
                 <span className="text-muted-foreground">
                   {" "}
-                  — {finding.disposition ?? "open"}
-                  {finding.reason === null ? null : `: ${finding.reason}`}
+                  ({finding.disposition ?? "open"}
+                  {finding.reason === null ? null : `: ${finding.reason}`})
                 </span>
               </li>
             ))}
@@ -117,7 +118,7 @@ const FactoryPhaseRecord = memo(function FactoryPhaseRecord({
               <li key={`${deviation.kind}:${deviation.path}`}>
                 <span className="font-mono text-foreground">{deviation.path}</span>{" "}
                 <span className="text-muted-foreground">
-                  {deviation.kind} — {deviation.reason}
+                  {deviation.kind}: {deviation.reason}
                 </span>
               </li>
             ))}
@@ -152,11 +153,9 @@ const FactoryPhaseRecord = memo(function FactoryPhaseRecord({
 });
 
 /**
- * The Run tab's model. Everything but the totals depends on the stream alone,
- * so it is derived when an item arrives or the reader picks a phase, never on
- * a clock tick. The previous model lends its unchanged rows, so a stream item
- * that moves one role re-renders only that role. React's pattern for keeping
- * a value from the previous render: compare during render, store in state.
+ * The Run tab's model, derived from the stream alone when an item arrives or the reader picks a
+ * phase, never on a clock tick. The previous model lends its unchanged rows, so a stream item that
+ * moves one role re-renders only that role (React's compare-during-render, store-in-state pattern).
  */
 function useFactoryRunViewModel(
   item: FactoryRunStreamItem,

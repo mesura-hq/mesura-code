@@ -68,12 +68,10 @@ export const writeLegacyFactoryEvents = Effect.fn("MesuraFactoryCardImport.write
 });
 
 /**
- * Runs after shell import, before recovery and Factory run reattachment.
- * V1 has no v2 provider runs, so cards share the null run anchor of imported
- * messages. Reserve the entire legacy timeline before lazy hydration. A
- * one-time event updates any message previews (or already hydrated messages)
- * whose old message-only position changes. Subsequent boots must not overwrite
- * a card that the run tracker updated, or move its pinned position again.
+ * Runs after shell import, before recovery and run reattachment. V1 has no v2 runs, so cards share
+ * the null run anchor of imported messages; the legacy timeline is reserved before lazy hydration,
+ * and a one-time event updates messages whose position moved. Later boots must not overwrite a
+ * card the run tracker updated, or move its pinned position.
  */
 export const importLegacyFactoryCards = Effect.fn("MesuraFactoryCardImport.import")(function* () {
   const sql = yield* SqlClient.SqlClient;

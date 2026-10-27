@@ -10,12 +10,9 @@ import { useOwnDictationJobsStore } from "./dictationSessionStore";
 const WAVE_BARS = [0, 1, 2, 3, 4, 5] as const;
 
 /**
- * How a `dictation` context link draws in the composer: a caret bar, six bars running the
- * stepped wave, and the job's mode. A failed job offers Retry and Discard instead.
- *
- * The mode is this device's choice for a job it started: the mode keys change it at once, and
- * the server's copy follows only after a round trip. A job another device started is read from
- * the composer's environment, where its marker lives.
+ * How a `dictation` context link draws in the composer: a caret bar, the stepped wave and the
+ * job's mode, or Retry and Discard when it failed. The mode is this device's choice for its own
+ * job (the server's copy lags a round trip); another device's job reads the composer's environment.
  */
 export function DictationSlotChip(props: { readonly jobId: string }) {
   const own = useOwnDictationJobsStore((state) => state.jobs[props.jobId]);

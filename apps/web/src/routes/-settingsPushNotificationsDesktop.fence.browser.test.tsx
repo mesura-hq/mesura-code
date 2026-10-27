@@ -1,12 +1,7 @@
 /**
- * Entry point: the real `/settings/general` file route inside the desktop
- * shell, mounted as `-settingsPushNotifications.fence.browser.test.tsx` mounts
- * it. The shell is the preload script's `window.desktopBridge`, set here before
- * any app module loads, because `env.ts` reads it once at load. The bridge
- * carries only what the settings page reads while mounting.
- *
- * Phone push phase 2, criterion 7: the desktop shell shows the switch as
- * unsupported and never registers the service worker.
+ * The desktop shell is `window.desktopBridge`, set before any app module loads because
+ * `env.ts` reads it once at load. The bridge carries only what the settings page reads
+ * while mounting.
  */
 import { expect, it, vi } from "vite-plus/test";
 

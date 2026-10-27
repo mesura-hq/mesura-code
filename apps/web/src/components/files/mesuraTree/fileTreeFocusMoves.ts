@@ -13,13 +13,9 @@ import { decideFileTreeShortcut } from "./fileTreeShortcutDecision";
 import { useFileTreeStore } from "./fileTreeStore";
 
 /**
- * Leaves the tree: to the editor when one is mounted, hiding the tree behind
- * it; otherwise to the composer, with the tree left in place. `Ctrl+E` from
- * inside the tree and `Escape` in it both come here, so the two routes cannot
- * drift. A file shown as a preview (an image, a rendered markdown) is the
- * editor target in the editor's place (`previewFocusTargetRef`). With no
- * file open there is no editor target, and hiding the tree while the keyboard
- * is still in it would drop focus on `body`.
+ * Leaves the tree (`Ctrl+E` and `Escape` both): to the editor, or a preview in its place,
+ * hiding the tree; otherwise to the composer with the tree kept, since hiding it while
+ * it holds the keyboard would drop focus on `body`.
  */
 export function leaveFileTree(): void {
   const store = useFileTreeStore.getState();

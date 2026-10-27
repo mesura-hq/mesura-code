@@ -31,10 +31,12 @@ export function useDictationComposer(input: {
   readonly readSubmissionContext: () => DirectedSubmissionContext | null;
 }): void {
   const { environmentId, composerDraftTarget, composerRef, readSubmissionContext } = input;
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers this composer's send-context reader in the module registry, removed on unmount
   useEffect(
     () => registerSendContextReader(composerDraftTarget, readSubmissionContext),
     [composerDraftTarget, readSubmissionContext],
   );
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers this composer with the dictation controller, removed on unmount
   useEffect(
     () =>
       registerDictationComposer({
@@ -62,6 +64,7 @@ export function useDictationComposer(input: {
  */
 export function useDictationDelivery(environmentId: EnvironmentId): void {
   const { jobs, cursor, loaded } = useDictationJobs(environmentId);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: delivers transcripts as the server's job subscription reports them
   useEffect(() => {
     if (loaded) deliverDictationJobs(environmentId, jobs, cursor);
   }, [environmentId, jobs, cursor, loaded]);
@@ -74,6 +77,7 @@ export function useDictationDelivery(environmentId: EnvironmentId): void {
  */
 export function useDictationKeybindings(): void {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: capture-phase window keydown listener for the dictation keys
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isKeybindingCaptureTarget(event.target)) return;

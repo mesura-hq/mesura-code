@@ -123,6 +123,7 @@ export function useRunContextController(input: RunContextControllerInput) {
 
   // Window listeners are cheap, so these resubscribe with the handlers rather
   // than reading them through a ref during render.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the external picker-action bus while the composer is mounted
   useEffect(() => {
     const openOrClose = (tab: RunContextTab | null) => {
       const request = resolveRunContextTabRequest({

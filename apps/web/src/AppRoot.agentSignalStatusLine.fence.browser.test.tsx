@@ -1,12 +1,7 @@
 import { act, render as renderBrowser, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router rendering the real ChatView, whose
- * `useThreadLifecycle` picks the chat status line above the composer. The
- * fixture replaces environment reads and RPC commands: every `useAtomCommand`
- * call records the command and its input, so a click proves which orchestration
- * command the application dispatched. Phone width is Playwright's Pixel 7
- * viewport (412 × 915).
- */
+// AppRoot with the real ChatView, whose `useThreadLifecycle` picks the status line above the
+// composer. Every `useAtomCommand` call records its command and input, so a click proves which
+// orchestration command ran. Phone width is Playwright's Pixel 7 viewport (412 × 915).
 
 import {
   createMemoryHistory,

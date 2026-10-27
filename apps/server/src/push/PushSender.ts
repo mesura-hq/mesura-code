@@ -1,10 +1,7 @@
 /**
- * Mesura: one Web Push request to one device.
- *
- * `web-push` signs (VAPID, RFC 8292) and encrypts (`aes128gcm`, RFC 8291); the
- * request itself goes out through the Effect `HttpClient`, so the server's
- * HTTP stack and tests' fake push services both apply. `sendNotification`
- * would open its own `https.request` instead.
+ * Mesura: one Web Push request to one device. `web-push` signs (VAPID) and encrypts
+ * (`aes128gcm`); the request goes through the Effect `HttpClient` rather than
+ * `sendNotification`'s own `https.request`, so the server's HTTP stack and test fakes apply.
  */
 import { PushNotificationPayload } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -108,11 +105,9 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    // One deadline covers the request and any body read. The scope aborts the
-    // request when the answer is decided, so a push service that sends headers
-    // and holds its body open cannot hold the send. Redirects are not followed:
-    // fetch would turn the POST into a GET, and a page at the new address would
-    // read as an accepted push. Tracing stays off because HTTP spans record the
+    // One deadline covers the request and body read; the scope aborts the request once the
+    // answer is decided, so a held-open body cannot stall the send. No redirects: fetch turns
+    // the POST into a GET and a page would read as accepted. No tracing: spans record the
     // endpoint URL, which works as a bearer token.
     const answer = yield* HttpClient.withScope(client)
       .execute(request)

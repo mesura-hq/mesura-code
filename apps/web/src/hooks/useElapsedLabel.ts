@@ -1,14 +1,9 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * A label for the time since `startedMs`, from one shared one-second clock.
- *
- * Mesura, phase 6 of the editor latency cycle: each working row in the sidebar
- * ran its own one-second interval, so ten running agents rendered ten separate
- * React commits every second, each one a task the editor's keys could land
- * behind. One timer ticks every reader in the same task, so they render in one
- * commit, and a reader whose label did not change (`3m` for a minute) does not
- * render at all: the label itself is the snapshot.
+ * One shared timer ticks every reader in the same task, so they render in one commit
+ * instead of one commit per row that the editor's keys can land behind. The label is
+ * the snapshot, so a reader whose label did not change does not render.
  */
 export function useElapsedLabel(startedMs: number, format: (elapsedMs: number) => string): string {
   return useSyncExternalStore(subscribe, () => format(nowMs - startedMs));

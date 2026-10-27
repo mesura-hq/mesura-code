@@ -1,15 +1,7 @@
 /**
- * Phase 3 of the search unification cycle ("Build the agent search popup with
- * history, Dots and completion signals"): the popup's pure state. Open state,
- * the active search and the unseen result live here, behind the popup's store.
- *
- * - Criterion 1: starting a search opens the popup on that search.
- * - Criterion 3: choosing an earlier search makes it active; deleting one
- *   leaves the history and, when it was active or unseen, the state too.
- * - Criterion 5: closing keeps the search; a search that settles while the
- *   popup is closed (or shows another search) is unseen until it is opened.
- * - Field: the sparkle shows while the field has text or a result is unseen.
- * - History: only threads of the hidden search project, newest first.
+ * The agent search popup's pure state: starting a search opens it, choosing or deleting an earlier
+ * search updates the active and unseen state, a search that settles while not shown stays unseen,
+ * the sparkle shows for text or an unseen result, and history lists the hidden project only.
  */
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {

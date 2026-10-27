@@ -1,17 +1,7 @@
 /**
- * FactoryRunTracker - follows the Software Factory runs attached to threads.
- *
- * A run directory is the source of the run's state: the coordinator appends one
- * event per step to `<runDir>/events.jsonl`, and this service tails it, folds it
- * with `@t3tools/shared/factoryRun`, and publishes two widths of the result:
- *
- * - the thin one reaches every client: a run card (a `factory_card` turn item)
- *   replaced in place when its compact summary changes, a report card when the
- *   report is written, and the thread shell's `factoryRun` label;
- * - the wide one reaches only an open Factory pane: `stream` sends the full state
- *   plus live per-role progress read from the role output files, which are tailed
- *   only while a pane subscribes.
- *
+ * Tails each attached run's `<runDir>/events.jsonl` and folds it with `@t3tools/shared/factoryRun`.
+ * Every client gets the thin result: run card, report card and the shell's `factoryRun` label.
+ * Only an open Factory pane gets the full state and role progress, tailed while it subscribes.
  * @module FactoryRunTracker
  */
 import {
@@ -103,11 +93,9 @@ export class FactoryRunTracker extends Context.Service<
   FactoryRunTracker,
   {
     /**
-     * Follows `<runDir>/events.jsonl` for a thread from its first line and
-     * records its run card at once, even before the file exists.
-     * The run id is the directory's name in every case: sf-team names the run
-     * directory after the run, and a key fixed at attach survives a restart and a
-     * `run.started` written later. Attaching a run already followed returns its id.
+     * Follows a thread's `<runDir>/events.jsonl` from its first line and records the run card at
+     * once, even before the file exists. The run id is the directory name, so it survives a restart
+     * and a later `run.started`. Attaching a run already followed returns its id.
      */
     readonly attach: (
       threadId: ThreadId,
@@ -353,7 +341,7 @@ const make = Effect.gen(function* () {
         if (!read.more) return changed;
       }
     },
-    Effect.catch(() => Effect.succeed(false)),
+    Effect.orElseSucceed(() => false),
   );
 
   const closeRoleWatch = (role: RoleTail) =>

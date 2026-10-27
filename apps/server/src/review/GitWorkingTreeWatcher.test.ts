@@ -1,18 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off - the fixture drives real git and the real disk synchronously.
 /**
- * Specs for the live working-tree changes stream.
- *
- * Entry point: `ReviewService.subscribeWorkingTreeChanges`, the method the
- * `review.subscribeWorkingTreeChanges` RPC serves in `ws.ts`. Each spec runs
- * the real `ReviewService.layer` over the real `GitWorkingTreeWatcher.layer`
- * and real git against a temp repository; `GitWorkingTreeWatcher` is read
- * directly only for its test-only `armedWatchPaths`.
- *
- * Waits are on emitted results or on completed re-scans, each with a timeout,
- * never on fixed sleeps. An "emits nothing" claim waits for the re-scan that
- * would have emitted, or, where no re-scan may run at all, for a bounded quiet
- * window on the re-scan probe; a sentinel change then proves the stream is
- * still live.
+ * Specs for `ReviewService.subscribeWorkingTreeChanges` over the real watcher layer and real git
+ * in a temp repository. Waits are on emitted results or completed re-scans, never fixed sleeps.
+ * An "emits nothing" claim waits for the re-scan that would have emitted (or a bounded quiet
+ * window where none may run), then a sentinel change proves the stream is still live.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

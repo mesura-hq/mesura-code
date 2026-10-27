@@ -5,12 +5,12 @@
 import type {
   OrchestrationV2ProviderTurnTokenUsage,
   OrchestrationV2ProviderTurn,
-  OrchestrationV2ThreadProjection,
   OrchestrationV2ProviderThread,
-  OrchestrationV2TurnItem,
   ThreadTokenUsageSnapshot,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+
+import type { ThreadStructure, ThreadStructureTurnItem } from "../state/models.ts";
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -33,7 +33,7 @@ export type ContextWindowSnapshot = NullableContextWindowUsage & {
     by provider thread, not time, so pick by timestamp. */
 export function latestProviderTurnTokenUsage(
   turns: ReadonlyArray<Pick<OrchestrationV2ProviderTurn, "tokenUsage">>,
-  projection?: Pick<OrchestrationV2ThreadProjection, "thread" | "contextTransfers"> | null,
+  projection?: Pick<ThreadStructure, "thread" | "contextTransfers"> | null,
   providerThread?: Pick<OrchestrationV2ProviderThread, "contextUsage"> | null,
 ): OrchestrationV2ProviderTurnTokenUsage | null {
   let latest: OrchestrationV2ProviderTurnTokenUsage | null = null;
@@ -62,7 +62,7 @@ export function latestProviderTurnTokenUsage(
 
 export function deriveLatestContextWindowSnapshot(
   entries: ReadonlyArray<{
-    readonly item: OrchestrationV2TurnItem;
+    readonly item: ThreadStructureTurnItem;
   }>,
   liveUsage?: OrchestrationV2ProviderTurnTokenUsage | null,
   providerThread?: Pick<OrchestrationV2ProviderThread, "contextUsage" | "updatedAt"> | null,

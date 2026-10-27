@@ -7,17 +7,9 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * A client that shows a thread reports it, so the server can tell somebody is
- * looking rather than that something is cached. The contract for that scope has
- * existed since before this fork and nothing ever emitted it, which is the
- * failure mode these assertions exist to catch: the declaration, the server
- * handling and the tests can all be present and correct while no route retains
- * anything, and every suite still passes.
- *
- * Asserted at the call site because that is where it breaks. Upstream rewrites
- * the chat layout and ThreadRouteView. A sync that drops one hook call leaves
- * the scope silently unemitted — the hooks keep their unit tests, and the
- * feature is gone.
+ * A client that shows a thread reports it, so the server can tell a viewer from a cache. The scope's
+ * contract existed long before anything emitted it, with every suite green. It is asserted at the
+ * call sites in upstream's chat layout and ThreadRouteView, which a sync can drop silently.
  */
 
 const read = (relativePath: string) =>
@@ -29,7 +21,7 @@ it("retains the thread scope from the web thread route", () => {
 
   assert.include(
     layout,
-    "<ThreadRouteView target={threadTarget}",
+    "<ThreadRouteView target={shownTarget}",
     "the chat layout no longer mounts the view that retains the visible thread scope",
   );
   assert.include(

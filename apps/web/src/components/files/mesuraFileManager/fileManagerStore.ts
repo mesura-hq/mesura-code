@@ -8,11 +8,9 @@ interface FileManagerState {
 }
 
 /**
- * Whether the layer is up: the chord, the tree's Miller button and the
- * bridge's `hideWindow` all write it. Its own store rather than a flag on the
- * tree's: the layer covers the whole window and does not belong to the files
- * surface, and the tree's overview flag it would sit beside is being retired
- * in favour of the file manager's own overview.
+ * Whether the layer is up: the chord, the tree's Miller button and the bridge's
+ * `hideWindow` all write it. Its own store, not the tree's: the layer covers the
+ * whole window and does not belong to the files surface.
  */
 export function createFileManagerStore() {
   return create<FileManagerState>((set, get) => ({

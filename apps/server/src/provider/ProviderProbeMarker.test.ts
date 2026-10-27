@@ -1,19 +1,8 @@
 /**
- * Provider probes carry `MESURA_PROVIDER_PROBE=1`; provider sessions never do,
- * even when the server's own or an instance's environment already has it.
- *
- * A host can wrap the provider CLIs to confine what the server spawns, and
- * exempt a process whose environment has exactly `MESURA_PROVIDER_PROBE=1`
- * (see `providerProbeMarker.ts`). These tests pin that contract from the
- * server's side: they spawn recording fakes
- * (`testFixtures/*SpawnEnvironmentPeer.mjs`) through the real probe paths and
- * read back the environment each child saw.
- *
- * Entry points: `checkCodexProviderStatus`, `probeCodexSkillsForCwd`,
- * `readCodexAccountLimits`, `probeClaudeCapabilities`, `readClaudeAccountLimits`,
- * `checkClaudeProviderStatus`. Sessions spawn from the orchestration-v2
- * adapters, which strip the marker with `withoutProviderProbeMarker`; the
- * helper specs below pin what that strip guarantees.
+ * Pins the probe-marker contract (`providerProbeMarker.ts`) from the server's side: probes
+ * carry `MESURA_PROVIDER_PROBE=1`, sessions never do, even when the inherited environment
+ * has it. Recording fakes (`testFixtures/*SpawnEnvironmentPeer.mjs`) spawn through the real
+ * probe paths and report the environment each child saw.
  */
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";

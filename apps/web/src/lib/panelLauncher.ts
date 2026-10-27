@@ -15,16 +15,9 @@ import { toastManager } from "~/components/ui/toast";
 import { focusPane } from "~/lib/paneFocus";
 import { ACTIVE_TAB_TITLE_SELECTOR, focusPanelSurfaceAfterRender } from "~/lib/panelSurfaceFocus";
 
-/**
- * The right panel's launcher ("Open a surface") as the panel's one menu.
- *
- * With no tab open the launcher is the panel's empty state. With tabs open,
- * `rightPanel.newTab` (`Space p`, `Ctrl+T` in the panel, the tab bar's `+`)
- * shows the same launcher over the panel's content, so the surfaces stay
- * mounted under it. Its letters open a surface or run a panel action, and a
- * letter that is not available says why instead of doing nothing: this is a
- * keyboard-first app, so a reason must never need a hover.
- */
+// The right panel's one menu: its empty state with no tab, an overlay over the
+// still-mounted surfaces otherwise. A letter that is unavailable says why instead
+// of doing nothing, because a keyboard-first app must not need a hover.
 
 /** Overlays that must win over the launcher's letter shortcuts. */
 const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
@@ -78,6 +71,7 @@ export function usePanelLauncherOwner(
   ref: RefObject<HTMLElement | null>,
   panelOpen: boolean,
 ): boolean {
+  // oxlint-disable-next-line t3code/react-effect-budget -- registers the mounted panel in the module's launcher registry and releases ownership on unmount
   useLayoutEffect(() => {
     const panel = panelRoot(ref);
     if (panel === null) return;
@@ -147,17 +141,9 @@ export function usePanelLauncherOpen(): boolean {
   );
 }
 
-/**
- * The mounted launcher's key handler; true when it took the key.
- *
- * The launcher component also listens on its own, which is how its letters
- * work from anywhere while it is the empty panel. That listener is added when
- * the launcher mounts, after every surface already listening on the window,
- * and a surface such as Diff stops keys it uses before it. So while the
- * launcher is open over the tabs or holds focus, this module's listener,
- * added once when the module loads and therefore ahead of every surface,
- * answers first.
- */
+// The launcher's own window listener mounts after surfaces that stop keys they use
+// (Diff), so this listener, added at module load ahead of every surface, answers
+// first while the launcher is open or focused.
 // Like commandRegistry, keep each registration so disposal restores the previous owner.
 const launcherKeyHandlers: Array<(event: KeyboardEvent) => boolean> = [];
 

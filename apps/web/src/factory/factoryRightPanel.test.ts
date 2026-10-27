@@ -1,13 +1,8 @@
 import { RunId } from "@t3tools/contracts";
 /**
- * Phase 2 fence, acceptance criterion 3: Open shows the plan in the Factory
- * surface of the right panel, maximized; the surface never opens by itself.
- *
- * Entry point: the card's Open callback in `ChatView`, which is
- * `openFactoryPlanInRightPanel` with ChatView's own maximize setter, acting
- * on the real `useRightPanelStore`. What only a browser shows: the pane
- * filling the chat area while maximized, and the panel's existing Restore
- * control (`toggleRightPanelMaximized`) returning it to side width.
+ * Open shows the plan in the right panel's Factory surface, maximized, through
+ * `openFactoryPlanInRightPanel` on the real `useRightPanelStore`; the surface never opens by
+ * itself. The maximized pane's layout and the Restore control are left to a real browser.
  */
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";

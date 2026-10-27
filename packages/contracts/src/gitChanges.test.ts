@@ -23,7 +23,7 @@ describe("GitWorkingTreeChangesResult paths", () => {
       truncated: false,
     } as const;
     const codec = Schema.toCodecJson(GitWorkingTreeChangesResult);
-    const decoded = Schema.decodeUnknownSync(codec)(Schema.encodeSync(codec)(result));
+    const decoded = Schema.decodeSync(codec)(Schema.encodeSync(codec)(result));
     expect(decoded).toEqual(result);
   });
 });

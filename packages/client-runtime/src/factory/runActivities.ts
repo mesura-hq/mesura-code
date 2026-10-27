@@ -7,6 +7,8 @@ import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import type { ThreadStructureTurnItem } from "../state/models.ts";
+
 /**
  * One Factory card as the activity-based derivations read it. Orchestrator v1
  * carried cards as thread activities, and upstream's v2 deleted
@@ -118,7 +120,7 @@ export function factoryRunItemFromCard(item: FactoryRunCardTurnItem): FactoryRun
 }
 
 export function isFactoryRunCardItem(
-  item: OrchestrationV2TurnItem,
+  item: ThreadStructureTurnItem,
 ): item is FactoryRunCardTurnItem {
   return (
     item.type === "factory_card" &&
@@ -129,7 +131,7 @@ export function isFactoryRunCardItem(
 
 /** Each run's card by run id, from a thread's turn items: a report card reads its own run's. */
 export function deriveFactoryRunItemsByIdFromTurnItems(
-  entries: ReadonlyArray<{ readonly item: OrchestrationV2TurnItem }>,
+  entries: ReadonlyArray<{ readonly item: ThreadStructureTurnItem }>,
 ): ReadonlyMap<string, FactoryRunTimelineItem> {
   const byId = new Map<string, FactoryRunTimelineItem>();
   for (const { item } of entries) {
@@ -145,7 +147,7 @@ export function deriveFactoryRunItemsByIdFromTurnItems(
 
 /** The thread's run card: the latest-started run, or null. */
 export function deriveLatestFactoryRunItemFromTurnItems(
-  entries: ReadonlyArray<{ readonly item: OrchestrationV2TurnItem }>,
+  entries: ReadonlyArray<{ readonly item: ThreadStructureTurnItem }>,
 ): FactoryRunTimelineItem | null {
   let latest: FactoryRunTimelineItem | null = null;
   for (const runItem of deriveFactoryRunItemsByIdFromTurnItems(entries).values()) {

@@ -12,16 +12,9 @@ import { NvimBridge, type NvimBridgeError, type NvimBridgeEvent } from "../NvimB
 import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * The conformance harness.
- *
- * It drives a real `nvim --embed --clean` and asserts that the bridge's mirror
- * is what Neovim itself reports, after each of a spread of key sequences. Zed
- * and JetBrains both run one of these in continuous integration for the same
- * reason: text sync is the subsystem that fails silently, and a mirror that has
- * drifted looks exactly like a mirror that has not until somebody saves.
- *
- * Every wait here is on a `flush`, a buffer-lines event, or an RPC response.
- * A sleep would make the harness pass for the wrong reason on a fast machine.
+ * Drives a real `nvim --embed --clean` and asserts the bridge's mirror equals what Neovim reports
+ * after each key sequence: a drifted mirror looks correct until the next save. Every wait is on a
+ * `flush`, a buffer-lines event or an RPC response, never a clock.
  */
 
 // `provideMerge` rather than `mergeAll`: the adapter needs the spawner that
@@ -41,14 +34,9 @@ const withNvim = <A>(
   }).pipe(Effect.scoped);
 
 /**
- * Types keys and returns once Neovim has executed them, never waiting on a
- * clock.
- *
- * `type` rather than `input`: `nvim_input` is asynchronous and nothing says
- * when it has been consumed, so a harness built on it asserts against whatever
- * state happens to exist. `awaitFlush` is not the answer either — waiting for
- * the next frame assumes the key is the only thing drawing, which holds for
- * `--clean` and fails the moment a real configuration is loaded.
+ * Types keys and returns once Neovim has executed them. `type`, not `input`: nothing reports when
+ * `nvim_input` is consumed. `awaitFlush` is not enough either: it assumes the key is the only thing
+ * drawing, which holds only under `--clean`.
  */
 const send = (bridge: NvimBridge.Session, keys: string) =>
   Effect.gen(function* () {
@@ -130,12 +118,8 @@ const collecting = <A>(
 it.layer(layer, { excludeTestServices: true })("conformance: a Neovim that is not there", (it) => {
   it.effect("says the binary is missing, rather than that something failed", () =>
     Effect.gen(function* () {
-      // Driven against the real spawner, because the thing that was wrong was
-      // what the platform layer's error looks like. A classifier tested
-      // against a string somebody wrote by hand is a classifier tested against
-      // a guess: this one matched `ENOENT` and `not found`, and Effect says
-      // `NotFound`, so every missing Neovim was reported as a plain failure
-      // and the developer was told to fix something else.
+      // The real spawner, not a hand-written error: the classifier once matched `ENOENT` and
+      // `not found` while Effect reports `NotFound`, so a missing Neovim read as a plain failure.
       const adapter = yield* NvimAdapter;
       const result = yield* adapter
         .spawn({
@@ -356,11 +340,8 @@ if (nvimAvailable)
     it.effect("does not trust the order the edits arrive in", () =>
       withNvim(["abcdefghij"], (bridge) =>
         Effect.gen(function* () {
-          // Measured: the late edit listed first, and both edits changing the
-          // line's length. An earlier version applied them in array order from
-          // the end and produced `XXXXXXZXdefghij` — the second edit's columns
-          // read against text the first had already moved. Length-preserving
-          // edits hide this completely, which is why this case changes lengths.
+          // The later edit comes first and both change the line's length: applying them in array
+          // order produced `XXXXXXZXdefghij`. Length-preserving edits would hide that defect.
           yield* bridge.request("nvim_exec_lua", [
             APPLY_EDITS_LUA,
             [
@@ -392,13 +373,9 @@ if (nvimAvailable)
     it.effect("orders edits across lines, not only within one", () =>
       withNvim(["one", "two", "three"], (bridge) =>
         Effect.gen(function* () {
-          // Two edits on different lines, and the first one splits a line, so
-          // applying it early moves the second one's target. The columns are
-          // deliberately opposed to the lines — the later line carries the
-          // smaller column — because a sort that compares only columns then puts
-          // them in exactly the wrong order, and one that compares lines first
-          // does not. An earlier version of this guard put both edits at column
-          // zero and could not tell the two sorts apart at all.
+          // The first edit splits a line, so applying it early moves the second's target. The later
+          // line carries the smaller column, so a sort on columns alone gets the order wrong and a
+          // sort on lines first does not. Equal columns could not tell the two sorts apart.
           yield* bridge.request("nvim_exec_lua", [
             APPLY_EDITS_LUA,
             [
@@ -446,12 +423,9 @@ if (nvimAvailable)
         Array.from({ length: 200 }, (_, index) => `line ${index + 1}`),
         (bridge) =>
           Effect.gen(function* () {
-            // The wheel-scroll case, and the one that does not work with
-            // `winrestview({ topline })` alone: the cursor is at the top of the
-            // file and the developer is looking at line 50. Neovim refuses to
-            // hold a window that hides the cursor, so the view snapped straight
-            // back — and the snap is invisible from inside the same Lua call,
-            // which is what made it survive a first round of testing.
+            // The wheel scroll: the cursor is at the top and the view at line 50. Neovim snaps back
+            // a window that hides the cursor, so `winrestview({ topline })` alone fails, and the
+            // snap is invisible from inside the same Lua call.
             yield* bridge.request("nvim_ui_try_resize_grid", [2, 120, 10]);
             yield* bridge.request("nvim_exec_lua", [
               SET_VIEWPORT_LUA,
@@ -495,11 +469,8 @@ if (nvimAvailable)
         Array.from({ length: 200 }, (_, index) => `line ${index + 1}`),
         (bridge) =>
           Effect.gen(function* () {
-            // The mirror of the case above, and the one that needs the window's
-            // height: the developer scrolls *up*, away from a caret that is now
-            // below what they can see. Only `rows` says where the window ends,
-            // so a clamp that used the buffer's last line instead would leave
-            // the cursor where it was and let Neovim snap the view back.
+            // Scrolling up, away from a caret below the window: only `rows` says where the window
+            // ends. A clamp on the buffer's last line leaves the cursor, and Neovim snaps back.
             yield* bridge.request("nvim_ui_try_resize_grid", [2, 120, 10]);
             yield* bridge.request("nvim_win_set_cursor", [0, [150, 0]]);
             yield* bridge.request("nvim_exec_lua", [
@@ -583,19 +554,10 @@ if (nvimAvailable)
 if (nvimAvailable)
   it.layer(layer, { excludeTestServices: true })("conformance: a substitute being typed", (it) => {
     /**
-     * Live substitute preview must not move the mirror.
-     *
-     * `inccommand` defaults to `nosplit`, so while a `:s` command is being typed
-     * Neovim reports what each line *would* become — on every keystroke of the
-     * replacement, every one of them describing the same range against the
-     * original text, and with the buffer itself untouched throughout. They are
-     * not deltas and they do not compose: applied in order they turn one line
-     * into a growing pile of half-typed fragments.
-     *
-     * The table above cannot catch this, and that is worth saying out loud. Its
-     * `substitute` case types the whole command through `type`, which runs it in
-     * one go, so no preview is ever generated. Only typing it the way a person
-     * does produces one.
+     * Live substitute preview must not move the mirror. With `inccommand=nosplit`, each keystroke
+     * of a `:s` reports the same range against the untouched original; applied in order, these
+     * non-composing events garble the line. The table's `substitute` case cannot catch this:
+     * `type` runs the whole command at once, so Neovim never draws a preview.
      */
     it.effect("does not move the mirror until Enter", () =>
       withNvim(["one two", "three four"], (bridge) =>
@@ -718,26 +680,10 @@ if (nvimAvailable)
     it.effect("stays on the file when Neovim moves to a buffer the host did not open", () =>
       withNvim(["first buffer"], (bridge) =>
         Effect.gen(function* () {
-          // REGRESSION. This asserted the opposite until it destroyed a file.
-          //
-          // The old rule was "follow the buffer switch", written for a real
-          // configuration that starts on a dashboard, with `:enew` standing in
-          // for that move. It is the wrong rule, because the announcement a
-          // dashboard makes is the announcement every plugin makes: a picker, a
-          // git status, a prompt, a terminal. Following it means the mirror
-          // holds a plugin's window, the client renders that as the file, and
-          // the next save writes it to disk.
-          //
-          // Measured in the running app against the developer's configuration:
-          // `<C-e>` put a git-status window in the panel and `<C-f>` put a
-          // one-line prompt holding a single emoji there.
-          // `apps/server/src/editor/hostPlugin.ts` became that emoji, five bytes
-          // on disk.
-          //
-          // The dashboard case needs no following at all: the host opens the
-          // file with `mesura.open`, which switches to a buffer the host owns
-          // and marks, and that switch is announced and followed. See
-          // `foreignBuffers.test.ts` for both halves of the rule.
+          // REGRESSION: this once asserted "follow the buffer switch", and the mirror followed a
+          // plugin's prompt into a save that overwrote `apps/server/src/editor/hostPlugin.ts`. A
+          // dashboard needs no following: `mesura.open` switches to a buffer the host marks. Both
+          // halves of the rule are in `foreignBuffers.test.ts`.
           yield* bridge.request("nvim_command", ["enew"]);
           yield* bridge.settle;
 
@@ -753,13 +699,9 @@ if (nvimAvailable)
     it.effect("keeps following the buffer it has when an attach fails", () =>
       withNvim(["first buffer"], (bridge) =>
         Effect.gen(function* () {
-          // An announcement naming a buffer that is not there. The attach fails,
-          // and failing is right — the buffer really is gone. What must not
-          // happen is the mirror giving up the buffer it was already following:
-          // recording the new buffer before the attach succeeded detaches from
-          // the good one and then leaves the mirror pointed at a buffer that
-          // will never send an event, so every later edit is dropped and the
-          // text goes stale with nothing reporting it.
+          // The announced buffer is gone, so the attach fails, correctly. The mirror must keep the
+          // buffer it follows: recording the new one before the attach succeeds points the mirror at
+          // a buffer that never sends an event, and every later edit is dropped silently.
           const gone = (yield* bridge.request("nvim_exec_lua", [
             `local buffer = vim.api.nvim_create_buf(true, false)
            vim.api.nvim_buf_delete(buffer, { force = true })
@@ -810,13 +752,9 @@ if (nvimAvailable)
         Effect.gen(function* () {
           const typed = Array.from({ length: 50 }, (_, index) => String(index % 10)).join("");
 
-          // `input` one character at a time, because per-key delivery is the
-          // whole subject here and `type` would defeat it twice over: it sends
-          // the sequence in one call, and its `x` flag aborts an incomplete
-          // command, so a lone `i` never reaches insert mode at all. Settling on
-          // the frame is sound in this file and only in this file — a character
-          // typed in insert mode always redraws, and `--clean` has nothing else
-          // drawing to be confused with.
+          // `input` per character, because per-key delivery is the subject: `type` sends one call,
+          // and its `x` flag aborts a lone `i` before insert mode. Settling on the frame is sound
+          // only here: an insert-mode character always redraws, and `--clean` draws nothing else.
           yield* bridge.input("i");
           yield* bridge.awaitFlush;
           for (const character of typed) {

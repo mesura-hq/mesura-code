@@ -1,11 +1,8 @@
 /**
- * Mesura's dictation outside the main window: the floating widget, its Hyprland window rules,
- * and the Hyprland session binds. The main window's renderer publishes its dictation state on
- * `PUBLISH_DICTATION_WIDGET_STATE_CHANNEL`; this service relays it to the widget window, shows
- * the widget while no Mesura window has focus, and binds the dictation keys in Hyprland while a
- * session is live. Those binds reach this process over the session's command socket; the
- * `--dictation …` command line of a second launch is forwarded in `DesktopClerk`, where the
- * single-instance lock lives, through the same `forwardDictationCommand`.
+ * Dictation outside the main window: the widget, its Hyprland window rules and the session binds.
+ * Relays the state on `PUBLISH_DICTATION_WIDGET_STATE_CHANNEL` to the widget window, shows it
+ * while no Mesura window has focus, and binds the keys in Hyprland while a session is live.
+ * `DesktopClerk` sends a second launch's `--dictation …` through `forwardDictationCommand` too.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

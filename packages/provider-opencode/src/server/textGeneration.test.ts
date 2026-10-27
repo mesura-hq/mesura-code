@@ -28,6 +28,8 @@ import {
   THREAD_SEARCH_STEP_CWD,
 } from "@t3tools/provider-testing/threadSearchStep";
 
+type MockSdkMethod = "session.create" | "session.prompt" | "session.abort" | "session.delete";
+
 const runtimeMock = {
   state: {
     startCalls: [] as string[],
@@ -59,6 +61,7 @@ const runtimeMock = {
     promptResult: undefined as
       | { data?: { info?: { error?: unknown }; parts?: Array<unknown> } }
       | undefined,
+    sdkCallWaiters: new Map<MockSdkMethod, () => void>(),
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -85,8 +88,11 @@ const runtimeMock = {
     this.state.sessionResult = undefined;
     this.state.promptRequestError = undefined;
     this.state.promptResult = undefined;
+    this.state.sdkCallWaiters.clear();
   },
 };
+
+const reportSdkCall = (method: MockSdkMethod) => runtimeMock.state.sdkCallWaiters.get(method)?.();
 
 const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntime["Service"] = {
   startOpenCodeServerProcess: ({ binaryPath, serverPassword, environment }) =>
@@ -137,6 +143,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntime["Service"] = {
         create: async (input: unknown, options?: { readonly signal?: AbortSignal }) => {
           runtimeMock.state.sessionCreateCalls += 1;
           runtimeMock.state.sessionCreateInputs.push(input);
+          reportSdkCall("session.create");
           if (runtimeMock.state.sessionCreateGate !== undefined) {
             await runtimeMock.state.sessionCreateGate;
           }
@@ -150,6 +157,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntime["Service"] = {
         },
         delete: async (input: { readonly sessionID: string }) => {
           runtimeMock.state.sessionDeleteCalls.push(input.sessionID);
+          reportSdkCall("session.delete");
           if (runtimeMock.state.sessionDeleteHangs) return new Promise<never>(() => {});
           if (runtimeMock.state.sessionDeleteError !== undefined) {
             throw runtimeMock.state.sessionDeleteError;
@@ -162,6 +170,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntime["Service"] = {
         ) => {
           runtimeMock.state.abortCalls.push(input.sessionID);
           runtimeMock.state.sessionAbortCalls.push(input.sessionID);
+          reportSdkCall("session.abort");
           if (runtimeMock.state.sessionAbortHangs) return new Promise<never>(() => {});
           if (runtimeMock.state.onAbort) return runtimeMock.state.onAbort(options?.signal);
           return { data: true };
@@ -171,6 +180,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntime["Service"] = {
           options?: { readonly signal?: AbortSignal },
         ) => {
           runtimeMock.state.promptStarted += 1;
+          reportSdkCall("session.prompt");
           if (runtimeMock.state.promptHangs) return new Promise<never>(() => {});
           runtimeMock.state.promptUrls.push(baseUrl);
           runtimeMock.state.promptParts.push(input.parts);
@@ -561,13 +571,12 @@ it.layer(layerOpenCodeTextGenerationTest)("OpenCodeTextGeneration", (it) => {
       cwd: THREAD_SEARCH_STEP_CWD,
       modelSelection: DEFAULT_TEST_MODEL_SELECTION,
     });
-  // The SDK mock answers with real promises; yield so they settle between checks.
-  const waitForMockPromises = (isReady: () => boolean) =>
+  // Arm before the step can reach `method`; the returned effect waits for that call.
+  const armSdkCall = (method: MockSdkMethod) =>
     Effect.gen(function* () {
-      for (let attempt = 0; attempt < 10_000 && !isReady(); attempt += 1) {
-        yield* Effect.yieldNow;
-      }
-      expect(isReady()).toBe(true);
+      const called = yield* Deferred.make<void>();
+      runtimeMock.state.sdkCallWaiters.set(method, () => Deferred.doneUnsafe(called, Effect.void));
+      return Deferred.await(called);
     });
 
   it.effect("keeps OpenCode sessions for existing text generation tasks", () =>
@@ -615,8 +624,9 @@ it.layer(layerOpenCodeTextGenerationTest)("OpenCodeTextGeneration", (it) => {
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {
         runtimeMock.state.promptHangs = true;
+        const promptCalled = yield* armSdkCall("session.prompt");
         const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
-        yield* waitForMockPromises(() => runtimeMock.state.promptStarted > 0);
+        yield* promptCalled;
         yield* TestClock.adjust(Duration.millis(60_000));
 
         const error = yield* Fiber.join(step).pipe(Effect.flip);
@@ -634,8 +644,9 @@ it.layer(layerOpenCodeTextGenerationTest)("OpenCodeTextGeneration", (it) => {
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {
         runtimeMock.state.promptHangs = true;
+        const promptCalled = yield* armSdkCall("session.prompt");
         const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
-        yield* waitForMockPromises(() => runtimeMock.state.promptStarted > 0);
+        yield* promptCalled;
 
         yield* Fiber.interrupt(step);
 
@@ -659,8 +670,9 @@ it.layer(layerOpenCodeTextGenerationTest)("OpenCodeTextGeneration", (it) => {
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {
         const releaseSessionCreate = holdSessionCreate();
+        const createCalled = yield* armSdkCall("session.create");
         const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
-        yield* waitForMockPromises(() => runtimeMock.state.sessionCreateCalls > 0);
+        yield* createCalled;
 
         const interruption = yield* Fiber.interrupt(step).pipe(Effect.forkChild);
         // Let the interrupt land while creation is still in flight.
@@ -678,8 +690,9 @@ it.layer(layerOpenCodeTextGenerationTest)("OpenCodeTextGeneration", (it) => {
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {
         const releaseSessionCreate = holdSessionCreate();
+        const createCalled = yield* armSdkCall("session.create");
         const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
-        yield* waitForMockPromises(() => runtimeMock.state.sessionCreateCalls > 0);
+        yield* createCalled;
         yield* TestClock.adjust(Duration.millis(60_000));
         releaseSessionCreate();
 
@@ -698,10 +711,12 @@ it.layer(layerOpenCodeTextGenerationTest)("OpenCodeTextGeneration", (it) => {
       Effect.gen(function* () {
         runtimeMock.state.promptHangs = true;
         runtimeMock.state.sessionAbortHangs = true;
+        const promptCalled = yield* armSdkCall("session.prompt");
+        const abortCalled = yield* armSdkCall("session.abort");
         const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
-        yield* waitForMockPromises(() => runtimeMock.state.promptStarted > 0);
+        yield* promptCalled;
         yield* TestClock.adjust(Duration.millis(60_000));
-        yield* waitForMockPromises(() => runtimeMock.state.sessionAbortCalls.length > 0);
+        yield* abortCalled;
         yield* TestClock.adjust(Duration.millis(2_000));
 
         const error = yield* Fiber.join(step).pipe(Effect.flip);
@@ -730,8 +745,9 @@ it.layer(layerOpenCodeTextGenerationTest)("OpenCodeTextGeneration", (it) => {
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {
         const releaseSessionCreate = holdSessionCreate();
+        const createCalled = yield* armSdkCall("session.create");
         const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
-        yield* waitForMockPromises(() => runtimeMock.state.sessionCreateCalls > 0);
+        yield* createCalled;
         yield* TestClock.adjust(Duration.millis(60_000));
         yield* TestClock.adjust(Duration.millis(5_000));
 
@@ -740,8 +756,9 @@ it.layer(layerOpenCodeTextGenerationTest)("OpenCodeTextGeneration", (it) => {
         expect(error.detail).toMatch(/timed out/i);
         expect(error.detail).toMatch(/could not delete/i);
 
+        const deleteCalled = yield* armSdkCall("session.delete");
         releaseSessionCreate();
-        yield* waitForMockPromises(() => runtimeMock.state.sessionDeleteCalls.length > 0);
+        yield* deleteCalled;
         expect(runtimeMock.state.sessionDeleteCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
         expect(runtimeMock.state.promptStarted).toBe(0);
       }),
@@ -772,8 +789,9 @@ it.layer(layerOpenCodeTextGenerationTest)("OpenCodeTextGeneration", (it) => {
           data: { parts: [{ type: "text", text: THREAD_SEARCH_FINISH_MODEL_OUTPUT }] },
         };
         runtimeMock.state.sessionDeleteHangs = true;
+        const deleteCalled = yield* armSdkCall("session.delete");
         const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
-        yield* waitForMockPromises(() => runtimeMock.state.sessionDeleteCalls.length > 0);
+        yield* deleteCalled;
         yield* TestClock.adjust(Duration.millis(10_000));
 
         const error = yield* Fiber.join(step).pipe(Effect.flip);

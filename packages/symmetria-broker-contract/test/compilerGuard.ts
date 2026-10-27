@@ -78,9 +78,9 @@ export const expectVocabularyLockRejection = (
   if (result.signal !== null) {
     fail(`compiler ended with signal ${String(result.signal)}`);
   }
-  // TypeScript 7 uses exit status 1 for diagnostics with noEmit.
-  if (result.status !== 1) {
-    fail(`compiler exited with ${String(result.status)}, expected diagnostic exit status 1`);
+  // TypeScript 7 exits 1 on diagnostics with noEmit; tsc-rs exits 2 like TypeScript 6.
+  if (result.status !== 1 && result.status !== 2) {
+    fail(`compiler exited with ${String(result.status)}, expected diagnostic exit status 1 or 2`);
   }
 
   const source = NodeFS.readFileSync(lockModulePath, "utf8");

@@ -5,8 +5,7 @@ const isDictationWidgetWindow =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location?.search ?? "").get("window") === "dictation-widget";
 
-// Bundled dev can move UI code into shared chunks. Load it only after this
-// entry runs the React refresh preamble, and catch failures before React mounts.
+// Shared dev chunks need the React refresh preamble first. Catch failures before React mounts.
 void (isDictationWidgetWindow ? import("./dictation/dictationWidgetMain") : import("./main"))
   .then(({ startup }) => startup)
   .catch(showBootError);

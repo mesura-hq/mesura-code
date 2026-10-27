@@ -1,9 +1,6 @@
 import { act, render as renderBrowser, type Screen } from "../../test/render";
-// Entry points: the registry's own API (`registerCommandHandlers`,
-// `useCommandHandlers`, `runRegisteredCommand`), and for the leader rows the
-// key engine's window `keydown` listener (`installKeyEngine` in
-// `keys/keyEngine.ts`), driven by real `KeyboardEvent`s from a focused element
-// in the chat. Phase 3 of the modal keys production cycle, criteria 2 to 5.
+// Modal keys phase 3, criteria 2-5: the registry's own API, and the leader rows through the key
+// engine's window `keydown` listener (`installKeyEngine`), driven by real `KeyboardEvent`s.
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { KeybindingCommand } from "@t3tools/contracts";

@@ -1,11 +1,8 @@
 import { act, render as renderBrowser, type Screen } from "../../../test/render";
-// Entry point: `usePierreTreePaneEntry` (`pierreTreeKeys.ts`), bound to a
-// tree wrapper the way `DiffFileTree` binds it, reached through
-// `focusPanelSurface` as every keyboard way into the panel reaches it. The
-// tree is a fake `FileTree` whose container holds an open shadow root with
-// Pierre's row buttons and virtualized scroller; like Pierre, it moves the
-// roving `tabindex="0"` to the row that takes focus. happy-dom lays nothing
-// out, so every row's box is stubbed from its index.
+// `usePierreTreePaneEntry`, bound as `DiffFileTree` binds it and reached through
+// `focusPanelSurface`. The tree is a fake `FileTree` whose open shadow root holds Pierre's row
+// buttons and moves the roving `tabindex="0"` as Pierre does. happy-dom lays nothing out, so row
+// boxes are stubbed from the index.
 import type { FileTree } from "@pierre/trees";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";

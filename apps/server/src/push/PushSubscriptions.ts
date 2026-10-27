@@ -1,13 +1,8 @@
 /**
- * Mesura: the devices subscribed to Web Push from this server, one row per
- * push endpoint in `mesura_push_subscriptions` (`persistence/mesuraSchema.ts`).
- *
- * Every delivery goes through `deliver`, which keeps the table honest: a push
- * service that answers 404 or 410 has forgotten the device, so the row goes
- * too. Any other failure keeps the row, records it in `last_failure` and logs
- * it, because a busy or unreachable push service says nothing about the device.
- * `broadcast` fans one payload out to every device that wants its kind; one
- * device's failure stays with that device.
+ * Mesura: Web Push devices, one row per endpoint in `mesura_push_subscriptions`. `deliver`
+ * deletes the row when the push service answers 404 or 410, because the service forgot the
+ * device. Any other failure keeps the row and records `last_failure`: a busy or unreachable
+ * service says nothing about the device. In `broadcast`, one device's failure stays its own.
  */
 import {
   type PushNotificationPayload,
@@ -147,19 +142,19 @@ const make = Effect.gen(function* () {
   ) {
     const result = yield* sender.send(targetOf(row), payload).pipe(
       Effect.catchTags({
-        PushSendError: (error) =>
-          Effect.gen(function* () {
-            const failedAt = yield* nowIso;
-            yield* sql`
+        // Untraced: it runs inside the `PushSubscriptions.deliver` span already.
+        PushSendError: Effect.fnUntraced(function* (error) {
+          const failedAt = yield* nowIso;
+          yield* sql`
             UPDATE mesura_push_subscriptions
             SET last_failure = ${`${failedAt} ${error.detail}`}
             WHERE endpoint = ${row.endpoint}
           `.pipe(Effect.catch(storageFailure("record the push failure")));
-            yield* Effect.logWarning(
-              `Push to "${row.label}" via ${pushServiceHost(row.endpoint)} failed: ${error.detail}`,
-            );
-            return yield* new PushNotificationError({ detail: error.detail });
-          }),
+          yield* Effect.logWarning(
+            `Push to "${row.label}" via ${pushServiceHost(row.endpoint)} failed: ${error.detail}`,
+          );
+          return yield* new PushNotificationError({ detail: error.detail });
+        }),
       }),
     );
 

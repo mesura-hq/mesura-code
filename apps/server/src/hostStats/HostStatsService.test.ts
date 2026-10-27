@@ -1,17 +1,8 @@
 /**
- * Phase 2 fence of the hosts dock plan: acceptance criteria 1 to 8.
- *
- * Entry points:
- * - `HostStatsService.layer`, the layer `server.ts` composes, for the
- *   activation gate and the cadence (AC1). `forkParked` starts its loop.
- * - `makeHostStatsService`, the constructor that layer wraps, for everything
- *   else. `sampleOnce` is one loop iteration, so a spec can move the wall
- *   clock between samples (a suspend, a clock jump) and still await each
- *   iteration's file write; `run` is forked where the loop itself is the
- *   subject (AC8).
- *
- * The collector is a fake: it stamps `sampledAt` from the clock plus an
- * offset, reports rates on every read, and can die or hang on a chosen read.
+ * `HostStatsService.layer` covers the activation gate and the cadence; `makeHostStatsService`
+ * covers the rest. `sampleOnce` is one loop iteration, so a spec can move the wall clock between
+ * samples and still await each file write. The collector is a fake that stamps `sampledAt` with
+ * an offset, reports rates on every read, and can die or hang on a chosen read.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { HostStatsBucket, type HostStatsMessage, type HostStatsSample } from "@t3tools/contracts";

@@ -82,6 +82,7 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
   const error = usePendingUserInputDraftStore((state) => state.requests[key]?.error ?? null);
   // A prefilled editor answer (`initialAnswer`) seeds its field once; an edit or a cleared
   // answer afterwards wins, because the draft then exists.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: seeds the draft store once per request; a later edit must win over the prefill
   useEffect(() => {
     const store = usePendingUserInputDraftStore.getState();
     const current = store.requests[key]?.answers ?? EMPTY_QUESTION_ANSWERS;
@@ -138,6 +139,7 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
   ).length;
   const blockedUploads = Object.values(completeDrafts).some((draft) => draft.attachmentsBlocked);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: unregisters the focused answer's dictation target on unmount
   useEffect(() => () => unregisterDictation.current?.(), []);
 
   const focusQuestion = (question: UserInputQuestion) => {
@@ -181,6 +183,7 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
   };
   // A deferred focus callback used stale completeness after an option changed.
   // Read this render's answers so the shortcut reaches the first missing answer.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: answers the parent's focus request after the render that has the current answers
   useEffect(() => {
     if (context.focusRequestId !== request.requestId) return;
     const question =
@@ -381,12 +384,14 @@ function QuestionField({
   const attachments = [...(draft?.images ?? []), ...(draft?.files ?? [])];
   const canAttach =
     context.supportsAttachments && question.allowCustomAnswer !== false && !disabled;
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: starts the upload of each attachment staged in this answer's draft
   useEffect(() => {
     if (!context.supportsAttachments) return;
     for (const image of [...(draft?.images ?? []), ...(draft?.files ?? [])]) {
       startAttachmentUpload({ environmentId: context.environmentId, image, draftTarget: target });
     }
   }, [draft?.images, draft?.files, context.environmentId, context.supportsAttachments, target]);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: sizes the textarea to its content before paint
   useLayoutEffect(() => {
     const element = textarea.current;
     if (!element || element.value !== (answer?.customAnswer ?? "")) return;

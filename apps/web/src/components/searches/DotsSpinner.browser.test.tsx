@@ -1,9 +1,7 @@
 /**
- * Phase 3 of the search unification cycle, criterion 4: the Dots mark cycles
- * braille frames on an interval of about 110 ms, and only while it is
- * mounted (AGENTS.md: no continuously repainting animation). Where it is
- * mounted, inside the sidebar Search field and the popup input while a
- * search runs, is pinned by `AppRoot.agentSearchPopup.fence.browser.test.tsx`.
+ * The Dots mark cycles braille frames about every 110 ms, only while mounted (AGENTS.md: no
+ * continuously repainting animation). Where it mounts is pinned by
+ * `AppRoot.agentSearchPopup.fence.browser.test.tsx`.
  */
 import { expect, it, vi } from "vite-plus/test";
 

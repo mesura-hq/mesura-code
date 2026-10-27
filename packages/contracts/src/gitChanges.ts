@@ -1,12 +1,7 @@
 /**
- * Fork addition: the working tree's per-file git status, split by side.
- *
- * `vcs.status` already reports which files changed and their combined line
- * counts, but it folds the index and the working tree into one number and keeps
- * no status letter. The Git status surface needs both: the letter for the row's
- * badge and the staged / unstaged / untracked split for the summary. It is a
- * separate request, not a wider status payload, because status is broadcast to
- * every client on every refresh and only an open Git status surface needs this.
+ * Fork addition: per-file git status split into index and working tree, with the status letter that
+ * `vcs.status` folds away. A separate request, because status is broadcast to every client on every
+ * refresh and only an open Git status surface needs this.
  */
 import * as Schema from "effect/Schema";
 

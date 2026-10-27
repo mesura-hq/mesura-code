@@ -165,6 +165,7 @@ describe("findProjectForIssueLink (issues phase 3 fence)", () => {
         host: "gitlab.com",
         repository: "acme/alpha",
         number: 7,
+        repositoryUrl: "https://gitlab.com/acme/alpha",
       }),
     ).toBeUndefined();
   });

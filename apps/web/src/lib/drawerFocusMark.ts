@@ -1,18 +1,7 @@
-/**
- * Mirrors "focus is inside the terminal drawer" onto `<html>`, for the pane
- * mark in `mesura.css`.
- *
- * The mark hands the chat column's hairline to the drawer while focus is in
- * the drawer. The drawer renders inside the chat column and after its header,
- * so CSS can only ask that question with `:has()` on the chat column — and
- * that is not affordable here. See the "Which pane has the keyboard" block in
- * `mesura.css` for the measurement.
- *
- * The attribute is written straight to the DOM, never through React state, so
- * no component re-renders when focus moves. It is written only when the answer
- * changes, so focus moving between two elements on the same side of the drawer
- * boundary invalidates nothing.
- */
+// Mirrors "focus is inside the terminal drawer" onto `<html>` for the pane mark
+// in `mesura.css`: the drawer sits inside the chat column, so CSS would need an
+// unaffordable `:has()`. Written to the DOM only when the answer changes, so focus
+// moves re-render nothing.
 
 import { TERMINAL_DRAWER_SELECTOR } from "./paneFocus";
 
@@ -47,17 +36,9 @@ function applyMark(root: MarkRoot, drawerFocused: boolean): void {
   else root.removeAttribute(DRAWER_FOCUS_MARK_ATTRIBUTE);
 }
 
-/**
- * Keeps the mark in step with focus until the returned cleanup runs.
- *
- * It starts from the element focused at registration, so a remount (dev
- * StrictMode, HMR, a route change) while the drawer holds focus keeps the
- * mark. `focusout` reads `relatedTarget`, the element about to receive focus,
- * so a move from the drawer to anywhere else clears the mark in the same
- * event. A drawer that unmounts while it holds focus fires no event; the
- * composer takes focus back when the drawer closes, and that `focusin` clears
- * it.
- */
+// Starts from the focused element, so a remount keeps the mark. `focusout` reads
+// `relatedTarget` so leaving the drawer clears it in the same event. A drawer that
+// unmounts with focus fires nothing; the composer's `focusin` clears it then.
 export function registerDrawerFocusMark(input: {
   readonly document: FocusEventSource;
   readonly root: MarkRoot;

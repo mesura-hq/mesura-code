@@ -1,21 +1,18 @@
 import { act, render as renderBrowser, type Screen } from "../../../test/render";
-/**
- * Entry point: `ComposerPrimaryActions`, mounted under React in the DOM, with
- * modifiers pressed on `window` as the browser delivers them.
- *
- * Phase 4 of the editor latency cycle ("One key costs one small render"),
- * criterion 2: a Control chord typed in the modal editor re-rendered the
- * composer's actions, because they follow the held modifiers for the queue
- * shortcut. Holding Ctrl or ⌘ only means something while a turn runs: it
- * turns a steer into a queue, or the reverse. Without a running turn the
- * actions do not follow the modifiers at all.
- */
+// Editor latency phase 4, criterion 2: held Ctrl or ⌘ only matters while a turn runs (it swaps
+// steer and queue), so without a running turn the composer's actions must not re-render on modifier
+// keys.
 import { Profiler, createElement } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-vi.mock("~/hooks/useSettings", () => ({
-  useEnvironmentIdentificationMode: () => "none",
-}));
+vi.mock("~/hooks/useSettings", async () => {
+  const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
+  return {
+    useEnvironmentIdentificationMode: () => "none",
+    useClientSettings: (select: (value: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
+      select(DEFAULT_CLIENT_SETTINGS),
+  };
+});
 vi.mock("../SidebarStageBackdrop", () => ({
   StageBackdropButtonArt: () => null,
   useSidebarStageBackdropVariant: () => null,

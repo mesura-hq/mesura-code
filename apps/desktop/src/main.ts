@@ -115,12 +115,9 @@ const resolveDesktopSshCliRunner = (
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
-  // v0.0.42 installs the remote by release archive rather than by npm package.
-  // The version alone is safe to pass here because the refusal moved with the
-  // mechanism: `PUBLISHED_RELEASE_BASE_URL` is null for this fork, so the
-  // runner script stops with an actionable message on a host that has no
-  // server, instead of downloading upstream's archive and connecting the
-  // desktop to it. See packages/ssh/src/tunnel.ts.
+  // Safe to pass the version alone: `PUBLISHED_RELEASE_BASE_URL` is null for this fork, so the
+  // runner script (packages/ssh/src/tunnel.ts) refuses on a host with no server instead of
+  // installing upstream's archive and connecting the desktop to it.
   return { archiveVersion: environment.appVersion };
 };
 
@@ -171,8 +168,7 @@ const layerDesktopServerExposure = DesktopServerExposure.layer.pipe(
 
 const layerDesktopPreview = PreviewManager.layer.pipe(
   Layer.provideMerge(DesktopBrowserHost.layer),
-  // Merged rather than provided so the IPC handlers can reach the import
-  // service alongside the manager; both sit on the same BrowserSession.
+  // IPC needs both services on the same BrowserSession.
   Layer.provideMerge(BrowserImport.layer.pipe(Layer.provide(LinuxBrowserSecret.layer))),
   Layer.provideMerge(BrowserSession.layer),
   Layer.provideMerge(PreviewPasskeys.layer),
@@ -243,8 +239,7 @@ const layerDesktopApplicationRuntime = layerDesktopApplication.pipe(
   Layer.provideMerge(layerElectron),
 );
 
-// Acquire strict pre-ready setup before Clerk. Nothing before the Clerk bridge
-// may yield, or Electron can emit ready before Clerk registers its scheme.
+// Pre-ready setup and Clerk must not yield before Clerk registers its scheme.
 const layerDesktopRuntime = layerDesktopClerk.pipe(
   Layer.flatMap((clerkContext) =>
     layerDesktopApplicationRuntime.pipe(Layer.provideMerge(Layer.succeedContext(clerkContext))),

@@ -7,23 +7,10 @@ import {
 } from "@t3tools/contracts";
 
 /**
- * The file manager's `IpcSurface`, shaped for the WebSocket.
- *
- * `createRegistry` registers one handler per channel on a surface and routes
- * every push by the `SenderHandle` the request arrived with. In Electron the
- * handle is a renderer; here it is a **session**: one per mounted file manager
- * in a client, opened by the client's event stream and closed when that stream
- * ends. A request names its session, and a push goes to that session's sink.
- *
- * A session belongs to the connection that opened it. The client picks the
- * session id, and two devices may well pick the same one, so the map is keyed
- * by the owner (the RPC client id) and the session id together: a second
- * device can never query, or receive the pushes of, a session it did not open.
- *
- * Sessions are opened only by the stream, never by a request. A request for a
- * session nobody opened is refused rather than served without a sink, because
- * a watch registered for a sink that does not exist would leak until the
- * registry was disposed.
+ * The file manager's `IpcSurface` over the WebSocket. The `SenderHandle` is a session, opened
+ * only by a client's event stream. Sessions are keyed by owner (the RPC client id) and session
+ * id, so a device never reaches another's session. A request for an unopened session is refused:
+ * a watch registered without a sink would leak until the registry is disposed.
  */
 
 /** Where a session's pushes go: the queue behind its event stream. */
@@ -50,11 +37,9 @@ function refused(message: string): IpcReply {
 }
 
 /**
- * The registry's handlers answer as they do for Electron's IPC, bytes and
- * `undefined` included; the WebSocket carries JSON. A reply that JSON cannot
- * write dies in the RPC encoder as a defect the client cannot act on — the
- * cursor settling on a directory did exactly that, through `describe`'s
- * byte head — so every value crosses through the contract's wire codec.
+ * Handlers answer as for Electron's IPC, bytes and `undefined` included, but the WebSocket
+ * carries JSON. A reply JSON cannot write dies in the RPC encoder as a defect (`describe`'s byte
+ * head did), so every value crosses through the contract's wire codec.
  */
 function wireReply(reply: IpcReply): IpcReply {
   if (!reply.ok) return reply;
@@ -118,11 +103,8 @@ export function createWsIpcSurface(): WsIpcTransport {
       try {
         return wireReply(await handler(payload, handle));
       } catch (cause) {
-        // The registry's own guard already turns throws into failures; this
-        // catches a handler registered without it. `invalid_reply` is the
-        // file manager's code for "the host failed to answer": a throw is the
-        // host's fault, and `invalid_request` would tell the user to fix
-        // input that was never wrong.
+        // Catches a handler registered without the registry's guard. `invalid_reply` means "the
+        // host failed to answer": `invalid_request` would blame input that was never wrong.
         const message = cause instanceof Error ? cause.message : String(cause);
         return { ok: false, error: { code: "invalid_reply", message: `${channel}: ${message}` } };
       }

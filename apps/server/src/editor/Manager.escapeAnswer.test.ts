@@ -9,13 +9,9 @@ import * as TestClock from "effect/testing/TestClock";
 import { createManager } from "./Manager.testkit.ts";
 
 /**
- * Entry point: `EditorSessionManager.input`, against the fake Neovim.
- *
- * The answer to a key batch is read after Neovim took the keys (`modeAfterKeys`
- * in `Manager.ts`). When that read fails or never answers, the keys are
- * Neovim's already: the batch has to succeed, be recorded once, and answer
- * `blocking`, so the client keeps the next Escape for Neovim. A failed batch
- * would make the client send the keys again.
+ * `EditorSessionManager.input` against the fake Neovim. When the read after the keys
+ * (`modeAfterKeys`) fails or hangs, Neovim already has the keys: the batch succeeds, is recorded
+ * once and answers `blocking`. A failed batch would make the client send the keys again.
  */
 
 const THREAD_ID = "thread-escape-answer";

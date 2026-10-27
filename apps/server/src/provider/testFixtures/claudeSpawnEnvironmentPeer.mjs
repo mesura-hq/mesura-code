@@ -1,10 +1,8 @@
 #!/usr/bin/env node
-// Minimal `claude` stand-in that records the environment it was spawned with.
-// Before it reads stdin it appends one JSON line to the file named by
-// T3_SPAWN_ENVIRONMENT_LOG, so any message it writes proves the record is
-// already on disk. Speaks enough of the Agent SDK's stream-json control
-// protocol for the capability probe, the account-limit read, and a
-// ClaudeAdapter session start. Stdlib only.
+// `claude` stand-in that records its spawn environment. It appends one JSON line to
+// T3_SPAWN_ENVIRONMENT_LOG before reading stdin, so any message it writes proves the record
+// is on disk. Speaks just enough stream-json control protocol for the capability probe,
+// the account-limit read, and a ClaudeAdapter session start. Stdlib only.
 import * as NodeFS from "node:fs";
 import * as NodeReadline from "node:readline";
 

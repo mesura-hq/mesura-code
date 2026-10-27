@@ -1,18 +1,8 @@
 /**
- * The server side of `orchestration.reasonThreadSearch`: one bounded agent
- * thread search step, answered by the text-generation model this environment
- * configured.
- *
- * The step is a plain text-generation call. It dispatches no orchestration
- * command and starts no provider session, so it never becomes a thread.
- *
- * Mesura: a step with `engine: "jev"` goes to Jev through OpenRouter, with the
- * server's `OPENROUTER_JEV_SEARCH_API_KEY`. Without the key, or when OpenRouter
- * cannot be reached, it fails with `jevUnavailableError` and the client reruns
- * the search on the configured text model; the server never switches silently.
- * `OPENROUTER_JEV_SEARCH_ENDPOINT` points Jev at another endpoint (JevThreadSearch.ts).
- *
- * @module ThreadSearchReasoning
+ * One bounded thread search step for `orchestration.reasonThreadSearch`: a plain text-generation
+ * call that dispatches no command and starts no provider session. Mesura: `engine: "jev"` goes
+ * to Jev via OpenRouter (`OPENROUTER_JEV_SEARCH_API_KEY`); with no key or no connection it fails
+ * with `jevUnavailableError` and the client reruns on the configured model, never silently.
  */
 import {
   jevUnavailableError,

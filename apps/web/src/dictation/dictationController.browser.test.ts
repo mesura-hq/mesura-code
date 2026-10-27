@@ -550,11 +550,10 @@ describe("a transcript another tab overwrites", () => {
   });
 });
 
-// The server keeps jobs in memory. A server restart, or the retention sweep,
-// drops a job the client never saw finish, and the mode keys then claimed
-// Alt+S (and the other Alt keys) for good, hiding the Hosts peek. Lists carry
-// a cursor (server run and revision) that tells a stale list from one that
-// lost the job; the start was accepted at server-run-1, revision 5.
+// The server keeps jobs in memory, so a restart or the retention sweep can drop a job the client
+// never saw finish, which left the mode keys claiming the Alt keys for good. A list's cursor
+// (server run and revision) tells a stale list from one that lost the job; the start was accepted
+// at server-run-1, revision 5.
 describe("a last job the server no longer knows", () => {
   const transcribingJob = (jobId: string) =>
     ({ ...completed(jobId, "submit", ""), status: "transcribing", text: undefined }) as const;

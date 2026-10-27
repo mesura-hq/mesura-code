@@ -1,41 +1,9 @@
 import { page } from "vite-plus/test/browser";
 import { act, render as renderBrowser, type Screen, fakeTimers } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout, as `routes/__root.tsx`
- * does, and whose chat layout is the real `_chat.tsx` route component (the
- * real KeyEngineHost around the real ChatView). The timeline mounts the real
- * AssistantSelectionToolbar, as `MessagesTimeline.tsx` does. The key engine
- * is installed on `window` before React renders, as `main.tsx` does.
- *
- * A mouse cite is a native selection over a timeline row's text, a primary
- * press in the timeline and a release, as the browser reports a drag, then a
- * click on the toolbar's *Cite selection in composer* button. A keyboard cite
- * is real `keydown` events from the focused element. A flash is observed as
- * `[data-mesura-cite-flash]` boxes in the DOM, and counted with a
- * MutationObserver, so a second flash of the same cite is seen even after the
- * first is removed.
- *
- * Phase 3 of the Vim keys round 2 cycle (flash the cited text for every cite,
- * the mouse included):
- * - Criterion 1: the mouse Cite button flashes the cited text.
- * - Criterion 2: a visual-mode cite and a flash cite each flash once.
- * - Criterion 3, guard: a refused cite (text too long) flashes nothing.
- * - Criterion 4, guard: in `citeFlash.test.ts`, which reads `mesura.css`.
- * - Criterion 5, guard: the boxes go on `animationend`, or after 1100 ms.
- * - Criterion 6, guard: with Vim mode on, the mouse cite lands the composer
- *   in insert mode after the chip.
- *
- * The boxes the cite path measures are stubbed: the
- * reading area (the timeline's scroller and the citation viewport), the
- * composer below it, and every text range as one line inside it, with nothing
- * over it. Everything else the fixture replaces is shared with the other
- * fences in `test/appRootFenceMocks.tsx`.
- *
- * Every timer and animation frame runs on Vitest's fake clock from setup on.
- * `settle` runs what is due without moving the clock, and only the tests
- * that remove a flash by time move it as far as 1100 ms.
- */
+// Cite flash (Vim keys round 2 phase 3) through AppRoot, ChatView and AssistantSelectionToolbar. A
+// flash is a `[data-mesura-cite-flash]` box counted by a MutationObserver, so a repeat flash is
+// seen after the first is removed. Cite-path boxes are stubbed. Timers run on the fake clock; only
+// the tests that remove a flash by time move it (to 1100 ms).
 import { useLayoutEffect } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { ASSISTANT_CITATION_MAX_TEXT_LENGTH, type ThreadId } from "@t3tools/contracts";

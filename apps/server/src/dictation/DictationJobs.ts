@@ -105,7 +105,7 @@ const isoAt = (epochMs: number) => DateTime.formatIso(DateTime.makeUnsafe(epochM
 
 const isTranscribing = (job: DictationJob) => job.status === "transcribing";
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const settings = yield* ServerSettingsService;
   const config = yield* ServerConfig;

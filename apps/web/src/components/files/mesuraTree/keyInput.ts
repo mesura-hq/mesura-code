@@ -62,12 +62,9 @@ interface KeyRoute<Command> {
 }
 
 /**
- * Routes one key press from a host wrapper to a file manager command port.
- *
- * The same rules for the tree and the overview: flash first; a button or a
- * disclosure keeps its native activation; Escape inside a text field only
- * leaves the field, so the next Escape reaches the host; Escape elsewhere is
- * the host's; anything else goes through the command table.
+ * Routes one key press from a host wrapper to a file manager command port. Escape in a
+ * text field only leaves the field, so the next Escape reaches the host; a button or
+ * disclosure keeps its native Enter and Space.
  */
 export function routeKey<Command>(
   event: ReactKeyboardEvent<HTMLElement>,

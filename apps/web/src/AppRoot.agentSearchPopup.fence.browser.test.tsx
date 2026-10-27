@@ -1,54 +1,10 @@
 import { page, userEvent } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout — and in it the real
- * `Sidebar` — and whose chat layout is the real `_chat.tsx` route component
- * around the real ChatView (`test/appRootFenceApp.tsx`). The key engine is
- * installed on `window` before React renders, as `main.tsx` does. Keys are
- * real `keydown` events dispatched from the focused element.
- *
- * Phase 3 of the search unification cycle ("Build the agent search popup with
- * history, Dots and completion signals"):
- * - Criterion 1: Tab in a non-empty sidebar Search field, or the sparkle
- *   ("Search with the agent"), opens the popup and starts a search
- *   conversation whose first message is the field's text.
- * - Criterion 2: desktop shows the conversation with earlier searches on its
- *   right; at Pixel 7 width the popup fills the screen and the history opens
- *   from a header button.
- * - Criterion 3: choosing an earlier search shows its conversation; deleting
- *   one goes through thread deletion and leaves the history.
- * - Criterion 4: while a search runs, a Dots mark (`role="status"`, named
- *   "Agent search running") sits inside the sidebar Search field and the
- *   popup; it is gone once the search settles.
- * - Criterion 5: Escape and X close the popup without stopping the search; on
- *   settling a toast with Open appears and the sparkle carries an unseen dot
- *   (`data-unseen`) until Open shows the result. The desktop notification is
- *   pinned in `components/ThreadNotificationCoordinator.badge.browser.test.tsx`,
- *   because the coordinator mounts in `routes/__root.tsx`, outside this router.
- * - Criterion 6: a result link in the popup opens the found thread in this
- *   tab, and the popup gets out of the way.
- * - Criterion 7: search threads and the search project appear in no sidebar
- *   list, sidebar search result, project filter or palette row. The settings
- *   lists are pinned in `components/settings/useSettingsProjectGroups.searchProject.browser.test.tsx`.
- * - Criterion 8: the palette offers no way into the old Agent mode, and
- *   `ThreadSearchPicker` and the `AgentThreadSearch*` components are gone.
- *
- * The server is a stub at the command boundary (`useAtomCommand`): a command
- * whose label names a search and whose input is empty is the
- * `startThreadSearchChat` RPC, and the stub answers it by publishing an idle
- * search thread in the hidden project. Any later command that carries that
- * thread's id and the query text is the first message: the stub publishes it
- * with the run running. `settleSearch` publishes the run completed with the
- * agent's answer. A thread delete command, or `useThreadActions` deletion,
- * removes the thread, as the server's deletion would.
- *
- * Boundaries replaced, as in `AppRoot.searchUnification.fence.browser.test.tsx`:
- * the environment, project and thread reads, the server's message search,
- * every RPC command, the chords and unrelated chrome; plus the toast manager's
- * `add`, recorded because the fence's root mounts no toast viewport.
- */
+// Agent search popup (search unification phase 3) through AppRoot, the real Sidebar, CommandPalette
+// and ChatView. The server is stubbed at `useAtomCommand`: an empty-input search command publishes
+// an idle search thread, the next command with its id is the first message, and `settleSearch`
+// completes the run. Toasts are recorded because the root mounts no viewport.
 import { describe, expect, it, vi } from "vite-plus/test";
 
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
@@ -798,7 +754,7 @@ describe("agent search popup: layout on desktop and phone", () => {
         ]),
       ),
     );
-    const composer = dialog.querySelector<HTMLElement>('[aria-label="Message"]');
+    const composer = dialog.querySelector<HTMLElement>('[data-testid="composer-editor"]');
     expect(composer, "the search conversation's composer in the popup").not.toBeNull();
     const history = dialog.querySelector<HTMLElement>('[aria-label="Earlier searches"]')!;
     expect(history.getBoundingClientRect().left).toBeGreaterThanOrEqual(

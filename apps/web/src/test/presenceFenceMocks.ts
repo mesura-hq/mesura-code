@@ -2,34 +2,10 @@ import { Atom } from "effect/reactivity";
 import { vi } from "vite-plus/test";
 
 /**
- * The fixture the `AppRoot.presence*.fence` tests mount the app over: the
- * page's visibility, focus and input, the presence RPC and one `vi.mock`
- * factory per replaced boundary, wired through a hoisted loader:
- *
- * ```ts
- * const fenceMocks = vi.hoisted(() => () => import("./test/presenceFenceMocks"));
- * vi.mock("./state/pushNotifications", async (original) =>
- *   (await fenceMocks()).mockPushNotificationsState(original),
- * );
- * ```
- *
- * This module must stay free of runtime imports of the app, because it is
- * loaded from inside those factories. Mounting lives in `presenceFenceApp.tsx`.
- *
- * Boundaries replaced, and nothing else:
- * - The presence RPC, at `openPresenceReport` in `~/state/pushNotifications`:
- *   the `push.presence` call stays open while its report holds, so each
- *   report is recorded with the fake clock's time, and `openReports` counts
- *   the reports opened and not yet closed.
- * - The environments: `useEnvironments` lists `presenceFence.environments`,
- *   all connected, and re-renders its readers when `setEnvironments` changes
- *   the list, as a host connecting or disconnecting does; `useServerConfigs` (`~/state/entities`) advertises
- *   `pushPresence` for those marked `takesPresence`; `pushSettingsPermissionAtom`
- *   grants for those marked `granted`. The primary environment id, at
- *   `~/state/environments` and `~/state/primaryEnvironment`, is the first.
- * - The page: `document.visibilityState`, `document.hidden` and
- *   `document.hasFocus()` follow `setPage`, which also fires the events a
- *   browser fires. Headless Chromium's own focus cannot be driven.
+ * Fixture for the `AppRoot.presence*.fence` tests, loaded from inside their `vi.mock` factories
+ * through a hoisted loader, so it must have no runtime imports of the app. `setPage` drives
+ * `document.visibilityState`, `hidden` and `hasFocus()` and fires the browser's events, because
+ * headless Chromium's own focus cannot be driven. Mounting lives in `presenceFenceApp.tsx`.
  */
 
 export const PRESENCE_FENCE_PRIMARY_ENVIRONMENT_ID = "presence-fence-primary";

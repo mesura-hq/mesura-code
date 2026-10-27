@@ -1,10 +1,6 @@
 /**
- * Phase 4 fence, acceptance criterion 6 (the Approve message) and the reading
- * side of criterion 7 (which approvals a thread holds).
- *
- * Entry point: `./planApproval.ts`. The message is what the planning skill
- * reads in the thread, so its text is written out here literally rather than
- * rebuilt from the module under test.
+ * The planning skill parses the Approve message in the thread, so its text is written out
+ * literally here, never rebuilt from the module under test.
  */
 import { describe, expect, it } from "vite-plus/test";
 

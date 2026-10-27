@@ -5,20 +5,10 @@ import { paintHighlight } from "./highlights";
 import { updateKeyEngineSnapshot } from "./keyEngineStore";
 
 /**
- * One flash jump in progress, on whichever surface started it.
- *
- * Two kinds share the overlay, the backdrop and the keys:
- * - a search (`s`): the surface supplies the targets for a pattern and what a
- *   jump does; this module owns the pattern, labels, Enter, Backspace and
- *   Escape. The label rules are flash.nvim's and live in `@mesura/keys/flash`.
- * - a pick (`startFlashPick`): the surface labels every target up front, one
- *   or two characters each, and the keys only choose a label. The chat's cite
- *   runs two picks in a row, for where the cite starts and where it ends.
- *
- * The look is the file editor's flash.nvim one, shared by every flash in the
- * app through the `--mesura-flash-*` tokens in `mesura.css`: the text around
- * the matches fades and turns italic (`<html data-mesura-flash>`), matches and
- * labels take the accent.
+ * Two kinds share the overlay and the keys: a search (`s`), where the surface supplies targets per
+ * pattern and this module owns the pattern and flash.nvim's label rules; and a pick, where the
+ * surface labels every target up front (the chat's cite runs two in a row). The look is shared
+ * through the `--mesura-flash-*` tokens in `mesura.css`.
  */
 
 export interface FlashTarget {

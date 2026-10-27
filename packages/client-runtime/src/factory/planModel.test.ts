@@ -1,14 +1,7 @@
 /**
- * Phase 2 fence, acceptance criteria 1 (the card's content) and 4 (the
- * Factory pane's sections).
- *
- * Entry point: the pure models `FactoryPlanCard` and `FactoryPlanDocument`
- * render from, fed with the plan this feature was planned in
- * (`packages/shared/src/fixtures/factory-in-chat.plan.md`). What only a browser
- * shows: the card frame, the skeleton while the Context body loads over
- * `factoryReadSnapshot`, file chips, and each `Collapsible` starting closed.
- * Which sections exist, in which order, what each phase card and decision
- * holds, and which sections are folded, is decided here.
+ * Fixture: `packages/shared/src/fixtures/factory-in-chat.plan.md`, the plan this feature used.
+ * Section order, phase cards, decisions and folding are decided here. Only a browser shows the
+ * card frame, the loading skeleton, file chips and each `Collapsible` starting closed.
  */
 /// <reference types="vite-plus/client" />
 import { splitFactoryDocument } from "@t3tools/shared/factoryDocument";

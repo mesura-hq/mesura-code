@@ -21,14 +21,9 @@ export function hostLevelStrokeClass(level: HostStatsLevel | null): string {
 }
 
 /**
- * One metric's 12 hours as a hand-drawn line, in the manner of
- * `UsageProviderChart`: a 100-wide viewBox stretched to the column with
- * `preserveAspectRatio="none"`, and `non-scaling-stroke` so the stretch never
- * thickens the line. The path breaks at every missing bucket: a host that was
- * down draws nothing for that time rather than a line across it.
- *
- * Static by design. It redraws when a sample lands, never on a timer, and has
- * no animation of its own.
+ * One metric's 12 hours as a hand-drawn line, like `UsageProviderChart`: a 100-wide viewBox
+ * stretched with `preserveAspectRatio="none"` and `non-scaling-stroke`. The path breaks at every
+ * missing bucket, so a down host draws nothing. It redraws when a sample lands, never on a timer.
  */
 export const HostSparkline = memo(function HostSparkline(props: {
   readonly series: ReadonlyArray<number | null>;

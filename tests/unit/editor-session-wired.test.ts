@@ -7,39 +7,10 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * The editor session's wiring, held in place by reading the source.
- *
- * Everything here broke silently at least once while it was built, and not one
- * of the breakages was reachable from a test that runs the code. That is the
- * whole justification for a guard that reads text instead of behaviour, and it
- * is the same justification `monaco-file-surface-wired.test.ts` gives.
- *
- * Four kinds of silence, in the order they cost the most time:
- *
- * - **A handler missing from `ws.ts` compiles.** The RPC group is typed by the
- *   contract, so the type checker is satisfied by the handlers that are there;
- *   the socket then answers the missing method with method-not-found at
- *   runtime, and the client shows an editor that takes no keys.
- * - **The manager layer missing from `server.ts` compiles too**, for the same
- *   reason one level up. The server starts and every editor call fails.
- * - **A host-plugin option left out changes nothing visible on the server.**
- *   It shifts the grid one column against the buffer, and the classification
- *   that finds flash labels then reads the whole line as text that is not
- *   there. With line numbers left on, one jump produced 132 phantom labels in
- *   the prototype against the 30 that were real.
- * - **A key rule is invisible until the wrong key is pressed.** Meta has to
- *   pass through to the application or the file picker and the command palette
- *   die wherever the editor holds focus.
- *
- * The scope assertions are the exception and they are deliberate: a missing
- * entry in `RpcAuthorization.ts` fails the type check, so those cannot rot.
- * They are here as documentation of which scope the editor borrows and why —
- * a session is a subprocess on the developer's machine reading and writing
- * their files, which is the terminal's authority rather than a new one.
- *
- * Assertions are on substrings, never on counts, so upstream adding a method
- * or an option beside ours does not fail a guard that has nothing to say about
- * it.
+ * Reads source because each wiring below broke silently: a handler missing from `ws.ts` or a layer
+ * missing from `server.ts` compiles, a dropped host-plugin option shifts the grid against the buffer,
+ * and a key rule shows only when the wrong key is pressed. Scope assertions document the borrowed
+ * terminal scope. Assertions are on substrings, never counts, so upstream additions do not fail them.
  */
 
 const read = (relativePath: string) =>
@@ -145,14 +116,9 @@ it("hands the file panel's surface the thread and the setting it needs", () => {
 });
 
 /**
- * The options that keep grid column N equal to buffer column N.
- *
- * A cell is read as text that is not there when its character differs from the
- * buffer's at that column, which is how flash labels are found. Anything
- * Neovim paints in the margin shifts every column on the line; `list` and
- * `conceallevel` break the same equality from the other side, by painting
- * where the buffer holds a space and by hiding buffer text behind something
- * narrower.
+ * Flash labels are found where a grid cell differs from the buffer at the same column, so grid
+ * column N must equal buffer column N. Margin paint shifts every column; `list` and `conceallevel`
+ * break the equality by painting over spaces and hiding text behind something narrower.
  */
 const COLUMN_PRESERVING_OPTIONS = [
   [
@@ -240,17 +206,9 @@ it("answers `:w` itself rather than letting Neovim write the file", () => {
 it("never opens a file in the session with another file's text", () => {
   const driver = read("apps/web/src/components/files/monaco/nvim/useNvimDriver.ts");
 
-  // The path and the model reach this hook from different places and do not
-  // land on the same render: `openFile` closes over the path and is new the
-  // moment the panel switches file, while `model` is still the previous
-  // file's for one more render. Opening on that render hands the session the
-  // old text under the new name, the server writes it into the buffer it just
-  // opened, and the panel saves it to disk.
-  //
-  // Measured on the wire before the guard existed: `open` asked for
-  // `browserFaviconLogic.test.ts` carrying `import { v4 as uuid } from
-  // "uuid";` as its first line. `NodeNvimAdapter.ts` was found on disk holding
-  // a GitHub workflow, and two other files went the same way.
+  // Regression: `openFile` changes with the path one render before `model` changes, so opening on
+  // that render sends the old file's text under the new name, and the panel saves it to disk.
+  // This overwrote real files (`NodeNvimAdapter.ts` held a GitHub workflow) before the guard existed.
   assert.include(
     driver,
     "monacoFileModelKey(environmentId, cwd, relativePath)",

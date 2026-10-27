@@ -8,12 +8,8 @@ import { createManager } from "./Manager.testkit.ts";
 
 /**
  * How long a key's text waits for its cursor when the cursor has to be read.
- *
- * The one place these tests wait on a clock, and deliberately: what they pin
- * is the bound itself, `TEXT_WAIT_MS` in `Manager.ts`, and a duration cannot
- * be shown without one. Every threshold here sits well clear of the values it
- * guards, so a fast machine cannot pass for the wrong reason and a loaded one
- * does not fail against them.
+ * These tests use a real clock on purpose: they pin `TEXT_WAIT_MS` in `Manager.ts` itself.
+ * Every threshold sits well clear of the bound, so machine load cannot flip a result.
  */
 
 const layer = NodeServices.layer;

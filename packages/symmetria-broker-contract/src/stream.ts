@@ -1,35 +1,8 @@
 /**
- * How a surface outside this fork reads the projection over time.
- *
- * **This module defines semantics, and nothing here enforces them at runtime.**
- * The same caveat the command and draft modules carry applies: there is no
- * publisher and no transport in this package, so a green suite proves the
- * contract can *express* an ordered stream, not that any producer emits one.
- *
- * The framing is borrowed rather than invented. `OrchestrationThreadStreamItem`
- * (`packages/contracts/src/orchestration.ts:1492`) is already a tagged union of
- * a snapshot and an event, and `OrchestrationReadModel.snapshotSequence`
- * (`:426`) is already the fork's own snapshot revision — the position in the
- * event sequence that a snapshot reflects. This module keeps both meanings and
- * changes only what travels: a delta carries a projected entity, never
- * `OrchestrationEvent` itself, whose `metadata` and per-type `payload` are the
- * free-form provider content the projection is an allowlist against.
- *
- * Three rules hold the whole framing together, and each one exists because the
- * alternative makes a consumer guess:
- *
- * - **A stream opens with a snapshot.** `openSymmetriaStream` is the only way to
- *   get a state, and it refuses a delta. A consumer that started mid-stream
- *   would render a partial world and never learn what it was missing.
- * - **A gap is reported, never repaired.** A sequence that skips ahead yields a
- *   `gap` that requires a resnapshot. This module does not buffer, does not
- *   reorder and holds no clock, because a gap that resolves itself by waiting is
- *   the consumer inferring a missing event from a local timeout — which the
- *   contract forbids outright.
- * - **A duplicate is normal traffic.** A delta replayed after a reconnect is
- *   reported as `duplicate` and applied once. It is a distinct outcome from an
- *   error, and it is the stream-level companion of the receipt idempotency in
- *   `command.ts`.
+ * Stream semantics only: this package has no publisher, so nothing enforces them at runtime.
+ * A delta carries a projected entity, never `OrchestrationEvent` and its free-form payload.
+ * A stream opens with a snapshot. A skipped sequence is a `gap` that requires a resnapshot.
+ * A reader never buffers or waits out a gap. A replayed delta is a `duplicate`, applied once.
  */
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -47,23 +20,10 @@ import {
 } from "./version.ts";
 
 /**
- * One changed entity, tagged by which of the projections it is.
- *
- * The tag is `entity` and not `type`, because `type` already discriminates the
- * stream item itself and one payload carrying two `type` keys at two depths is
- * how a consumer branches on the wrong one.
- *
- * Every member that carries a body also appears in the snapshot, which is what
- * lets a consumer fold deltas into the state a snapshot opened without ever
- * holding a shape the snapshot cannot describe. `SymmetriaUnknownChange` below
- * is the one member with no body, and it writes nothing for exactly that reason.
- *
- * There is no removal member, and that is the design rather than an omission.
- * A thread that goes away says so in its own summary — `archivedAt` and
- * `deletedAt` are fields of `SymmetriaThreadSummary` — and a presence row is
- * valid only until its `expiresAt`, so a producer retires a surface early by
- * publishing a shortened expiry. One mechanism per fact, and no second way for
- * an entity to leave that a consumer could miss.
+ * One changed entity, tagged `entity` because `type` already discriminates the stream item.
+ * Every member with a body also appears in the snapshot, so deltas fold into snapshot state.
+ * There is no removal member: a thread leaves through `archivedAt` or `deletedAt`, and a surface
+ * leaves when its `expiresAt` passes. Each fact has one mechanism.
  */
 export const SymmetriaThreadChange = Schema.Struct({
   entity: Schema.Literal("thread"),
@@ -78,13 +38,9 @@ export const SymmetriaSurfaceChange = Schema.Struct({
 export type SymmetriaSurfaceChange = typeof SymmetriaSurfaceChange.Type;
 
 /**
- * The current composer draft of one thread.
- *
- * This is the delta `draft.ts` points at: the surface that loses a
- * compare-and-set race learns the draft that stands from the stream it already
- * holds, rather than from a second request. It carries the draft body and never
- * `SymmetriaDraftUpdateResult`, because a conflict is one caller's answer and a
- * stream is read by every consumer.
+ * The current composer draft of one thread. The surface that loses a compare-and-set race reads
+ * the standing draft here. It carries the draft, never `SymmetriaDraftUpdateResult`, because a
+ * conflict answers one caller and every consumer reads the stream.
  */
 export const SymmetriaDraftChange = Schema.Struct({
   entity: Schema.Literal("draft"),
@@ -93,14 +49,9 @@ export const SymmetriaDraftChange = Schema.Struct({
 export type SymmetriaDraftChange = typeof SymmetriaDraftChange.Type;
 
 /**
- * One project's identity, so a consumer grouping threads has a word to print.
- *
- * It has no removal member either, and unlike a thread it carries no field that
- * could stand in for one — a project has no `deletedAt` on this wire. That is
- * deliberate rather than an oversight: a project is only ever interesting here
- * because threads point at it, so one that no thread references is one a
- * consumer stops rendering by itself. Adding a tombstone would create a second
- * way for a project to leave, and the two could disagree.
+ * One project's identity, so a consumer that groups threads can print a name.
+ * There is no removal member and no tombstone: a consumer stops rendering a project that no
+ * thread references, and a second way to leave could disagree with that one.
  */
 export const SymmetriaProjectChange = Schema.Struct({
   entity: Schema.Literal("project"),
@@ -109,30 +60,10 @@ export const SymmetriaProjectChange = Schema.Struct({
 export type SymmetriaProjectChange = typeof SymmetriaProjectChange.Type;
 
 /**
- * A change this build cannot read, kept rather than refused.
- *
- * A minor bump is additive by definition, so a 1.1 producer may name an entity
- * this build has never heard of. Refusing the delta outright would cost the
- * consumer far more than the update it could not read: the position would never
- * be applied, the next in-order delta would look like a gap, and every
- * occurrence would force a full resnapshot. So an unrecognized entity degrades
- * the way an unrecognized surface kind does in `surfacePresence.ts:71` — the
- * item survives, and the consumer skips one update it was never going to
- * understand.
- *
- * The check on the source string is what keeps this from swallowing corruption.
- * A payload naming a *known* entity with a body that does not match it fails the
- * check, so it never reaches this member and is still reported as malformed. The
- * name itself is not carried: `entity` decodes to `unknown`, so a consumer
- * branching on the tag has five cases and not an open string, and re-encoding
- * such a change writes `unknown` rather than the name it arrived under.
- *
- * Measured limit, the same class as the conflict filter in `draft.ts:110`: a
- * check that is not a pattern does not survive into the emitted JSON Schema, so
- * a consumer that is not TypeScript sees a bare string here and would accept a
- * mismatched known entity as an unknown one. The decoder is the only reader that
- * can tell those apart, and it errs toward accepting rather than dropping, which
- * is the same direction `additionalProperties: true` errs in.
+ * A change whose entity this build does not know, kept rather than refused: a refusal leaves the
+ * position unapplied, turns the next delta into a gap, and forces a resnapshot every time.
+ * A known entity with a mismatched body fails the check and stays malformed. The check does not
+ * reach the emitted JSON Schema, so only the decoder tells the two apart.
  */
 const KNOWN_CHANGE_ENTITIES: ReadonlySet<string> = new Set([
   "thread",
@@ -182,20 +113,9 @@ export const SymmetriaStreamChange = Schema.Union([
 export type SymmetriaStreamChange = typeof SymmetriaStreamChange.Type;
 
 /**
- * The whole projected world at one revision, and the item every stream opens
- * with.
- *
- * `revision` is a position in the same sequence the deltas number, which is what
- * `OrchestrationReadModel.snapshotSequence` already means upstream. So the first
- * delta a consumer may apply is `revision + 1`, and the arithmetic that makes a
- * gap detectable needs no second field.
- *
- * `protocolVersion` is announced here and not repeated on every delta. The
- * snapshot is where a stream is negotiated, a delta is the hot path, and a
- * consumer that accepted the opening snapshot has already settled which major it
- * is speaking for the life of that stream. `decodeSymmetriaStreamItem` gates any
- * item that announces a version, so a producer that chooses to repeat it on a
- * delta is still checked.
+ * The whole projected world at one revision. Every stream opens with it.
+ * `revision` uses the delta sequence numbering, so the first applicable delta is `revision + 1`.
+ * The snapshot negotiates `protocolVersion`, so a delta need not repeat it.
  */
 export const SymmetriaStreamSnapshot = Schema.Struct({
   type: Schema.Literal("snapshot"),
@@ -209,19 +129,9 @@ export const SymmetriaStreamSnapshot = Schema.Struct({
 export type SymmetriaStreamSnapshot = typeof SymmetriaStreamSnapshot.Type;
 
 /**
- * One change at one position. `sequence` is `NonNegativeInteger` rather than a
- * brand of its own, the same as the accepted position on
- * `SymmetriaCommandAppliedReceipt`: a consumer compares it against a snapshot
- * revision, and two brands over one number line would make that comparison need
- * a cast.
- *
- * `protocolVersion` is an optional key, which is the whole of the difference
- * from the snapshot. A delta need not repeat what the opening snapshot already
- * settled, and a producer that does repeat it is checked by this schema rather
- * than only by `decodeSymmetriaStreamItem`. Without the key the schema itself
- * would accept a delta announcing a major this build does not speak and drop the
- * announcement silently, so a consumer reaching for the exported root schema
- * instead of the gate would fold foreign-major data into its state.
+ * One change at one position. `sequence` has no brand, so it compares against a snapshot revision
+ * without a cast. The optional `protocolVersion` key makes this schema reject a delta that
+ * announces an unsupported major. Without the key, the root schema would drop the announcement.
  */
 export const SymmetriaStreamDelta = Schema.Struct({
   type: Schema.Literal("delta"),
@@ -263,21 +173,10 @@ const announcedProtocolVersionOf = (input: unknown): unknown =>
     : undefined;
 
 /**
- * Reads one payload off the wire, running the version gate before the schema.
- *
- * The order is the point. An unsupported major is refused with
- * `SymmetriaProtocolVersionMismatch`, which names both the major this build
- * speaks and the major the producer announced — a consumer that cannot say what
- * it expected cannot report a useful error, and a schema failure over an unknown
- * literal would say only that something did not match.
- *
- * Nothing a newer *minor* can add is a refusal. An unknown field is dropped —
- * Effect drops a key this contract does not name, at every depth, so a payload
- * from a newer minor decodes to exactly the fields this build knows, which is
- * why the emitted JSON Schema sets `additionalProperties` to true. An unknown
- * change entity degrades to `SymmetriaUnknownChange` rather than failing, for
- * the same reason and at a higher cost if it did not: see that member. Only a
- * major refuses.
+ * Runs the version gate before the schema, so an unsupported major fails as
+ * `SymmetriaProtocolVersionMismatch` with both majors, not as a vague schema mismatch.
+ * A newer minor never causes a refusal: Effect drops unknown keys at every depth, and an
+ * unknown change entity decodes to `SymmetriaUnknownChange`.
  */
 export const decodeSymmetriaStreamItem = (
   input: unknown,
@@ -296,14 +195,9 @@ export const decodeSymmetriaStreamItem = (
 };
 
 /**
- * What a consumer holds between items.
- *
- * A plain type and not a schema, deliberately. This never crosses the wire — it
- * is what a reader accumulates locally — and declaring it as a schema would
- * offer it to the JSON Schema emitter as though a producer could send one.
- *
- * `sequence` is the last position applied. It starts at the snapshot's revision,
- * because a snapshot already reflects every delta up to that position.
+ * What a consumer holds between items. It is a plain type, not a schema: it never crosses the
+ * wire, and a schema would reach the JSON Schema emitter. `sequence` is the last applied position
+ * and starts at the snapshot's revision.
  */
 export type SymmetriaStreamState = {
   readonly revision: SymmetriaSnapshotRevision;
@@ -322,11 +216,8 @@ export const SymmetriaStreamNotOpened = Schema.TaggedStruct("SymmetriaStreamNotO
 export type SymmetriaStreamNotOpened = typeof SymmetriaStreamNotOpened.Type;
 
 /**
- * Opens a stream from its first item.
- *
- * A delta first is refused rather than tolerated: the consumer would be folding
- * changes into a world it never received, and nothing later in the stream would
- * tell it so. The failure carries the sequence it saw, which is what a consumer
+ * Opens a stream from its first item and refuses a delta, because the consumer would fold
+ * changes into a world it never received. The failure carries the sequence that the consumer
  * asks the producer to snapshot from.
  */
 export const openSymmetriaStream = (
@@ -348,12 +239,8 @@ export const openSymmetriaStream = (
       });
 
 /**
- * What one delta did to the state.
- *
- * `requiresResnapshot` is present on every outcome rather than only on a gap, so
- * a consumer reads one field to decide whether it has to reopen and never has to
- * tell an absent key from a false one. It is the only recovery this contract
- * offers for a gap; there is deliberately no "wait and see".
+ * What one delta did to the state. Every outcome carries `requiresResnapshot`, so a consumer
+ * reads one field. A resnapshot is the only recovery for a gap; there is no "wait and see".
  */
 export type SymmetriaStreamDeltaApplied = {
   readonly outcome: "applied";
@@ -381,11 +268,9 @@ export type SymmetriaStreamDeltaResult =
   | SymmetriaStreamDeltaGap;
 
 /**
- * Replaces the entry that matches, or appends when nothing does. Every entity
- * kind routes through it — threads, surfaces and projects directly, drafts via
- * `upsertNewerDraft` — so an upsert cannot mean one thing for a thread and
- * another for a surface, and order-preserving so folding a stream twice
- * produces the same document twice.
+ * Replaces the matching entry or appends. Every entity kind routes through it (drafts through
+ * `upsertNewerDraft`), so an upsert means one thing for all of them. It preserves order, so
+ * folding a stream twice produces the same document twice.
  */
 const upsertBy = <A>(
   items: ReadonlyArray<A>,
@@ -397,15 +282,9 @@ const upsertBy = <A>(
 };
 
 /**
- * Stores a draft only when it advances that thread's version.
- *
- * Position and version are two different orderings and only one of them is the
- * draft's own. `draft.ts:53` says it in as many words — the version is the only
- * ordering a consumer may trust — so a producer that re-emits a draft row on a
- * resync, or publishes the body a lost compare-and-set was about to overwrite,
- * must not walk the consumer's draft backwards. A delta that does not advance
- * the version is still applied at the stream level: the position is consumed and
- * nothing is written.
+ * Stores a draft only when it advances that thread's version, because the version is the only
+ * draft ordering a consumer may trust. A resync or a lost compare-and-set must not move the draft
+ * backwards. The stream still consumes the position when nothing is written.
  */
 const upsertNewerDraft = (
   drafts: ReadonlyArray<SymmetriaDraft>,
@@ -465,19 +344,10 @@ const withChange = (
 };
 
 /**
- * Folds one delta into consumer state, and reports what it did.
- *
- * Total: it holds no clock, no buffer and no failure channel, and it answers
- * every pair of inputs with one member of the result union. Keeping it that way
- * is what stops it becoming the consumer this run excludes — the moment it grows
- * a clock, a pending buffer or a retry it is a client and not a contract.
- *
- * Exactly one position advances the state: the successor of the last applied
- * sequence. A position already seen is a `duplicate` — normal traffic after a
- * reconnect, applied once and never twice. A position beyond the successor is a
- * `gap`: the delta is not applied, not held, and not inferred about, because the
- * consumer cannot know what the missing positions carried. Its only recovery is
- * a fresh snapshot.
+ * Folds one delta into consumer state. Total: no clock, no buffer, no retry, no failure channel.
+ * Any of those would turn this contract into a client. Only the successor of the last applied
+ * sequence applies. An earlier position is a `duplicate`. A later one is a `gap`: not applied,
+ * not held, and recoverable only by a fresh snapshot.
  */
 export const applySymmetriaStreamDelta = (
   state: SymmetriaStreamState,

@@ -1,19 +1,6 @@
-/**
- * Entry point: AppRoot, the component `main.tsx` mounts around the app's
- * router, here with a memory router that has the thread route
- * `/$environmentId/$threadId`. The push service worker's `notificationclick`
- * focuses an open window and posts `{ type: "mesura-push-open", url }` to it;
- * each spec dispatches that message on the page's real
- * `navigator.serviceWorker`, the `ServiceWorkerContainer` a worker's
- * `client.postMessage` reaches.
- *
- * Boundaries the fixture replaces, and nothing else: AppRoot's chrome that
- * needs the desktop shell or a live server (`ElectronBrowserHost`,
- * `BrowserProfileReporter`, `QuitHoldOverlay`).
- *
- * Phone push phase 2, criterion 5, the app's half: the focused window
- * navigates to the thread route the notification carries.
- */
+// Phone push phase 2, criterion 5: a `{ type: "mesura-push-open", url }` message on the page's real
+// `navigator.serviceWorker` (what the worker's `notificationclick` posts) navigates to the thread
+// route. Only AppRoot chrome that needs the desktop shell or a live server is replaced.
 import {
   createMemoryHistory,
   createRootRoute,

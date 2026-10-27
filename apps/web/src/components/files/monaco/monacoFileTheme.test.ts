@@ -76,17 +76,9 @@ describe("defineMesuraMonacoThemes", () => {
 });
 
 /**
- * Where the editor's background comes from.
- *
- * Two faults, and each hid the other. The probe canvas lives for the process
- * and was never cleared, so a colour with any transparency composited over the
- * last one read; and the editor's host paints no background of its own, so it
- * answered transparent every time. The editor therefore sat on whichever
- * colour happened to have been read before it — neither the app's nor
- * Monaco's, and different depending on the order of calls.
- *
- * The canvas here is a fake, and it composites the way a real one does. That
- * is the point: a fake that ignored alpha would pass with the defect in place.
+ * Regression: the shared probe canvas was never cleared, and the editor host paints no background,
+ * so the editor took whichever colour was read before it. The fake canvas composites alpha like a
+ * real one; a fake that ignored alpha would pass with the defect in place.
  */
 describe("readCodeSurfaceColors", () => {
   // The canvas is memoised for the life of the process, so without this only

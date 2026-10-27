@@ -103,14 +103,8 @@ export function supportsServerUpdateThreadContinuation(
 }
 
 /**
- * The command to hand users whose server cannot update itself, or `null` when
- * there is no such command.
- *
- * Mesura Code publishes no npm package, so `npx t3@<version>` would install
- * *upstream's* server over the user's — a different product that does not
- * implement Mesura's own RPC methods. Handing someone a command that quietly
- * replaces their server is worse than telling them there is no command, so
- * return null and let the caller say so.
+ * Returns `null`: Mesura Code publishes no npm package, so `npx t3@<version>` would quietly replace
+ * the user's server with upstream's, which lacks Mesura's own RPC methods.
  */
 export function manualServerUpdateCommand(
   targetVersion: string,

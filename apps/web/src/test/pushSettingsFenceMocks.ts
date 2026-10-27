@@ -1,37 +1,14 @@
 import * as Cause from "effect/Cause";
 import { Atom } from "effect/reactivity";
-import { vi } from "vite-plus/test";
+import { type Mock, vi } from "vite-plus/test";
 
 import { stubGlobal } from "../../test/render";
 
 /**
- * The fixture the `-settingsPushNotifications*.fence` tests mount the real
- * Settings route over: a fake browser push stack, the server's push RPCs and
- * one `vi.mock` factory per replaced boundary. Each fence wires the factories
- * up through a hoisted loader, as `appRootFenceMocks.tsx` describes:
- *
- * ```ts
- * const fenceMocks = vi.hoisted(() => () => import("../test/pushSettingsFenceMocks"));
- * vi.mock("~/state/use-atom-command", async () => (await fenceMocks()).mockUseAtomCommand());
- * ```
- *
- * This module must stay free of runtime imports of the app, because it is
- * loaded from inside those factories. Mounting lives in `pushSettingsFenceApp.tsx`.
- *
- * Boundaries replaced, and nothing else:
- * - The browser's push stack: `navigator.serviceWorker`, `PushManager` and
- *   `Notification`. Headless Chromium has no push service, so a real
- *   `pushManager.subscribe` cannot succeed.
- * - The server's push RPCs, at `useAtomCommand`, the hook client mutations go
- *   through. The RPC is picked from the command's label (`publicKey`,
- *   `subscribe`, `unsubscribe`, `status`, `sendTest`, compared without case or
- *   punctuation, and the label must name `push`).
- * - The push RPCs' permission, at `pushSettingsPermissionAtom`
- *   (`canWriteSettings`), and a failed RPC (`failing`).
- * - Client settings persistence, project groups and environment discovery.
- *   The primary environment is `PUSH_FENCE_PRIMARY_ENVIRONMENT_ID`; its
- *   presentation exists only once a test sets a connection phase
- *   (`setPrimaryConnectionPhase`), which re-renders its readers.
+ * Mocks for the `-settingsPushNotifications*.fence` tests, loaded from inside their hoisted
+ * `vi.mock` factories (see `appRootFenceMocks.tsx`), so no runtime imports of the app. Replaced:
+ * the browser push stack (headless Chromium has no push service), the push RPCs at `useAtomCommand`,
+ * their permission, client settings, project groups and environment discovery.
  */
 
 export const PUSH_FENCE_PRIMARY_ENVIRONMENT_ID = "push-fence-primary";
@@ -74,10 +51,10 @@ export const pushSettingsFence = {
   permissionAnswer: "granted" as NotificationPermission,
   subscription: null as FakeSubscription | null,
   registered: false,
-  requestPermission: vi.fn(),
-  register: vi.fn(),
-  subscribe: vi.fn(),
-  showNotification: vi.fn(),
+  requestPermission: vi.fn() as Mock,
+  register: vi.fn() as Mock,
+  subscribe: vi.fn() as Mock,
+  showNotification: vi.fn() as Mock,
 };
 
 function pushMethodOf(label: string | undefined): PushRpcMethod | null {

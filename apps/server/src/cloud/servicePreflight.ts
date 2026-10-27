@@ -23,8 +23,14 @@ export function runServicePreflight(input: {
     return {
       status: "blocked",
       version,
-      reason:
-        "This release requires a newer Mesura Code service launcher. Update it on the server machine.",
+      // A stale `t3` earlier on PATH (an old npm/nvm global) makes `t3 service install`
+      // reinstall itself and report success, so name the exact install and the path check.
+      reason: [
+        `The installed service launcher speaks protocol ${input.launcherProtocol}, but t3@${version} requires protocol ${SERVICE_LAUNCHER_PROTOCOL}.`,
+        "On the server machine, build and install this exact CLI by hand: Mesura Code publishes no release archive.",
+        `Check that \`t3 --version\` prints ${version} and that \`which -a t3\` lists no older t3 (such as an npm or nvm install) first, then run \`~/.local/bin/t3 service install\` (the installer's default path).`,
+        "Updating the desktop app does not update this CLI, and `t3 service update` only repairs the service with whichever CLI runs it.",
+      ].join(" "),
     };
   }
 

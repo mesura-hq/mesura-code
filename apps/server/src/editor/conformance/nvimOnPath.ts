@@ -1,11 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - locates the real nvim binary before spawning it.
 /**
- * Whether the conformance harnesses can reach a real Neovim, and what a file
- * that needs one shows when it cannot.
- *
- * A file that needs Neovim registers its suites only when `nvimAvailable`, and
- * otherwise calls `reportMissingNvim` once. A suite registered without its
- * tests fails as empty, and tests skipped one by one look like a pass in CI.
+ * A file that needs Neovim registers its suites only when `nvimAvailable`, else calls
+ * `reportMissingNvim` once: an empty suite fails, and tests skipped one by one look like a pass.
  *
  * @module nvimOnPath
  */

@@ -1,12 +1,7 @@
 /**
- * What a steady-state pull-request sweep costs in spawned processes when every
- * thread group's lookup fails for a cause a retry cannot change. Entry point:
- * `ThreadPullRequestService.make` started through
- * `ThreadPullRequestService.testkit.ts`, over the real GitManager, repository
- * identity resolver and source control registry of `GitManager.testkit.ts`
- * against a real repository. The remote is on GitHub, but the registry has no
- * providers. Each lookup ends in "No github source control provider is
- * registered.", as it does in production when that provider is unavailable.
+ * Spawned-process cost of a steady-state pull-request sweep when every lookup
+ * fails for a cause a retry cannot change: the registry has no providers, so
+ * each lookup ends as production does when the GitHub provider is unavailable.
  */
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";

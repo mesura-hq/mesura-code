@@ -2,12 +2,7 @@
 /**
  * One-shot screenshots from a paired headless browser on this worktree's dev server.
  * For interactions, import `openMesuraPage` from `./lib/mesura-browser.ts` instead.
- *
- *   node scripts/mesura-browser.ts shot <route> <file.png> [--device phone] [--theme light]
- *     [--selector <css>] [--origin <url>] [--base-dir <dir>]
- *
- * `--selector` crops to one element: a full-page PNG costs several hundred
- * kilobytes of an agent's context, a crop a fraction of that.
+ * `--selector` crops to one element: a full-page PNG costs an agent several hundred kilobytes of context.
  */
 import * as NodeUtil from "node:util";
 

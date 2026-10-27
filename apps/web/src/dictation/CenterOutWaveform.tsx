@@ -134,10 +134,12 @@ function RecordingWaveform({
   const targetAmplitudeRef = useRef(0);
   const staticRedrawRef = useRef<(() => void) | null>(null);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-ref, so the canvas loop reads the newest level without restarting
   useEffect(() => {
     targetAmplitudeRef.current = normalizedAmplitude(audioLevel ?? 0);
   }, [audioLevel]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: owns the canvas animation-frame loop, cancelled on cleanup
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -280,6 +282,7 @@ function RecordingWaveform({
   const staticAudioUpdate = shouldDrawStaticAudioUpdate({ active, phase, reducedMotion })
     ? { audioLevel }
     : null;
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: redraws the static canvas when a new audio sample arrives
   useEffect(() => {
     if (staticAudioUpdate !== null) staticRedrawRef.current?.();
   }, [staticAudioUpdate]);

@@ -37,11 +37,13 @@ export function KeyEngineHost() {
   // The engine is global and installed once, but only the chat layout mounts
   // this host: leaving it (Settings, the pull requests page) turns the engine
   // off, so a key there is never read against the chat's remembered scope.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: turns the global key engine on with the vimMode setting and off when the chat layout unmounts
   useEffect(() => {
     configureKeyEngine({ enabled: vimMode });
     return () => configureKeyEngine({ enabled: false });
   }, [vimMode]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the chat and composer key surfaces for as long as vimMode is on
   useEffect(() => {
     if (!vimMode) return;
     const disposeChat = registerKeySurface(chatSurface);
@@ -63,6 +65,7 @@ export function KeyEngineHost() {
 
   // The chat cursor is remembered per thread, keyed by the route's ids.
   const threadKey = useChatThreadKey();
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: pushes the route's thread key into the chat surface, an external store outside React
   useEffect(() => {
     if (vimMode) setChatThreadKey(threadKey);
   }, [threadKey, vimMode]);
@@ -109,6 +112,7 @@ function useChatThreadKey(): string | null {
 function useMainPanelElement(enabled: boolean): HTMLElement | null {
   const router = useRouter();
   const [element, setElement] = useState<HTMLElement | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the router's onRendered event to find the main panel a lazy route mounts late
   useEffect(() => {
     if (!enabled) return;
     const find = () =>
@@ -215,11 +219,9 @@ function FlashLabels() {
 }
 
 /**
- * The block cursors a highlight cannot paint (`blockCursor.ts`): an empty
- * line's, fixed to the viewport; and a narrow glyph's, widened to half an em
- * with the glyph redrawn inside in its own font, drawn in the glyph's own
- * container so it is clipped and covered where the glyph is. The widened
- * cursor's colours live in `mesura.css` with the highlight cursor's.
+ * The block cursors a highlight cannot paint (`blockCursor.ts`): an empty line's,
+ * fixed to the viewport, and a narrow glyph's, widened to half an em with the glyph
+ * redrawn inside, portalled into the glyph's container so it clips with the glyph.
  */
 function BlockCursor() {
   const overlays = useCursorOverlays();
@@ -250,6 +252,7 @@ function BlockCursor() {
 function WidenedCursor({ overlay, glyph }: { overlay: CursorOverlay; glyph: CursorGlyph }) {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the anchor's DOM box in the commit, before paint
   useLayoutEffect(() => {
     const anchor = anchorRef.current?.getBoundingClientRect();
     const cursor = cursorRef.current;
@@ -289,16 +292,15 @@ interface GutterLine {
 }
 
 /**
- * The expanded composer's line numbers: hybrid, as Neovim's `number` plus
- * `relativenumber`. In normal mode the cursor's line shows its number and the
- * others their distance from it, which is the count a `5j` needs; in insert
- * mode every line shows its number. Re-measured only when the composer's
- * layout version moves, on input, or on the editor's own scroll.
+ * Hybrid line numbers, as Neovim's `number` plus `relativenumber`: in normal mode
+ * the others show their distance from the cursor's line, the count a `5j` needs.
+ * Re-measured only on a layout change, on input, or on the editor's own scroll.
  */
 function ComposerLineNumbers() {
   const expanded = useComposerExpanded();
   const [gutter, setGutter] = useState<{ host: HTMLElement; lines: GutterLine[] } | null>(null);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the editor's line boxes and subscribes to its input, scroll and layout events
   useLayoutEffect(() => {
     if (!expanded) return;
     const editor = composerEditorElement();

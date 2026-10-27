@@ -1,9 +1,6 @@
-// Mesura: the agent icon search on the v2 project path. Entry point:
-// `planProjectCommand` folded into `ProjectStoreV2`, the pair `ProjectService`
-// commits under the project's lock. An explicit request claims a job token and
-// generation, and a completion saves its image only while that token,
-// generation, captured root and starting icon fields still hold. A manual icon
-// write names the root it inspected and is refused once the project moved.
+// Mesura: the agent icon search on the v2 project path. A completion saves its
+// image only while its job token, generation, captured root and starting icon
+// fields still hold; a manual write naming a stale root is refused.
 import { describe, expect, it } from "@effect/vitest";
 import {
   type ApplicationProjectEvent,

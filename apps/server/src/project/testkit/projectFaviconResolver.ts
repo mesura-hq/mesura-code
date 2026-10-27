@@ -7,12 +7,17 @@ export const projectFaviconResolverForPath = (
   resolvePath: ProjectFaviconResolver.ProjectFaviconResolver["Service"]["resolvePath"],
 ) =>
   ProjectFaviconResolver.ProjectFaviconResolver.of({
-    invalidate: () => Effect.void,
+    invalidate: Effect.fn("ProjectFaviconResolver.invalidate")(function () {
+      return Effect.void;
+    }),
     resolvePath,
-    resolveEffectiveImage: (...args) =>
-      resolvePath(...args).pipe(
+    resolveEffectiveImage: Effect.fn("ProjectFaviconResolver.resolveEffectiveImage")(function (
+      ...args
+    ) {
+      return resolvePath(...args).pipe(
         Effect.map((resolved) =>
           resolved === null ? null : { path: resolved, source: "detected" as const },
         ),
-      ),
+      );
+    }),
   });

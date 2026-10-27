@@ -10,44 +10,18 @@ import { buildSymmetriaJsonSchemaArtifacts } from "./jsonSchema.ts";
 import { SymmetriaThreadSummary } from "./threadSummary.ts";
 
 /**
- * Issue #2: a check applied *after* a transformation is dropped when Effect
- * emits JSON Schema, and `TrimmedNonEmptyString` is built that way. So a field
- * composing it emitted as a bare `{"type":"string"}` while the decoder still
- * refused the empty string — the two consumer kinds disagreed, and the one
- * told the payload was fine was the one with no decoder behind it.
- *
- * These assertions pin both halves of the agreement: the schema the current
- * sources emit carries the constraint, and the decoder refuses exactly the
- * values that constraint refuses. One further assertion pins the committed
- * artifact to the emitted one for these three fields, so the file cannot pass
- * while the document a consumer downloads says something else.
- *
- * The last block pins the opposite, and it is not an oversight. Measured
- * 2026-08-22: `IsoDateTime` (`packages/contracts/src/baseSchemas.ts:21`) is
- * `Schema.String` with no check at all, so a bare `{"type":"string"}` for a
- * timestamp is a *faithful* emission and not a dropped constraint. Adding one
- * would make this projection stricter than the model it projects, and a thread
- * upstream considers valid would then fail to publish. `draft.ts` already
- * records the same fact twice in prose; this is the executable form.
+ * Effect drops a check applied after a transformation, as in `TrimmedNonEmptyString`, from the
+ * emitted JSON Schema. These assertions pin the emitted constraint and the decoder to the same
+ * values. The last block pins the opposite on purpose: `IsoDateTime` has no check upstream, so
+ * a bare timestamp string is faithful, and a constraint would refuse threads upstream accepts.
  */
 
 type JsonObject = Readonly<Record<string, unknown>>;
 
 /**
- * The document these assertions judge is the one the CURRENT sources emit, not
- * the copy checked in under `schema/`.
- *
- * That distinction was not obvious and is the correction of a real defect in
- * the first version of this file, caught in review by reverting the fix in
- * `threadSummary.ts` and watching every assertion here stay green: reading only
- * the committed artifact made this file pass whenever the artifact was stale,
- * which is exactly when it should shout. The artifact's freshness is
- * `jsonSchema.test.ts`'s single responsibility and is not duplicated here — but
- * a file that depends on a sibling to be meaningful has to say so, or it reads
- * as self-sufficient and is trusted alone.
- *
- * `pinsTheCommittedArtifact` below closes the loop for these three fields only,
- * which is the narrowest pairing that makes this file honest on its own.
+ * Judges the document the CURRENT sources emit, not the committed `schema/` copy: reading only
+ * the committed copy passes whenever it is stale. Whole-artifact freshness is
+ * `jsonSchema.test.ts`'s job; the committed-artifact test below covers these fields only.
  */
 const threadSummaryDocument = (): JsonObject => {
   const artifact = buildSymmetriaJsonSchemaArtifacts().find(
@@ -90,14 +64,9 @@ const stringSchemaFor = (property: string): JsonObject =>
   stringSchemaIn(threadSummaryDocument(), property);
 
 /**
- * Collects `minLength` and `pattern` from a node, including the ones Effect
- * nests inside `allOf` when a value carries more than one check.
- *
- * This is deliberately not a JSON Schema validator. The repository has none,
- * and adding one would put a dependency in the root manifest — a new upstream
- * conflict surface every week for two keywords. So it reads exactly the two
- * keywords these assertions are about, and claims nothing about the rest of
- * the document.
+ * Collects `minLength` and `pattern`, including those Effect nests inside `allOf`. Not a JSON
+ * Schema validator on purpose: a validator dependency in the root manifest costs a weekly
+ * upstream conflict surface for two keywords.
  */
 const stringConstraints = (node: JsonObject): { minLength?: number; pattern?: string } => {
   const collected: { minLength?: number; pattern?: string } = {};
@@ -195,11 +164,8 @@ describe("upstream-derived free-text fields carry their constraint into the arti
   });
 
   it("pins the committed artifact to what the sources emit, for these fields", () => {
-    // Without this, every assertion above could hold against a live document
-    // while the file a consumer actually downloads said something else. It
-    // checks these three properties only: the whole document's freshness is
-    // `jsonSchema.test.ts`'s job and a second copy of that check would be one
-    // more thing to keep in step.
+    // Without this, the assertions above could pass while the downloaded file disagrees.
+    // Whole-document freshness is `jsonSchema.test.ts`'s job.
     const committed = committedThreadSummaryDocument();
     for (const property of FREE_TEXT_PROPERTIES) {
       expect(stringSchemaIn(committed, property)).toEqual(stringSchemaFor(property));
@@ -208,11 +174,8 @@ describe("upstream-derived free-text fields carry their constraint into the arti
 });
 
 describe("projected timestamps stay as loose as the model they project", () => {
-  // A guard against a plausible and wrong future edit. Every field here emits a
-  // bare string because `IsoDateTime` IS a bare string — there is no dropped
-  // check to restore, and inventing one would make this projection refuse
-  // timestamps the fork itself accepts. If a reader arrives here intending to
-  // "finish" issue #2 by constraining timestamps, that is the edit this refuses.
+  // Refuses a plausible wrong edit: `IsoDateTime` IS a bare string, so there is no dropped check
+  // to restore, and a constraint would refuse timestamps the fork itself accepts.
   it.each(TIMESTAMP_PROPERTIES)("%s emits no string constraint", (property) => {
     expect(stringConstraints(stringSchemaFor(property))).toEqual({});
   });
