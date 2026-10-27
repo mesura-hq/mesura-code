@@ -13,6 +13,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { expect, it, vi } from "vite-plus/test";
+import { userEvent } from "vite-plus/test/browser";
 import {
   EnvironmentId,
   ThreadId,
@@ -840,7 +841,9 @@ it.each([
 
     using mediaClick = vi.spyOn(mediaInput, "click").mockImplementation(() => {});
     using fileClick = vi.spyOn(fileInput, "click").mockImplementation(() => {});
-    await act(async () => triggerButton.click());
+    // A real press, not `.click()`: Base UI opens the menu on `mousedown`, which
+    // a `pointerdown` handler calling preventDefault would suppress.
+    await userEvent.click(triggerButton);
     await vi.waitFor(() =>
       expect(openMenuItems().map((item) => item.textContent)).toEqual([
         "Photos and videos",
@@ -851,7 +854,7 @@ it.each([
     expect(mediaClick).toHaveBeenCalledTimes(1);
     expect(fileClick).not.toHaveBeenCalled();
 
-    await act(async () => triggerButton.click());
+    await userEvent.click(triggerButton);
     await vi.waitFor(() => expect(openMenuItems()).toHaveLength(2));
     await act(async () => openMenuItems()[1]!.click());
     expect(fileClick).toHaveBeenCalledTimes(1);
@@ -886,7 +889,13 @@ it("a fine pointer keeps one tap from the attach button to the file dialog", asy
     '[data-normal-composer] input[type="file"]',
   )!;
   using fileClick = vi.spyOn(fileInput, "click").mockImplementation(() => {});
-  await act(async () => triggerButton.click());
+  const pointerDowns: PointerEvent[] = [];
+  const recordPointerDown = (event: PointerEvent) => pointerDowns.push(event);
+  document.addEventListener("pointerdown", recordPointerDown);
+  await userEvent.click(triggerButton);
+  document.removeEventListener("pointerdown", recordPointerDown);
   expect(fileClick).toHaveBeenCalledTimes(1);
   expect(openMenuItems()).toHaveLength(0);
+  // The press must not take focus from the composer's editor.
+  expect(pointerDowns.map((event) => event.defaultPrevented)).toEqual([true]);
 });

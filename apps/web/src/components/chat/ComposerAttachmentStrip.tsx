@@ -670,14 +670,8 @@ export function ComposerAttachButton({
       includeVideos
       // No focus return: the editor would raise the phone keyboard over the picker.
       popupProps={{ ...composerFloatingLayerProps, finalFocus: false }}
-      trigger={
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onPointerDown={(event) => event.preventDefault()}
-        />
-      }
+      keepFocusOnPress
+      trigger={<Button type="button" variant="ghost" size="icon-sm" />}
       onFilesPicked={(files) => {
         // Inserting a chip refocuses the editor after the draft renders;
         // focusing synchronously here would report the editor's stale text

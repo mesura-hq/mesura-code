@@ -40,6 +40,7 @@ export function AttachmentPicker({
   label,
   includeVideos,
   disabled = false,
+  keepFocusOnPress = false,
   trigger,
   popupProps,
   onFilesPicked,
@@ -49,6 +50,13 @@ export function AttachmentPicker({
   readonly label: string;
   readonly includeVideos: boolean;
   readonly disabled?: boolean;
+  /**
+   * Keeps focus where it is (the composer's editor) when the button opens the
+   * file dialog. Applied only without the menu: Base UI opens a menu on
+   * `mousedown`, which preventing `pointerdown` suppresses, so the menu would
+   * never open.
+   */
+  readonly keepFocusOnPress?: boolean;
   /** The trigger element; this component supplies its label and press behaviour. */
   readonly trigger: ReactElement<{ disabled?: boolean }>;
   readonly popupProps?: Omit<ComponentProps<typeof MenuPopup>, "children">;
@@ -80,6 +88,7 @@ export function AttachmentPicker({
           <TooltipTrigger
             render={triggerElement}
             aria-label={label}
+            onPointerDown={keepFocusOnPress ? (event) => event.preventDefault() : undefined}
             onClick={() => fileInputRef.current?.click()}
           >
             {children}
