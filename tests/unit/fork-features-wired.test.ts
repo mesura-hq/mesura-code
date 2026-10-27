@@ -163,30 +163,37 @@ it("handles the attach shortcut in the composer that owns the file input", () =>
   const buttonStart = attachButton.indexOf("export function ComposerAttachButton(");
   assert.isAbove(buttonStart, -1, "the extracted attachment button owner is gone");
   const button = attachButton.slice(buttonStart);
-  assert.include(
-    button,
-    "const inputRef = useRef<HTMLInputElement>(null);",
-    "the attach button loses its file input ref",
-  );
   assert.match(
     button,
-    /<input\s+ref=\{inputRef\}\s+type="file"\s+multiple/,
-    "the attach button no longer owns upstream's multiple-file input",
-  );
-  assert.match(
-    button,
-    /onClick=\{\(\) => inputRef\.current\?\.click\(\)\}\s+aria-label="Attach files"/,
-    "the shortcut's attach button no longer clicks that same file input",
-  );
-  assert.include(
-    button,
-    "const files = Array.from(event.currentTarget.files ?? []);",
-    "the file input no longer reads its selected files",
+    /<AttachmentPicker\s+label="Attach files"/,
+    "the attach button no longer renders the shared picker under the label the shortcut presses",
   );
   assert.include(
     button,
     "void addComposerAttachments(files)",
-    "the file input no longer sends its files to the composer's attachment intake",
+    "the picked files no longer reach the composer's attachment intake",
+  );
+  // The shared picker owns the one real file input; the phone menu adds a Photos input beside it.
+  const attachmentPicker = read("apps/web/src/components/chat/AttachmentPicker.tsx");
+  assert.include(
+    attachmentPicker,
+    "const fileInputRef = useRef<HTMLInputElement>(null);",
+    "the attach picker loses its file input ref",
+  );
+  assert.match(
+    attachmentPicker,
+    /<input\s+ref=\{fileInputRef\}\s+type="file"\s+multiple/,
+    "the attach picker no longer owns upstream's multiple-file input",
+  );
+  assert.match(
+    attachmentPicker,
+    /aria-label=\{label\}\s+onPointerDown=\{[^\n]*\}\s+onClick=\{\(\) => fileInputRef\.current\?\.click\(\)\}/,
+    "the labelled desktop trigger no longer clicks that same file input",
+  );
+  assert.include(
+    attachmentPicker,
+    "onFilesPicked(takePickedFiles(event.currentTarget))",
+    "the file input no longer hands its selected files to the picker's owner",
   );
 });
 
