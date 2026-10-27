@@ -39,13 +39,8 @@ export interface ShortcutMatchContext {
   isDesktop: boolean;
   editableFocus?: boolean;
   /**
-   * Which pane owns the keyboard, filled from the document's focus tree for
-   * every caller. A binding scoped to one pane says so with these rather
-   * than by naming every pane it is not.
-   *
-   * The terminal drawer sets none of the three: it is its own pane, and
-   * `terminalFocus` already speaks for it. Optional for callers: resolution
-   * fills each one lazily from the focus tree when the caller leaves it out.
+   * Which pane owns the keyboard. Resolution fills each one lazily from the focus tree when
+   * the caller leaves it out. The terminal drawer sets none: `terminalFocus` speaks for it.
    */
   sidebarFocus?: boolean;
   chatFocus?: boolean;
@@ -118,14 +113,9 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
     ...options?.context,
   };
 
-  // The document is read only if a `when` clause actually asks which pane has
-  // focus, and then once. This runs on every keystroke typed anywhere in the
-  // app, including every one typed into the embedded Neovim editor, whose
-  // insert-mode latency is measured against a 16.7 ms budget. Most keystrokes
-  // never reach a pane-scoped rule and so never walk the DOM at all.
-  //
-  // A caller that named a pane itself keeps its own value: the property is
-  // only replaced where the caller left it out.
+  // Read the document at most once, and only when a `when` clause asks for a pane: this runs
+  // on every keystroke, Neovim insert mode included, against a 16.7 ms budget. A pane the
+  // caller named itself keeps the caller's value.
   let focusedPane: PaneId | null | undefined;
   const isFocused = (pane: PaneId): boolean => {
     if (focusedPane === undefined) focusedPane = getFocusedPane();
@@ -211,8 +201,7 @@ export function shortcutConflictKey(
 
 function shortcutForContext(binding: ResolvedKeybindingRule, context: ShortcutMatchContext) {
   const shortcut = binding.shortcut;
-  // Existing installs persist Mod+Enter. Resolve its alternate chord against
-  // the send preference without rewriting saved or remapped shortcuts.
+  // Resolve persisted Mod+Enter against send preference without rewriting saved shortcuts.
   if (
     context.composerRequiresModifier &&
     binding.command === "composer.sendAlternate" &&
@@ -259,13 +248,9 @@ export function effectiveShortcutsForCommand(
 }
 
 /**
- * Never ask this, or `shortcutLabelForCommand`, about a `pane.*` command.
- *
- * A pane command may share its chord with another command on purpose, and
- * this scan awards a shared chord to the last binding that claims it. For
- * `pane.focusDown`, which sits behind `terminal.toggle` on `mod+j`
- * deliberately, the answer would be "no shortcut" for a chord that works.
- * Those commands are dispatched by `lib/usePaneNavigation.ts`, not resolved.
+ * Never ask this, or `shortcutLabelForCommand`, about a `pane.*` command: a pane command can
+ * share its chord on purpose (`pane.focusDown` sits behind `terminal.toggle` on `mod+j`), and
+ * this scan gives a shared chord to the last claimant. `lib/usePaneNavigation.ts` dispatches them.
  */
 export function findEffectiveShortcutForCommand(
   keybindings: ResolvedKeybindingsConfig,
@@ -285,12 +270,9 @@ function matchesCommandShortcut(
 }
 
 /**
- * The last binding in `bindings` that this event satisfies, or null.
- *
- * Last wins, which is what lets a later rule override an earlier one. Taking
- * the candidate list as an argument is what lets a caller resolve over a
- * subset: the pane handler resolves over just the pane bindings, and doing it
- * through here rather than in a copy of this loop keeps the two from drifting.
+ * The last binding in `bindings` that this event satisfies, or null; last wins so a later
+ * rule overrides an earlier one. The pane handler passes only the pane bindings, so it shares
+ * this loop instead of copying it.
  */
 export function findLastMatchingBinding(
   event: ShortcutEventLike,
@@ -303,21 +285,14 @@ export function findLastMatchingBinding(
   for (let index = bindings.length - 1; index >= 0; index -= 1) {
     const binding = bindings[index];
     if (!binding) continue;
-    // Shortcut first, `when` second. Both must hold, so the order cannot
-    // change the answer, but a `when` clause can now read the focus tree
-    // while a shortcut comparison is pure arithmetic on the event.
-    // Saved Mod+Enter must move to Mod+Shift+Enter with the send preference,
-    // just as its label does, or it steals foreground sends and loses to queue steering.
+    // Shortcut first: it is arithmetic on the event, and a `when` clause can read the focus tree.
+    // Saved Mod+Enter follows the send preference to Mod+Shift+Enter, as its label does, or it
+    // steals foreground sends and loses to queue steering.
     if (!matchesShortcut(event, shortcutForContext(binding, context), platform)) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
-    // The file-manager stand-down belongs here rather than in
-    // `resolveShortcutCommand`, because that is no longer the single point
-    // every resolution crosses: `usePaneNavigation` calls this function
-    // directly, and a guard one level up would leave the pane chords firing
-    // over an open file manager, in the capture phase, ahead of its own
-    // dispatcher. A matched binding that stands down yields null rather than
-    // continuing the search, so a lower-priority binding cannot inherit the
-    // key the file manager just claimed.
+    // The file-manager stand-down lives here because `usePaneNavigation` calls this directly;
+    // one level up, pane chords would fire over the file manager in the capture phase. It
+    // yields null instead of searching on, so a lower binding cannot inherit the claimed key.
     return standDownForFileManager(binding.command) === null ? null : binding;
   }
   return null;
@@ -332,12 +307,9 @@ export function resolveShortcutCommand(
 }
 
 /**
- * Fork addition. While the file manager is up over the window every host
- * chord but its own toggle stands down, so its keys — `Ctrl+O` for the
- * overview above all — reach its dispatcher unopposed. Every window listener
- * resolves through `findLastMatchingBinding`, directly or through
- * `resolveShortcutCommand` and the `is*Shortcut` helpers over it, which is why
- * the one guard is applied there rather than in each listener.
+ * Fork: while the file manager is open, every host chord but its toggle stands down, so its
+ * keys (`Ctrl+O` above all) reach its dispatcher. Every window listener resolves through
+ * `findLastMatchingBinding`, so the one guard there covers them all.
  */
 function standDownForFileManager(command: KeybindingCommand): KeybindingCommand | null {
   if (command === "fileTree.miller") return command;
@@ -435,9 +407,7 @@ export function shouldShowThreadJumpHintsForModifiers(
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): boolean {
-  // The embedded terminal owns keystrokes while it has focus: the Ghostty surface encodes the
-  // keydown and can write the pressed key into the shell before our window-level shortcut handling
-  // ever runs, regardless of any configured `when` clause on the jump command.
+  // Ghostty can write keys to the shell before window shortcuts run, regardless of the when clause.
   if (resolveContext(options).terminalFocus) {
     return false;
   }
@@ -528,15 +498,21 @@ export function isOpenFavoriteEditorShortcut(
 }
 
 /**
- * Whether the keypress is the rich-text bold chord (Mod+B without extra
- * modifiers). Tiptap binds the same chord, so app shortcuts captured ahead
- * of the editor must yield when the rich-text composer is focused.
+ * Whether the keypress should bold text in the rich-text composer: Mod+B
+ * without extra modifiers, with text selected. Tiptap binds the same chord, so
+ * app shortcuts captured ahead of the editor yield only in that case. With no
+ * selection the chord stays with the app (the sidebar toggle by default).
  */
-export function isRichTextBoldShortcut(event: ShortcutEventLike): boolean {
+export function isRichTextBoldShortcut(
+  event: ShortcutEventLike,
+  selection: Pick<Selection, "isCollapsed"> | null,
+): boolean {
   if (event.type !== undefined && event.type !== "keydown") {
     return false;
   }
   return (
+    selection !== null &&
+    !selection.isCollapsed &&
     resolveEventKeys(event).has("b") &&
     (event.metaKey || event.ctrlKey) &&
     !event.altKey &&

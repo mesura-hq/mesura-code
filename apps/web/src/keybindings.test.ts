@@ -455,7 +455,10 @@ describe("thread navigation helpers", () => {
   it("maps jump commands to visible thread indices", () => {
     assert.strictEqual(threadJumpCommandForIndex(0), "thread.jump.1");
     assert.strictEqual(threadJumpCommandForIndex(2), "thread.jump.3");
-    assert.isNull(threadJumpCommandForIndex(9));
+    // Mesura: a tenth jump, on mod+0.
+    assert.strictEqual(threadJumpCommandForIndex(9), "thread.jump.10");
+    assert.isNull(threadJumpCommandForIndex(10));
+    assert.strictEqual(threadJumpIndexFromCommand("thread.jump.10"), 9);
     assert.strictEqual(threadJumpIndexFromCommand("thread.jump.1"), 0);
     assert.strictEqual(threadJumpIndexFromCommand("thread.jump.3"), 2);
     assert.isNull(threadJumpIndexFromCommand("thread.next"));
@@ -989,9 +992,11 @@ describe("resolveShortcutCommand", () => {
 });
 
 describe("isRichTextBoldShortcut", () => {
+  const selected = { isCollapsed: false };
+
   it("matches the B key on non-Latin layouts, like the sidebar toggle does", () => {
     const cyrillicB = event({ key: "и", code: "KeyB", ctrlKey: true });
-    assert.isTrue(isRichTextBoldShortcut(cyrillicB));
+    assert.isTrue(isRichTextBoldShortcut(cyrillicB, selected));
     assert.strictEqual(
       resolveShortcutCommand(cyrillicB, DEFAULT_BINDINGS, { platform: "Win32" }),
       "sidebar.toggle",
@@ -999,8 +1004,18 @@ describe("isRichTextBoldShortcut", () => {
   });
 
   it("follows the letter a Latin layout types, not the physical key", () => {
-    assert.isFalse(isRichTextBoldShortcut(event({ key: "x", code: "KeyB", ctrlKey: true })));
-    assert.isTrue(isRichTextBoldShortcut(event({ key: "b", code: "KeyN", ctrlKey: true })));
+    assert.isFalse(
+      isRichTextBoldShortcut(event({ key: "x", code: "KeyB", ctrlKey: true }), selected),
+    );
+    assert.isTrue(
+      isRichTextBoldShortcut(event({ key: "b", code: "KeyN", ctrlKey: true }), selected),
+    );
+  });
+
+  it("leaves the chord to the sidebar toggle when no text is selected", () => {
+    const modB = event({ key: "b", metaKey: true });
+    assert.isFalse(isRichTextBoldShortcut(modB, { isCollapsed: true }));
+    assert.isFalse(isRichTextBoldShortcut(modB, null));
   });
 });
 
@@ -1130,14 +1145,9 @@ describe("shipped defaults on Linux", () => {
   });
 
   it("leaves AltGr+Q free to type the character it produces", () => {
-    // Chromium on Linux reports AltGr as ctrl+alt, and a Latin American layout
-    // types "@" there. Matching on alt alone would eat that keystroke while
-    // the user writes their own answer in the composer.
-    //
-    // `code` has to be set for this to test anything. resolveEventKeys falls
-    // back to the physical letter whenever event.key is not a Latin letter, so
-    // "@" alone would resolve against no shortcut for a reason that has nothing
-    // to do with the modifiers this guards.
+    // Chromium on Linux reports AltGr as ctrl+alt; a Latin American layout types "@" there.
+    // `code` must be set: resolveEventKeys falls back to the physical letter for a non-Latin
+    // key, so "@" alone would match no shortcut for a reason unrelated to the modifiers.
     assert.strictEqual(resolve(press("@", { ctrlKey: true, altKey: true, code: "KeyQ" })), null);
   });
 
@@ -1260,14 +1270,9 @@ it("resolves mod+alt+k to the thread search outside terminal focus", () => {
 });
 
 /**
- * A stub `document` for the focus helpers below, focused on `activeElement`.
- *
- * Answering `querySelector` is part of the contract, not a detail. Shortcut
- * resolution reads the page at event time to see whether the file manager is up
- * over the window, so a stub carrying only `activeElement` throws there instead
- * of reporting a closed file manager, and every test that installs one fails.
- * Returning null is the honest answer: nothing here puts a file manager in the
- * page. A test that wants the opposite should return an element instead.
+ * A stub `document` focused on `activeElement`. It must answer `querySelector`: shortcut
+ * resolution queries the page for an open file manager, and a stub without it throws.
+ * Null means no file manager; a test that wants one returns an element.
  */
 const noFileManagerInPage = () => null;
 
@@ -1528,11 +1533,9 @@ describe("the sidebar's list chords", () => {
   });
 
   it("is a motion, not a chord, inside the editor in the right panel", () => {
-    // GUARD. `j` is `down` in the embedded Neovim editor and the editor
-    // lives in the right panel, so the pane read is what keeps the letter a
-    // letter there. Asserted through the focus tree rather than an explicit
-    // context, because an explicit context is exactly what the editor does
-    // not pass.
+    // GUARD. `j` is `down` in the embedded Neovim editor in the right panel; the pane read
+    // keeps it a letter there. Asserted through the focus tree, because the editor passes
+    // no explicit context.
     withFocusOn(PANEL_ROOT, "TEXTAREA", () => {
       assert.isNull(resolve(event({ key: "j" })));
       assert.isNull(resolve(event({ key: "k" })));
@@ -1660,16 +1663,6 @@ describe("composer and pull request shortcuts", () => {
     },
   );
 
-  const shortcuts = [
-    ["a", "composer.mode"],
-    ["x", "composer.workspace"],
-    ["g", "composer.branch"],
-    ["l", "composer.previousWorktree"],
-    ["c", "thread.copyReference"],
-    ["k", "pullRequest.copyNumber"],
-    ["Enter", "thread.steerQueuedMessage"],
-  ] as const;
-
   it.each(["MacIntel", "Win32", "Linux"])(
     "reserves the alternate send chord for the focused composer on %s",
     (platform) => {
@@ -1752,6 +1745,94 @@ describe("composer and pull request shortcuts", () => {
         { platform: "MacIntel" },
       ),
       "composer.effort",
+    );
+  });
+});
+
+// Mesura: Ctrl+0 is the tenth thread jump, beside Ctrl+1..9.
+describe("the tenth thread jump", () => {
+  const ctrlZero = (overrides: Partial<ShortcutEventLike> = {}) =>
+    event({ key: "0", code: "Digit0", ctrlKey: true, ...overrides });
+  const resolveOnLinux = (input: ShortcutEventLike, context: Record<string, boolean>) =>
+    resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Linux", context });
+
+  it("jumps to the tenth thread with Ctrl+0 on the desktop, from the number row and the keypad", () => {
+    assert.strictEqual(resolveOnLinux(ctrlZero(), { isDesktop: true }), "thread.jump.10");
+    assert.strictEqual(
+      resolveOnLinux(ctrlZero({ code: "Numpad0" }), { isDesktop: true }),
+      "thread.jump.10",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "0", code: "Digit0", metaKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        { platform: "MacIntel", context: { isDesktop: true } },
+      ),
+      "thread.jump.10",
+    );
+  });
+
+  it("labels the tenth jump with the modifier and 0", () => {
+    const desktop = { context: { isDesktop: true } };
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.jump.10", {
+        platform: "Linux",
+        ...desktop,
+      }),
+      "Ctrl+0",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.jump.10", {
+        platform: "MacIntel",
+        ...desktop,
+      }),
+      "\u23180",
+    );
+  });
+
+  it("leaves Ctrl+0 to the browser on the web, as Ctrl+1..9 are left to its tabs", () => {
+    assert.isNull(resolveOnLinux(ctrlZero(), { isDesktop: false }));
+  });
+
+  it("leaves Ctrl+0 to the preview's reset zoom while the preview has focus", () => {
+    assert.strictEqual(
+      resolveOnLinux(ctrlZero(), { isDesktop: true, previewFocus: true }),
+      "preview.resetZoom",
+    );
+    assert.isNull(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.jump.10", {
+        platform: "Linux",
+        context: { isDesktop: true, previewFocus: true },
+      }),
+    );
+    // The first nine still jump there, as before.
+    assert.strictEqual(
+      resolveOnLinux(event({ key: "1", code: "Digit1", ctrlKey: true }), {
+        isDesktop: true,
+        previewFocus: true,
+      }),
+      "thread.jump.1",
+    );
+  });
+
+  it("follows a rebinding like the other nine", () => {
+    const rebound = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([{ key: "mod+shift+0", command: "thread.jump.10" }]),
+    );
+    const desktop = { isDesktop: true };
+    assert.strictEqual(
+      resolveShortcutCommand(ctrlZero({ key: ")", shiftKey: true }), rebound, {
+        platform: "Linux",
+        context: desktop,
+      }),
+      "thread.jump.10",
+    );
+    assert.isNull(
+      resolveShortcutCommand(ctrlZero(), rebound, { platform: "Linux", context: desktop }),
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(rebound, "thread.jump.10", { platform: "Linux", context: desktop }),
+      "Ctrl+Shift+0",
     );
   });
 });

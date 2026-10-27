@@ -4,12 +4,9 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 const PROVIDER_SLUG_MAX_CHARS = 64;
 /**
- * Slug pattern shared by driver kinds and instance ids — letters, digits,
- * dashes, underscores. The first character must be a letter so slugs remain
- * JS-identifier friendly when used as object keys, log fields, or telemetry
- * attributes. Mixed case is permitted so historical driver kinds (e.g.
- * `claudeAgent`) can be used verbatim during the migration and so external
- * fork authors retain reasonable freedom.
+ * Letters, digits, dashes and underscores, starting with a letter so a slug stays JS-identifier
+ * friendly as an object key, log field or telemetry attribute. Mixed case admits historical driver
+ * kinds such as `claudeAgent`.
  */
 // Effect 4 exports regex constraints to JSON Schema only with the Unicode flag.
 const PROVIDER_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/u;
@@ -55,12 +52,7 @@ export type ProviderInstanceEnvironmentVariable = typeof ProviderInstanceEnviron
 export const ProviderInstanceEnvironment = Schema.Array(ProviderInstanceEnvironmentVariable);
 export type ProviderInstanceEnvironment = typeof ProviderInstanceEnvironment.Type;
 
-/**
- * The driver-specific config payload is left as `Schema.Unknown`; each driver
- * registers its own decoder with the runtime registry, and envelopes for
- * unknown drivers are preserved verbatim so they round-trip across version
- * changes without data loss.
- */
+/** Drivers decode their own config; unknown-driver envelopes round-trip verbatim across versions. */
 export const ProviderInstanceConfig = Schema.Struct({
   driver: ProviderDriverKind,
   displayName: Schema.optional(TrimmedNonEmptyString),
@@ -92,11 +84,6 @@ export type ProviderInstanceMutation = typeof ProviderInstanceMutation.Type;
 export const ProviderInstanceConfigMap = Schema.Record(ProviderInstanceId, ProviderInstanceConfig);
 export type ProviderInstanceConfigMap = typeof ProviderInstanceConfigMap.Type;
 
-/**
- * The legacy single-instance-per-driver world used the driver kind itself as
- * the instance id; preserving that mapping keeps existing persisted threads,
- * bindings, and cache files routable across the migration without rewriting
- * their stored selection payloads.
- */
+/** Driver-kind ids keep stored selections routable without migration. */
 export const defaultInstanceIdForDriver = (driver: ProviderDriverKind): ProviderInstanceId =>
   ProviderInstanceId.make(driver);

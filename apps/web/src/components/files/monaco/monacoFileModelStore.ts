@@ -3,13 +3,8 @@ import * as monaco from "monaco-editor";
 import { MonacoFileModelCache, type MonacoFileModels } from "./monacoFileModels";
 
 /**
- * The cache, backed by real Monaco models.
- *
- * Separate from `monacoFileModels.ts` so that module stays free of Monaco: the
- * eviction rules are what deserve testing, and importing the editor to test
- * them would pull two megabytes into a unit test to no purpose.
- *
- * The cache key is the model's URI, so nothing else is needed to build one.
+ * The cache backed by real Monaco models, kept apart so `monacoFileModels.ts` and its eviction
+ * tests never import the editor. The cache key is the model's URI.
  */
 export function createMonacoFileModels(): MonacoFileModels {
   return new MonacoFileModelCache({

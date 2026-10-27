@@ -77,11 +77,7 @@ export function createAssistantTextSelector(
   };
 }
 
-/**
- * All positions and context lengths use UTF-16 units in that normalized stream,
- * not markdown offsets or Unicode code points. Even matching saved offsets cannot
- * break a context tie, since those offsets may have drifted.
- */
+/** Offsets use normalized UTF-16 units. Saved offsets may drift, so they cannot break context ties. */
 export function findAssistantCitationText(
   text: string,
   selector: AssistantTextSelector,
@@ -127,11 +123,9 @@ export function findAssistantCitationText(
 export type TextChunk = { node: Text | Element; start: number; end: number };
 
 /**
- * Uses DOM text order, with a line break between HTML blocks and at <br>.
- * Inline markup, including code and links, contributes its displayed text.
- * Controls and subtrees marked hidden/aria-hidden do not contribute. No layout
- * reads, CSS-generated content, or soft-wrap line breaks enter the stream, so
- * reflow cannot move it.
+ * DOM text order, with a line break between blocks and at <br>; inline markup gives its displayed
+ * text, and hidden or aria-hidden subtrees and controls give none. No layout reads, generated
+ * content or soft wraps enter the stream, so reflow cannot move it.
  */
 export function readAssistantText(root: HTMLElement) {
   const parts: string[] = [];
@@ -203,8 +197,7 @@ function selectedTextBoundary(range: Range, node: Node, last: boolean): Text | n
     const text = node as Text;
     const start = node === range.startContainer ? range.startOffset : 0;
     const end = node === range.endContainer ? range.endOffset : text.length;
-    // Triple-click ranges run through unselectable rows (tool calls, timestamps,
-    // author headings) into the next response; that text is not selected.
+    // Triple-click ranges include unselected text from unselectable rows and the next response.
     return start < end && !isUnselectable(text) ? text : null;
   }
   for (

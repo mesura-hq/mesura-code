@@ -37,16 +37,8 @@ import { getDisplayModelName } from "./providerIconUtils";
 import { runtimeModeOptions } from "./runtimeModeConfig";
 
 /**
- * The combined model, effort, options, and access picker. It wraps upstream's
- * `ModelPickerContent` through `ModelPickerExtension` and adds:
- *
- * - an inline effort stepper on every model row, also driven by Left/Right;
- * - Tab and Shift+Tab to cycle provider tabs from the search field;
- * - the More options screen, which replaces model search inside the same
- *   bounded popup and holds the other provider options and the access mode.
- *
- * Every edit stays pending in this component until a row is applied, so
- * Escape or a click outside (which unmount it) discards them.
+ * Wraps upstream's `ModelPickerContent` through `ModelPickerExtension`. Every edit stays pending
+ * here until a row is applied, so Escape or a click outside (which unmount it) discards them.
  */
 
 type ModelPickerContentProps = ComponentProps<typeof ModelPickerContent>;
@@ -75,16 +67,10 @@ export const CombinedModelPickerContent = memo(function CombinedModelPickerConte
   );
 });
 
-// WORKAROUND: the combined picker sizes itself from its trigger's position
-// instead of Base UI's `--available-height`. Base UI's popup measurement
-// (usePopupAutoResize) temporarily sets that variable to `max-content`, so a
-// cap built on it measures at full height and opens off-screen on short
-// viewports. The margin mirrors Base UI internals: the 4px side offset, the
-// flip padding (5px plus two 1px side biases), the popup's 1px borders, and
-// 2px for subpixel rounding; with less, Base UI flips the popup to the side.
-// Remove this, and `resolveModelPickerFitHeight`, once Base UI offers a
-// supported way to cap popup content by the available height during
-// measurement; re-check the margin on every Base UI upgrade until then.
+// WORKAROUND: size from the trigger, not `--available-height`: Base UI's usePopupAutoResize sets it to
+// `max-content` while measuring, so the popup opens off-screen. The margin mirrors Base UI internals
+// (4px offset, 5px+2x1px flip padding, 1px borders, 2px rounding); less flips the popup. Remove with
+// `resolveModelPickerFitHeight` once Base UI can cap content during measurement; re-check on upgrades.
 const MODEL_PICKER_VIEWPORT_MARGIN_PX = 16;
 const EMPTY_CATALOG: ReadonlyArray<ServerProviderModel> = [];
 
@@ -260,6 +246,7 @@ function CombinedPicker(
   // Opening on More options focuses its first control. The model content
   // keeps retrying its search focus for a frame, but its search is hidden.
   const opensOnExtras = combined.initialExtrasExpanded === true;
+  // oxlint-disable-next-line t3code/react-effect-budget -- focus must land after mount and win over the model content's own focus retries
   useLayoutEffect(() => {
     if (!opensOnExtras) return;
     focusExtras();
@@ -274,6 +261,7 @@ function CombinedPicker(
   // WORKAROUND (see MODEL_PICKER_VIEWPORT_MARGIN_PX): size the picker to the
   // larger side of its trigger. This layout effect runs before Base UI's
   // measurement, because the popup is an ancestor of this content.
+  // oxlint-disable-next-line t3code/react-effect-budget -- WORKAROUND above: writes the fit height before Base UI measures and tracks window resizes
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || !getAnchorRect) return;
@@ -301,6 +289,7 @@ function CombinedPicker(
     if (expanded) setExtrasTargetKey(lastHighlightedModelKeyRef.current);
     pendingExtrasFocusRef.current = expanded ? "extras" : "search";
   };
+  // oxlint-disable-next-line t3code/react-effect-budget -- focus moves into or out of More options only after the render that shows or hides it
   useLayoutEffect(() => {
     const target = pendingExtrasFocusRef.current;
     if (target === null) return;
@@ -308,16 +297,15 @@ function CombinedPicker(
     if (target === "extras") focusExtras();
     else focusSearch();
   });
+  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes to the composer's traits picker action while this picker answers it
   useEffect(() => {
     if (!combined.respondsToShortcut) return;
     return subscribePickerAction("traits", () => setExtras(!extrasExpandedRef.current));
   }, [combined.respondsToShortcut, setExtras]);
-  // The traits shortcut (and its composer.effort alias) toggles More options
-  // while the picker is open, including where no ChatView dispatches it, such
-  // as Settings. In the composer ChatView may see the event first and
-  // dispatch the picker action instead; this handler skips an event already
-  // handled, so the section toggles once.
+  // The traits shortcut toggles More options even where no ChatView dispatches it (Settings). In the
+  // composer ChatView may handle the event first; skipping a handled event keeps it to one toggle.
   const terminalOpen = contentProps.terminalOpen;
+  // oxlint-disable-next-line t3code/react-effect-budget -- window keydown listener for the traits shortcut while the picker is open
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isCommandPaletteOpen()) return;

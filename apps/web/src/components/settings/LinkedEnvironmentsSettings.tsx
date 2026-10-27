@@ -42,7 +42,8 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
 import { LinkAccessPicker } from "./LinkAccessPicker";
 import { ANOTHER_ADDRESS, LinkMachineSelect } from "./LinkMachineSelect";
-import { SettingsRow, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
+import { useNowMinute } from "../../hooks/useNowMinute";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 const failureToast = (title: string, description: string) =>
@@ -95,8 +96,9 @@ function LinkedEnvironmentRow({
   readonly environmentId: EnvironmentId;
   readonly link: PeerLinkSummary;
 }) {
-  const nowMs = useRelativeTimeTick(60_000);
-  const health = peerLinkHealth(link, DateTime.makeUnsafe(nowMs));
+  // The minute tick is an ISO UTC timestamp cut to the minute.
+  const nowMinute = useNowMinute();
+  const health = peerLinkHealth(link, DateTime.makeUnsafe(`${nowMinute}:00Z`));
   const unlink = useAtomCommand(peerLinkEnvironment.unlink, { label: "unlink environment" });
   const canUnlink = useAtomValue(peerLinkEnvironment.unlink.permissionAtom(environmentId));
   const [busy, setBusy] = useState(false);

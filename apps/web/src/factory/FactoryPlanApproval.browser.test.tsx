@@ -1,15 +1,10 @@
 import { flushBrowserTasks } from "../test/browserTasks";
 import { act, render as renderBrowser, type Screen } from "../../test/render";
 /**
- * Phase 4 fence on the web: acceptance criteria 1 and 3–7, through the plan
- * card's route rows and its Approve button.
- *
- * Entry point: AppRoot with its memory router and the real ChatView,
- * MessagesTimeline and FactoryPlanCard, as `AppRoot.inlinePendingUserInput`
- * mounts them. The thread, its environment's provider list and the stored plan
- * body are fixtures; `threadEnvironment.startTurn` is a spy, so the sent turn
- * is read from its input. What only a browser shows: the Select popups'
- * placement, and the card's layout on a narrow pane.
+ * The plan card's route rows and Approve button, through AppRoot with the real ChatView,
+ * MessagesTimeline and FactoryPlanCard over fixture thread, provider list and plan body;
+ * `threadEnvironment.startTurn` is a spy, so the sent turn is read from its input. Popup
+ * placement and the narrow layout are left to a real browser.
  */
 import { type ReactNode } from "react";
 import {
@@ -228,11 +223,9 @@ let root: Screen | undefined;
 let container: HTMLDivElement;
 let restoreDocumentFonts: () => void;
 
-// A workspace snapshot for the project's folder, so the composer does not ask
-// the server to refresh its provider list.
-// New environment objects, as `useEnvironments` hands out on every change:
-// the React compiler memoizes on their identity, so mutating in place would
-// never reach the card.
+// A workspace snapshot for the project's folder, so the composer does not ask the server to refresh
+// its provider list. New environment objects each time, as `useEnvironments` hands out: the React
+// compiler memoizes on their identity, so mutating in place would never reach the card.
 function setProviders(providers: ReadonlyArray<ServerProvider>) {
   const [environment] = fixture.environments;
   fixture.environments = [

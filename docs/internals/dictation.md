@@ -44,6 +44,23 @@ Two traps follow from that choice:
   prompt that still holds a marker.
 - The web editor draws the marker as the stepped wave.
 
+## The thread a recording belongs to
+
+A recording belongs to the server thread whose composer, or question card, holds dictation when
+the recording starts (`bindRecordingThread` in
+[`dictationController.ts`](../../apps/web/src/dictation/dictationController.ts)). A composer of
+another thread that mounts during the recording never takes the marker, so every stop path (the
+strip, the toggle key, the desktop command line, the sidebar's wave) places it in the starting
+thread: at its caret when that thread is on screen, else at the end of its draft. Composers of the
+starting thread still trade it among themselves, so a question card of that thread can take it.
+
+A recording started in a new-thread draft has no thread and follows the composer that holds
+dictation when it stops. Sending the draft turns it into a server thread while the recording
+runs, and a marker pinned to the draft would land in a draft nobody shows.
+
+The session carries the thread, so the sidebar row can show the recording
+([`threadDictationActivity.ts`](../../apps/web/src/dictation/threadDictationActivity.ts)).
+
 ## Filling is idempotent by job id
 
 A completed job replaces the marker whose id is its job id. A filled marker is gone, so a second

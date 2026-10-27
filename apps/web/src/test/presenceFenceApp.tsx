@@ -13,12 +13,8 @@ import type { AppRouter } from "../router";
 import { installPresencePage, type PresencePageOptions } from "./presenceFenceMocks";
 
 /**
- * Mounts AppRoot, the component `main.tsx` mounts around the app's router,
- * with a memory router whose one route is a placeholder, on fake timers and
- * the fake page of `presenceFenceMocks.ts`. Both are installed before the
- * first render, because the presence report reads the page and starts its
- * timer when it mounts. The test files mock AppRoot's chrome that needs the
- * desktop shell or a live server, as `AppRoot.pushOpen.fence` does.
+ * Installs fake timers and the fake page of `presenceFenceMocks.ts` before the first render,
+ * because the presence report reads the page and starts its timer on mount.
  */
 export async function mountPresenceApp(initialPage: PresencePageOptions = {}) {
   await using stack = new AsyncDisposableStack();

@@ -4,11 +4,9 @@ import { applyDictationSlotEdits, fillDictationSlotEdits } from "@t3tools/shared
 export { appendDictationSlot, insertDictationSlotAt } from "@t3tools/shared/dictationSlots";
 
 /**
- * Fills the marker for `jobId` and carries an expanded caret offset through every edit the fill
- * makes: an edit wholly before the caret shifts it by its change in length, an edit after it
- * leaves it alone, and a caret inside a replaced range lands at that range's end. This is what
- * keeps the caret where the user is typing when a transcript lands in the composer on screen,
- * including when a copied marker on the other side of the caret is removed at the same time.
+ * Fills the marker for `jobId` and carries an expanded caret offset through every edit: an edit
+ * before the caret shifts it, one after leaves it, and a caret inside a replaced range lands at
+ * its end. This keeps the caret where the user types when a transcript lands on screen.
  */
 export function fillDictationSlotKeepingCaret(
   prompt: string,

@@ -1,10 +1,7 @@
 /**
- * The phone push dispatcher's test harness, shared by the phase 3 specs
- * (`PushDispatcher.test.ts`) and the phase 4 presence specs
- * (`PushDispatcher.presence.test.ts`). `PushDispatcher.test.ts`'s header
- * describes what it builds and how `flushSends` avoids sleeps. `presence` is
- * the `ClientPresence` the dispatcher reads; without it, a real one that no
- * client reports into.
+ * Harness shared by `PushDispatcher.test.ts` (whose header explains how `flushSends` avoids
+ * sleeps) and `PushDispatcher.presence.test.ts`. Without a `presence`, the dispatcher reads a
+ * real `ClientPresence` that no client reports into.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {

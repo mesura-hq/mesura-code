@@ -1,18 +1,10 @@
 import { page, userEvent } from "vite-plus/test/browser";
 import { act, type Screen } from "../test/render";
 import { flushBrowserTasks } from "./test/browserTasks";
-/**
- * Entry point: AppRoot over the shared fence (`test/appRootFenceApp.tsx`),
- * with the real ChatView, its real ThreadDetailsPanel and upstream's real
- * OpenInPicker. The fixture adds two things to the shared one: the primary
- * server reports Zed as installed, and the open thread's environment is the
- * primary environment, which is where upstream shows the picker and arms the
- * favorite-editor shortcut. Every `useAtomCommand` call records the command
- * and its input, so a spec proves whether the open-in-editor RPC ran.
- *
- * Mesura's `openInExternalEditor` client setting (default off) gates both the
- * "Open in <editor>" control and the shortcut; these specs pin the gate.
- */
+// AppRoot with the real ThreadDetailsPanel and upstream's OpenInPicker. The primary server reports
+// Zed installed and the thread is on the primary environment, where upstream shows the picker. The
+// specs pin Mesura's `openInExternalEditor` setting (default off), which gates the control and the
+// shortcut; recorded `useAtomCommand` calls show whether the RPC ran.
 
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { ThreadId } from "@t3tools/contracts";

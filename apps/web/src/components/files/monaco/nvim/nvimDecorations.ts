@@ -1,20 +1,8 @@
 /**
- * What Neovim drew over the text, kept per row.
- *
- * Everything on the buffer grid that is not the file's own text arrives here:
- * flash's jump labels, the search highlight, a plugin's virtual text. It is
- * kept per row because of what an event means — `rows` names the buffer lines
- * this event fully replaces, and says nothing at all about the others.
- *
- * That rule is the whole reason this module is not a straight assignment. A
- * host that took each event as the complete picture would clear every flash
- * label the moment one unrelated row redrew, and under the developer's real
- * configuration a row redraws constantly.
- *
- * Pure, and diffing rather than replacing, so the driver's work per event is
- * bounded by what changed rather than by what is on screen. Rebuilding thirty
- * content widgets on every keystroke of a flash search is the difference
- * between a label that sits still and one that flickers.
+ * What Neovim drew over the text (flash labels, search highlight, virtual text), kept per row:
+ * an event's `rows` fully replaces those buffer lines and says nothing about the others. Pure and
+ * diffing, so per-event work is bounded by what changed; rebuilding every widget per keystroke of a
+ * flash search makes labels flicker.
  */
 
 export interface DecorationOverlay {
@@ -89,12 +77,9 @@ export function runsFor(state: DecorationState): ReadonlyArray<DecorationRun> {
 }
 
 /**
- * What changed between what is on screen and what should be.
- *
- * Separate from the fold because the two run in different places: the fold
- * accumulates whether or not anything is rendered, and the renderer compares
- * against what it last put on screen. A renderer that trusted the fold's own
- * diff would miss everything that happened while two events shared a render.
+ * What changed between what is on screen and what should be. Separate from the fold, which
+ * accumulates whether or not anything rendered: a renderer trusting the fold's own diff would miss
+ * everything that happened while two events shared a render.
  */
 export function diffWidgets(
   before: ReadonlyMap<string, OverlayWidget>,

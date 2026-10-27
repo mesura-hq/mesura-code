@@ -17,6 +17,7 @@ import type { SidebarThreadStatus } from "./Sidebar.logic";
 export type SidebarThreadAttentionKind =
   | "approval"
   | "input"
+  | "request"
   | "failed"
   | "limited"
   | "factory"
@@ -79,6 +80,7 @@ export function resolveSidebarThreadAttention(
   ) {
     return NEEDS_INPUT;
   }
+  if (status === "request") return { kind: "request", text: "Request", emphasis: "loud" };
   if (status === "failed") return { kind: "failed", text: "Failed", emphasis: "loud" };
   if (status === "limited") return { kind: "limited", text: "Limited", emphasis: "loud" };
   if (factoryRun?.status === "running") {
@@ -107,12 +109,19 @@ export function threadHasOpenPullRequest(links: ReadonlyArray<ThreadPullRequestL
   );
 }
 
-export type SidebarThreadAttentionIcon = "approval" | "input" | "failed" | "done" | "woke" | null;
+export type SidebarThreadAttentionIcon =
+  | "approval"
+  | "input"
+  | "request"
+  | "failed"
+  | "done"
+  | "woke"
+  | null;
 
 export interface SidebarThreadAttentionLook {
   readonly className: string;
   readonly icon: SidebarThreadAttentionIcon;
-  /** The 2 px left edge a loud row carries in its label's color; empty for the rest. */
+  /** The 2 px left edge Approval and Failed rows carry in their label's color; empty for the rest. */
   readonly rowEdgeClassName: string;
 }
 
@@ -121,9 +130,17 @@ const QUIET_LOOK: SidebarThreadAttentionLook = {
   icon: null,
   rowEdgeClassName: "",
 };
+// Working rows read azure, apart from Waiting's grey, and carry the Working section's band
+// (sidebar/workingSweep.tsx); the developer chose it from the working-state prototype.
+const WORKING_LOOK: SidebarThreadAttentionLook = {
+  className: "font-medium text-(--mesura-working)",
+  icon: null,
+  rowEdgeClassName: "",
+};
 
 // The prototype's emphasis levels on the sidebar's own hues. Limited, Woke and Done keep the look
-// they had before the label moved here; Limited therefore carries no edge.
+// they had before the label moved here; Limited therefore carries no edge. Needs input is loud
+// but carries no edge either: its label and icon are enough (developer, 2026-10-26).
 const LOOK_BY_KIND: Readonly<Record<SidebarThreadAttentionKind, SidebarThreadAttentionLook>> = {
   approval: {
     className: "font-semibold text-warning-foreground",
@@ -133,7 +150,12 @@ const LOOK_BY_KIND: Readonly<Record<SidebarThreadAttentionKind, SidebarThreadAtt
   input: {
     className: "font-semibold text-needs-input",
     icon: "input",
-    rowEdgeClassName: "shadow-[inset_2px_0_0_var(--color-needs-input)]",
+    rowEdgeClassName: "",
+  },
+  request: {
+    className: "font-semibold text-guest-foreground",
+    icon: "request",
+    rowEdgeClassName: "",
   },
   failed: {
     className: "font-semibold text-error",
@@ -141,13 +163,18 @@ const LOOK_BY_KIND: Readonly<Record<SidebarThreadAttentionKind, SidebarThreadAtt
     rowEdgeClassName: "shadow-[inset_2px_0_0_var(--color-error)]",
   },
   limited: { className: "font-medium text-warning", icon: "failed", rowEdgeClassName: "" },
-  factory: QUIET_LOOK,
-  working: QUIET_LOOK,
+  factory: WORKING_LOOK,
+  working: WORKING_LOOK,
   waiting: QUIET_LOOK,
   woke: { className: "font-medium text-warning", icon: "woke", rowEdgeClassName: "" },
   ready_to_close: { className: "font-normal text-success/70", icon: null, rowEdgeClassName: "" },
   done: { className: "font-medium text-success", icon: "done", rowEdgeClassName: "" },
 };
+
+/** The labels that carry the Working section's band. */
+export function sidebarThreadAttentionSweeps(kind: SidebarThreadAttentionKind): boolean {
+  return kind === "working" || kind === "factory";
+}
 
 export function sidebarThreadAttentionLook(
   kind: SidebarThreadAttentionKind,

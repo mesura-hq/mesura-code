@@ -1,12 +1,7 @@
 /**
- * Prompt and output schema for one agent thread search reasoning step, shared
- * by every provider's `generateThreadSearchStep`.
- *
- * Evidence is thread history, so it is untrusted: each item is serialized as
- * one JSON object per line, which keeps quotes, brackets, and newlines inside
- * an excerpt escaped and unable to pose as instructions.
- *
- * @module provider-core/server/threadSearchPrompt
+ * Evidence is thread history, so it is untrusted: each item is serialized as one JSON object per
+ * line, which keeps quotes, brackets and newlines in an excerpt escaped and unable to pose as
+ * instructions.
  */
 import {
   OrchestrationThreadSearchStep,

@@ -11,14 +11,9 @@ const REPORT_INTERVAL_MS = 30 * 1000;
 const PAGE_STATE_EVENTS = ["focus", "blur"] as const;
 
 /**
- * Follows the page and calls `report` with whether the developer is here.
- *
- * It reports every transition, and while the developer stays active it
- * renews the unchanged `active` report at most once per 30 seconds, when
- * input came after the last report. The host forgets an active report two
- * minutes after it was made (`ClientPresence` on the server); reporting only
- * transitions would let it lapse under a developer who keeps working.
- * Returns the function that stops it.
+ * Reports every transition, and renews an unchanged `active` report when input came after
+ * the last one. The host forgets an active report two minutes after it was made
+ * (`ClientPresence`), so transitions alone would lapse under a developer who keeps working.
  */
 function followPresence(report: (active: boolean) => void): () => void {
   let lastInputAt = Number.NEGATIVE_INFINITY;
@@ -31,11 +26,9 @@ function followPresence(report: (active: boolean) => void): () => void {
     now - lastInputAt < ACTIVITY_WINDOW_MS;
 
   /**
-   * One timeout, aimed at the next moment the state can change without an
-   * event: the end of the activity window, or the end of the interval that
-   * holds back a report. Do not replace it with a periodic tick: a tick
-   * reports inactive up to one period after the window ends, so a developer
-   * gone for two minutes still holds the phone's pushes.
+   * One timeout aimed at the next event-less state change. Do not replace it with a
+   * periodic tick: a tick reports inactive up to one period late, so a developer gone
+   * for two minutes would still hold the phone's pushes.
    */
   const scheduleNextCheck = (now: number, active: boolean, heldBack: boolean) => {
     window.clearTimeout(wakeTimer);
@@ -119,6 +112,7 @@ function createPresenceHub(): PresenceHub {
 /** Follows the page for as long as the caller is mounted; the hub carries its reports. */
 export function useReportPresence(): PresenceHub {
   const [hub] = useState(createPresenceHub);
+  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes to page input, focus and visibility events while mounted
   useEffect(() => followPresence(hub.report), [hub]);
   return hub;
 }

@@ -7,19 +7,10 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * The modal key layer runs app commands through the command registry
- * (`apps/web/src/commands/commandRegistry.ts`), never by replaying a chord.
- *
- * The prototype ran a leader command by dispatching its chord as a synthetic
- * `keydown` (`keybindingCommandBridge.ts`), so the component that already
- * handled the chord ran it. That breaks for a command with no chord, runs the
- * wrong owner when a chord means two things, and fakes input to reach code the
- * app already owns. These assertions read the sources, because a replay that
- * comes back works and no behavioural test of the effect notices.
- *
- * Owners register an object map, a spread of a named object map, or literal
- * command/mode pairs mapped through `Object.fromEntries`. Only declarations
- * that reach a registration call count as owners.
+ * The modal key layer runs app commands through `apps/web/src/commands/commandRegistry.ts`, never by
+ * replaying a chord as a synthetic `keydown`: a replay fails for a chordless command and runs the
+ * wrong owner of a shared chord, yet still passes behaviour tests. Owners are object maps, spreads
+ * of named maps, or `Object.fromEntries` pairs that reach a registration call.
  */
 
 const webSource = NodePath.join(repositoryRoot, "apps/web/src");

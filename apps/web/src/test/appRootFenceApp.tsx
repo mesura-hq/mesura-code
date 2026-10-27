@@ -28,6 +28,7 @@ import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/th
 
 import type { AppRouter } from "../router";
 import { AppRoot } from "../AppRoot";
+import { AppRouteModal } from "../components/AppRouteModal";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { Route as ChatLayoutRoute } from "../routes/_chat";
@@ -147,11 +148,8 @@ export function addFenceThread(
 }
 
 /**
- * A memory router whose root renders the real CommandPalette around the real
- * AppSidebarLayout, as `routes/__root.tsx` does, and whose chat layout is the
- * real `_chat.tsx` route component. That layout reads the thread params and
- * mounts ThreadRouteView. The leaf route renders nothing, as the real thread
- * route does, so navigation keeps one ChatView mounted across thread changes.
+ * Mirrors `routes/__root.tsx` and the real `_chat.tsx` layout. The leaf route renders nothing, as
+ * the real thread route does, so navigation keeps one ChatView mounted across thread changes.
  */
 export function createFenceRouter(firstThreadId: ThreadId) {
   const route = createRootRoute({
@@ -173,15 +171,18 @@ export function createFenceRouter(firstThreadId: ThreadId) {
     path: "/$environmentId/$threadId",
     component: () => null,
   });
-  // A Settings page outside the chat layout, as the real one is: the layout's
-  // sidebar slot shows the settings navigation there.
+  // A Settings modal over the thread that opened it, as the real `_chat.settings` route is.
   const settings = createRoute({
-    getParentRoute: () => route,
+    getParentRoute: () => chatLayout,
     path: "/settings",
-    component: () => <button data-testid="settings-control">Save</button>,
+    component: () => (
+      <AppRouteModal label="Settings">
+        <button data-testid="settings-control">Save</button>
+      </AppRouteModal>
+    ),
   });
   return createRouter({
-    routeTree: route.addChildren([chatLayout.addChildren([thread]), settings]),
+    routeTree: route.addChildren([chatLayout.addChildren([thread, settings])]),
     history: createMemoryHistory({
       initialEntries: [`/${fenceEnvironmentId}/${firstThreadId}`],
     }),

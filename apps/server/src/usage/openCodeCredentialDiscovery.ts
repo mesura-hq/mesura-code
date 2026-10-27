@@ -1,9 +1,6 @@
 /**
- * Seed subscriptions from the credentials OpenCode already holds.
- *
- * This runs once to *find* a subscription, never to own it. The record it seeds
- * outlives OpenCode: uninstalling it, or driving the same plan through another
- * agent, must not make the row disappear.
+ * Seed subscriptions from the credentials OpenCode already holds. Discovery finds a subscription
+ * but does not own it: the seeded row must survive an OpenCode uninstall or another agent.
  *
  * @module usage/openCodeCredentialDiscovery
  */
@@ -66,15 +63,9 @@ export function openCodeDataDirectories(environment: NodeJS.ProcessEnv): Readonl
 }
 
 /**
- * Read both credential stores and report the plans this fork can meter.
- *
- * Both are read because OpenCode is mid-migration between them: `account.json`
- * is the newer store and holds some services, while `auth.json` is a flat map
- * that holds those *plus* others. A reader that knows only one is already half
- * broken.
- *
- * A missing store is not a failure. OpenCode not being installed is an ordinary
- * state, not an error to report.
+ * Read both credential stores and report the plans this fork can meter. OpenCode is mid-migration:
+ * the newer `account.json` holds some services, and the flat `auth.json` holds those plus others.
+ * A missing store is not a failure, because OpenCode not being installed is an ordinary state.
  */
 export const discoverOpenCodeCredentials = Effect.fn("discoverOpenCodeCredentials")(
   function* (input: {
@@ -104,7 +95,7 @@ export const discoverOpenCodeCredentials = Effect.fn("discoverOpenCodeCredential
       if (Option.isNone(contents)) return null;
       // A store that is present but unreadable is treated as absent: the point
       // of discovery is to find what it can, never to fail a startup.
-      return yield* decodeJson(contents.value).pipe(Effect.catch(() => Effect.succeed(null)));
+      return yield* decodeJson(contents.value).pipe(Effect.orElseSucceed(() => null));
     });
 
     // The newer store first, so its entry wins where a service is in both.

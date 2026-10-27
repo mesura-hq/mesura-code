@@ -1,10 +1,7 @@
 /**
- * Entry point: `createDictationSessionKeys`, which `DesktopDictationWidget` drives from the
- * renderer's published dictation state and tears down on quit. The socket and the binds are
- * recording stand-ins; a socket start is held open with a promise the spec releases.
- *
- * Search unification, phase 4, review finding P1-1, and the regressions for socket-only-under-
- * Hyprland and the launcher fallback.
+ * Entry point: `createDictationSessionKeys`, driven by the renderer's dictation state and torn
+ * down on quit. The socket and the binds are recording stand-ins; the spec holds a socket start
+ * open with a promise it releases.
  */
 import { describe, expect, it } from "vite-plus/test";
 

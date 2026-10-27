@@ -1,23 +1,14 @@
 /**
- * Binding and unbinding a Unix socket server, as promises.
- *
- * Both of these are about the LISTENER and know nothing about what is served
- * over it: the framing belongs to `threadStream.ts`, which pushes rather than
- * answers.
- *
- * Only `node:net` here, for the same reason `socketFiles.ts` holds no net: the
- * repository's diagnostics forbid node builtins wherever an Effect service
- * exists, and there is none for sockets.
+ * Binding and unbinding a Unix socket listener, as promises; framing lives in `threadStream.ts`.
+ * Only `node:net` here: diagnostics forbid node builtins where an Effect service exists, and none
+ * exists for sockets.
  */
 import * as NodeNet from "node:net";
 
 /**
- * Resolves once the server is listening, and rejects with the bind error
- * rather than leaving it to the server's own `error` handler.
- *
- * The handler is removed on both paths. Leaving it attached would make a later
- * runtime error — a peer resetting a connection, say — reject a promise that
- * has already settled, which is silent.
+ * Rejects with the bind error instead of leaving it to the server's `error` handler. The handler
+ * is removed on both paths: left attached, a later runtime error would reject a settled promise,
+ * silently.
  */
 export function listenOnPath(server: NodeNet.Server, socketPath: string): Promise<void> {
   return new Promise((resolve, reject) => {

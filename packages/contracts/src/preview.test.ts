@@ -8,11 +8,7 @@ import {
   PreviewOpenLinkTargetInput,
   PreviewOpenLinkTargetResult,
 } from "./preview.ts";
-import {
-  PreviewAutomationHost,
-  PreviewAutomationOpenInput,
-  PreviewAutomationStatus,
-} from "./previewAutomation.ts";
+import { PreviewAutomationHost, PreviewAutomationStatus } from "./previewAutomation.ts";
 
 const decodePreviewEvent = Schema.decodeUnknownSync(PreviewEvent);
 const decodeLinkTargetInput = Schema.decodeUnknownSync(PreviewOpenLinkTargetInput);
@@ -20,7 +16,6 @@ const encodeLinkTargetInput = Schema.encodeUnknownSync(PreviewOpenLinkTargetInpu
 const decodeLinkTargetResult = Schema.decodeUnknownSync(PreviewOpenLinkTargetResult);
 const decodeManualOpenInput = Schema.decodeUnknownSync(PreviewOpenInput);
 const decodeSnapshot = Schema.decodeUnknownSync(PreviewSessionSnapshot);
-const decodeOpenInput = Schema.decodeUnknownSync(PreviewAutomationOpenInput);
 const decodeAutomationHost = Schema.decodeUnknownSync(PreviewAutomationHost);
 const decodeAutomationStatus = Schema.decodeUnknownSync(PreviewAutomationStatus);
 
@@ -97,12 +92,6 @@ describe("thread-link allocation contracts", () => {
       expect(() => decodeLinkTargetResult(incomplete)).toThrow();
     }
     expect(() => decodeLinkTargetResult({ ...result, revision: -1 })).toThrow();
-  });
-});
-
-describe("PreviewAutomationOpenInput", () => {
-  it("retains the legacy show visibility alias", () => {
-    expect(decodeOpenInput({ show: false })).toEqual({ show: false });
   });
 });
 

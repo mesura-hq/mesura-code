@@ -22,12 +22,9 @@ import { encodePngIco, readPngDimensions, WINDOWS_ICON_SIZES } from "./lib/icon-
 export const PINNED_LIBVIPS_VERSION = "8.18.6";
 
 /**
- * The boot splash blocks first paint on this file, so it ships at 3x the 64px
- * box the splash draws it in rather than at icon resolution, and it is the one
- * rendition worth quantizing: a palette cuts it by 58% (37,489 -> 15,657
- * bytes) at 46 dB PSNR, which is invisible on a 64px metallic cube. The icons
- * keep the plain encoding, because changing theirs would rewrite every tracked
- * asset for no user-visible gain.
+ * The boot splash blocks first paint on this file, so it ships at 3x its 64px box and is quantized:
+ * a palette cuts it by 58% at 46 dB PSNR, invisible at that size. The icons keep the plain
+ * encoding, because changing it would rewrite every tracked asset for no visible gain.
  */
 export const SPLASH_MARK_SIZE = 192;
 export const SPLASH_MARK_PNG_OPTIONS = { palette: true, quality: 90, effort: 10 } as const;
@@ -51,19 +48,6 @@ export interface IconVariant {
   readonly source: string;
   readonly composerAsset: string;
   readonly outputs: VariantOutputs;
-}
-
-interface IconComposerTool {
-  readonly path: string;
-  readonly version: string;
-  readonly bundleVersion: string;
-  readonly supportsDesignGeneration: boolean;
-}
-
-interface CommandResult {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number;
 }
 
 export class IconExportFileSystemError extends Schema.TaggedError<IconExportFileSystemError>()(

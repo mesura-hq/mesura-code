@@ -17,41 +17,10 @@ import { connectSideChannel, listeningAdapterLayer } from "./nvimSideChannel.ts"
 import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * Entry point: `EditorSessionManager.makeWithOptions`, driven through the calls
- * the websocket layer makes for `editorSession.open`, `.viewport` and `.input`
- * (`wsMesura.ts`), and read through `EditorSessionManager.attachEventStream`,
- * the stream it serves for `editorSession.attach`. Neovim is real, spawned by
- * `NodeNvimAdapter` with `--listen` added, so `nvimSideChannel.ts` can ask it
- * what the wire never says: how far the window is scrolled sideways
- * (`leftcol`) and where the cursor really is.
- *
- * Phase 2 of the editor latency cycle, "Long lines never scroll Neovim
- * sideways". Neovim draws nothing past its grid's last column, and with
- * 'nowrap' a cursor that reaches that column scrolls the window sideways. The
- * classification in `GridModel.ts` reads grid column N against buffer column
- * N, so after that scroll every visible character differs from the one it is
- * compared against and becomes a phantom overlay.
- *
- * The viewport each test sends is the one the web client sends today
- * (`nvimViewport.ts`): `cols` is the widest visible line, floor 200. Under
- * `MESURA_NVIM_CONFIG_DIR` the developer's own configuration is loaded, as
- * `realConfig.test.ts` loads it; without it, an empty one.
- *
- * - Criteria 1 and 2: `A` on the widest visible line, then 40 typed
- *   characters, leave `leftcol` at 0.
- * - Criterion 3: a window scrolled sideways anyway is classified against the
- *   buffer shifted by `leftcol`, so the shift alone is no overlay.
- * - Criterion 4: on the Markdown fixture, `A` plus 40 characters emit no
- *   overlay and at most 2 KB of events per key.
- * - Criterion 5: a visible line longer than the widest request the contract
- *   accepts (`cols` 1000) types and moves like any other line.
- * - Criterion 6: the real client's viewport requests, recorded during the
- *   bench's "50 j from the top", do not move the cursor the keys put: the
- *   cursor ends on line 51.
- * - Criterion 7: `A` plus 40 characters on the TypeScript fixture's longest
- *   line hold no overlay.
- *
- * Every wait is on an attach-stream event or an RPC answer, never a clock.
+ * With 'nowrap', a cursor at the grid's last column scrolls Neovim sideways, and `GridModel.ts`
+ * then reads each grid column against the wrong buffer column. Neovim runs with `--listen` so
+ * `nvimSideChannel.ts` reads `leftcol` and the true cursor. Viewports match `nvimViewport.ts`
+ * (`cols` = widest visible line, floor 200); every wait is on an event or an RPC answer.
  */
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));
@@ -318,12 +287,9 @@ if (nvimAvailable)
       );
 
       /**
-       * What Neovim really draws at the left edge, past the bound so the shift
-       * stays. A wide character the edge cuts in half is drawn as `<`, and an
-       * unprintable one as the rest of its spelling: U+200B is `<200b>`, six
-       * cells, and from `leftcol` 3 its last four, `00b>`. Both are the
-       * buffer's own character. Counting U+200B as one cell put every
-       * character after it in the wrong column.
+       * At the left edge, Neovim draws a cut wide character as `<` and an unprintable one as the
+       * rest of its spelling: U+200B is `<200b>`, six cells, so `leftcol` 3 shows `00b>`. Both
+       * are the buffer's own character, and U+200B counted as one cell misplaces every later one.
        */
       const atLeftEdge = (text: string, leftcol: number, caretByte: number) =>
         Effect.gen(function* () {
@@ -484,16 +450,10 @@ if (nvimAvailable)
        * lines now under them.
        */
       /**
-       * What the reservation in `mayExpandUnpredictably` costs in ordinary
-       * use. A count, a `.` or an Ex command reserves the grid's whole bound
-       * before it is sent, because its width is Neovim's to know; on a file of
-       * short lines that is one widening for the burst, never a resize per
-       * key, and the keys cost what plain motions and edits cost.
-       *
-       * The client is played as it behaves: after a key scrolls Neovim's
-       * window it sends the new window, `cols` 200, as `nvimViewport.ts`
-       * computes it for short lines. A viewport that shrank the reserved grid
-       * would make the next count widen it again, a resize per key pair.
+       * `mayExpandUnpredictably` reserves the grid's whole bound for a count, `.` or Ex command:
+       * on short lines that is one widening per burst, never a resize per key. The client sends
+       * `cols` 200 after each scroll, as `nvimViewport.ts` does; a viewport that shrank the
+       * reserved grid would cause a resize per key pair.
        */
       const SHORT_LINES = Array.from(
         { length: 300 },

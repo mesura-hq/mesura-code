@@ -6,11 +6,9 @@ import * as NodeURL from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 
 /**
- * `@symmetria/fm-main` is the file manager's privileged half: scanning,
- * watching, file operations, an Electron peer. The web app depends on it for
- * exactly one module, the channel table, which imports nothing. Any other
- * subpath would pull `node:fs` or Electron into the browser bundle, and the
- * failure would be a build or a blank page rather than a type error.
+ * The web app may import only the channel table from `@symmetria/fm-main`, the file
+ * manager's privileged half. Any other subpath pulls `node:fs` or Electron into the
+ * browser bundle, and fails as a build or a blank page rather than a type error.
  */
 const webSource = NodeURL.fileURLToPath(new URL("../../..", import.meta.url));
 const ALLOWED = new Set(["@symmetria/fm-main/ipc/channels"]);

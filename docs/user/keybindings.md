@@ -59,7 +59,7 @@ in Settings.
 
 ## Copy pull request references
 
-With a PR open in the right panel or on the Pull Requests page, use `mod+shift+c`
+With a PR open in the right panel or on the Pull requests page, use `mod+shift+c`
 to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
 Both shortcuts can be changed in Settings. Search for “Copy Link or Thread ID”
 or “Copy Number”. They copy the selected PR and leave terminal input alone.
@@ -157,6 +157,10 @@ model picker is open. The thread jumps do not run while the model picker is open
 Those defaults use `isDesktop` so they do not steal the
 browser's tab-switch shortcuts. Remove that condition in Settings if you want
 the same jumps in a browser.
+
+`mod+0` jumps to the tenth thread. While the preview has focus, it resets the
+preview's zoom instead. In the desktop app, View > Actual Size resets the app's
+zoom and has no shortcut, because `mod+0` belongs to the thread jump.
 
 ## Commands
 
@@ -336,7 +340,7 @@ the file editor, and neither runs while the terminal has focus. See
 `ctrl+tab` and `ctrl+shift+tab`. The bracket pair works everywhere and is the one the app reports as
 the shortcut. The tab pair is desktop-only, because browsers keep those two chords for their own tab
 strip; it is also inactive while the terminal has focus, since the terminal encodes `ctrl+tab`
-itself. `mod+1` through `mod+9` jump straight to a thread: hold `mod` and the threads on screen in
+itself. `mod+1` through `mod+9`, and `mod+0` for the tenth, jump straight to a thread: hold `mod` and the threads on screen in
 the sidebar show their numbers, counted from the top of what you see. With the sidebar hidden, they
 count from the top of the list.
 

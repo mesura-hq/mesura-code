@@ -1,9 +1,5 @@
 /**
- * Phase 1 fence of the hosts dock plan: acceptance criteria 1, 2, 3, 5, 6, 7 and 8.
- *
- * Entry point: `HostStatsCollector.make`, the constructor phase 2 wraps into the
- * sampler. Nothing in the server calls the collector during phase 1, so these
- * specs drive it directly against the fixture trees in `./fixtures`
+ * Drives `HostStatsCollector.make` directly against the fixture trees in `./fixtures`
  * (provenance in `./fixtures/README.md`).
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -41,9 +37,8 @@ const NVIDIA_SMI_ARGS = [
 ];
 
 /**
- * Expected second-reading rates between `vigilia-home` and `vigilia-home-60s-later`.
- * CPU follows proc(5): idle time is `idle + iowait`, and the total is the first eight
- * fields, because `guest` and `guest_nice` are already counted inside `user` and `nice`.
+ * Rates from `vigilia-home` to `vigilia-home-60s-later`. Per proc(5), idle is `idle + iowait` and
+ * the total is the first eight fields (`guest` and `guest_nice` are already in `user` and `nice`).
  * cpu  7957187 202 1169318 12256969 28932 58487 26810 0 153145 0   (vigilia-home)
  * cpu  8033079 202 1178122 12267617 28969 58802 26906 0 153697 0   (60 s later)
  */

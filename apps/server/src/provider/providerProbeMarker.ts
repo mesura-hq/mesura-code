@@ -1,18 +1,8 @@
 /**
- * The environment marker that tells a host a spawned provider CLI is a short
- * probe, not an agent session.
- *
- * Contract: a host may wrap the provider CLIs (`codex`, `claude`) to confine
- * every process the server spawns, for example under a memory limit shared by
- * all agent sessions. Such a wrapper exempts a process whose environment has
- * exactly `MESURA_PROVIDER_PROBE=1`, so the server's status, skills,
- * account-limit and reset-credit probes stay responsive while sessions fill
- * that limit.
- *
- * The exemption is only safe while sessions never carry the marker: a marked
- * session escapes the confinement. So probes add it with
- * `withProviderProbeMarker`, and every session spawn removes it with
- * `withoutProviderProbeMarker`, including a value the server inherited.
+ * Marks a spawned provider CLI as a short probe, not an agent session. A host wrapper
+ * that confines spawned CLIs under a shared limit may exempt `MESURA_PROVIDER_PROBE=1`, so
+ * probes stay responsive. Safe only while sessions never carry it: probes add it with
+ * `withProviderProbeMarker`; every session spawn strips it, an inherited value included.
  */
 export const PROVIDER_PROBE_MARKER_ENVIRONMENT = Object.freeze({
   MESURA_PROVIDER_PROBE: "1",

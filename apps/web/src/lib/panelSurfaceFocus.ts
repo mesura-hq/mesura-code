@@ -1,18 +1,7 @@
-/**
- * Where the keyboard lands in the right panel: in the active surface's content,
- * on the element that owns its keys (a tree, an editor, a diff, a terminal),
- * never on a tab title or a toolbar button. Every keyboard way into the panel
- * comes here — `Ctrl+L` and the other pane moves, a launcher letter, `Ctrl+Tab`,
- * a close — so a surface is navigable the moment it shows, with no click first.
- *
- * A surface marks its entry with `data-pane-entry`; the value ranks entries
- * when a surface shows more than one (the editor beside its file tree), and
- * the highest visible one wins, then document order. An entry that is not
- * focusable itself gets its scroll region focused, so the arrows scroll it; an
- * entry whose keys live deeper (a tree that renders its rows in a shadow root)
- * names its own focus with `setPaneEntryFocus`. In a focused scroll region,
- * `Ctrl+D` / `Ctrl+U` scroll half a page unless the surface took them first.
- */
+// Every keyboard way into the right panel lands on the active surface's key owner,
+// never a tab title or toolbar. `data-pane-entry` marks entries; the highest shown
+// rank wins, then document order. A non-focusable entry focuses its scroll region;
+// one whose keys live deeper (a shadow-root tree) uses `setPaneEntryFocus`.
 
 import { useEffect, type RefObject } from "react";
 
@@ -189,17 +178,14 @@ export function isPanelSurfaceKeyboardActivation(event: {
   return event.type.startsWith("key") || (event.detail === 0 && lastInputWasKey);
 }
 
-/**
- * While a panel is mounted: `enterPanel` is the panel's pane entry, and
- * `Ctrl+D` / `Ctrl+U` scroll its surfaces. When a key changes the active
- * surface while the keyboard is in the panel — `Ctrl+Tab`, a close, a file
- * opened from a tree — focus follows into the new surface; the old one took
- * its focused element with it, which leaves focus on <body>.
- */
+// When a key changes the active surface while the keyboard is in the panel, focus
+// follows into the new surface: the old one took its focused element with it,
+// which leaves focus on <body>.
 export function usePanelSurfaceKeys(
   panelRef: RefObject<Element | null>,
   activeSurfaceId: string | null,
 ): void {
+  // oxlint-disable-next-line t3code/react-effect-budget -- focus follows an active-surface change from any key path (Ctrl+Tab, close, tree open) after commit
   useEffect(() => {
     // The empty panel is the launcher, which keeps its own focus.
     if (activeSurfaceId === null || !lastInputWasKey) return;
@@ -212,6 +198,7 @@ export function usePanelSurfaceKeys(
     if (inPanel) focusPanelSurfaceAfterRender(panel);
   }, [panelRef, activeSurfaceId]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes window key and pointer listeners and the pane entry for the panel's lifetime
   useEffect(() => {
     const unregisterEntry = registerPaneEntry("panel", enterPanel);
     // Bind allocates listeners per registration. React Compiler hoists
@@ -257,15 +244,10 @@ export function activatePanelSurfaceFromLauncher(
   if (keyboard) focusPanelSurfaceAfterRender(panel, previousTitle);
 }
 
-/**
- * After a key changed the panel's active surface: focus its entry once it
- * renders. The panel shows the new tab a frame or more later, so this first
- * waits for the active tab title to differ from `previousTitle` (the title
- * active at the key; null when any title will do). Focus parks on that title,
- * so `Ctrl+Tab` still reads as the panel's, and moves into the surface as soon
- * as its entry appears. A surface that took focus itself (a terminal) keeps it,
- * and a key or a click that moves focus meanwhile wins over the wait.
- */
+// The panel shows the new tab a frame or more after the key, so this waits for the
+// active title to differ from `previousTitle` (null: any title), parks focus there
+// so `Ctrl+Tab` stays the panel's, then enters the surface once its entry renders.
+// A surface that focused itself, or a focus move meanwhile, wins over the wait.
 export function focusPanelSurfaceAfterRender(
   panel: Element,
   previousTitle: Element | null = null,

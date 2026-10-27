@@ -13,13 +13,9 @@ import {
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * Monaco's CSS reaches the page from the first file opened until the window
- * closes, so a `:has()` in it costs every thread switch for the rest of the
- * session, not only while the editor is open. One such rule, which reads the
- * `style` attribute, added ten whole-page restyles to thirteen thread
- * switches; `apps/web/vite/monacoActionWidgetCss.ts` rewrites it at build
- * time. These checks run against the installed Monaco, so a version bump that
- * moves or adds such a rule fails here instead of shipping silently.
+ * Monaco's CSS stays on the page for the whole session once a file opens, so a `:has()` in it costs
+ * every thread switch; `apps/web/vite/monacoActionWidgetCss.ts` rewrites one such rule at build time.
+ * These checks run against the installed Monaco, so a bump that adds such a rule fails here.
  */
 
 // Through the web app's link, not `require.resolve`: Monaco's exports map sends

@@ -97,6 +97,7 @@ import { previewEnvironment } from "./state/preview";
 import { AsyncResult } from "effect/reactivity";
 import * as Cause from "effect/Cause";
 import { createDeferredPromise } from "./test/threadLinkFixture";
+import { dispatchMenuAction } from "./shortcuts/dispatcher";
 import { resetConfirmDialogForTests } from "./confirmDialog";
 import type { FenceRouter } from "./test/appRootFenceApp";
 
@@ -381,7 +382,8 @@ it("thread link AppRoot guard: forwarded configured close reaches the mounted re
   ).toBe("file:retained.md");
   await root?.[Symbol.asyncDispose]();
   root = undefined;
-  expect(listeners.size).toBe(0);
+  // The shortcut dispatcher's menu listener is app-global by design and outlives every mount.
+  expect([...listeners].filter((listener) => listener !== dispatchMenuAction)).toEqual([]);
 });
 
 it("thread link AppRoot fence: accepted public target close clears maximize while another surface survives", async () => {

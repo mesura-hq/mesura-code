@@ -21,7 +21,6 @@ const fromWire = <S extends Schema.Top>(schema: S) =>
   Schema.decodeUnknownSync(Schema.toCodecJson(schema) as never) as (value: unknown) => S["Type"];
 
 const Named = ForwardCompatibleArray(Schema.Struct({ name: TrimmedNonEmptyString }));
-const encodeNamedJson = Schema.encodeUnknownSync(Schema.toCodecJson(Named));
 const isNamed = Schema.is(Named);
 // How context records are bounded before forward-compatible decoding.
 const Wrapped = Schema.Array(Schema.Unknown).pipe(Schema.decodeTo(Named));
@@ -39,8 +38,10 @@ describe("ForwardCompatibleArray", () => {
   });
 
   it("drops an element it cannot encode instead of failing the array", () => {
+    const encodeNamed = Schema.encodeUnknownSync(Schema.toCodecJson(Named));
+
     const wire = JSON.parse(
-      JSON.stringify(encodeNamedJson([{ name: "a" }, { name: " " }, { name: "b" }])),
+      JSON.stringify(encodeNamed([{ name: "a" }, { name: " " }, { name: "b" }])),
     );
     expect(wire).toEqual([{ name: "a" }, { name: "b" }]);
     expect(fromWire(Named)(wire)).toEqual([{ name: "a" }, { name: "b" }]);

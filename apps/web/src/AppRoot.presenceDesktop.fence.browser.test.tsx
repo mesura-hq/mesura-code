@@ -1,15 +1,7 @@
-/**
- * Entry point: AppRoot inside the desktop shell, mounted as
- * `AppRoot.presence.fence.browser.test.tsx` mounts it. The shell is the
- * preload script's `window.desktopBridge`, set here before any app module
- * loads, because `env.ts` reads it once at load.
- *
- * Phone push phase 4, from the plan: the desktop shell reports presence too,
- * because the developer at the laptop is the main case to silence the phone
- * for. The shell never subscribes to push (phase 2), and that must not turn
- * its presence report off. Its primary environment is its own local server,
- * so the report has to reach a connected remote host too.
- */
+// AppRoot inside the desktop shell: `window.desktopBridge` is set before any app module loads,
+// because `env.ts` reads it once. The shell never subscribes to push, which must not turn its
+// presence report off, and the report must reach a connected remote host, not only the shell's own
+// local server.
 import { expect, it, vi } from "vite-plus/test";
 
 vi.hoisted(() => {

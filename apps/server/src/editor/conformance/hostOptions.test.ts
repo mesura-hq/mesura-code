@@ -10,18 +10,10 @@ import { NvimBridge } from "../NvimBridge.ts";
 import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * The host's options, proved against a configuration that fights them.
- *
- * This is the equality the whole grid classification rests on: grid column N
- * equals buffer column N. Every option asserted here breaks it — a sign
- * column shifts every character right, `list` paints a dot where the buffer
- * holds a space, `conceallevel` replaces buffer text with something shorter.
- * A configuration that sets them is the ordinary case, not a hostile one, so
- * the host has to win and the proof has to be a real Neovim reading the
- * option back rather than a string match on the Lua.
- *
- * It uses a configuration written here rather than the developer's own, so it
- * runs wherever `nvim` is on PATH. `realConfig.test.ts` covers the real one.
+ * Grid classification needs grid column N to equal buffer column N, and each option asserted here
+ * (sign column, `list`, `conceallevel`) breaks that. A real Neovim reads the options back under a
+ * configuration that sets them; that configuration lives here so the file runs wherever `nvim` is
+ * on PATH. `realConfig.test.ts` covers the developer's own configuration.
  */
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));

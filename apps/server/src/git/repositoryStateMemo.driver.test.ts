@@ -1,11 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * The repository-state memo through the real git driver: it answers only the
- * reads made under `UseRepositoryStateMemo` (the background sweep's), and a
- * change to anything those reads depend on — an included config file, the
- * system config, a loose ref rewritten in place — reaches the next read.
- * Entry point: `memoizeRepositoryReads` over the counting driver of
- * `GitManager.testkit.ts`.
+ * Drives `memoizeRepositoryReads` over the counting real driver: only reads under
+ * `UseRepositoryStateMemo` are memoized, and a change to anything they depend on (an included
+ * config file, the system config, a loose ref rewritten in place) reaches the next read.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";

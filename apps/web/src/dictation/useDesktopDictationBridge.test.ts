@@ -16,6 +16,7 @@ const recording: DictationWidgetSnapshot = {
     runningSince: 1_000,
     level: 0.2,
     sampledAt: 1_100,
+    thread: null,
   },
   mode: "submit",
   target: "Dictation fence",

@@ -1,15 +1,34 @@
-/**
- * Phase 6 guard (thread-attention plan): the banner stack's dismiss, which the pinned action
- * dock extends. Entry point: `ComposerBannerStack` as `ChatComposer` mounts it, with a notice
- * item carrying `onDismiss`. What only a browser shows: the exit transition runs before the
- * notice is removed, and a second press during the exit does nothing.
- */
 import { InfoIcon } from "lucide-react";
 import { expect, it, vi } from "vite-plus/test";
+import { userEvent } from "vite-plus/test/browser";
 
 import { act, fakeTimers, render } from "../../../test/render";
-import { ComposerBannerStack } from "./ComposerBannerStack";
+import { ComposerBannerStack, type ComposerBannerStackItem } from "./ComposerBannerStack";
 
+it("commits a dismissal when the thread switches during the exit transition", async () => {
+  const onDismiss = vi.fn();
+  const item: ComposerBannerStackItem = {
+    id: "notice",
+    variant: "info",
+    icon: <InfoIcon />,
+    title: "Thread A notice",
+    dismissLabel: "Dismiss notice",
+    onDismiss,
+  };
+  await using screen = await render(<ComposerBannerStack key="thread-a" items={[item]} />);
+
+  await userEvent.click(screen.getByRole("button", { name: "Dismiss notice" }));
+  // The composer keys the stack by thread, so switching threads remounts it mid-exit.
+  await screen.rerender(<ComposerBannerStack key="thread-b" items={[]} />);
+
+  await vi.waitFor(() => expect(onDismiss).toHaveBeenCalledTimes(1));
+});
+
+/**
+ * Phase 6 guard (thread-attention plan): the pinned action dock extends this dismiss. Only a
+ * browser shows that the exit transition runs before the notice is removed, and that a second
+ * press during the exit does nothing.
+ */
 function notice(onDismiss: () => void) {
   return {
     id: "composer-banner-stack-guard-notice",

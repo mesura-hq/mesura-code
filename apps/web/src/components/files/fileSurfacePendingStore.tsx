@@ -1,16 +1,9 @@
 import { create } from "zustand";
 
 /**
- * Which file surfaces have an edit not yet saved, per project.
- *
- * A store rather than state in `ChatView`, which is where it lived: every
- * pending transition — the first key of a typing burst, and the save that
- * ends it — re-rendered the whole chat view and its composer, once per burst.
- * `ChatView` only writes here. The readers subscribe to one surface's flag
- * each: the panel's tab marker and the file panel itself.
- *
- * Keyed by `${environmentId}:${workspaceRoot}`, the project key `ChatView`
- * resolves for the active thread, so two threads on one project share it.
+ * Unsaved-edit flags per project, kept out of `ChatView` state so a typing burst does not re-render the
+ * chat view; `ChatView` only writes. Keyed by `${environmentId}:${workspaceRoot}`, so two threads on
+ * one project share it.
  */
 interface FileSurfacePendingState {
   readonly pendingByProject: ReadonlyMap<string, ReadonlySet<string>>;

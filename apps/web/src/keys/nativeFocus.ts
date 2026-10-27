@@ -1,16 +1,8 @@
 /**
- * Focus moves the way it does in a native desktop app: by the app's own keys
- * (the pane moves, the panel launcher, the trees, the sidebar arrows), never
- * by walking the page's tab order. A bare `Tab` or `Shift+Tab` that no element
- * claimed does nothing. The focus outline that walk would show is removed in
- * `mesura.css`. This applies with Vim mode off too, as the focus outlines of
- * round 2 did.
- *
- * Elements that own `Tab` keep it: the terminal, the editor, the composer's
- * menus, the selection toolbar and the thread search each cancel the event
- * themselves. That is why the listener is on the window in the bubble phase,
- * after every element's own handler, and why it cancels only the browser's
- * default action and never stops the event.
+ * Focus moves only by the app's own keys, never the tab order, with Vim mode off too: an unclaimed
+ * bare `Tab` does nothing. Elements that own `Tab` (terminal, editor, composer menus) cancel it
+ * themselves, so the listener sits on the window in the bubble phase, after them, and only
+ * prevents the default; it never stops the event.
  */
 let installed = false;
 
@@ -32,13 +24,10 @@ function cancelTabTraversal(event: KeyboardEvent): void {
 }
 
 /**
- * WORKAROUND: an element that stops a key's propagation without cancelling it
- * hides the `Tab` from the window listener, and the browser then walks the tab
- * order from there (the device tab's rename field in `RightPanelTabs.tsx`, the
- * Monaco comment zones, and any such handler upstream adds later). Wrapping
- * this one event's stop methods cancels the walk at the moment propagation
- * stops, without editing each upstream handler. Remove if the platform gains a
- * way to observe a stopped event, or if the tab walk is ever wanted back.
+ * WORKAROUND: a handler that stops a `Tab` without cancelling it (`RightPanelTabs.tsx`'s rename
+ * field, Monaco comment zones) hides it from the window listener; wrapping this event's stop methods
+ * cancels the walk there without editing each upstream handler. Remove if the platform can observe
+ * a stopped event, or if the tab walk is wanted back.
  */
 function cancelTabWhereItStops(event: KeyboardEvent): void {
   if (!isBareTab(event)) return;

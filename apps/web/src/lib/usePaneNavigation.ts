@@ -18,21 +18,10 @@ import {
 } from "./paneFocus";
 import { closeAgentSearchPopupForWorkspace } from "../components/searches/agentSearchPopupStore";
 
-/**
- * Directional pane navigation, claimed at the window before any pane sees it.
- *
- * The chord has one meaning wherever it is typed, including inside the
- * embedded Neovim editor and inside a terminal. That is the whole point: a
- * chord whose meaning depends on what happens to have focus is the problem
- * this exists to remove, so it is consumed in the capture phase and never
- * forwarded. Neovim's own window commands stay reachable as `<C-w>h` and
- * `<C-w>l`, because a prefix chord is never captured here.
- *
- * Directional, never wrapping, silent at the edge: `Ctrl+L` from the
- * rightmost pane does nothing rather than jumping to the leftmost, because a
- * chord whose effect depends on invisible state is worse than one that does
- * nothing.
- */
+// Claimed in the capture phase and never forwarded, so the chord means the same in
+// Neovim and the terminal; Neovim keeps `<C-w>h`/`<C-w>l` since a prefix chord is
+// never captured. Never wraps and is silent at the edge: a chord whose effect
+// depends on invisible state is worse than one that does nothing.
 
 export interface PaneNavigationEvent extends ShortcutEventLike {
   readonly repeat?: boolean;
@@ -65,13 +54,8 @@ export function createPaneNavigationHandler(input: {
 }): (event: PaneNavigationEvent) => void {
   const platform = input.platform;
 
-  // Whatever this config binds the pane commands to, computed once. Matching
-  // an event against these is what lets the handler decline in a couple of
-  // comparisons instead of scanning the whole table.
-  //
-  // Derived from the config rather than hardcoded to `h`, `j`, `k` and `l`,
-  // because a rebound pane chord has to keep working and a hardcoded key
-  // would silently stop honouring it.
+  // From the config, not hardcoded `h`/`j`/`k`/`l`, so a rebound chord keeps
+  // working; precomputed so the handler declines in a few comparisons.
   const paneBindings = input.keybindings.filter((binding) =>
     PANE_COMMAND_DIRECTIONS.has(binding.command),
   );
@@ -108,15 +92,9 @@ export function createPaneNavigationHandler(input: {
     const from = getFocusedPane() ?? getLastFocusedPane();
 
     if (direction === "up" || direction === "down") {
-      // The vertical chords disable themselves, and that is the mechanism
-      // rather than an omission. Both share their key with something else —
-      // `mod+j` with the terminal toggle by design — so consuming one where
-      // it does not apply would take that other meaning away. Declining
-      // leaves the event untouched and the other owner runs.
-      //
-      // Not resolved against the whole table, deliberately: `mod+j` answers
-      // the toggle by last-wins, so asking would always decline and the
-      // chord would never work at all.
+      // Declining is the mechanism: `mod+j` is also the terminal toggle, so
+      // consuming it where it does not apply would take that meaning away. Not
+      // resolved against the whole table, where the toggle wins by last-wins.
       const target = neighbourOf(from, direction);
       if (target === null) return;
       event.preventDefault();
@@ -149,27 +127,10 @@ export function createPaneNavigationHandler(input: {
   };
 }
 
-/**
- * The invariant: the keyboard is never left in a pane nobody can see.
- *
- * Two different things break it, and they look nothing alike:
- *
- * - **The pane unmounts.** Closing the right panel removes its subtree, focus
- *   falls to the document body, and a `focusout` fires.
- * - **The pane stays but goes away.** Collapsing the sidebar keeps every row
- *   mounted, focusable and in the tab order, and slides the container
- *   off-screen. No blur happens, no `focusout` fires, and the focused row
- *   keeps the keyboard while being invisible. Observed in the running app,
- *   which is the only reason this second trigger exists.
- *
- * So the guard is keyed on the invariant rather than on either event: after
- * anything that could change the layout, if the pane holding focus is no
- * longer reachable, move the keyboard somewhere it can be seen.
- *
- * A pane that merely blurred is left alone. Leaving Neovim's normal mode
- * blurs the editor to the body on purpose, and a rescue there would yank the
- * keyboard out of the pane the developer is working in.
- */
+// Invariant: the keyboard is never left in a pane nobody can see. Closing the panel
+// unmounts it (a `focusout`); collapsing the sidebar slides it off-screen with no
+// blur at all, so the guard rechecks after any layout change. A merely blurred pane
+// is left alone: Neovim blurs to <body> on leaving normal mode.
 export interface PaneFocusGuard {
   /** Focus left an element. Only interesting when it went nowhere. */
   readonly onFocusOut: (event: PaneFocusOutEvent) => void;
@@ -232,27 +193,10 @@ function rescueToFirstReachablePane(): void {
   }
 }
 
-/**
- * A list chord leaves the keyboard in the list.
- *
- * `j` and `k` walk the sidebar's thread list, and opening a thread focuses
- * the composer — ChatView does that on every change of the active thread.
- * That is right when you clicked the row and wrong when you walked to it:
- * without this, `j` works exactly once and the second one types a letter into
- * the composer. Observed in the running app; no unit test sees it, because
- * the two behaviours live in different components and only meet on screen.
- *
- * Putting the keyboard back beats stopping the composer from taking it. The
- * mouse path wants that focus — click a thread, start typing — and the two
- * paths are indistinguishable at the moment the composer asks, so a guard
- * there would have to break one of them.
- *
- * The claim is armed by a list chord typed with the sidebar focused, and it
- * answers the next focus loss out of the sidebar by focusing the sidebar's
- * active row again. It disarms on the first key that is not another list
- * chord, and in any case once `SIDEBAR_CLAIM_WINDOW_MS` has passed, so it can
- * never sit waiting to snatch focus back from something unrelated.
- */
+// ChatView focuses the composer on every thread change, so without this `j` works
+// once and the next one types into the draft. A list chord with the sidebar focused
+// arms a claim that refocuses the active row on the next focus loss; any other key
+// or `SIDEBAR_CLAIM_WINDOW_MS` disarms it. The mouse path keeps the composer focus.
 export interface SidebarListFocusClaim {
   readonly onKeyDown: (event: PaneNavigationEvent) => void;
   readonly onFocusOut: (event: PaneFocusOutEvent) => void;
@@ -301,31 +245,16 @@ export function createSidebarListFocusClaim(input: {
         return;
       }
 
-      // Past this point the key is `j` or `k`, and those are the first bare
-      // letters the app has ever bound, so this is the first time a common
-      // letter reads the focus tree at all. Measured in the running app
-      // against the real tree: 1.699 microseconds per read over 200,000
-      // reads, twice per keystroke because the sidebar's own handler asks
-      // again. Against the editor's 16.7 ms insert-mode budget that is two
-      // hundredths of one percent, and autorepeat is already filtered out
-      // above, so holding a key costs nothing at all.
+      // The first bare letters to read the focus tree: measured at 1.7 us per
+      // read, twice per keystroke, negligible against the editor's 16.7 ms budget.
       if (getFocusedPane() === "sidebar") {
         armedUntil = now() + SIDEBAR_CLAIM_WINDOW_MS;
         return;
       }
 
-      // The keyboard is not in the sidebar. Either this is an ordinary `j`
-      // typed somewhere else, or it is the second chord of a fast run and the
-      // composer has taken focus in between without the rescue frame having
-      // run yet.
-      //
-      // The claim being armed is what tells the two apart, and it is the case
-      // worth catching: without this, the second `j` of a double tap types a
-      // letter into the draft and leaves the keyboard there. Moving focus back
-      // now — synchronously, inside the capture phase — fixes both halves at
-      // once. The sidebar's own handler runs later in the same event and so
-      // sees the sidebar focused, and the character never lands, because the
-      // element it would have gone into no longer has the keyboard.
+      // Armed and outside the sidebar: the composer took focus mid double-tap.
+      // Refocusing synchronously in the capture phase stops the letter landing
+      // in the draft, and the sidebar's own handler then sees the sidebar focused.
       if (now() <= armedUntil && isPaneReachable("sidebar") && focusPane("sidebar")) {
         armedUntil = now() + SIDEBAR_CLAIM_WINDOW_MS;
         return;
@@ -338,13 +267,8 @@ export function createSidebarListFocusClaim(input: {
       if (now() > armedUntil) return;
       input.scheduleFrame(() => {
         if (now() > armedUntil) return;
-        // Only the chat is taken back from, and this is the whole of the
-        // narrowness. The one theft being undone is ChatView focusing the
-        // composer on every change of the active thread. Anything else that
-        // takes the keyboard inside the window — a dialog, the command
-        // palette, a context menu, all of which render outside every pane
-        // root — the person opened on purpose, and yanking focus out of it
-        // would be far worse than the problem this fixes.
+        // Only the chat is taken back from, undoing ChatView's composer focus. A
+        // dialog, palette or menu opened in the window was opened on purpose.
         if (getFocusedPane() !== "chat") return;
         if (!isPaneReachable("sidebar")) return;
         // Focuses the active row, which by now is the thread just opened.
@@ -408,18 +332,9 @@ export function registerPaneNavigation(input: {
   };
 }
 
-/**
- * Attributes worth watching, and no others.
- *
- * `data-state` is how the sidebar reports being collapsed, and the other two
- * are how the chat column and the right panel report being closed. Attributes
- * only: watching `childList` over the whole document would fire for every row
- * the virtualised message list recycles, which is constantly.
- *
- * `data-state` is a common attribute, so unrelated menus and popovers trigger
- * this too. That is affordable because the callback is coalesced to one check
- * per frame and the check itself is a handful of selector matches.
- */
+// Attributes only: `childList` over the document would fire for every row the
+// virtualised message list recycles. `data-state` also fires for menus and
+// popovers, which is affordable because checks coalesce to one per frame.
 const LAYOUT_ATTRIBUTES = [
   "data-state",
   "data-preview-panel-mode",
@@ -438,15 +353,8 @@ function observeLayoutWithMutations(onChange: () => void): () => void {
   };
 }
 
-/**
- * Names the open thread's row as the way into the sidebar.
- *
- * Without this the sidebar's entry is whatever selector matches first, and
- * arriving by `Ctrl+H` puts the keyboard on a row you were not looking at.
- * The row is found by the key the list already renders on it; the route is
- * the only thing that knows which key that is, which is why this is here and
- * not in `paneFocus.ts`.
- */
+// Without this, `Ctrl+H` lands on whichever row matches first. Only the route
+// knows the open thread's key, so this lives here and not in `paneFocus.ts`.
 export function registerSidebarThreadEntry(threadKey: string | null): () => void {
   return registerPaneEntry("sidebar", () => {
     if (threadKey === null || typeof document === "undefined") return false;
@@ -467,7 +375,9 @@ export function usePaneNavigation(
   keybindings: ResolvedKeybindingsConfig,
   activeThreadKey: string | null = null,
 ): void {
+  // oxlint-disable-next-line t3code/react-effect-budget -- registers the open thread's row in the module's pane-entry registry while it is active
   useEffect(() => registerSidebarThreadEntry(activeThreadKey), [activeThreadKey]);
+  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes document focus listeners that mirror drawer focus onto <html>
   useEffect(
     () =>
       registerDrawerFocusMark({
@@ -477,6 +387,7 @@ export function usePaneNavigation(
       }),
     [],
   );
+  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes capture-phase window and document listeners plus a MutationObserver
   useEffect(
     () =>
       registerPaneNavigation({

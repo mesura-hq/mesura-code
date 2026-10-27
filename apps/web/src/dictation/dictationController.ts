@@ -14,6 +14,7 @@ import {
   type DictationKeybindingCommand,
   type DictationMode,
   type DictationTarget,
+  type DictationThreadTarget,
   type EnvironmentId,
   type KeybindingCommand,
 } from "@t3tools/contracts";
@@ -77,6 +78,7 @@ import { dictationTargetLabel } from "./dictationTargetLabel";
 import {
   recordDictationDelivery,
   recordDictationFailure,
+  setDictationJobUnlisted,
   setTranscribingDictationJobs,
   useDictationWidgetActivityStore,
 } from "./dictationWidgetState";
@@ -99,11 +101,10 @@ export interface DictationComposer {
   readonly insertSlot: ((slot: string) => boolean) | null;
   /** Set for a focused question card: the marker goes into that answer, not into the draft. */
   readonly question?: DictationQuestionAnswer;
+  /** A question card's thread, which a recording started in the card belongs to. */
+  readonly thread?: DictationThreadTarget;
 }
 
-let lastComposer: DictationComposer | null = null;
-/** The thread's composer, which takes over again when a focused question card lets go. */
-let lastThreadComposer: DictationComposer | null = null;
 let activeRecording: DictationRecording | null = null;
 let opening = false;
 let levelTimer: ReturnType<typeof setInterval> | null = null;
@@ -152,12 +153,9 @@ const delivering = new Set<string>();
 /** After a reload the mode keys pick the newest job back up, once, if it still transcribes. */
 let lastJobRestored = false;
 /**
- * Transcripts this tab placed, watched until the user's own draft no longer holds them.
- *
- * Tabs persist the whole draft store and the last writer wins (upstream behaviour this feature
- * does not redesign), so another tab's write can erase a transcript from storage while this tab
- * still shows it. When that happens the user is told it is kept in Transcriptions, once per job,
- * instead of losing it silently at the next reload.
+ * Transcripts this tab placed, watched until the user's own draft no longer holds them. Tabs
+ * persist the whole draft store and the last writer wins (upstream behaviour), so another tab can
+ * erase a transcript from storage; the user is told once per job it is kept in Transcriptions.
  */
 const placedTranscripts = new Map<
   string,
@@ -179,28 +177,108 @@ const UNCLAIMED_GRACE_MS = 3_000;
 /** Two tabs that both write within this window settle before storage is judged. */
 const SURVIVAL_CHECK_DELAY_MS = 1_000;
 
-export function registerDictationComposer(composer: DictationComposer): () => void {
-  lastComposer = composer;
-  if (!composer.question) lastThreadComposer = composer;
-  return () => {
-    if (composer.question) {
-      if (lastComposer === composer) lastComposer = lastThreadComposer;
-      return;
+/**
+ * Which composer takes the next marker: the last to take dictation, or the thread's composer
+ * once a question card that took it lets go.
+ */
+interface DictationComposerFocus {
+  current: DictationComposer | null;
+  thread: DictationComposer | null;
+}
+
+function takeComposerFocus(focus: DictationComposerFocus, composer: DictationComposer) {
+  focus.current = composer;
+  if (!composer.question) focus.thread = composer;
+}
+
+function releaseComposerFocus(focus: DictationComposerFocus, composer: DictationComposer) {
+  if (composer.question) {
+    if (focus.current === composer) focus.current = focus.thread;
+    return;
+  }
+  const unmounted = { ...composer, insertSlot: null };
+  if (focus.thread === composer) focus.thread = unmounted;
+  if (focus.current === composer) focus.current = unmounted;
+}
+
+/** The server thread a composer writes into: its own, or the question card's. */
+function composerThread(composer: DictationComposer): DictationThreadTarget | null {
+  return composer.thread ?? (composer.target.kind === "thread" ? composer.target : null);
+}
+
+function isComposerOfThread(composer: DictationComposer, thread: DictationThreadTarget): boolean {
+  const own = composerThread(composer);
+  return own !== null && sameTarget(own, thread);
+}
+
+const composerFocus: DictationComposerFocus = { current: null, thread: null };
+
+/**
+ * The thread the recording belongs to, and the focus among its own composers, fixed at start so
+ * another thread's composer mounting mid-recording never takes the marker. A recording started in
+ * a new-thread draft follows `composerFocus`, since sending the draft creates the thread mid-run.
+ */
+let recordingThread: {
+  readonly thread: DictationThreadTarget;
+  readonly environmentId: EnvironmentId;
+  readonly focus: DictationComposerFocus;
+} | null = null;
+
+function bindRecordingThread() {
+  const current = composerFocus.current;
+  const thread = current ? composerThread(current) : null;
+  if (!current || !thread) {
+    recordingThread = null;
+    return null;
+  }
+  const threadComposer = composerFocus.thread;
+  recordingThread = {
+    thread,
+    environmentId: current.environmentId,
+    focus: {
+      current,
+      thread: threadComposer && isComposerOfThread(threadComposer, thread) ? threadComposer : null,
+    },
+  };
+  return thread;
+}
+
+/** The composer a recording stopped now drops its marker into. */
+function recordingComposer(): DictationComposer | null {
+  if (!recordingThread) return composerFocus.current;
+  const { focus, thread, environmentId } = recordingThread;
+  return (
+    focus.current ?? {
+      environmentId,
+      target: thread,
+      draftTarget: toComposerThreadTarget(thread),
+      insertSlot: null,
     }
-    const unmounted = { ...composer, insertSlot: null };
-    if (lastThreadComposer === composer) lastThreadComposer = unmounted;
-    if (lastComposer === composer) lastComposer = unmounted;
+  );
+}
+
+export function registerDictationComposer(composer: DictationComposer): () => void {
+  takeComposerFocus(composerFocus, composer);
+  if (recordingThread && isComposerOfThread(composer, recordingThread.thread)) {
+    takeComposerFocus(recordingThread.focus, composer);
+  }
+  return () => {
+    releaseComposerFocus(composerFocus, composer);
+    if (recordingThread) releaseComposerFocus(recordingThread.focus, composer);
   };
 }
 
 /** Where a recording stopped now would drop its marker, for the desktop widget. */
 export function currentDictationTarget(): Exclude<DictationTarget, null> | null {
-  return lastComposer?.target ?? null;
+  return recordingComposer()?.target ?? null;
 }
 
 /** The thread's composer took focus back from a question card: it takes the next marker. */
 export function reclaimDictationComposer(): void {
-  if (lastThreadComposer) lastComposer = lastThreadComposer;
+  const reclaiming = composerFocus.thread;
+  if (!reclaiming) return;
+  composerFocus.current = reclaiming;
+  if (recordingThread?.focus.thread === reclaiming) recordingThread.focus.current = reclaiming;
 }
 
 /** Where a job's marker lives, and what fills, removes and sends it there. */
@@ -314,10 +392,13 @@ async function openRecording(): Promise<DictationRecording | null> {
 export async function startDictation(): Promise<void> {
   if (useDictationSessionStore.getState().session !== null || opening) return;
   const generation = ++sessionGeneration;
+  // Bound before the microphone opens: the user pressed record in this thread, and may leave it
+  // while the browser asks for the microphone.
+  const thread = bindRecordingThread();
   const recording = await openRecording();
-  if (!recording) return;
-  if (generation !== sessionGeneration) {
-    recording.discard();
+  if (!recording || generation !== sessionGeneration) {
+    if (generation === sessionGeneration) recordingThread = null;
+    recording?.discard();
     return;
   }
   activeRecording = recording;
@@ -334,6 +415,7 @@ export async function startDictation(): Promise<void> {
       runningSince: now,
       level: 0,
       sampledAt: now,
+      thread,
     },
   });
   startLevelPolling();
@@ -342,6 +424,7 @@ export async function startDictation(): Promise<void> {
 function endRecording() {
   stopLevelPolling();
   activeRecording = null;
+  recordingThread = null;
   useDictationSessionStore.setState({ session: null });
 }
 
@@ -389,7 +472,7 @@ export async function restartDictation(): Promise<void> {
     return;
   }
   if (!recording) {
-    useDictationSessionStore.setState({ session: null });
+    endRecording();
     return;
   }
   activeRecording = recording;
@@ -470,6 +553,7 @@ function failToStart(jobId: DictationJobId, host: DictationSlotHost, cause: unkn
   const { lastJob } = useDictationSessionStore.getState();
   if (lastJob?.jobId === jobId) useDictationSessionStore.setState({ lastJob: null });
   const own = useOwnDictationJobsStore.getState().jobs[jobId];
+  if (own) setDictationJobUnlisted(own.environmentId, jobId, false);
   if (own) announceFailed(jobId, own);
   reportError("Dictation could not be sent for transcription", cause);
   if (useOwnDictationJobsStore.getState().jobs[jobId]?.mode === "clipboard") {
@@ -533,7 +617,7 @@ export async function stopDictation(): Promise<void> {
   const { session } = useDictationSessionStore.getState();
   const recording = activeRecording;
   if (!session || !recording) return;
-  const composer = lastComposer;
+  const composer = recordingComposer();
   sessionGeneration += 1;
   endRecording();
   if (!composer) {
@@ -555,7 +639,9 @@ export async function stopDictation(): Promise<void> {
     mode: session.mode,
     createdAt: now,
     ...(composer.question ? { question: composer.question } : {}),
+    ...(composer.thread ? { thread: composer.thread } : {}),
   });
+  setDictationJobUnlisted(environmentId, jobId, true);
   lastJobRestored = true;
   useDictationSessionStore.setState({ lastJob: { environmentId, jobId } });
 
@@ -616,11 +702,12 @@ export function selectDictationMode(mode: DictationMode): void {
   updateOwnDictationJob(lastJob.jobId, { mode });
   const host = slotHostFor(own);
   if (own.mode === "clipboard") {
+    const focused = composerFocus.current;
     const composer =
-      lastComposer &&
-      sameTarget(lastComposer.target, own.target) &&
-      lastComposer.question?.questionId === own.question?.questionId
-        ? lastComposer
+      focused &&
+      sameTarget(focused.target, own.target) &&
+      focused.question?.questionId === own.question?.questionId
+        ? focused
         : null;
     placeDictationSlot(
       composer ?? {
@@ -661,6 +748,7 @@ export function retryDictationJob(jobId: string): void {
     }
     const id = DictationJobId.make(jobId);
     updateOwnDictationJob(jobId, { notStarted: undefined });
+    setDictationJobUnlisted(own.environmentId, jobId, true);
     void startDictationJob(id, own, kept.audio, kept.durationMs).catch((cause: unknown) =>
       failToStart(id, slotHostFor(own), cause),
     );
@@ -765,11 +853,10 @@ function restoreLastJob(environmentId: EnvironmentId, jobs: ReadonlyArray<Dictat
 }
 
 /**
- * The server keeps jobs in memory: a restart or the retention sweep drops a job this tab never saw
- * finish. The last job then never clears, and the mode keys keep Alt+S and the other Alt keys from
- * everything else (the Hosts peek). A job an earlier snapshot listed and this one does not is
- * gone, and so is an accepted job a snapshot well after its start still lacks (a restart before
- * the first listing). Otherwise the snapshot may only predate the job, so it stays.
+ * The server keeps jobs in memory, so a restart or the retention sweep drops a job this tab never
+ * saw finish, and the mode keys would keep the Alt keys forever. A job an earlier snapshot listed
+ * and this one lacks is gone, as is an accepted job still missing well after its start; anything
+ * else may only predate the job, so it stays.
  */
 function rememberJobStamp(job: DictationJob) {
   if (job.epoch === undefined || job.revision === undefined || jobStamps.has(job.id)) return;
@@ -782,6 +869,13 @@ function forgetVanishedLastJob(
   cursor: DictationJobsCursor,
 ) {
   latestJobLists.set(environmentId, jobs);
+  // A job is listed now, or a list proves the server lost it before it was ever listed.
+  const unlisted = useDictationWidgetActivityStore.getState().unlisted[environmentId] ?? [];
+  for (const jobId of unlisted) {
+    if (jobs.some((job) => job.id === jobId) || listProvesJobGone(jobStamps.get(jobId), cursor)) {
+      setDictationJobUnlisted(environmentId, jobId, false);
+    }
+  }
   reclaimReappearedJob(environmentId, jobs);
   const { lastJob } = useDictationSessionStore.getState();
   if (lastJob?.environmentId !== environmentId) return;

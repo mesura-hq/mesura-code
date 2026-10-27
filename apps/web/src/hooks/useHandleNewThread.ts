@@ -82,6 +82,7 @@ export function useNewThreadHandler() {
     // up again and finding whichever draft it happens to hold.
   ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
     const projects = readProjects();
+    // Read at call time; status pushes replace the config map and would recreate every sidebar handler.
     const environmentServerConfigs = appAtomRegistry.get(environmentServerConfigsAtom);
     const targetServerSettings =
       environmentServerConfigs.get(projectRef.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
@@ -171,12 +172,9 @@ export function useNewThreadHandler() {
     if (storedDraftThreadRef && reusableStoredDraftThread === null) {
       markPromotedDraftThreadByRef(storedDraftThreadRef);
     }
-    // New-thread surfaces (button, hotkeys, "/" landing, palette) only
-    // ever reuse a draft the user has NOT invested in. A draft with typed
-    // text or attachments is work in progress: it stays alive where it is
-    // (reachable from the sidebar draft rows) and this request mints a
-    // fresh draft instead — the remap in the store preserves invested
-    // drafts rather than deleting them.
+    // New-thread surfaces reuse only a draft with no typed text or attachments. An invested
+    // draft stays where it is (the store's remap keeps it, reachable from the sidebar) and this
+    // request mints a fresh one.
     const emptyStoredDraftThread =
       reusableStoredDraftThread &&
       !composerDraftHasUserContent(getComposerDraft(reusableStoredDraftThread.draftId))
@@ -299,10 +297,7 @@ export function useNewThreadHandler() {
             clearWhenAbsent: !!projectSettings.modelDefaultWarning,
           },
         );
-        // The workspace context must also ride along here: when projectRef
-        // targets a different physical member of the logical project,
-        // createDraftThreadState treats the remap as a project change and
-        // would otherwise wipe branch/worktree, undoing the write above.
+        // Remapping physical projects clears workspace context; preserve the branch and worktree.
         setLogicalProjectDraftThreadId(
           logicalProjectKey,
           projectRef,
@@ -345,10 +340,7 @@ export function useNewThreadHandler() {
       if (routeChangedSinceRequest()) {
         return null;
       }
-      // The await yields, so a concurrent invocation may have registered a
-      // draft for this logical project in the meantime. Registering ours
-      // too would evict that draft while its navigation is in flight —
-      // reuse the winner instead, like the synchronous path above does.
+      // Reuse drafts registered while awaiting so their pending navigation cannot lose them.
       const racedDraft = getDraftSessionByLogicalProjectKey(logicalProjectKey);
       if (
         racedDraft &&
@@ -359,14 +351,9 @@ export function useNewThreadHandler() {
         racedDraft.draftId !== storedDraftThread?.draftId &&
         readThreadShell(scopeThreadRef(racedDraft.environmentId, racedDraft.threadId)) === null
       ) {
-        // Same remap the reuse paths above perform: point the draft at the
-        // caller's project member and apply explicit workspace options if
-        // the caller passed any. Without explicit options the winner's
-        // context stands untouched — the winner's navigation is landing,
-        // which is the isDraftAlreadyOpen "leave it alone" case. Writing
-        // this invocation's defaults here instead would clobber the
-        // winner's explicit picks and could pair its worktreePath with a
-        // contradictory envMode.
+        // The reuse paths' remap, applying only explicit workspace options: the winner's
+        // navigation is landing, and this invocation's defaults would clobber its explicit
+        // picks and could pair its worktreePath with a contradictory envMode.
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, racedDraft.draftId, {
           threadId: racedDraft.threadId,
           createdAt: racedDraft.createdAt,

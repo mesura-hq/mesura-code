@@ -1,20 +1,8 @@
 /**
- * Phase 4 fence of phone push notifications: the `push.presence` RPC and
- * acceptance criterion 4's "when its connection closes", across connections.
- *
- * Entry point: `layerWsRpcMesura`, the fork's per-connection handler layer,
- * mounted the way `ws.ts`'s `/ws` route mounts it: the handler layer is given
- * to the protocol setup with `Effect.provide`, and the RPC server is forked
- * into the connection's own scope. With that composition the handler layer's
- * own scope closes as soon as the protocol is set up, not when the socket
- * closes, so an `Effect.addFinalizer` in the handler layer runs at connect.
- * Closing `connection` stands for the socket closing: it ends the RPC server
- * and every request still running on it, as the `/ws` request scope does.
- * That is why `push.presence` is a stream: the end of its call is the close
- * signal, with no seam in `ws.ts`.
- *
- * `ClientPresence.layer` is real and built once at server scope, as
- * `PushSubscriptions` is, so every connection reports into one map.
+ * Phone push: the `push.presence` RPC and criterion 4's "when its connection closes".
+ * `ws.ts` provides the handler layer to protocol setup, so that layer's scope closes at
+ * connect; hence `push.presence` is a stream whose end is the close signal. Closing
+ * `connection` stands for the socket closing; `ClientPresence.layer` is one server-scope map.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -57,11 +45,9 @@ type PresenceClient = {
 };
 
 /**
- * One WebSocket, composed as `ws.ts` composes it; `close` is the socket
- * closing. `push.presence` is a stream that stays open while its report
- * holds, so `report` does what the client does: it interrupts the previous
- * call, opens a new one in the connection's scope, and returns once the
- * server says it holds the report.
+ * One WebSocket, composed as `ws.ts` composes it; `close` is the socket closing.
+ * `report` acts like the client: it interrupts the previous `push.presence` stream, opens
+ * a new one in the connection's scope, and returns once the server holds the report.
  */
 const connectAsWs = (
   serverScope: MesuraServerScope,

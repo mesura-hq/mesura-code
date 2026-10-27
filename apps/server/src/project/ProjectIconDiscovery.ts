@@ -1,15 +1,8 @@
 /**
- * ProjectIconDiscovery - explicit Luna searches for project icons.
- *
- * The `projectIcons.discover` RPC is the only way a search starts: nothing on
- * project creation, threads, turns, resets, restarts or replay reaches the
- * model. A request is claimed as a durable job on the project before the
- * worker runs it, the worker runs one model call at a time, and the outcome is
- * committed through `ProjectService.commitIconDiscovery`, whose project
- * commands refuse to overwrite a project that changed since the request. A
- * restart marks unfinished jobs interrupted and never retries them.
- *
- * @module ProjectIconDiscovery
+ * Only the `projectIcons.discover` RPC starts a Luna icon search; no lifecycle event
+ * or replay reaches the model. Each request is a durable job, run one model call at a
+ * time, and `ProjectService.commitIconDiscovery` refuses a project that changed since.
+ * A restart marks unfinished jobs interrupted and never retries them.
  */
 import {
   CommandId,
@@ -147,11 +140,9 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
   const readProject = (projectId: ProjectId) =>
     projects.getShell(projectId).pipe(Effect.map(Option.getOrNull));
 
-  // The effective icon decides eligibility, not an earlier outcome: a custom
-  // icon, then whatever the resolver displays (a saved path that still
-  // resolves, repository configuration, or a built-in favicon).
-  // The preview may trust the resolver's cache; the worker acts on the answer,
-  // so it asks for a fresh walk (`fresh`).
+  // The icon shown now decides eligibility, not an earlier outcome: a custom icon,
+  // then whatever the resolver displays. The preview may trust the resolver's
+  // cache; the worker acts on the answer, so it asks for a fresh walk.
   const effectiveIcon = Effect.fn("ProjectIconDiscovery.effectiveIcon")(function* (
     project: OrchestrationProjectShell,
     fresh: boolean,
@@ -193,11 +184,12 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
               reason: "No local image candidates. The agent will not run.",
             } as const);
       },
-      Effect.catch(() =>
-        Effect.succeed({
-          status: "failed",
-          reason: "Could not inspect this project's files.",
-        } as const),
+      Effect.orElseSucceed(
+        () =>
+          ({
+            status: "failed",
+            reason: "Could not inspect this project's files.",
+          }) as const,
       ),
     );
 

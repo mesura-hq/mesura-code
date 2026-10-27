@@ -1,11 +1,7 @@
 /**
- * The "PR lookup failed; keeping last known PR state." warning is written once
- * per lookup attempt, not once per remote status poll. The VCS remote status
- * poller (`VcsStatusBroadcaster`, every 30 seconds by default) reads remote
- * status for the cwd a client watches; a failed lookup is cached with
- * `prLookupFailureTtl`, and every poll inside that window replays it. Entry
- * point: `GitManager.remoteStatus` over real git (`GitManager.testkit.ts`), on
- * a repository whose registered source control provider rejects lookups.
+ * The "PR lookup failed" warning is written once per lookup attempt, not once per 30-second
+ * `VcsStatusBroadcaster` poll: a failed lookup is cached for `prLookupFailureTtl` and polls in
+ * that window replay it. Drives `GitManager.remoteStatus` over real git with a rejecting provider.
  */
 import { describe, expect, it } from "@effect/vitest";
 import { SourceControlProviderError, SourceControlProviderKind } from "@t3tools/contracts";

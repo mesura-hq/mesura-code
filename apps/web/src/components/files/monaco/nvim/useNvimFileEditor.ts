@@ -27,13 +27,9 @@ import { useNvimDriver, type NvimDriverResult } from "./useNvimDriver.ts";
 import { APP_SHORTCUTS_THAT_OUTRANK_NEOVIM } from "./appShortcutsThatOutrankNeovim";
 
 /**
- * Binds the thread's editor session to a Monaco editor.
- *
- * The split is deliberate: everything that talks to the wire lives here, and
- * everything that talks to Monaco lives in `useNvimDriver`. The driver is the
- * part with the awkward reasoning — the key race, the undo stack, composition
- * — and keeping the subscription out of it is what lets that reasoning be
- * read without an atom runtime in the way.
+ * Binds the thread's editor session to a Monaco editor. The wire lives here and Monaco lives in
+ * `useNvimDriver`, so the driver's key race, undo stack and composition read without an atom
+ * runtime in the way.
  */
 
 const IDLE_SESSION_ATOM = Atom.make(AsyncResult.initial<EditorSessionState, never>(false)).pipe(
@@ -48,14 +44,9 @@ export interface NvimFileEditorResult extends NvimDriverResult {
   /** Whether typed keys are reaching Neovim; see `editorKeyLane`. */
   readonly keysDelivery: EditorKeysDelivery;
   /**
-   * Whether an Escape typed now is Neovim's rather than the panel's.
-   *
-   * The panel takes it only when Neovim is known to rest in plain normal mode:
-   * nothing pending and the last batch's answer saying so (`restsInNormalMode`),
-   * and the attach stream not showing another mode or a flash label either. The
-   * stream alone lags the keys by a round trip — `A x Escape` on a remote host
-   * released the editor on a NORMAL from before the `A`, and left Neovim in
-   * insert mode with the keyboard elsewhere.
+   * Whether an Escape typed now is Neovim's rather than the panel's. The panel takes it only when
+   * both the last batch's answer (`restsInNormalMode`) and the attach stream show plain normal
+   * mode: the stream alone lags a round trip, so `A x Escape` on a remote host left Neovim in insert.
    */
   readonly escapeGoesToNeovim: () => boolean;
 }
@@ -82,23 +73,14 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   const threadId = threadRef.threadId;
 
   /**
-   * Why Neovim is not running, when it is not.
-   *
-   * Held here rather than in the driver because it decides whether the driver
-   * runs at all: a session that could not start leaves the panel as the plain
-   * editor it was before, and the driver is the thing that must not be in the
-   * way.
+   * Why Neovim is not running. Held here, not in the driver, because it decides whether the
+   * driver runs at all: a session that could not start leaves the plain editor.
    */
   const [fallback, setFallback] = useState<NvimFallback | null>(null);
   /**
-   * Raised to make the driver open the file again: by a Retry, and when the
-   * session is lost.
-   *
-   * A value the driver's open effect depends on, not a dependency smuggled into
-   * `openFile`'s list. REGRESSION: that is how Retry was first written, and
-   * the React Compiler drops a `useCallback` dependency the body never reads,
-   * so the callback never changed and nothing reopened. Retry only appeared to
-   * work because it also turns the driver off and on.
+   * Raised to make the driver open the file again (Retry, or a lost session). REGRESSION: Retry
+   * first smuggled this into `openFile`'s `useCallback` list, but the React Compiler drops a
+   * dependency the body never reads, so nothing reopened. Keep it a value the open effect reads.
    */
   const [openGeneration, setOpenGeneration] = useState(0);
   const enabled = input.enabled && fallback === null;
@@ -119,6 +101,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   // A ref, so a new refresh function never makes `openFile` a new callback:
   // the driver opens the file again whenever that identity changes.
   const refreshAttachRef = useRef(refreshAttach);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-ref, so a new refresh function never gives `openFile` a new identity
   useEffect(() => {
     refreshAttachRef.current = refreshAttach;
   }, [refreshAttach]);
@@ -127,6 +110,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   const opensInFlightRef = useRef(0);
   const reopensInARowRef = useRef(0);
   const mountedRef = useRef(true);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: tracks mount so async open results never touch an unmounted editor
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -135,6 +119,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   }, []);
   // Nothing opens while the driver is off, so a pending reattach would wait
   // for an open that is not coming.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: drops a pending reattach when the driver turns off, since no open will land
   useEffect(() => {
     if (!enabled) reattachPendingRef.current = false;
   }, [enabled]);
@@ -146,6 +131,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     enabled && AsyncResult.isFailure(result) && !result.waiting && isSessionMissing(result.cause);
   const ended = enabled ? state.ended : null;
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reacts to the attach stream's ended/missing state, which no handler owns
   useEffect(() => {
     const action = decideSessionRecovery({
       ended,
@@ -175,6 +161,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   }, [ended, attachFoundNoSession]);
 
   // A session that answers resets the count: the next loss is a new one.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: resets the reopen count when the external session answers with a snapshot
   useEffect(() => {
     if (state.latestEvent?.type === "snapshot") reopensInARowRef.current = 0;
   }, [state.latestEvent]);

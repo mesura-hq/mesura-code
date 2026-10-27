@@ -1,21 +1,10 @@
 import { readAssistantText, type TextChunk } from "~/lib/assistantTextSelection";
 
 /**
- * The chat as a text buffer: every mounted timeline row, projected to text by
- * the same reader the citation feature uses, joined into lines.
- *
- * `readAssistantText` turns block elements into line breaks and maps every
- * character back to a DOM `Text` node, so a buffer position always resolves
- * to a `Range` on the rendered chat. Rows are separated by one empty line, so
- * Vim's paragraph motions step from message to message.
- *
- * Only mounted rows are in the buffer: the timeline is virtualized. Motions
- * near the edge scroll the list, the list mounts more rows, and the next key
- * rebuilds the buffer with them.
- *
- * A `\n` in a text node whose `white-space` collapses newlines (a soft break
- * in a Markdown paragraph) renders as a space, so the projection reads it as
- * one; the swap is one character for one, so every offset stays valid.
+ * Every buffer position resolves to a `Range` on the rendered chat; one empty line between rows
+ * lets `{`/`}` step by message. The timeline is virtualized, so only mounted rows are in it and the
+ * next key rebuilds it. A `\n` that `white-space` collapses reads as a space, one character for one,
+ * so offsets stay valid.
  */
 
 export const CHAT_VIEWPORT_SELECTOR = "[data-assistant-citation-viewport]";
@@ -79,12 +68,9 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     if (rawText.trim().length === 0) continue;
     const collapses = collapseReader(chunks);
     const text = renderedText(rawText, chunks, collapses);
-    // Two kinds of projected line are dropped:
-    // - blank lines, from whitespace between HTML blocks: a cursor there has
-    //   no character to paint, and the one blank line between rows already
-    //   gives `{` and `}` their stops;
-    // - lines of screen-reader-only text, such as the "You" and "T3 Code"
-    //   author headings: a cursor there would be invisible.
+    // Blank lines (whitespace between HTML blocks) and screen-reader-only lines
+    // (the "You" and "T3 Code" headings) are dropped: a cursor there paints
+    // nothing, and the blank line between rows already gives `{`/`}` their stops.
     const rowLines: string[] = [];
     const lineStarts: number[] = [];
     let offset = 0;

@@ -9,12 +9,6 @@ import * as AcpError from "./errors.ts";
 const decodeNestedNumberPayload = Schema.decodeUnknownEffect(
   Schema.Struct({ profile: Schema.Struct({ token: Schema.Number }) }),
 );
-const decodeUsageSummaryPayload = Schema.decodeUnknownEffect(
-  Schema.Struct({
-    update: Schema.Struct({ used: Schema.Number, size: Schema.Number }),
-    env: Schema.Record(Schema.String, Schema.Number),
-  }),
-);
 const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 describe("effect-acp errors", () => {
@@ -132,7 +126,14 @@ describe("effect-acp errors", () => {
   it.effect("summarizes schema issues by path without payload values", () =>
     Effect.gen(function* () {
       const secret = "acp-summary-secret";
-      const cause = yield* decodeUsageSummaryPayload(
+      const decodeStruct = Schema.decodeUnknownEffect(
+        Schema.Struct({
+          update: Schema.Struct({ used: Schema.Number, size: Schema.Number }),
+          env: Schema.Record(Schema.String, Schema.Number),
+        }),
+      );
+
+      const cause = yield* decodeStruct(
         { update: { size: secret }, env: { [`${secret} key`]: secret } },
         { errors: "all" },
       ).pipe(Effect.flip);

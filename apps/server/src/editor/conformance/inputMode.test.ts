@@ -13,19 +13,10 @@ import { makeScratchManager, realConfigDirectory } from "./managerHarness.ts";
 import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * Entry point: `EditorSessionManager.input`, the handler the websocket layer
- * serves for `editorSession.input` (`wsMesura.ts`), over a real Neovim.
- *
- * Phase 3 of the editor latency cycle: the answer to a key batch says where
- * Neovim is once it has consumed the batch, and the client releases the
- * editor on Escape only on an answer of plain normal mode, not blocking, no
- * flash label. `nvim_input` is asynchronous, so the read has to be one Neovim
- * orders after the keys; each case runs `REPEATS` times, so a read that
- * overtook the keys would show as a stale mode at least once.
- *
- * With `MESURA_NVIM_CONFIG_DIR` set, the same cases run under the developer's
- * configuration, where `f` is flash's and waits in `getcharstr()` with the
- * mode at plain `n`; `s` then a character shows flash's labels.
+ * `EditorSessionManager.input` answers with Neovim's state after the batch; the client releases
+ * the editor on Escape only for plain normal mode, not blocking, no flash label. `nvim_input` is
+ * asynchronous, so each case runs `REPEATS` times to expose a read that overtook the keys. With
+ * `MESURA_NVIM_CONFIG_DIR`, flash owns `f` (waits in `getcharstr()` at mode `n`) and `s` labels.
  */
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));

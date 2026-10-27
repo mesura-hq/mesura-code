@@ -1,42 +1,10 @@
 import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout, as `routes/__root.tsx`
- * does, and whose chat layout is the real `_chat.tsx` route component (the
- * real KeyEngineHost around the real ChatView, and in it the real
- * ChatComposer, which registers the real Vim adapter). The thread route reads
- * the environment and thread ids from its params, as
- * `routes/_chat.$environmentId.$threadId.tsx` does, so opening another thread
- * is a router navigation. The key engine is installed on `window` before
- * React renders, as `main.tsx` does. Keys are real `keydown` events
- * dispatched from the focused element.
- *
- * Phase 6 of the modal keys production cycle (composer undo spans normal-mode
- * sessions), through the real composer and its adapter:
- * - Criterion 1: an insert session is one undo step.
- * - Criterion 3: `Ctrl+R` redoes it.
- * - Criterion 5: sending the prompt, and switching thread, start a fresh
- *   history for the new draft; returning to a thread walks back its own.
- * - Criterion 6: a mention and a citation survive undo and redo as the same
- *   tokens, and the editor draws them as chips again.
- * - The palette round trip (`resumeComposerNormalOnFocus`) pushes no step and
- *   the history survives it.
- * - Guard: `u` inside one normal-mode session undoes the last change.
- * `keys/composer/composerUndo.test.ts` covers every criterion at the surface.
- *
- * Typing is the one input this file does not drive by keys. A typed insert
- * session changes the draft's prompt while the composer is in INSERT, which
- * is what the editor's own typing does to the draft.
- *
- * Boundaries the fixture replaces, and nothing else: the environment and
- * thread reads (looked up by the thread ref), every RPC command and query,
- * the chords (the shipped defaults), unrelated chrome, the CSS highlight
- * registry happy-dom lacks (recorded instead of painted), the sidebar's
- * thread list, the file manager layer and the virtual list's measurement.
- * The setup follows `AppRoot.chatCursorMemory.fence.test.tsx`.
- */
+// Composer undo across normal-mode sessions (modal keys phase 6) through the real ChatComposer and
+// its Vim adapter; `keys/composer/composerUndo.test.ts` covers the surface. Typing is not driven by
+// keys: an insert session writes the draft's prompt in INSERT, as the editor's own typing does. The
+// CSS highlight registry is recorded instead of painted.
 
 import { describe, expect, it, vi } from "vite-plus/test";
 import { MessageId, ThreadId } from "@t3tools/contracts";

@@ -71,13 +71,9 @@ export interface RunContextDrawerProps {
 }
 
 /**
- * Host, workspace and branch as three tabs in one keyboard-first surface. It
- * opens inside the composer's context strip, so the strip grows and the
- * composer moves up. The tab bar doubles as the summary of the current choice.
- *
- * One pass: open, choose the host, Tab, choose the workspace, Enter. Host and
- * workspace changes apply at once, because they only edit the draft. A branch
- * waits for Enter, because choosing one can run a checkout.
+ * Host, workspace and branch as three tabs in one keyboard-first surface inside the composer's
+ * context strip; the tab bar doubles as the summary. Host and workspace apply at once because
+ * they only edit the draft; a branch waits for Enter because choosing one can run a checkout.
  */
 export function RunContextDrawer(props: RunContextDrawerProps) {
   const {
@@ -121,12 +117,10 @@ export function RunContextDrawer(props: RunContextDrawerProps) {
   const LockedWorkspaceIcon =
     workspaceOptions.find((option) => option.value === selectedWorkspace)?.Icon ?? FolderIcon;
 
-  // WORKAROUND: a machine change re-seeds the composer's Lexical editor, and
-  // setting its DOM selection moves focus into it without any focus() call, so
-  // the drawer loses the keyboard mid-navigation. For a short window after the
-  // drawer itself changes machine, focus that lands outside it is taken back.
-  // Remove once the composer stops claiming focus when its draft context
-  // changes (an upstream composer behavior, out of scope for the prototype).
+  // WORKAROUND: a machine change re-seeds the composer's Lexical editor, whose DOM selection
+  // steals focus without any focus() call, so for a short window after the drawer changes machine,
+  // focus landing outside it is taken back. Remove once the composer stops claiming focus when its
+  // draft context changes (upstream composer behavior).
   const reclaimFocusUntilRef = useRef(0);
   const selectHost = useCallback(
     (value: string) => {
@@ -166,7 +160,9 @@ export function RunContextDrawer(props: RunContextDrawerProps) {
       rootRef.current?.querySelector<HTMLButtonElement>("[data-run-context-panel] button");
     option?.focus({ preventScroll: true });
   }, [activeTab, selectedHost, selectedWorkspace]);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: moves DOM focus to the active tab's selected option before paint
   useLayoutEffect(focusActiveTab, [focusActiveTab]);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: document focusin listener for the WORKAROUND above, removed on cleanup
   useEffect(() => {
     const handler = (event: FocusEvent) => {
       if (performance.now() > reclaimFocusUntilRef.current) return;
@@ -486,6 +482,7 @@ function RunContextOptionRow(props: {
  * drawer makes the strip taller, so the shell has to learn the real height.
  */
 function useStripExtension(rootRef: React.RefObject<HTMLDivElement | null>) {
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the strip height into the composer shell's CSS variable before paint
   useLayoutEffect(() => {
     const strip = rootRef.current?.closest<HTMLElement>('[data-slot="composer-context-strip"]');
     const shell = strip?.closest<HTMLElement>('[data-slot="composer-shell"]');
@@ -513,6 +510,7 @@ function useCloseOnOutsidePress(
   rootRef: React.RefObject<HTMLDivElement | null>,
   onClose: (options: { focusComposer: boolean }) => void,
 ) {
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: document pointerdown listener that closes the drawer on an outside press
   useEffect(() => {
     const handler = (event: PointerEvent) => {
       const strip = rootRef.current?.closest('[data-slot="composer-context-strip"]');

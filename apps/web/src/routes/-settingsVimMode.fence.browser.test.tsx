@@ -56,7 +56,7 @@ import {
 } from "~/hooks/useSettings";
 import { AppAtomRegistryProvider } from "~/rpc/atomRegistry";
 
-import { Route as SettingsGeneralRoute } from "./settings.general";
+import { Route as SettingsGeneralRoute } from "./_chat.settings.general";
 
 function createSettingsRouter() {
   const root = createRootRoute({ component: () => <Outlet /> });

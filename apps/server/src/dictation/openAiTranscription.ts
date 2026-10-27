@@ -95,7 +95,9 @@ export const makeOpenAiTranscription: Effect.Effect<
     Effect.orElseSucceed(() => OPENAI_TRANSCRIPTION_URL),
   );
 
-  const transcribe = (request: OpenAiTranscriptionRequest) => {
+  const transcribe = Effect.fn("OpenAiTranscription.transcribe")(function (
+    request: OpenAiTranscriptionRequest,
+  ) {
     const useWhisper = request.durationMs > LONG_RECORDING_THRESHOLD_MS;
     const form = new FormData();
     form.append("file", new Blob([request.audio]), request.fileName);
@@ -149,7 +151,7 @@ export const makeOpenAiTranscription: Effect.Effect<
         while: (error) => error.retryable,
       }),
     );
-  };
+  });
 
   return { transcribe };
 });

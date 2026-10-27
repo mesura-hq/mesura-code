@@ -1,12 +1,6 @@
 /**
- * Why Neovim is not running, said so the developer can fix it.
- *
- * The reasons come from the launch unchanged, because they are different
- * problems with different fixes: a configuration directory that is not there
- * is not a Neovim that is too old, and telling them "the editor did not start"
- * for both tells them nothing. The panel keeps working either way — it is the
- * plain editor it was before modal editing existed — so this is an explanation
- * rather than an error.
+ * Why Neovim is not running, with the launch's own reason, because each reason has a different fix.
+ * The panel keeps working as plain Monaco either way, so this is an explanation, not an error.
  */
 
 export type NvimFallbackReason =
@@ -43,7 +37,7 @@ const EXPLANATIONS: Readonly<Record<NvimFallbackReason, string>> = {
 export function describeFallback(fallback: NvimFallback): string {
   const explanation = EXPLANATIONS[fallback.reason] ?? "Neovim would not start";
   const detail = fallback.detail.trim();
-  return detail.length === 0 ? explanation : `${explanation} — ${detail}`;
+  return detail.length === 0 ? explanation : `${explanation}: ${detail}`;
 }
 
 /** Whether a reason is one the developer can fix in Settings. */
@@ -52,18 +46,9 @@ export function isSettingsFixable(reason: NvimFallbackReason): boolean {
 }
 
 /**
- * The fallback a failed `open` implies, if any.
- *
- * Pure, and separate from the hook, because the shape it has to read is the
- * part that was wrong: an atom command's failure carries an Effect `Cause`,
- * not the error. A `Cause` has `reasons`, and the typed error is inside one of
- * them — reading `reason` off the cause itself finds nothing, silently, and
- * the panel then sits with no session and no explanation, which is worse than
- * either branch it was meant to choose between.
- *
- * Only a spawn failure is a fallback. A lookup that raced a close, or one
- * request that failed, leaves the session alone to recover: turning the editor
- * into a plain one for a transient error is a worse answer than waiting.
+ * The fallback a failed `open` implies, if any. An atom command's failure is an Effect `Cause`: the
+ * typed error is inside one of its `reasons`, and reading `reason` off the cause silently finds
+ * nothing. Only a spawn failure falls back; a raced lookup or one failed request is transient.
  */
 export function fallbackFromCause(cause: unknown): NvimFallback | null {
   for (const error of taggedErrorsOf(cause)) {
@@ -79,12 +64,9 @@ export function fallbackFromCause(cause: unknown): NvimFallback | null {
 }
 
 /**
- * Whether a failure says the thread has no session at all.
- *
- * What a server restart looks like from here: the client reconnects and
- * attaches again, and the session it attaches to went with the old process.
- * Unlike a spawn failure this is not a reason to give up on Neovim — opening
- * the file again starts a new session.
+ * Whether a failure says the thread has no session at all, as after a server restart. Unlike a
+ * spawn failure this is no reason to give up on Neovim: opening the file again starts a new
+ * session.
  */
 export function isSessionMissing(cause: unknown): boolean {
   return taggedErrorsOf(cause).some((error) => error._tag === "EditorSessionLookupError");

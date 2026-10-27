@@ -45,9 +45,10 @@ Uploads begin when you add an attachment. All uploads must finish before the
 message can send. Retry or remove a failed upload. On web and desktop, reloading
 before an upload finishes requires you to attach that file again.
 
-Use the attachment control to choose files from your device. On a phone, the
-browser opens the device's file picker. You can also drag or paste images into
-the composer when your browser supports it. HEIC and HEIF photos are converted
+Use the attachment control to choose files from your device. On a phone or
+tablet, it offers **Photos and videos**, which opens the device's photo picker
+directly, and **Files** for anything else or the camera. You can also drag or
+paste images into the composer when your browser supports it. HEIC and HEIF photos are converted
 to JPEG before upload; photos over the image limit are also resized to fit.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
@@ -190,6 +191,12 @@ Select the microphone beside Send to start recording. The strip above the compos
 elapsed time, a live waveform, and pause, restart, cancel and stop. Stop and transcribe ends the
 recording; the composer stays editable the whole time.
 
+A recording belongs to the chat you started it in. If you open another chat while you speak, the
+text still goes to the first chat, and Send mode sends it there. While it records, that chat's row in
+the sidebar shows a sound wave: select the wave to stop and deliver the recording in its current
+mode. The wave stays, in grey, until the text arrives. A recording started in a new thread goes to
+the chat where you stop it.
+
 The mode button cycles through three modes:
 
 - **Copy** copies the text to the clipboard and leaves the draft alone.
@@ -220,7 +227,7 @@ microphone, and the marker, modes and send-when-ready work as on the desktop.
 ### Dictate from another app on Hyprland
 
 With Mesura Code running, `mesura-code --dictation toggle` starts a recording, and running it again
-stops it. The transcript goes to the last chat you had open. To use it from any app, add a bind to
+stops it. The transcript goes to the chat you had open when the recording started. To use it from any app, add a bind to
 your Hyprland config, for example:
 
 ```
@@ -293,9 +300,13 @@ row above the composer shows the goal and its progress.
 
 - `/goal` alone shows the current goal. `/goal clear` removes it.
 - Codex also supports `/goal pause` and `/goal resume`. Stopping a Codex goal
-  pauses it.
+  pauses it, and so does Codex ending its work without meeting the goal.
 - Stopping Claude ends the current turn, but the goal stays set. Claude checks it
   again at the end of your next message.
+- Sending a new goal, or `/goal resume`, while the agent works stops the current
+  turn and starts the goal, unless you queue it. `/goal clear` and `/goal pause`
+  stop the turn only when it is working on the goal. Other goal commands wait for
+  the turn to end.
 
 ## Context in your message
 

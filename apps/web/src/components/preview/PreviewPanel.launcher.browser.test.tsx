@@ -1,27 +1,9 @@
 import { act, render as renderBrowser, type Screen } from "../../../test/render";
 /**
- * Entry point: PreviewPanel, the component ChatView renders for a Browser tab,
- * with the desktop runtime reported (`isPreviewSupportedInRuntime`) and one
- * loaded tab, and the real launcher store (`lib/panelLauncher.ts`). The native
- * browser view exists only in the Electron window: `BrowserSurfaceSlot` is
- * replaced by a recorder of the `visible` it receives, which is what the slot
- * hands to the desktop bridge (`lease.present`).
- *
- * Phase 4 of the Vim keys round 2 cycle:
- * - Criterion 5: while the launcher shows over a browser tab, the browser slot
- *   is not visible, and it is visible again when the launcher closes, by a
- *   row or by Escape.
- * - Criterion 6, guard: a Browser tab offers no entry of its own, so the
- *   panel's pane entry (`enterPanel`) keeps focus on its tab title.
- *
- * Phase 5 review (P1-1): `RightPanelTabs`, the launcher over a Browser tab
- * with two browser profiles. Choosing a profile from the Browser row's
- * chevron opens the tab in that profile and closes the launcher, as every
- * other row does, so the native browser view shows again.
- *
- * Boundaries replaced, as `PreviewView.test.tsx` replaces them: the preview
- * and history stores, the environment, the RPC commands, the desktop bridge,
- * the browser defaults and recording, and the mini player.
+ * `PreviewPanel` for a loaded Browser tab on the desktop runtime, with the real launcher store and
+ * `BrowserSurfaceSlot` replaced by a recorder of the `visible` it hands the desktop bridge. While
+ * the launcher shows over a browser tab the native view is hidden, and choosing a profile from the
+ * Browser row's chevron closes the launcher so the view shows again.
  */
 import {
   AuthPreviewOperateScope,

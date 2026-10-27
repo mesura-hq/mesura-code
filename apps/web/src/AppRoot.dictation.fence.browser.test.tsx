@@ -1,34 +1,10 @@
 import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, render as renderBrowser, type Screen, fakeTimers } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * AppSidebarLayout around the real ChatView, as `_chat.tsx` does. The layout is
- * where the app-wide dictation listener lives, so a job that completes for a
- * thread that is not on screen is still filled.
- *
- * Phase 4 of the STT redesign, criteria 1–8: record in the desktop and web
- * window and place the marker. Phase 5, criteria 1–7: send a draft when its
- * last marker fills, on screen, off screen and from an open question card.
- * Phase 6, criteria 1–4 on the renderer side: a `--dictation …` command line
- * the desktop forwards runs the in-window command, and the widget window's
- * page (`DictationWidgetPage`, mounted beside the app) draws what the app
- * publishes. The desktop bridge is a loopback stand-in for the preload one.
- *
- * Boundaries the fixture replaces, and nothing else:
- * - The browser media APIs, through the `setDictationMediaBackend` seam in
- *   `dictation/recorder.ts` (happy-dom has no getUserMedia, MediaRecorder or
- *   AudioContext).
- * - The upload, at `runAttachmentUploadCycle`, the cycle the plan names, and the check of an
- *   earlier upload, at `verifyPersistedAttachmentUpload`.
- * - Every RPC command, at `runAtomCommand` and `useAtomCommand`, so the
- *   dictation start and setMode commands are observed as they leave.
- * - The job stream, at phase 2's `useDictationJobs` hook: the fixture pushes
- *   job lists through it as the server would.
- * - The sidebars and the thread entity reads, as `AppRoot.pendingUserInput.test.tsx` does,
- *   including the registry reads (`environmentThreadDetails.detailAtom`,
- *   `environmentProjects.projectAtom`) that a send off screen resolves the thread with.
- */
+// STT redesign phases 4-6 through AppRoot and the real AppSidebarLayout, which hosts the app-wide
+// dictation listener, so a job for an off-screen thread still fills. Media goes through
+// `setDictationMediaBackend` (no getUserMedia, MediaRecorder or AudioContext here). Uploads, RPC
+// commands and the `useDictationJobs` stream are replaced; the desktop bridge is a loopback.
 import { type ReactNode } from "react";
 import {
   createMemoryHistory,
@@ -437,8 +413,16 @@ async function mountApp(
     path: "/elsewhere",
     component: () => <p>Elsewhere</p>,
   });
+  // Another thread, whose composer takes the screen.
+  const other = createRoute({
+    getParentRoute: () => route,
+    path: "/other",
+    component: () => (
+      <ChatView environmentId={environmentId} threadId={offScreenThreadId} routeKind="server" />
+    ),
+  });
   router = createRouter({
-    routeTree: route.addChildren([index, elsewhere]),
+    routeTree: route.addChildren([index, elsewhere, other]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
@@ -492,6 +476,29 @@ async function navigateAwayFromThread() {
   });
   await settle();
   expect(container.querySelector('[data-testid="composer-editor"]')).toBeNull();
+}
+
+/** Opens the other thread: its composer mounts and takes the screen. */
+async function navigateToOtherThread() {
+  publishFenceThreadProjection(
+    makeFenceThreadProjection(
+      makeFenceThreadShell({
+        id: offScreenThreadId,
+        environmentId,
+        projectId: ProjectId.make(FENCE_PROJECT_ID),
+        title: "Other thread",
+        createdAt: now,
+      }),
+    ),
+    environmentId,
+  );
+  await act(async () => {
+    await router!.navigate({ to: "/other" as never });
+  });
+  await settle();
+  await vi.waitFor(() =>
+    expect(container.querySelector('[data-testid="composer-editor"]')).not.toBeNull(),
+  );
 }
 
 /** Lets promise chains (getUserMedia, Blob reads, upload, start) settle inside React's act. */
@@ -2284,5 +2291,89 @@ describe("dictation phase 8 guards", () => {
 
     await stopRecordingFromStrip();
     expect(document.querySelector(".mesura-dictation-strip")).toBeNull();
+  });
+});
+
+// A recording belongs to the thread whose composer owned dictation when it started. Thread B's
+// composer is the other route's ChatView; thread A is the index route's.
+describe("dictation stays on its thread fence", () => {
+  it("dictation stays on its thread AC1: a recording started in thread A and stopped from thread B's strip fills thread A's draft", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft A");
+    useComposerDraftStore.getState().setPrompt(offScreenTarget, "Draft B");
+    await mountApp();
+    await startRecordingFromMicrophone();
+    await pressKey(ALT_I);
+    await navigateToOtherThread();
+    await stopRecordingFromStrip();
+
+    const started = startedJob(0).input;
+    expect(started.target).toEqual({ kind: "thread", environmentId, threadId });
+    expect(slotsIn(promptOf(onScreenTarget)).map((slot) => slot.jobId)).toEqual([started.jobId]);
+    expect(promptOf(offScreenTarget)).toBe("Draft B");
+
+    await pushJobs([job(started.jobId, { status: "completed", mode: "inject", text: "hola" })]);
+    expect(squash(promptOf(onScreenTarget))).toBe("Draft A hola");
+    expect(promptOf(offScreenTarget)).toBe("Draft B");
+    expect(turnStarts()).toHaveLength(0);
+  });
+
+  it("dictation stays on its thread AC1: the toggle key stops it into thread A after a page with no thread and thread B", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft A");
+    await mountApp();
+    await startRecordingFromMicrophone();
+    await pressKey(ALT_I);
+    await navigateAwayFromThread();
+    await navigateToOtherThread();
+    await pressKey(TOGGLE);
+
+    const started = startedJob(0).input;
+    expect(started.target).toEqual({ kind: "thread", environmentId, threadId });
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
+    expect(slotsIn(promptOf(offScreenTarget))).toHaveLength(0);
+  });
+
+  it("dictation stays on its thread AC2: a send-mode stop on thread B's screen sends in thread A", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft A");
+    useComposerDraftStore.getState().setPrompt(offScreenTarget, "Draft B");
+    await mountApp();
+    await startRecordingFromMicrophone();
+    await navigateToOtherThread();
+    await stopRecordingFromStrip();
+    const { jobId, mode } = startedJob(0).input;
+    expect(mode).toBe("submit");
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y envíalo" })]);
+    const turns = turnStarts();
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.input.threadId).toBe(threadId);
+    expect(squash(turns[0]!.input.message.text)).toBe("[voiced] Draft A y envíalo");
+    expect(promptOf(offScreenTarget)).toBe("Draft B");
+  });
+
+  it("dictation stays on its thread AC2: Send pressed on thread A's pending marker sends in A while thread B is on screen", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft A");
+    useComposerDraftStore.getState().setPrompt(offScreenTarget, "Draft B");
+    await mountApp();
+    await recordInMode("insert");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
+    await click(requireButton("Submit message"));
+    expect(sendWhenReadyBannerShown()).toBe(true);
+    await navigateToOtherThread();
+
+    await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "hola mundo" })]);
+    const turns = turnStarts();
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.input.threadId).toBe(threadId);
+    expect(squash(turns[0]!.input.message.text)).toBe("[voiced] Draft A hola mundo");
+    expect(promptOf(offScreenTarget)).toBe("Draft B");
   });
 });

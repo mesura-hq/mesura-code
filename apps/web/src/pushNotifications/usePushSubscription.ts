@@ -121,6 +121,7 @@ export function usePushSubscription() {
     },
   );
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- reads the browser's and host's subscription state whenever the environment, scope or connection changes
   useEffect(() => {
     let current = true;
     check(environmentId, canWriteSettings, connectionPhase, () => current);

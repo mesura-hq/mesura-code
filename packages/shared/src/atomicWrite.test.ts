@@ -122,10 +122,8 @@ it.layer(NodeServices.layer)("writeFileStringAtomically", (it) => {
         Effect.forkChild,
       );
       yield* Deferred.await(firstAttempt);
-      // Another process saves once the lock clears, before the waiting write retries.
       yield* writeFileStringAtomically({ filePath, contents: "newer" });
 
-      // The newer target stops the first retry; Fiber.join waits for its real stat I/O.
       yield* TestClock.adjust("100 millis");
       assert.isTrue(Exit.isFailure(yield* Fiber.join(stale)));
       assert.strictEqual(yield* fs.readFileString(filePath), "newer");

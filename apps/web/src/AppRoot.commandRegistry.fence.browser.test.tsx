@@ -1,29 +1,9 @@
 import { page } from "vite-plus/test/browser";
 import { act, render as renderBrowser, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * AppSidebarLayout, a chat layout that mounts the real KeyEngineHost around
- * the real ChatView, as `_chat.tsx` does, and a settings page outside it. The
- * key engine is installed on `window` before React renders, as `main.tsx`
- * does. Keys are real `keydown` events dispatched from
- * the focused element.
- *
- * Phase 3 of the modal keys production cycle (the command registry):
- * - Criterion 2 at the app: a leader sequence runs the owner's own function
- *   and dispatches no synthetic `KeyboardEvent`.
- * - Criterion 6, guards: the chords of the ChatView branches this phase lifts
- *   into named functions (thread.settle, thread.pin, rightPanel.close) keep
- *   their effect with Vim mode off and on, and the sidebar chord keeps what it
- *   does today in each mode.
- * - Review P1-1, regression: leaving the chat layout turns the engine off, so
- *   Space reaches a focused Settings control.
- *
- * Boundaries the fixture replaces, and nothing else: the environment and
- * thread reads, every RPC command, the thread actions (observed as they are
- * called), the chords (the shipped defaults, as a fresh keybindings file
- * resolves them) and unrelated chrome. The setup follows
- * `AppRoot.dictation.fence.test.tsx`.
- */
+// Command registry (modal keys phase 3) through AppRoot, KeyEngineHost and ChatView, plus a
+// settings page outside the chat layout. A leader sequence must run the owner's own function and
+// dispatch no synthetic `KeyboardEvent`. Regression (review P1-1): leaving the chat layout turns
+// the engine off.
 
 import {
   createMemoryHistory,

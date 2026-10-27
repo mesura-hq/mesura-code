@@ -1,7 +1,7 @@
 import { ComposerSelectControl } from "./chat/ComposerControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { FolderGit2Icon, FolderGitIcon, FolderIcon } from "lucide-react";
-import { memo, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { memo, useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 
 import {
   resolveCurrentWorkspaceLabel,
@@ -55,6 +55,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   // new thread made the control editable again.
   const workspaceLocked = envLocked || forceNewWorktree;
   if (workspaceLocked && isOpen) setIsOpen(false);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the composer's workspace picker shortcut while the control is editable
   useEffect(() => {
     if (workspaceLocked) return;
     return subscribePickerAction("workspace", () => {

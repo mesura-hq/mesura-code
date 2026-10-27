@@ -1,20 +1,8 @@
 /**
- * Phase 3 fence of the hosts dock plan: acceptance criteria 1, 2, 4 and 5 as
- * wired into each sample, 6 (the stream), 7 (capability and scope) and 8
- * (shared sampling), plus the payload budget carried from phase 2's review.
- *
- * Entry points:
- * - `HostStatsService.layer`, the layer `server.ts` composes. Its `subscribe`
- *   is what the `subscribeHostStats` handler in `ws.ts` streams unchanged
- *   (`latest`, then `changes`), so the messages asserted here are the messages
- *   a client receives. The WebSocket route itself is pinned in `server.test.ts`
- *   ("streams host stats over websocket as a snapshot followed by samples").
- * - `ServerEnvironment.layer` for the advertised capability, and
- *   `requiredScopeForRpcMethod` for the scope the RPC layer enforces.
- *
- * The collector, the agent count query and server discovery are fakes; the
- * clock is `TestClock`. A payload's size is its JSON after the contract
- * schema encodes it, which is what the RPC serializer sends. 1 KB = 1024 bytes.
+ * `subscribeHostStats` in `ws.ts` streams `HostStatsService.subscribe` unchanged, so the messages
+ * asserted here are what a client receives; `server.test.ts` pins the WebSocket route itself.
+ * The collector, agent count query and server discovery are fakes, and the clock is `TestClock`.
+ * A payload's size is its JSON after the contract schema encodes it. 1 KB = 1024 bytes.
  */
 // @effect-diagnostics nodeBuiltinImport:off - the host facts are compared with Node's own reading.
 import * as NodeOS from "node:os";
@@ -61,7 +49,7 @@ const KB = 1024;
 /** The host the layer is told it runs on, so the snapshot's host facts are checkable. */
 const HOST = { platform: "linux", arch: "arm64", hostname: "vigilia-home" } as const;
 
-type Message = typeof HostStatsMessage.Type;
+type Message = HostStatsMessage;
 
 const encodeHistoryFile = Schema.encodeSync(
   Schema.fromJsonString(

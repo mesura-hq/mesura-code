@@ -23,7 +23,6 @@ import {
   resolveSidebarSweepKeys,
   resolveSidebarThreadStatus,
   resolveSidebarV2TopStatus,
-  resolveThreadLastVisitedAt,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   searchSidebarThreads,
@@ -51,6 +50,11 @@ import {
   type Thread,
 } from "../types";
 import { makeThreadFixture, type ThreadFixtureOverrides } from "../test-fixtures";
+import {
+  completeSidebarRouteReveal,
+  pendingSidebarRouteReveal,
+  resolveSidebarRouteReveal,
+} from "./sidebar/routeReveal";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 
@@ -452,6 +456,19 @@ describe("resolveSidebarThreadStatus", () => {
     ).toBe("approval");
   });
 
+  it("shows a waiting guest message as a Request, below the agent's own requests", () => {
+    expect(resolveSidebarThreadStatus({ ...idle, pendingGuestMessageCount: 1, runtime })).toBe(
+      "request",
+    );
+    expect(
+      resolveSidebarThreadStatus({
+        ...idle,
+        hasPendingUserInput: true,
+        pendingGuestMessageCount: 1,
+      }),
+    ).toBe("input");
+  });
+
   it("keeps usage-limit stops Limited and visible until the thread recovers", () => {
     const limited = {
       ...runtime,
@@ -514,13 +531,18 @@ describe("searchSidebarThreads", () => {
     title,
     projectId,
     branch,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-10-20T00:00:00.000Z",
+    latestUserMessageAt: "2026-10-20T00:00:00.000Z",
+    opens: null,
   });
   const threads = [
     searchThread("thread-1", "Fix workspace search", "p-alpha", "feat/search"),
     searchThread("thread-2", "Review providers", "p-workspace", null),
     searchThread("thread-3", "WORKTREE cleanup", "p-beta", null),
   ];
-  const search = (query: string) => searchSidebarThreads(threads, query, PROJECT_TITLE_BY_ID);
+  const search = (query: string) =>
+    searchSidebarThreads(threads, query, PROJECT_TITLE_BY_ID).titleMatches;
   const contentKeys = (...ids: ReadonlyArray<string>) =>
     new Set(
       ids.map((id) =>
@@ -559,7 +581,9 @@ describe("searchSidebarThreads", () => {
   });
 
   it("returns only threads it was given, so the caller keeps deciding the scope", () => {
-    expect(searchSidebarThreads([threads[1]!], "work", PROJECT_TITLE_BY_ID)).toEqual([threads[1]]);
+    expect(searchSidebarThreads([threads[1]!], "work", PROJECT_TITLE_BY_ID).titleMatches).toEqual([
+      threads[1],
+    ]);
   });
 
   it("matches a linked pull request, and still requires the other words to match", () => {
@@ -580,9 +604,11 @@ describe("searchSidebarThreads", () => {
         ],
       },
     ];
-    expect(searchSidebarThreads(linked, "#41", PROJECT_TITLE_BY_ID)).toEqual(linked);
-    expect(searchSidebarThreads(linked, "41 sidebar", PROJECT_TITLE_BY_ID)).toEqual(linked);
-    expect(searchSidebarThreads(linked, "#41 absent", PROJECT_TITLE_BY_ID)).toEqual([]);
+    const searchLinked = (query: string) =>
+      searchSidebarThreads(linked, query, PROJECT_TITLE_BY_ID).titleMatches;
+    expect(searchLinked("#41")).toEqual(linked);
+    expect(searchLinked("41 sidebar")).toEqual(linked);
+    expect(searchLinked("#41 absent")).toEqual([]);
   });
 
   // Search unification phase 1, criterion 2, guard: no word score. The older
@@ -592,30 +618,38 @@ describe("searchSidebarThreads", () => {
     const newer = searchThread("thread-newer", "Sidebar polish", "p-alpha", "rename-flow");
     const older58Days = searchThread("thread-58-days", "Sidebar rename", "p-beta", null);
     expect(
-      searchSidebarThreads([newer, older58Days], "sidebar rename", PROJECT_TITLE_BY_ID),
+      searchSidebarThreads([newer, older58Days], "sidebar rename", PROJECT_TITLE_BY_ID)
+        .titleMatches,
     ).toEqual([newer, older58Days]);
     expect(
-      searchSidebarThreads([older58Days, newer], "sidebar rename", PROJECT_TITLE_BY_ID),
+      searchSidebarThreads([older58Days, newer], "sidebar rename", PROJECT_TITLE_BY_ID)
+        .titleMatches,
     ).toEqual([older58Days, newer]);
   });
 
   // "cleanup" matches only thread-3's fields, so the others can be content-only matches.
-  it("appends content-only matches after every field match", () => {
+  // Mesura: content-only matches keep the sidebar's order, as field matches do (sidebarSearchScope.test.ts).
+  it("lists content-only matches apart, in the sidebar's order", () => {
     expect(
-      searchSidebarThreads(threads, "cleanup", PROJECT_TITLE_BY_ID, contentKeys("thread-1")),
-    ).toEqual([threads[2], threads[0]]);
+      searchSidebarThreads(
+        threads,
+        "cleanup",
+        PROJECT_TITLE_BY_ID,
+        contentKeys("thread-2", "thread-1"),
+      ),
+    ).toEqual({ titleMatches: [threads[2]], contentMatches: [threads[0], threads[1]] });
   });
 
   it("lists a thread matching both its fields and its content once", () => {
     expect(
       searchSidebarThreads(threads, "cleanup", PROJECT_TITLE_BY_ID, contentKeys("thread-3")),
-    ).toEqual([threads[2]]);
+    ).toEqual({ titleMatches: [threads[2]], contentMatches: [] });
   });
 
   it("ignores content matches for threads outside the sidebar collection", () => {
     expect(
       searchSidebarThreads(threads, "cleanup", PROJECT_TITLE_BY_ID, contentKeys("thread-missing")),
-    ).toEqual([threads[2]]);
+    ).toEqual({ titleMatches: [threads[2]], contentMatches: [] });
   });
 });
 
@@ -767,7 +801,9 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          pendingBackgroundTasks: [{ taskId: "bg-1", description: "Watch build", kind: "monitor" }],
+          pendingBackgroundTasks: [
+            { taskId: "bg-1", description: "Watch build", kind: "monitor", awaited: true },
+          ],
           runtime: {
             ...baseThread.runtime,
             status: "idle",
@@ -1282,18 +1318,40 @@ describe("navigation after parking a thread", () => {
 
 describe("unseen completion with background work", () => {
   it.each([
-    // Mesura: a pending command holds the current sidebar at Waiting (threadAttention.ts); the
-    // shared pill the legacy sidebar draws keeps upstream's Completed.
-    { kind: "command", status: "waiting", topStatus: "waiting", receded: true, pill: "Completed" },
-    { kind: "monitor", status: "waiting", topStatus: "waiting", receded: true, pill: "Waiting" },
-  ] as const)("presents a completed thread with a $kind roster", (expected) => {
+    // Mesura: any pending task holds the current sidebar at Waiting once its run settles
+    // (threadAttention.ts); the shared pill the legacy sidebar draws keeps upstream's rule.
+    {
+      roster: "dev server",
+      task: { kind: "command" },
+      status: "waiting",
+      topStatus: "waiting",
+      receded: true,
+      pill: "Completed",
+    },
+    {
+      roster: "dev server watchdog",
+      task: { kind: "monitor" },
+      status: "waiting",
+      topStatus: "waiting",
+      receded: true,
+      pill: "Completed",
+    },
+    {
+      roster: "awaited command",
+      task: { kind: "command", awaited: true },
+      status: "waiting",
+      topStatus: "waiting",
+      receded: true,
+      pill: "Waiting",
+    },
+  ] as const)("presents a completed thread with a $roster roster", (expected) => {
     const thread = presentThreadShell(localEnvironmentId, {
       ...makeThreadFixture().source,
       latestRunId: RunId.make("run-background-completion"),
       status: "completed",
       latestRunCompletedAt: DateTime.makeUnsafe("2026-06-20T01:00:00.000Z"),
       lastVisitedAt: DateTime.makeUnsafe("2026-06-20T00:59:00.000Z"),
-      pendingBackgroundTasks: [{ taskId: "background-work", kind: expected.kind }],
+      pendingBackgroundTasks: [{ taskId: "background-work", ...expected.task }],
     });
     const status = resolveSidebarThreadStatus(thread);
     const isUnread = hasUnseenCompletion(thread);
@@ -1324,7 +1382,12 @@ describe("Working shelf (beta)", () => {
     lastError: null,
     updatedAt: "2026-03-09T10:00:00.000Z",
   };
-  const backgroundTask = { taskId: "bg-1", description: "Watch build", kind: "monitor" as const };
+  const backgroundTask = {
+    taskId: "bg-1",
+    description: "Watch build",
+    kind: "monitor" as const,
+    awaited: true as const,
+  };
   const idle = {
     hasActionableProposedPlan: false,
     hasPendingApprovals: false,
@@ -1546,5 +1609,86 @@ describe("Working shelf (beta)", () => {
         unsnooze: false,
       });
     });
+  });
+});
+
+describe("pendingSidebarRouteReveal", () => {
+  it("keeps a revealed thread settled across a mount that reads no route params", () => {
+    const reveal = { observedKey: null, pendingKey: null };
+    expect(pendingSidebarRouteReveal(reveal, "env:a1")).toBe("env:a1");
+    completeSidebarRouteReveal(reveal);
+
+    // Back from Settings: location commits before the thread match does.
+    expect(pendingSidebarRouteReveal(reveal, null)).toBeNull();
+    expect(pendingSidebarRouteReveal(reveal, "env:a1")).toBeNull();
+
+    expect(pendingSidebarRouteReveal(reveal, "env:b1")).toBe("env:b1");
+  });
+
+  it("keeps a pending reveal through a render without route params", () => {
+    const reveal = { observedKey: null, pendingKey: null };
+    pendingSidebarRouteReveal(reveal, "env:a1");
+    expect(pendingSidebarRouteReveal(reveal, null)).toBeNull();
+    expect(pendingSidebarRouteReveal(reveal, "env:a1")).toBe("env:a1");
+  });
+});
+
+describe("resolveSidebarRouteReveal", () => {
+  const scopedProjectKeys = new Set(["environment-test:project-scoped"]);
+  const hidden = makeThreadFixture({ projectId: ProjectId.make("project-other") });
+  const hiddenKey = "environment-test:thread-test";
+  const findThread = (key: string) => (key === hiddenKey ? hidden : undefined);
+
+  it("widens the scope for a newly opened thread the scope hides", () => {
+    expect(
+      resolveSidebarRouteReveal({
+        reveal: { observedKey: "environment-test:other", pendingKey: null },
+        routeKey: hiddenKey,
+        isSearching: false,
+        scopedProjectKeys,
+        findThread,
+      }),
+    ).toEqual({ pendingKey: hiddenKey, widensScope: true });
+  });
+
+  it("never widens for a thread whose reveal already completed", () => {
+    // A remount's once-per-mount scroll must keep the scope the user chose.
+    expect(
+      resolveSidebarRouteReveal({
+        reveal: { observedKey: hiddenKey, pendingKey: null },
+        routeKey: hiddenKey,
+        isSearching: false,
+        scopedProjectKeys,
+        findThread,
+      }),
+    ).toEqual({ pendingKey: null, widensScope: false });
+  });
+
+  it("widens again for a thread reopened before the thread between them listed its row", () => {
+    // The user scoped away from the open thread, then went to a thread whose row
+    // never mounted, then came back.
+    const reveal = { observedKey: hiddenKey, pendingKey: null };
+    const resolve = (routeKey: string) =>
+      resolveSidebarRouteReveal({
+        reveal,
+        routeKey,
+        isSearching: false,
+        scopedProjectKeys,
+        findThread,
+      });
+    resolve("environment-test:unlisted");
+    expect(resolve(hiddenKey)).toEqual({ pendingKey: hiddenKey, widensScope: true });
+  });
+
+  it("holds a pending reveal without widening while searching", () => {
+    expect(
+      resolveSidebarRouteReveal({
+        reveal: { observedKey: hiddenKey, pendingKey: hiddenKey },
+        routeKey: hiddenKey,
+        isSearching: true,
+        scopedProjectKeys,
+        findThread,
+      }),
+    ).toEqual({ pendingKey: hiddenKey, widensScope: false });
   });
 });

@@ -106,11 +106,9 @@ export const OrchestrationThreadSearchEvidencePage = Schema.Struct({
 export type OrchestrationThreadSearchEvidencePage =
   typeof OrchestrationThreadSearchEvidencePage.Type;
 
-// One bounded reasoning step of agent thread search. The caller labels each
-// piece of evidence with an opaque `ref` and maps the model's refs back itself,
-// so the model never sees or returns environment or thread IDs. The request
-// names no model: the answering environment uses its own configured
-// textGenerationModelSelection.
+// One bounded reasoning step of agent thread search. Evidence carries opaque `ref`s the caller maps
+// back, so the model never sees environment or thread IDs. The request names no model: the answering
+// environment uses its own `textGenerationModelSelection`.
 export const THREAD_SEARCH_DESCRIPTION_MAX_LENGTH = 1_000;
 export const THREAD_SEARCH_REASONING_MAX_EVIDENCE = 60;
 export const THREAD_SEARCH_REASONING_MAX_TERMS = 24;

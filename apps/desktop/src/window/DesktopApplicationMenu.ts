@@ -107,14 +107,13 @@ const handleCheckForUpdatesMenuClick = Effect.gen(function* () {
     return;
   }
 
-  // The result dialogs need no main window. Opening one before the backend
-  // answers strands the renderer on a failed auth bootstrap.
+  // Opening a window before backend confirmation can strand it on failed auth bootstrap.
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
   yield* desktopWindow.activate;
   yield* checkForUpdatesFromMenu;
 }).pipe(Effect.withSpan("desktop.menu.handleCheckForUpdatesClick"));
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const electronMenu = yield* ElectronMenu.ElectronMenu;
   // Mesura: the Linux File menu quits through the app, not the `quit` role.
@@ -146,10 +145,7 @@ export const make = Effect.gen(function* () {
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
     };
-    // Chromium already pastes as plain text for this chord, so the accelerator
-    // needs nothing from the menu: the composer and the terminal each arm
-    // themselves from the same keydown. Routing it through the renderer anyway
-    // lands a second, injected paste and doubles the text.
+    // Chromium and the renderer already handle this chord; injecting another paste duplicates text.
     const pasteAsTextClick = (
       _item: Electron.MenuItem,
       _window: Electron.BaseWindow | undefined,
@@ -193,23 +189,10 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    // Electron's windowMenu role carries a Close item bound to CmdOrCtrl+W.
-    // On Linux and Windows that window is the whole application, so the
-    // accelerator quit Mesura Code outright, and it fired exactly when the
-    // press was aimed at the focused terminal's terminal.close binding and the
-    // terminal had just lost focus. Drop the item on those platforms: the File
-    // menu above already offers Quit, the titlebar and the window manager
-    // still close the window, and the renderer keeps receiving Ctrl+W, so
-    // terminal.close is unaffected.
-    //
-    // This cannot be fixed in the before-input-event handler in
-    // DesktopWindow.ts. Its preventDefault suppresses the page keydown as well
-    // as the menu accelerator, so blocking the close there would take
-    // terminal.close away with it. That handler rejects only auto-repeats for
-    // the same reason.
-    //
-    // macOS keeps the stock menu: there Cmd+W closes a window without quitting
-    // the app, and the File menu already owns the close role.
+    // On Linux and Windows the windowMenu role's Close (CmdOrCtrl+W) quits the app, and it fired
+    // when Ctrl+W was meant for terminal.close. Drop it there; the renderer still gets Ctrl+W.
+    // before-input-event cannot block it: its preventDefault also suppresses the page keydown.
+    // macOS keeps the stock menu, where Cmd+W closes a window without quitting.
     const windowMenuItem: Electron.MenuItemConstructorOptions =
       environment.platform === "darwin"
         ? { role: "windowMenu" }
@@ -267,11 +250,7 @@ export const make = Effect.gen(function* () {
       {
         label: "View",
         submenu: [
-          /*
-            Not the reload, DevTools or zoom roles: those act on the focused
-            webContents, so with a browser page focused they reload or zoom
-            the guest page and the app UI appears stuck.
-          */
+          /* Native reload/DevTools/zoom roles target focused guests; these commands must target the app. */
           { label: "Reload", accelerator: "CmdOrCtrl+R", click: mainContentsClick("reload") },
           {
             label: "Force Reload",
@@ -284,7 +263,9 @@ export const make = Effect.gen(function* () {
             click: mainContentsClick("toggleDevTools"),
           },
           { type: "separator" },
-          { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: zoomClick("reset") },
+          // Mesura: no accelerator. CmdOrCtrl+0 is the tenth thread jump, a
+          // page shortcut, and a menu accelerator would reset the zoom instead.
+          { label: "Actual Size", click: zoomClick("reset") },
           { label: "Zoom In", accelerator: "CmdOrCtrl+=", click: zoomClick("in") },
           {
             label: "Zoom In",
@@ -303,14 +284,8 @@ export const make = Effect.gen(function* () {
               ]
             : []),
           { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: zoomClick("out") },
-          // The numeric keypad sends its own key codes, so the number-row
-          // accelerators above never match it.
-          {
-            label: "Actual Size",
-            accelerator: "CmdOrCtrl+num0",
-            visible: false,
-            click: zoomClick("reset"),
-          },
+          // Keypad codes do not match number-row accelerators. Mesura: no keypad
+          // Actual Size; the page reads Ctrl+Numpad0 as the tenth thread jump.
           {
             label: "Zoom In",
             accelerator: "CmdOrCtrl+numadd",

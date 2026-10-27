@@ -1,12 +1,7 @@
 /**
- * The filesystem side of a Unix socket this process owns.
- *
- * Nothing here knows what travels over the socket: it is where the node lives,
- * that nothing else can write to it, and that it does not survive the process.
- *
- * Effect's `FileSystem` and `Path` rather than the node builtins, which the
- * repository's diagnostics enforce at typecheck — that requirement is why this
- * concern is a module of its own rather than part of the `node:net` side.
+ * The filesystem side of a Unix socket this process owns: where the node lives, that nothing else
+ * can write to it, and that it does not outlive the process. It uses Effect's `FileSystem` and
+ * `Path` because diagnostics forbid node builtins here, hence a module apart from `node:net`.
  */
 // @effect-diagnostics nodeBuiltinImport:off - `os.tmpdir()` has no Effect
 // service, and the fallback below is precisely about which directory the
@@ -61,11 +56,9 @@ export const removeSocketPath = Effect.fn("symmetria.socket.removeSocketPath")(f
 });
 
 /**
- * `$XDG_RUNTIME_DIR` is already `drwx------`, so the socket's own mode is a
- * second lock rather than the only one. The fallback is not: `os.tmpdir()` is
- * world-writable, and a predictable name there invites another local user to
- * pre-place a symlink between our unlink and our bind. So the fallback gets a
- * per-user directory of its own, which `prepareSocketPath` creates owner-only.
+ * `$XDG_RUNTIME_DIR` is already `drwx------`; `os.tmpdir()` is world-writable, and a predictable
+ * name there lets another local user pre-place a symlink between our unlink and our bind. So the
+ * fallback is a per-user directory, which `prepareSocketPath` creates owner-only.
  */
 export function defaultRuntimeDir(
   env: NodeJS.ProcessEnv = process.env,

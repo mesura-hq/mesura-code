@@ -189,6 +189,7 @@ export function AssistantSelectionToolbar({
   // Mesura: the chat buffer's visual mode cites by key. Its selection is set
   // by code, which the toolbar's pointer-driven observer does not track, so
   // the request captures the current native selection itself.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the chat buffer's cite requests while the viewport is mounted
   useEffect(() => {
     if (!viewport) return;
     return subscribeChatCiteRequest((request) => {

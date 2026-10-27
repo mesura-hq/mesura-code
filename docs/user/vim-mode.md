@@ -48,7 +48,7 @@ These keys work with Vim mode on or off.
 In the sidebar:
 
 - `Ctrl+D` and `Ctrl+U` scroll the thread list half a page without opening a thread.
-- Hold `Ctrl` and the threads on screen show a number: `Ctrl+1` to `Ctrl+9` open one. After a
+- Hold `Ctrl` and the threads on screen show a number: `Ctrl+1` to `Ctrl+9` and `Ctrl+0` open one. After a
   scroll, the numbers count from the top of what you now see.
 - The arrow keys move over the threads and show each one's details without opening it. `Enter`
   opens the thread you are on.

@@ -4,7 +4,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import LegacyPeerLinks from "./Migrations/061_PeerLinks.ts";
 
-/** Upgrade the published preview's 061_PeerLinks before the history guard runs. */
+const PEER_LINK_SERIES = ["PeerLinks", "PeerLinkFence", "WaitingLinkRequestIndex"] as const;
+
+// Previews recorded the peer-link series at 61 and releases at 68–70; main moved it to 70–72.
+// The migrator skips ids below the highest recorded one, so this moves the series and applies
+// and records the migrations it skipped, in one transaction.
 export const reconcilePeerLinksPreviewMigration = Effect.fn("reconcilePeerLinksPreviewMigration")(
   function* <E, R>(
     migrations: ReadonlyArray<readonly [number, string, Effect.Effect<unknown, E, R>]>,
@@ -19,15 +23,20 @@ export const reconcilePeerLinksPreviewMigration = Effect.fn("reconcilePeerLinksP
         const history = yield* sql<{ readonly migration_id: number; readonly name: string }>`
         SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 55
       `;
-        if (!history.some((row) => row.migration_id === 61 && row.name === "PeerLinks")) {
-          return [];
-        }
-        const earlier = migrations.filter(([id]) => id >= 55 && id <= 60);
+        const manifestIds = new Map(migrations.map(([id, name]) => [name, id]));
+        const targetId = manifestIds.get(PEER_LINK_SERIES[0]);
+        const recorded = history.find((row) => row.name === PEER_LINK_SERIES[0]);
+        if (targetId === undefined || !recorded || recorded.migration_id === targetId) return [];
+
+        const fromId = recorded.migration_id;
+        const earlier = migrations.filter(([id]) => id >= 55 && id < fromId);
+        const later = history.filter((row) => row.migration_id >= fromId);
         if (
-          history.some((row) => row.migration_id > 61) ||
+          fromId > targetId ||
           earlier.some(
             ([id, name]) => !history.some((row) => row.migration_id === id && row.name === name),
-          )
+          ) ||
+          later.some((row) => row.name !== PEER_LINK_SERIES[row.migration_id - fromId])
         ) {
           return yield* new Migrator.MigrationError({
             kind: "BadState",
@@ -35,24 +44,34 @@ export const reconcilePeerLinksPreviewMigration = Effect.fn("reconcilePeerLinksP
           });
         }
 
-        // Keep the original row and its timestamp. Merely moving it to 068 makes the
-        // migrator skip 061–067, so apply and record those migrations in this transaction.
-        // The preview DDL is idempotent and leaves existing links and secret names intact.
-        yield* LegacyPeerLinks;
-        yield* sql`
-        UPDATE effect_sql_migrations SET migration_id = 68
-        WHERE migration_id = 61 AND name = 'PeerLinks'
-      `;
+        // The 061 preview DDL is idempotent and leaves existing links and secret names intact.
+        if (fromId === 61) yield* LegacyPeerLinks;
+        // Keep the original rows and timestamps. Move the latest first to avoid key collisions.
+        const moved = later
+          .toSorted((a, b) => b.migration_id - a.migration_id)
+          .map(
+            (row) =>
+              [row.migration_id, manifestIds.get(row.name) ?? row.migration_id, row.name] as const,
+          );
+        for (const [oldId, newId, name] of moved) {
+          yield* sql`
+          UPDATE effect_sql_migrations SET migration_id = ${newId}
+          WHERE migration_id = ${oldId} AND name = ${name}
+        `;
+        }
         const executed: Array<readonly [number, string]> = [];
         for (const [id, name, migration] of migrations) {
-          if (id < 61 || id > 67) continue;
+          if (id < fromId || id >= targetId) continue;
           yield* migration;
           yield* sql`
           INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${id}, ${name})
         `;
           executed.push([id, name]);
         }
-        return [...executed, [68, "PeerLinks"] as const];
+        return [
+          ...executed,
+          ...moved.toReversed().map(([, newId, name]) => [newId, name] as const),
+        ];
       }),
     );
   },

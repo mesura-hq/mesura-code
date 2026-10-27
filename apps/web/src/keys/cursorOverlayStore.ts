@@ -18,11 +18,9 @@ export interface CursorGlyph {
 }
 
 /**
- * A block cursor drawn as an element, for the cases a highlight cannot paint:
- * a cursor with no character under it (an empty line, the end of a line),
- * fixed to the viewport; and a glyph narrower than the cursor's minimum
- * width, which carries `width`, `glyph` and the `container` it is drawn in,
- * with an optional `clip` (a `clip-path`). Viewport coordinates.
+ * For what a highlight cannot paint, in viewport coordinates: a cursor with no character under it
+ * (fixed to the viewport), or a glyph narrower than the minimum width, which also carries `width`,
+ * `glyph`, its `container` and an optional `clip-path`.
  */
 export interface CursorOverlay {
   readonly left: number;

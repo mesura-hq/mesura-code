@@ -1,8 +1,6 @@
 // Mesura: the broker that forwards a `find_threads` call to one connected
-// client (ADR-010). Entry point: `ThreadSearchBroker.layer`, driven through
-// `connect`, `invoke` and `respond` as the WebSocket handlers and the MCP tool
-// call them. Ported from commit d4e841fb56; every title carries "thread search
-// broker" so a name-filtered re-run matches it exactly.
+// client (ADR-010), driven through `connect`, `invoke` and `respond`. Every
+// title carries "thread search broker" so a name-filtered re-run matches it.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {

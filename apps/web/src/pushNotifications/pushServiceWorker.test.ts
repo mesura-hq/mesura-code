@@ -1,14 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - loads the shipped worker script off the checkout, outside any Effect.
 /**
- * Entry point: `apps/web/public/push-sw.js`, the file the browser registers,
- * evaluated as a classic worker script inside a fresh `node:vm` context whose
- * global is a fake `ServiceWorkerGlobalScope`: `self`, `clients`,
- * `registration`, `skipWaiting` and `addEventListener` are fixtures, so the
- * script may reach them either as `self.x` or as bare globals.
- *
- * Phone push phase 2, criteria 4 (a notification per push, with its tag, and
- * no fetch handler) and 5 (a click focuses an open window and asks it to open
- * the thread route, or opens a new window at that route).
+ * Runs the shipped `public/push-sw.js` as a classic script in a `node:vm` context whose
+ * global is a fake `ServiceWorkerGlobalScope`, so the script may reach the fixtures
+ * either as `self.x` or as bare globals.
  */
 import * as NodeFS from "node:fs";
 import * as NodeURL from "node:url";

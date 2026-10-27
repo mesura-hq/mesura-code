@@ -25,12 +25,8 @@ const browserScrollEnvironment = {
 };
 
 /**
- * React binding for the reading scroll. The behaviour lives in
- * `chatReadingScroller.ts`; this only wires it to the component lifecycle.
- *
- * It lives beside ChatView rather than inside it because ChatView is one of
- * the files upstream rewrites most often, and a self-contained hook keeps the
- * weekly merge surface to a single call.
+ * Beside ChatView rather than inside it, so the upstream file carries a single call.
+ * The behaviour lives in `chatReadingScroller.ts`.
  */
 export function useChatReadingScroll(
   options: ChatReadingScrollOptions,
@@ -51,6 +47,7 @@ export function useChatReadingScroll(
     [getScrollNode, getComposerOverlayHeight, onBreakLiveFollow],
   );
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: disposes the scroller's animation frame and gesture listeners on unmount
   useEffect(() => scroller.dispose, [scroller]);
 
   return scroller.scroll;
