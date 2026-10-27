@@ -3671,6 +3671,11 @@ export default function ChatView(props: ChatViewProps) {
               ref={setComposerOverlayElement}
               inert={isRevertingCheckpoint}
               data-chat-composer-overlay="true"
+              style={
+                isDraftHeroState && forceExpandedMobileComposer
+                  ? { viewTransitionName: MOBILE_DRAFT_HEADLINE_VIEW_TRANSITION_NAME }
+                  : undefined
+              }
               className={
                 isDraftHeroState
                   ? "pointer-events-none absolute inset-0 z-20 flex flex-col justify-end overflow-y-clip"
@@ -3680,7 +3685,10 @@ export default function ChatView(props: ChatViewProps) {
               {/* The hero headline sits in flow above the stack, with an equal spacer below it,
                   so the composer stays centred while there is room and is pushed down rather
                   than letting the headline rise over the header when the keyboard shrinks the
-                  pane. Past that, the overlay clips the headline and the composer stays whole. */}
+                  pane. Past that, the overlay clips the headline and the composer stays whole.
+                  The overlay, not the headline, carries the headline's view-transition name: a
+                  snapshot ignores its ancestors' clip, so a headline snapshot would paint its
+                  clipped part over the header while it fades out. */}
               <div
                 ref={draftHeroTransitionGroupRef}
                 className={
@@ -3691,14 +3699,7 @@ export default function ChatView(props: ChatViewProps) {
               >
                 {isDraftHeroState ? (
                   <div className="mx-auto flex w-full max-w-(--chat-content-max-width) flex-1 basis-0 flex-col justify-end">
-                    <div
-                      className="pointer-events-auto pb-4 group-has-data-[composer-shoulder-tab]/draft-hero:pb-0"
-                      style={
-                        forceExpandedMobileComposer
-                          ? { viewTransitionName: MOBILE_DRAFT_HEADLINE_VIEW_TRANSITION_NAME }
-                          : undefined
-                      }
-                    >
+                    <div className="pointer-events-auto pb-4 group-has-data-[composer-shoulder-tab]/draft-hero:pb-0">
                       <DraftHeroHeadline
                         draftId={draftId}
                         activeProjectRef={activeProjectRef}
