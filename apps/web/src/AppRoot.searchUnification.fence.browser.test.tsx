@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 import { page, userEvent } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
@@ -27,6 +28,8 @@ const sidebarLists = vi.hoisted(() => ({
   messageHits:
     [] as import("@t3tools/client-runtime/state/thread-search").EnvironmentThreadSearchMatch[],
   listeners: new Set<() => void>(),
+  shellReads: new Map<string, number>(),
+  messageSearchPending: false,
   /** What `useLegacySidebarEnabled` answers. */
   legacySidebar: false,
 }));
@@ -82,8 +85,14 @@ vi.mock("./state/entities", async (original) => {
     ...(await mocks.mockEntities(original)),
     useThreadShells: () => useAtomValue(shells.threadShellsAtom),
     useQuietThreadShells: () => useAtomValue(shells.quietThreadShellsAtom),
-    useThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) =>
-      useAtomValue(ref === null ? emptyShell : shells.threadShellAtom(ref)),
+    useThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) => {
+      if (ref)
+        sidebarLists.shellReads.set(
+          ref.threadId,
+          (sidebarLists.shellReads.get(ref.threadId) ?? 0) + 1,
+        );
+      return useAtomValue(ref === null ? emptyShell : shells.threadShellAtom(ref));
+    },
     useQuietThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) =>
       useAtomValue(ref === null ? emptyShell : shells.quietThreadShellAtom(ref)),
     useServerConfigs: () => useAtomValue(environmentServerConfigsAtom),
@@ -98,7 +107,11 @@ vi.mock("./state/queries", async (original) => ({
   ...(await (await fenceMocks()).mockQueries(original)),
   useThreadSearch: (_environmentIds: unknown, query: string) =>
     query.trim().length >= 2
-      ? { matches: sidebarLists.messageHits, query: query.trim(), isPending: false }
+      ? {
+          matches: sidebarLists.messageHits,
+          query: query.trim(),
+          isPending: sidebarLists.messageSearchPending,
+        }
       : { matches: [], query: "", isPending: false },
 }));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
@@ -180,6 +193,8 @@ let stopLocationTracking: (() => void) | undefined;
 let container: HTMLDivElement;
 
 async function setupBrowserFixture0() {
+  sidebarLists.shellReads.clear();
+  sidebarLists.messageSearchPending = false;
   const previousViewport = { width: window.innerWidth, height: window.innerHeight };
   await page.viewport(1440, 900);
   installKeyEngine();
@@ -386,7 +401,57 @@ const crossProjectThreads = () => [
   sidebarThread("beta-unrelated", "Provider settings", BETA_PROJECT_ID, 20),
 ];
 
+// Keep this target below the old first result so a stale Enter cannot pass.
+function addPendingSearchTarget() {
+  const at = DateTime.makeUnsafe(minutesAgo(60));
+  return addFenceThread(
+    "pending-target",
+    "Rename target thread",
+    [makeMessage("pending-target-assistant", "assistant", "Done.")],
+    { createdAt: minutesAgo(60), overrides: { updatedAt: at, latestUserMessageAt: at } },
+  );
+}
+
 describe("search unification: the sidebar Search reaches every project", () => {
+  it("keeps unchanged title rows mounted without rendering them again when the query gains whitespace", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await typeIntoSearch("rename");
+    const before = sidebarLists.shellReads.get("beta-rename");
+    expect(before).toBeGreaterThan(0);
+    await typeIntoSearch("rename ");
+    expect(searchResultKeys()).toEqual([threadKey("beta-rename"), threadKey("alpha-rename")]);
+    expect(sidebarLists.shellReads.get("beta-rename")).toBe(before);
+  });
+
+  it("keeps the pull request badge on field matches for number and URL queries", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const thread = sidebarThread("pr-match", "Rename sidebar", ALPHA_PROJECT_ID, 5);
+    const url = "https://github.com/acme/app/pull/57";
+    await mountWithThreads([
+      makeFenceThreadShell({
+        environmentId,
+        id: thread.id,
+        projectId: thread.projectId,
+        overrides: {
+          ...thread.source,
+          linkedPullRequest: {
+            projectId: thread.projectId,
+            repository: "acme/app",
+            number: 57,
+            url,
+          },
+        },
+      }),
+    ]);
+    for (const query of ["#57", "57", url]) {
+      await typeIntoSearch(query);
+      expect(searchResultKeys()).toEqual([threadKey("pr-match")]);
+      const row = document.querySelector<HTMLElement>("[data-search-result-key]")!;
+      expect(row.querySelector('[aria-label="PR #57, status pending"]')).not.toBeNull();
+    }
+  });
+
   it("search unification spec: with a project filter active a query lists matching threads from every project", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await mountWithThreads(crossProjectThreads());
@@ -780,6 +845,269 @@ describe("search unification regression: a focus chord over the open palette", (
 });
 
 describe("search unification regression: the chat keeps its own focus after a search", () => {
+  it.each(["Enter", "pointer"])(
+    "keeps a %s selection made before the current query commits",
+    async (method) => {
+      await using _browserFixture0 = await setupBrowserFixture0();
+      const targetId = addPendingSearchTarget();
+      await mountWithThreads(crossProjectThreads());
+      await typeIntoSearch("rename");
+      expect(searchResultKeys()).toContain(threadKey(targetId));
+      expect(searchResultKeys()[0]).not.toBe(threadKey(targetId));
+      const field = sidebarSearchField()!;
+      const target = [...document.querySelectorAll<HTMLElement>("[data-search-result-key]")].find(
+        (row) => row.dataset.searchResultKey === threadKey(targetId),
+      )!;
+
+      // One event task: the input is ahead of the result transition when the pick arrives.
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+          field,
+          "target thread",
+        );
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        expect(searchResultKeys().length).toBeGreaterThan(1);
+        if (method === "Enter") {
+          field.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "Enter",
+              code: "Enter",
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        } else {
+          target.click();
+        }
+      });
+      await vi.waitFor(() =>
+        expect(router!.state.location.pathname).toBe(`/${environmentId}/${targetId}`),
+      );
+      expect(sidebarSearchField()!.value).toBe("");
+    },
+  );
+
+  it("does not open a stale pointer row absent from the committed query", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const targetId = addPendingSearchTarget();
+    await mountWithThreads(crossProjectThreads());
+    await typeIntoSearch("rename");
+    const before = router!.state.location.pathname;
+    const field = sidebarSearchField()!;
+    const stale = [...document.querySelectorAll<HTMLElement>("[data-search-result-key]")].find(
+      (row) => row.dataset.searchResultKey === threadKey("alpha-rename"),
+    )!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        field,
+        "target thread",
+      );
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      stale.click();
+    });
+    await vi.waitFor(() => expect(searchResultKeys()).toEqual([threadKey(targetId)]));
+    expect(router!.state.location.pathname).toBe(before);
+    expect(sidebarSearchField()!.value).toBe("target thread");
+  });
+
+  it.each(["Escape", "button", "native"])(
+    "enters the restored list when Down follows %s before clear commits",
+    async (method) => {
+      await using _browserFixture0 = await setupBrowserFixture0();
+      await mountWithThreads(crossProjectThreads());
+      await typeIntoSearch("rename");
+      const field = sidebarSearchField()!;
+      await act(async () => {
+        flushSync(() => {
+          if (method === "Escape") {
+            field.dispatchEvent(
+              new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+            );
+          } else if (method === "button") {
+            document.querySelector<HTMLElement>('[aria-label="Clear thread search"]')!.click();
+          } else {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+              field,
+              "",
+            );
+            field.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        });
+        expect(field.value).toBe("");
+        expect(searchResultKeys().length).toBeGreaterThan(0);
+        field.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+        );
+      });
+      await vi.waitFor(() =>
+        expect(document.activeElement).toBe(
+          document.querySelector("[data-mesura-nav-stop], [data-mesura-thread-key]"),
+        ),
+      );
+      expect(field.value).toBe("");
+    },
+  );
+
+  it.each([
+    { keys: ["ArrowDown", "ArrowUp"], opens: false },
+    { keys: ["ArrowDown", "ArrowDown", "ArrowDown", "Enter"], opens: true },
+  ])("keeps cleared-list $keys in order", async ({ keys, opens }) => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    const secondKey = document.querySelectorAll<HTMLElement>("[data-mesura-thread-key]")[1]!.dataset
+      .mesuraThreadKey;
+    const before = router!.state.location.pathname;
+    await typeIntoSearch("rename");
+    const field = sidebarSearchField()!;
+    await act(async () => {
+      flushSync(() => {
+        field.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+        );
+      });
+      expect(field.value).toBe("");
+      expect(searchResultKeys().length).toBeGreaterThan(0);
+      for (const key of keys)
+        field.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    });
+    if (opens) {
+      await vi.waitFor(() =>
+        expect(router!.state.location.pathname).toBe(`/${secondKey!.replace(":", "/")}`),
+      );
+    } else {
+      await vi.waitFor(() => expect(listedThreadKeys().length).toBe(4));
+      expect(document.activeElement).toBe(field);
+      expect(router!.state.location.pathname).toBe(before);
+    }
+  });
+
+  it("does not move focus back after a pending clear and Down when focus leaves Search", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await typeIntoSearch("rename");
+    const field = sidebarSearchField()!;
+    const outside = projectFilterTrigger();
+    await act(async () => {
+      flushSync(() => {
+        field.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+        );
+      });
+      expect(field.value).toBe("");
+      expect(searchResultKeys().length).toBeGreaterThan(0);
+      field.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+      );
+      outside.focus();
+    });
+    await vi.waitFor(() => expect(listedThreadKeys().length).toBe(4));
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it.each([
+    { keys: ["ArrowDown"], expected: "alpha-rename" },
+    { keys: ["ArrowUp"], expected: "pending-target" },
+    { keys: ["ArrowDown", "ArrowDown"], expected: "pending-target" },
+    { keys: ["Enter", "ArrowDown"], expected: "beta-rename" },
+    { keys: ["Enter", "ArrowUp"], expected: "beta-rename" },
+  ])("preserves pending $keys navigation order", async ({ keys, expected }) => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    addPendingSearchTarget();
+    await mountWithThreads(crossProjectThreads());
+    await typeIntoSearch("provider");
+    expect(searchResultKeys()).toEqual([threadKey("beta-unrelated")]);
+    const field = sidebarSearchField()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        field,
+        "rename",
+      );
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      for (const key of [...keys, "Enter"]) {
+        field.dispatchEvent(
+          new KeyboardEvent("keydown", { key, code: key, bubbles: true, cancelable: true }),
+        );
+      }
+    });
+    await vi.waitFor(() =>
+      expect(router!.state.location.pathname).toBe(`/${environmentId}/${expected}`),
+    );
+  });
+
+  it("keeps a pending arrow highlight when Enter follows the committed query", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await typeIntoSearch("provider");
+    const field = sidebarSearchField()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        field,
+        "rename",
+      );
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          code: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await press({ key: "Enter", code: "Enter" });
+    await vi.waitFor(() =>
+      expect(router!.state.location.pathname).toBe(`/${environmentId}/alpha-rename`),
+    );
+  });
+
+  it("does not keep an Enter intent until a late remote result arrives", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const targetId = addPendingSearchTarget();
+    await mountWithThreads(crossProjectThreads());
+    await typeIntoSearch("rename");
+    const before = router!.state.location.pathname;
+    const field = sidebarSearchField()!;
+    sidebarLists.messageSearchPending = true;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        field,
+        "needle",
+      );
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          code: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(searchResultKeys()).toEqual([]);
+    await act(async () => {
+      sidebarLists.messageSearchPending = false;
+      sidebarLists.messageHits = [
+        {
+          environmentId,
+          threadId: targetId,
+          projectId: ProjectId.make(ALPHA_PROJECT_ID),
+          source: "user",
+          snippet: "needle",
+          messageCreatedAt: null,
+        },
+      ];
+      // A shell update makes the late server fixture visible through the app entry point.
+      sidebarLists.threads = [
+        ...sidebarLists.threads,
+        sidebarThread("late-refresh", "Other thread", ALPHA_PROJECT_ID, 5),
+      ];
+      for (const listener of sidebarLists.listeners) listener();
+    });
+    await vi.waitFor(() => expect(searchResultKeys()).toEqual([threadKey(targetId)]));
+    expect(router!.state.location.pathname).toBe(before);
+    expect(sidebarSearchField()!.value).toBe("needle");
+  });
+
   it("search unification regression: Enter on a sidebar search result opens it and hands the keyboard to the composer", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     const targetId = addFenceThread("search-fence-target", "Rename target thread", [

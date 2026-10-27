@@ -1573,8 +1573,8 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
   searchQuery: string;
   /** The query `searchMatch` was found for, which lags `searchQuery` while a search runs. */
   searchMatchQuery?: string;
-  onHighlight: () => void;
-  onSelect: () => void;
+  onHighlight: (thread: SidebarThreadSummary) => void;
+  onSelect: (thread: SidebarThreadSummary) => void;
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
 }) {
   const thread =
@@ -1654,8 +1654,8 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
               aria-current={accessibility.current}
               aria-describedby={`${props.resultId}-pr`}
               aria-label={accessibility.label}
-              onMouseMove={props.onHighlight}
-              onClick={props.onSelect}
+              onMouseMove={() => props.onHighlight(thread)}
+              onClick={() => props.onSelect(thread)}
               className={cn(
                 "group/sidebar-row group/v2-row flex min-h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1 text-left text-sm outline-none",
                 props.isHighlighted || props.isRouteActive

@@ -461,6 +461,51 @@ async function chooseProjectInFilter(title: string): Promise<void> {
 const FAR_FUTURE = DateTime.makeUnsafe("2099-01-01T00:00:00.000Z");
 
 describe("working section: place and order", () => {
+  it.each([
+    { expanded: false, clearWith: "Escape" },
+    { expanded: false, clearWith: "button" },
+    { expanded: true, clearWith: "Escape" },
+    { expanded: true, clearWith: "button" },
+  ])(
+    "searches Working rows and restores expansion $expanded and order with $clearWith",
+    async ({ expanded, clearWith }) => {
+      await using _browserFixture0 = await setupBrowserFixture0();
+      await mountWithThreads(
+        [
+          workingThread("search-old", "Search target old", 30),
+          workingThread("search-new", "Search target new", 5),
+          idleThread("search-idle", "Search target idle", 10),
+        ],
+        { expanded },
+      );
+      expect(headerExpanded()).toBe(expanded);
+      const before = sectionRowKeys();
+      expect(before).toEqual(expanded ? [threadKey("search-new"), threadKey("search-old")] : []);
+
+      await userEvent.type(sidebarSearchField(), "target");
+      await vi.waitFor(() =>
+        expect(
+          [...document.querySelectorAll<HTMLElement>("[data-search-result-key]")].map(
+            (row) => row.dataset.searchResultKey,
+          ),
+        ).toEqual([threadKey("search-idle"), threadKey("search-new"), threadKey("search-old")]),
+      );
+      expect(section()).toBeNull();
+
+      if (clearWith === "Escape") {
+        await press({ key: "Escape", code: "Escape" });
+      } else {
+        await userEvent.click(
+          document.querySelector<HTMLElement>('[aria-label="Clear thread search"]')!,
+        );
+      }
+      await vi.waitFor(() => expect(section()).not.toBeNull());
+      expect(sidebarSearchField().value).toBe("");
+      expect(headerExpanded()).toBe(expanded);
+      expect(sectionRowKeys()).toEqual(before);
+    },
+  );
+
   it("working section spec: Search, Working, every other thread, Snoozed, then Settled, top to bottom", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await mountWithThreads(

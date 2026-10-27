@@ -1,4 +1,4 @@
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { FolderPlusIcon, LoaderCircleIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -6,6 +6,8 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+
+import { useResponsiveSearchInput } from "./useResponsiveSearchInput";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -25,13 +27,13 @@ export interface SidebarThreadHeaderProps {
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
-  onSearchKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
+  onSearchKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>, clearSearch: () => void) => void;
   isSearching: boolean;
   searchResultCount: number;
   activeSearchResultIndex: number;
   onClearSearch: () => void;
   /** Mesura: sits at the right inside the Search field, before the clear X. */
-  searchFieldAccessory?: ReactNode;
+  renderSearchFieldAccessory?: (query: string) => ReactNode;
 }
 
 export function SidebarThreadHeader({
@@ -52,11 +54,13 @@ export function SidebarThreadHeader({
   searchResultCount,
   activeSearchResultIndex,
   onClearSearch,
-  searchFieldAccessory,
+  renderSearchFieldAccessory,
 }: SidebarThreadHeaderProps) {
+  const input = useResponsiveSearchInput(searchQuery, onSearchQueryChange);
   const resultsVisible = isSearching && searchResultCount > 0;
   // Shrinking results can remove the active option; never leave aria-activedescendant pointing at it.
-  const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
+  const activeResultExists =
+    !input.isPending && resultsVisible && activeSearchResultIndex < searchResultCount;
   const newThreadLabel = newThreadShortcutLabel
     ? `New thread (${newThreadShortcutLabel})`
     : "New thread";
@@ -67,14 +71,29 @@ export function SidebarThreadHeader({
         ref={searchFieldRef}
         className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground redesign:focus-within:bg-sidebar-row-hover redesign:focus-within:text-sidebar-foreground redesign:focus-within:ring-1 redesign:focus-within:ring-inset redesign:focus-within:ring-ring/70"
       >
-        <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
+        <span className="relative size-4 shrink-0 text-(--sidebar-icon-color)">
+          <SearchIcon
+            className={cn(
+              "size-4 transition-opacity duration-0",
+              input.isPending && "opacity-0 delay-150",
+            )}
+          />
+          <LoaderCircleIcon
+            aria-hidden="true"
+            className={cn(
+              "absolute inset-0 size-4 transition-opacity duration-0",
+              input.isPending ? "animate-spin opacity-100 delay-150" : "opacity-0",
+            )}
+          />
+        </span>
         <SidebarInput
           ref={searchInputRef}
           nativeInput
           type="search"
-          value={searchQuery}
-          onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
-          onKeyDown={onSearchKeyDown}
+          value={input.value}
+          onChange={(event) => input.onChange(event.currentTarget.value)}
+          aria-busy={input.isPending}
+          onKeyDown={(event) => onSearchKeyDown(event, () => input.onChange("", onClearSearch))}
           placeholder="Search"
           aria-label="Search threads"
           // Mesura: Down from the empty field enters the thread list (sidebarThreadViewport.ts).
@@ -90,8 +109,8 @@ export function SidebarThreadHeader({
           }
           className="min-w-0 flex-1"
         />
-        {searchFieldAccessory}
-        {isSearching ? (
+        {renderSearchFieldAccessory?.(input.value)}
+        {input.value.trim().length > 0 ? (
           <Button
             type="button"
             size="icon-micro"
@@ -99,7 +118,7 @@ export function SidebarThreadHeader({
             className="shrink-0"
             aria-label="Clear thread search"
             onClick={() => {
-              onClearSearch();
+              input.onChange("", onClearSearch);
               searchInputRef.current?.focus();
             }}
           >
