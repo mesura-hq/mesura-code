@@ -403,7 +403,7 @@ sent a message to yet has no title to rename, so the shortcut does nothing there
 
 ### Settling a thread
 
-`thread.toggleSettled` settles the open thread, or brings a settled one back to Active, and
+`thread.settle` settles the open thread, or brings a settled one back to Active, and
 defaults to `mod+shift+s`. Note that `mod+s` — the same chord without `Shift` — is a different
 shortcut: it stashes the composer draft. Like the other composer shortcuts, it is inactive while
 the terminal has focus.

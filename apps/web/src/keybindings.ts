@@ -18,6 +18,7 @@ import {
   type ShortcutEventLike,
   type ShortcutModifierStateLike,
 } from "@t3tools/shared/keybindings";
+import { diagnoseUnhandledKeybinding } from "./commands/unhandledKeybinding";
 import { isElectron } from "./env";
 import { projectScriptIdFromCommand } from "./projectScripts";
 import { getFocusedPane, isSidebarSearchFocused, type PaneId } from "./lib/paneFocus";
@@ -303,7 +304,9 @@ export function resolveShortcutCommand(
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): KeybindingCommand | null {
-  return findLastMatchingBinding(event, keybindings, options)?.command ?? null;
+  const command = findLastMatchingBinding(event, keybindings, options)?.command ?? null;
+  if (command !== null) diagnoseUnhandledKeybinding(event, command);
+  return command;
 }
 
 /**

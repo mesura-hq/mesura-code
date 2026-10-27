@@ -202,7 +202,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(soleKeyFor("branchPicker.toggle"), "alt+b");
       assert.equal(soleKeyFor("question.toggleCollapse"), "alt+q");
       // Upstream's thread.settle owns this chord since the 2026-W35 sync; the
-      // fork's thread.toggleSettled does the same thing and is now unbound.
+      // retired fork alias migrates to this command, including custom chords.
       // mod+s is composer.stash, so this sits one Shift away from it, and the
       // same-shortcut-context guard below proves the two stay apart.
       assert.equal(soleKeyFor("thread.settle"), "mod+shift+s");
@@ -606,6 +606,99 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       );
     }).pipe(Effect.provide(layerKeybindings())),
   );
+
+  it.effect(
+    "migrates the retired settle command without changing custom keys, conditions, or order",
+    () => {
+      const migrationLogs: unknown[] = [];
+      const logger = Logger.make(({ message }) => {
+        if (Array.isArray(message) && message[0] === "applied keybinding command migration")
+          migrationLogs.push(message[1]);
+      });
+      return Effect.gen(function* () {
+        const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const legacyRules = [
+          ...Keybindings.DEFAULT_KEYBINDINGS,
+          { key: "mod+shift+s", command: "thread.toggleSettled", when: "!terminalFocus" },
+          { key: "alt+shift+s", command: "thread.toggleSettled", when: "chatFocus" },
+          { key: "alt+shift+s", command: "thread.pin", when: "chatFocus" },
+        ];
+        yield* fs.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true });
+        yield* fs.writeFileString(keybindingsConfigPath, JSON.stringify(legacyRules));
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+        const expectedLog = {
+          path: keybindingsConfigPath,
+          from: "thread.toggleSettled",
+          to: "thread.settle",
+          id: "rename:thread.toggleSettled:thread.settle",
+          count: 2,
+        };
+        assert.deepEqual(migrationLogs, [expectedLog]);
+        const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+        assert.deepEqual(persisted.slice(-3), [
+          { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
+          { key: "alt+shift+s", command: "thread.settle", when: "chatFocus" },
+          { key: "alt+shift+s", command: "thread.pin", when: "chatFocus" },
+        ]);
+        const state = yield* keybindings.loadConfigState;
+        assert.deepEqual(state.issues, []);
+        assert.isFalse(
+          state.keybindings.some((rule) => String(rule.command) === "thread.toggleSettled"),
+        );
+        const ledgerPath = path.join(path.dirname(keybindingsConfigPath), "keybindings-migrations");
+        const ledger = yield* fs.readFileString(ledgerPath);
+        assert.include(ledger, "rename:thread.toggleSettled:thread.settle");
+        const afterFirstStartup = yield* fs.readFileString(keybindingsConfigPath);
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+        assert.equal(yield* fs.readFileString(keybindingsConfigPath), afterFirstStartup);
+        assert.equal(yield* fs.readFileString(ledgerPath), ledger);
+        // A restored backup can contain an old id after the ledger records its migration.
+        // Startup invalidates the cached snapshot, but the reader must normalize independently.
+        yield* fs.writeFileString(keybindingsConfigPath, JSON.stringify(legacyRules));
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+        assert.deepEqual(migrationLogs, [expectedLog, expectedLog]);
+        assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), persisted);
+        const restored = yield* keybindings.loadConfigState;
+        assert.deepEqual(restored.issues, []);
+        assert.deepEqual(
+          restored.keybindings.slice(-3).map((rule) => rule.command),
+          ["thread.settle", "thread.settle", "thread.pin"],
+        );
+        assert.equal(yield* fs.readFileString(ledgerPath), ledger);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(layerKeybindings(), Logger.layer([logger], { mergeWithExisting: false })),
+        ),
+      );
+    },
+  );
+
+  it.effect("does not rewrite or log command renames when the config contains no old ids", () => {
+    const messages: string[] = [];
+    const logger = Logger.make(({ message }) => {
+      messages.push(String(message));
+    });
+    return Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, Keybindings.DEFAULT_KEYBINDINGS);
+      const fs = yield* FileSystem.FileSystem;
+      const original = JSON.stringify(Keybindings.DEFAULT_KEYBINDINGS, null, 4) + "\n";
+      yield* fs.writeFileString(keybindingsConfigPath, original);
+      const keybindings = yield* Keybindings.Keybindings;
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.equal(yield* fs.readFileString(keybindingsConfigPath), original);
+      assert.isFalse(
+        messages.some((message) => message.includes("applied keybinding command migration")),
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(layerKeybindings(), Logger.layer([logger], { mergeWithExisting: false })),
+      ),
+    );
+  });
 
   it.effect("leaves an already-migrated config untouched on the next startup", () =>
     Effect.gen(function* () {

@@ -659,7 +659,6 @@ export default defineConfig({
           "apps/web/src/lib/openIssueLink.ts",
           "apps/web/src/lib/paneEdges.ts",
           "apps/web/src/lib/useChatReadingScroll.ts",
-          "apps/web/src/lib/useThreadSettledToggle.ts",
         ],
         rules: { "t3code/no-manual-memo": ["error", { allowMemoHooks: true }] },
       },

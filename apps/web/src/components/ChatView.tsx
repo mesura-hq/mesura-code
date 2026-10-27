@@ -13,7 +13,7 @@ import type { DirectedSubmissionContext } from "../dictation/directedComposerSub
 import { useRepositoryDefaults } from "../lib/t3ProjectFileDefaults";
 import { applyImplicitDraftModelDefaults } from "../lib/chatThreadActions";
 import { useCommandHandlers } from "../commands/commandRegistry";
-import { dispatchPickerAction } from "../lib/pickerActionBus";
+import { chatPickerCommands } from "./chat/chatPickerCommands";
 import { openPanelLauncher } from "../lib/panelLauncher";
 import { projectIssuesAvailability } from "./issues/issues.logic";
 import { useFileSurfacePendingStore } from "./files/fileSurfacePendingStore";
@@ -216,7 +216,6 @@ import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations"
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { useChatReadingScroll } from "../lib/useChatReadingScroll";
-import { useThreadSettledToggle } from "../lib/useThreadSettledToggle";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { focusTerminalOnThreadEnter, getTerminalFocusOwner } from "../lib/terminalFocus";
 import {
@@ -2807,23 +2806,23 @@ export default function ChatView(props: ChatViewProps) {
     composerOverlayHeight: composerTimelineInset,
     onBreakLiveFollow: releaseFollowForNavigation,
   });
-  const toggleActiveThreadSettled = useThreadSettledToggle(
-    activeThreadRef && isServerThread
-      ? { threadRef: activeThreadRef, settled: activeThreadShell?.settledOverride === "settled" }
-      : null,
-  );
+  // Keep the local map explicit: the modal-key guards follow its registered command names.
   const mesuraPickerCommands = {
-    "traitsPicker.toggle": () => dispatchPickerAction("traits"),
-    "workspacePicker.toggle": () => dispatchPickerAction("workspace"),
-    "branchPicker.toggle": () => dispatchPickerAction("branch"),
-    "composer.workspace": () => dispatchPickerAction("workspace"),
-    "question.toggleCollapse": () => dispatchPickerAction("question"),
+    "traitsPicker.toggle": chatPickerCommands["traitsPicker.toggle"],
+    "workspacePicker.toggle": chatPickerCommands["workspacePicker.toggle"],
+    "branchPicker.toggle": chatPickerCommands["branchPicker.toggle"],
+    "composer.workspace": chatPickerCommands["composer.workspace"],
+    "question.toggleCollapse": chatPickerCommands["question.toggleCollapse"],
+    "runContext.toggle": chatPickerCommands["runContext.toggle"],
+    "runContext.cycleMachine": chatPickerCommands["runContext.cycleMachine"],
+    "runContext.toggleWorkspace": chatPickerCommands["runContext.toggleWorkspace"],
   };
   useCommandHandlers({
     ...mesuraPickerCommands,
     "thread.copyReference": copyActiveThreadReference,
     "thread.settle": () => {
-      toggleActiveThreadSettled();
+      // The chord and Vim must share capability checks, unsettle, and sidebar advancement.
+      threadLifecycleShortcuts["thread.settle"]();
     },
     "thread.pin": () => {
       threadLifecycleShortcuts["thread.pin"]();

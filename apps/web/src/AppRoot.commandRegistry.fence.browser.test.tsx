@@ -87,6 +87,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { installKeyEngine } from "./keys/keyEngine";
 
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
+import { registerSettleAndAdvance } from "./settleAndAdvance";
 import { runRegisteredCommand } from "./commands/commandRegistry";
 import {
   selectActiveRightPanelSurface,
@@ -412,6 +413,18 @@ describe("registry fence: lifted ChatView chords keep their effect", () => {
 });
 
 describe("registry fence: leader rows run the owner's function at the app", () => {
+  it("routes the leader and the chord through the same settle-and-advance owner", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountApp({ vimMode: true });
+    const advance = vi.fn();
+    using owner = new DisposableStack();
+    owner.defer(registerSettleAndAdvance(advance));
+    await press(SETTLE_CHORD);
+    await pressLeader("ts");
+    expect(advance.mock.calls).toEqual([[threadRef], [threadRef]]);
+    expect(fixture.threadActions.settleThread).toEqual([]);
+  });
+
   it("registry fence spec: <leader>ts settles the open thread with no synthetic keydown", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
