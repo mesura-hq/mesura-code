@@ -1,12 +1,8 @@
 #!/usr/bin/env node
-// Minimal `codex app-server` stand-in that records the environment it was
-// spawned with. Before it reads stdin it appends one `spawn` JSON line to the
-// file named by T3_SPAWN_ENVIRONMENT_LOG, so any response it sends proves the
-// record is already on disk; every request it then answers appends a `request`
-// line with the same pid, so a test can tell which spawn served which method.
-// Answers just enough of the protocol for the provider probes (status, skills,
-// account limits, reset-credit) and for CodexSessionRuntime to start a
-// session. Stdlib only.
+// `codex app-server` stand-in that records its spawn environment. It appends a `spawn` line
+// to T3_SPAWN_ENVIRONMENT_LOG before reading stdin, so any response proves the record is on
+// disk, then a `request` line with the same pid per answer. Answers just enough protocol for
+// the provider probes and a CodexSessionRuntime session start. Stdlib only.
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeReadline from "node:readline";

@@ -1,19 +1,8 @@
 /**
- * Entry point: `widenedCursorBox` in `blockCursor.ts`, the pure decision both
- * key surfaces (`chat/chatSurface.ts`, `composer/composerSurface.ts`) take for
- * the block cursor on a glyph: paint the CSS highlight as it is, or draw the
- * widened overlay in a box this function returns.
- *
- * Phase 7 of the modal keys production cycle (a readable block cursor on
- * narrow glyphs):
- * - Criterion 1: on a glyph narrower than 0.5em the cursor block is 0.5em
- *   wide and centred on the glyph.
- * - Criterion 3: on a glyph 0.5em or wider there is no box, so the highlight
- *   paints the cursor exactly as in the baseline.
- *
- * happy-dom has no layout, so the geometry is decided here from a glyph box
- * and the glyph's computed font size in px; the app-level fence
- * (`AppRoot.narrowGlyphCursor.fence.test.tsx`) proves the surfaces use it.
+ * `widenedCursorBox` is the pure decision both key surfaces take: a glyph under
+ * 0.5em gets a centred 0.5em box, a wider one gets none and keeps the highlight.
+ * happy-dom has no layout, so geometry is fed in; the wiring is proved by
+ * `AppRoot.narrowGlyphCursor.fence.test.tsx`.
  */
 import { describe, expect, it } from "vite-plus/test";
 

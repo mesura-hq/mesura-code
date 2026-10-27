@@ -5,12 +5,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { SymmetriaDraftVersion, SymmetriaSnapshotRevision } from "./primitives.ts";
 
 /**
- * The bound on these two has to survive `Schema.brand`, because phase six emits
- * JSON Schema from them and a non-TypeScript consumer only ever sees what
- * survives. Rebuilding either on a transformed base — the upstream
- * `TrimmedString` family, say — drops the check from the emitted document while
- * TypeScript keeps enforcing it, so the two consumer kinds would disagree with
- * nothing red. These cases are what turns that back into a failure.
+ * The bound must survive `Schema.brand` into the emitted JSON Schema. A transformed base such
+ * as upstream `TrimmedString` drops the check from the artifact while TypeScript still enforces
+ * it; these cases make that disagreement fail.
  */
 const brandedNonNegativeIntegers = {
   SymmetriaDraftVersion,

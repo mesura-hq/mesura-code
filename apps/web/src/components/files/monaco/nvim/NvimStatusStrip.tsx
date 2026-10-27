@@ -6,18 +6,9 @@ import { isErrorMessageKind } from "./nvimMessages.ts";
 import { describeFallback, isSettingsFixable, type NvimFallback } from "./nvimFallback.ts";
 
 /**
- * One row under the editor: the mode, the command line, and the last message.
- *
- * A modal editor that does not show its mode is a trap — the same keystroke
- * deletes a line or types a letter, and the only way to find out which is to
- * press it. The command line is the same problem one level up: `:` and `/`
- * take the keyboard entirely, and a host that does not draw them leaves the
- * developer typing into something they cannot see. Phase 8 adds the notice for
- * when Neovim could not start.
- *
- * Deliberately still: no transition, no animation. This is driven all day and
- * an indicator that moved on every `i` would be the most repetitive thing on
- * the screen.
+ * One row under the editor: the mode, the command line, the last message, and the notice when
+ * Neovim could not start. A modal editor must show its mode, and `:` and `/` must be visible.
+ * Deliberately still (no transition, no animation): an indicator moving on every `i` is noise.
  */
 export function NvimStatusStrip({
   mode,

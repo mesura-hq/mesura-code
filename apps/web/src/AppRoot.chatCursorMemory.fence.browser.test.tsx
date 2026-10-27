@@ -1,39 +1,10 @@
 import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout, as `routes/__root.tsx`
- * does, and whose chat layout is the real `_chat.tsx` route component (the
- * real KeyEngineHost around the real ChatView). The thread route reads the
- * environment and thread ids from its params, as
- * `routes/_chat.$environmentId.$threadId.tsx` does, so opening another thread
- * is a router navigation that re-renders the same ChatView with new ids. The
- * key engine is installed on `window` before React renders, as `main.tsx`
- * does. Keys are real `keydown` events dispatched from the focused element.
- *
- * Phase 5 of the modal keys production cycle (the chat cursor per thread, and
- * soft breaks read as spaces):
- * - Criterion 1: open thread A, move the cursor, open thread B, return to A:
- *   the cursor is on the same row and offset as before.
- * - Criterion 2, guard: a thread opened for the first time starts at the first
- *   visible line, as today.
- * - Criterion 3, guard: the memory is never written to storage.
- * - Criterion 4 at the app: a Markdown paragraph whose source has a single
- *   newline is one buffer line, and `j` from it lands on the next block.
- * - Criterion 6 at the app: a visual selection across a former soft break,
- *   cited with `<Space>c`, cites the exact rendered text through the real
- *   cite path (the chat cite bus, AssistantSelectionToolbar, the composer).
- *
- * Chromium lays out the question as the first visible line. Tests that move
- * up through a reply first reach its last line with ordinary Vim motions.
- * Every test opens threads with ids no other test uses, because the chat
- * surface's state is module-level and lives for the whole file.
- *
- * The boundaries the fixture replaces, and the app it mounts, are shared
- * with the other fences in `test/appRootFenceMocks.tsx` and
- * `test/appRootFenceApp.tsx`.
- */
+// Chat cursor memory per thread (modal keys phase 5) through AppRoot, `_chat.tsx` and ChatView. The
+// thread route reads its ids from params, so opening a thread re-renders the same ChatView. Each
+// test uses thread ids no other test uses: the chat surface's state is module-level and lives for
+// the file. Boundaries are shared in `test/appRootFenceMocks.tsx`.
 
 import { describe, expect, it, vi } from "vite-plus/test";
 import { ThreadId } from "@t3tools/contracts";

@@ -1,17 +1,10 @@
 import { act, render, type Screen } from "../../../test/render";
 import { RunId } from "@t3tools/contracts";
 /**
- * Entry point: the real `MessagesTimeline`, the component ChatView renders for a thread's
- * conversation, mounted inside a memory router on a thread route with the real right-panel
- * store. Its assistant rows render the real `ChatMarkdown` with the thread's ref, so a click on
- * an issue reference here is the click a developer makes on an agent message.
- *
- * The fixture replaces boundaries only: the virtualized list (rendered flat), the project,
- * thread-shell, server-config (hook and atom) and environment hooks, the query runner that sends a read over the
- * connection (every run is recorded and settled by the spec), the Issues query families (every
- * call is recorded), and the external-link opener (every URL it is handed is recorded).
- *
- * Issues pane, phase 3: acceptance criteria 1–7.
+ * The real `MessagesTimeline` on a thread route with the real right-panel store and `ChatMarkdown`,
+ * so a click on an issue reference is the one made on an agent message. Replaced and recorded: the
+ * virtualized list (flat), project, thread-shell, server-config and environment hooks, the query
+ * runner, the Issues query families and the external-link opener.
  */
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
@@ -302,7 +295,6 @@ function timelineProps(ref: typeof threadRef, entries: Array<ReturnType<typeof a
     contentInsetEndAdjustment: 0,
     liveFollowEnabled: true,
     onIsAtEndChange: () => {},
-    onManualNavigation: () => {},
     timelineEntries: entries,
   } satisfies Parameters<typeof MessagesTimeline>[0];
 }

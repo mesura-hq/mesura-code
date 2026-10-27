@@ -21,26 +21,16 @@ import {
 import { makeNvimRpc, type NvimRpcError } from "./NvimRpc.ts";
 
 /**
- * One embedded Neovim, mirrored.
- *
- * The bridge owns three things that have to agree: the text, which arrives
- * incrementally through `nvim_buf_lines_event`; the screen, which arrives as
- * grid cells and is only meaningful read against the text; and the cursor and
- * mode, which are asked for rather than pushed because the redraw stream's own
- * cursor lags behind what a mapping has already done.
- *
- * Nothing here waits on a clock. Every settle point is a `flush` from Neovim or
- * the response to a request, which is what lets the conformance harness assert
- * equivalence rather than probability.
+ * One embedded Neovim, mirrored. The text arrives through `nvim_buf_lines_event` and the screen
+ * as grid cells. The cursor and mode are requested, because the redraw stream's cursor lags behind
+ * what a mapping already did. Nothing waits on a clock: every settle point is a `flush` or a
+ * response, so the conformance harness can assert equivalence rather than probability.
  */
 
 /**
- * What a frame says about whether the cursor is worth asking for.
- *
- * Pure and exported so each trigger can be held on its own. Driven through a
- * real Neovim they overlap — a half-page scroll changes the viewport *and*
- * redraws every row — so a behavioural test passes with any one of them
- * deleted, which is the shape of a guard that looks covered and is not.
+ * What a frame says about whether the cursor is worth asking for. Pure and exported so a test can
+ * hold each trigger alone: through a real Neovim they overlap (a half-page scroll changes the
+ * viewport and redraws every row), so a behavioural test still passes with any one deleted.
  */
 export interface CursorReadTrigger {
   /** Neovim changed mode in this batch. */
@@ -56,24 +46,10 @@ export interface CursorReadTrigger {
 }
 
 /**
- * Four triggers, each a class of key the others miss.
- *
- * - `cursorMoves` counts a `grid_cursor_goto` that actually moved, which is
- *   `h`, `j`, `k`, `l` and the arrows.
- * - `hasModeChange` is the keys that change the mode and move nothing. `i` at
- *   the start of a line is the one that made this necessary.
- * - `hasViewport` is the scrolling keys, and it is not redundant: `<C-d>`
- *   scrolls the text under a cursor that stays on the same screen row, so
- *   Neovim sends no `grid_cursor_goto` at all even though the buffer cursor
- *   moved half a page. Measured — the viewport went from 0 to 11 with the move
- *   count unchanged.
- * - `changedRows` covers the rest, the awkward one being a long line scrolling
- *   sideways under a cursor parked at the last column: no new screen position,
- *   no new topline, new text.
- *
- * A real configuration emits about 230 frames a second while completely idle
- * and nearly all of them draw nothing. An idle frame matches none of these and
- * costs nothing.
+ * Each trigger catches keys the others miss: `cursorMoves` (`hjkl`, arrows), `hasModeChange` (`i`
+ * at line start moves nothing), `hasViewport` (`<C-d>` scrolls under a cursor that keeps its row,
+ * so no `grid_cursor_goto`), `changedRows` (a long line scrolling sideways under a cursor at the
+ * last column). Idle frames, about 230 a second under a real config, match none of them.
  */
 export function shouldReadCursor(trigger: CursorReadTrigger): boolean {
   return (
@@ -98,12 +74,8 @@ interface CursorState {
 }
 
 /**
- * What a session tells whoever is watching it.
- *
- * Deliberately close to what Neovim said rather than to what a client wants:
- * turning a redraw into something drawable is the business of whoever is
- * drawing, and a bridge that decided it here would have to decide it again
- * differently for the next surface.
+ * What a session tells whoever is watching it. It stays close to what Neovim said: turning a
+ * redraw into something drawable belongs to the client, and each surface does it differently.
  */
 export type NvimBridgeEvent =
   | {
@@ -115,16 +87,9 @@ export type NvimBridgeEvent =
     }
   | {
       /**
-       * The cursor and the mode were re-read, and are now current.
-       *
-       * Its own kind rather than a second `flush`, because it is not a frame:
-       * nothing was drawn. The read is forked off the notification fiber — see
-       * the comment at its trigger — so it finishes after the frame that
-       * caused it, and this is what says it has.
-       *
-       * `push` is the host plugin telling the host from an autocommand, which
-       * lands before the frame that draws the key; `read` is the host asking
-       * after a frame, which lands after it.
+       * The cursor and mode were re-read and are now current. Not a `flush`: nothing was drawn.
+       * `read` comes from the cursor read forked off the notification fiber, after its frame.
+       * `push` comes from the host plugin's autocommand, before the frame that draws the key.
        */
       readonly kind: "cursor";
       readonly source: "push" | "read";
@@ -164,12 +129,8 @@ export type NvimBridgeEvent =
     };
 
 /**
- * Joins the `[attribute, text]` chunks Neovim writes a line of text as.
- *
- * The attributes are its own highlight ids, and this host has no use for them
- * on the command line or in a message: both are drawn in the status strip's
- * own colours, and the only distinction that matters — an error — comes from
- * `msg_show`'s kind rather than from a chunk's attribute.
+ * Joins the `[attribute, text]` chunks of a Neovim text line. The attribute ids are dropped: the
+ * status strip draws in its own colours, and an error comes from `msg_show`'s kind instead.
  */
 const joinChunks = (chunks: unknown): string =>
   Array.isArray(chunks)
@@ -177,13 +138,9 @@ const joinChunks = (chunks: unknown): string =>
     : "";
 
 /**
- * Neovim's byte offset into a string, as an index a client can slice on.
- *
- * `cmdline_show` and `cmdline_pos` count bytes, because Vim counts bytes.
- * Passing that straight to a client puts the caret in the wrong place the
- * moment a command holds anything outside ASCII — a search for `café`, a
- * path with an accent — and it is the client that would have to know, which
- * is knowledge the wire should not be asking it for.
+ * Converts Neovim's byte offset into a string index. `cmdline_show` and `cmdline_pos` count bytes,
+ * so passing them through puts the caret in the wrong place for non-ASCII text such as `café`,
+ * and the client should not have to know that.
  */
 function characterIndexForByte(text: string, byteOffset: number): number {
   if (byteOffset <= 0) return 0;
@@ -199,20 +156,9 @@ function characterIndexForByte(text: string, byteOffset: number): number {
 }
 
 /**
- * The command line and the messages, pulled out of a redraw batch.
- *
- * They arrive mixed in with the drawing because Neovim externalises them
- * through the same stream, and they are the two things in it that are already
- * text rather than cells. Everything else in a redraw is a drawing, and
- * reading a drawing is `GridModel`'s job.
- *
- * `previous` is the command line as it stood, because `cmdline_pos` reports a
- * caret that moved without the text changing — `Left`, `Home`, `Ctrl-B` — and
- * carries nothing else. Without it the caret in the strip freezes wherever the
- * last `cmdline_show` left it.
- *
- * `msg_history_show` is the whole of `:messages`, which arrives as one event
- * under its own name rather than as a run of `msg_show`s.
+ * Pulls the command line and the messages, already text, out of a redraw batch. `GridModel` reads
+ * the rest. `previous` is needed because `cmdline_pos` moves the caret (`Left`, `Home`, `Ctrl-B`)
+ * without resending the text. `msg_history_show` carries all of `:messages` as one event.
  */
 function tellCmdlineAndMessages(
   batch: ReadonlyArray<ReadonlyArray<unknown>>,
@@ -321,12 +267,8 @@ export interface NvimCmdline {
 }
 
 /**
- * A visual selection, in Neovim's own terms.
- *
- * Both ends are given because neither is "the start": a selection made upwards
- * has its anchor below its cursor, and a client that assumed otherwise would
- * draw nothing for half of them. `kind` is the mode itself, so `v`, `V` and
- * the literal Ctrl-V stay distinguishable.
+ * A visual selection in Neovim's terms. Both ends are given because a selection made upwards has
+ * its anchor below its cursor. `kind` is the mode, so `v`, `V` and Ctrl-V stay distinct.
  */
 export interface NvimVisual {
   readonly anchor: NvimCursor;
@@ -361,12 +303,8 @@ export declare namespace NvimBridge {
     readonly bufferGridId: number | null;
     readonly overlays: ReadonlyArray<GridOverlay>;
     /**
-     * The colours Neovim has defined, by id.
-     *
-     * Kept as the wire's own shape rather than Neovim's raw attribute bag: the
-     * bag carries terminal colour indexes and blend levels this host has no
-     * use for, and passing it whole would make every client decide again which
-     * parts mean something.
+     * The colours Neovim has defined, by id, in the wire's shape. Neovim's raw attribute bag also
+     * carries terminal colour indexes and blend levels that no client uses.
      */
     readonly highlightDefinitions: ReadonlyMap<number, EditorHighlightDefinition>;
     readonly highlightRuns: ReadonlyArray<HighlightRun>;
@@ -375,80 +313,42 @@ export declare namespace NvimBridge {
       params: ReadonlyArray<unknown>,
     ) => Effect.Effect<unknown, NvimRpcError>;
     /**
-     * Queues keys the way a keyboard does: asynchronously.
-     *
-     * Nothing in the protocol says when they have been consumed. `nvim_input`
-     * answers as soon as the bytes are accepted, and under a real
-     * configuration the request after it is commonly served first — measured,
-     * with `f` under flash: the keys were accepted, the following request
-     * reported no change, and the mapping fired afterwards. Use this for keys
-     * that come from a person, and `type` when the caller has to know.
+     * Queues keys asynchronously, like a keyboard: use it for keys from a person. `nvim_input`
+     * answers on acceptance, and a later request is often served before the keys run (measured
+     * with `f` under flash). Use `type` when the caller has to know the keys ran.
      */
     readonly input: (keys: string) => Effect.Effect<void, NvimRpcError>;
     /**
-     * Points the mirror at a buffer the host owns, and waits for it.
-     *
-     * The announcement route is a notification, so it lands whenever the
-     * notification fiber gets to it. `open` cannot wait on that: it builds the
-     * snapshot it answers with from the mirror, and a snapshot taken before
-     * the announcement is the *previous* buffer's text sent to the client as
-     * the file it just asked for. Under a configuration that restores a
-     * session or opens a picker at start, that previous buffer is a plugin's,
-     * and the client then saves a plugin's window over the file.
+     * Points the mirror at a buffer the host owns, and waits for it. `open` builds its snapshot
+     * from the mirror, and the announcement notification can land late. A snapshot taken before it
+     * holds the previous buffer, often a plugin's, and the client then saves that over the file.
      */
     readonly followBuffer: (buffer: number) => Effect.Effect<void, NvimRpcError>;
     /**
-     * The buffer the mirror is on.
-     *
-     * Every write has to name it. Since the host announces nothing and follows
-     * only what it opened, the mirror and Neovim's *current* buffer are allowed
-     * to disagree — a plugin owning the window is the ordinary case — so a
-     * write aimed at buffer `0` lands in the plugin's buffer instead of the
-     * file. Silently: the edit is lost, and the lines event it causes is
-     * dropped by the guard in `applyLinesEvent`, so nothing reports it.
+     * The buffer the mirror is on. Every write must name it: the mirror and Neovim's current buffer
+     * can differ (a plugin owning the window), so a write to buffer `0` lands in the wrong buffer.
+     * `applyLinesEvent` then drops the resulting lines event, so nothing reports the lost edit.
      */
     readonly attachedBuffer: number;
     /**
-     * Types keys and returns once Neovim has executed them.
-     *
-     * `nvim_feedkeys` with the `m`, `t` and `x` flags: remapped, treated as
-     * typed, and executed before the call answers. That makes it the exact
-     * settle a harness needs. It is not a replacement for `input` on the path
-     * a person types: `x` finishes the typeahead, so an operator sent on its
-     * own — `d`, waiting for a motion — would be aborted rather than left
-     * pending. Send whole sequences through it.
+     * Types keys and returns once Neovim executed them: `nvim_feedkeys` with the `m`, `t` and `x`
+     * flags (remapped, typed, executed before it answers). Send whole sequences: `x` ends the
+     * typeahead, so a lone operator such as `d` is aborted rather than left pending.
      */
     readonly type: (keys: string) => Effect.Effect<void, NvimRpcError>;
     readonly setLines: (lines: ReadonlyArray<string>) => Effect.Effect<void, NvimRpcError>;
     /** Resolves on the next `flush`, which is Neovim saying it finished drawing. */
     readonly awaitFlush: Effect.Effect<void>;
     /**
-     * The same wait with no round trip behind it.
-     *
-     * `awaitFlush` asks Neovim for the cursor once the frame lands, and there
-     * are frames after which Neovim will not answer: a plugin that reads a
-     * key — flash waiting for a label — holds the main loop while its own
-     * drawing is already on screen. Reading that drawing is exactly when this
-     * is the one to use, because the frame arrives without being asked for.
+     * `awaitFlush` without the cursor round trip. Use it when Neovim cannot answer: a plugin that
+     * reads a key (flash waiting for a label) holds the main loop with its drawing already sent.
      */
     readonly awaitFrame: Effect.Effect<void>;
     /**
-     * Subscribes to the next frame now, and hands back the wait for it.
-     *
-     * Two steps because one is a race. A caller that sends a key and then
-     * waits can lose: the frame the key caused can land in the gap between the
-     * two, and the wait then belongs to a frame that has not been asked for —
-     * which, on an idle Neovim, never arrives. Subscribing first closes the
-     * gap, and it is the only way to time a key honestly.
-     *
-     * It resolves on the next frame, not on the next frame *this* caller
-     * caused — nothing in the redraw stream says which key a frame belongs to.
-     * A caller that needs to know its number is not contaminated has to bound
-     * that itself, by measuring how often frames arrive with no key in flight.
-     *
-     * A subscription abandoned after a timeout stays in the queue and is
-     * resolved by the next frame with nobody listening. That is harmless and
-     * deliberate: dropping it would need a handle this returns no room for.
+     * Subscribes to the next frame now and returns the wait for it, so the frame a key causes
+     * cannot land between sending the key and waiting (on an idle Neovim that wait never ends).
+     * It resolves on the next frame from any cause: bound that by measuring the idle frame rate.
+     * An abandoned subscription stays queued until a later frame resolves it, which is harmless.
      */
     readonly nextFrame: Effect.Effect<Effect.Effect<void>>;
     /**
@@ -474,14 +374,9 @@ export declare namespace NvimBridge {
       readonly cursorReads: number;
     };
     /**
-     * Waits until every key given has been executed and the mirror has caught
-     * up with it.
-     *
-     * This is the settle point to use after sending keys, and `awaitFlush` is
-     * not. Waiting for the next `flush` only works when the only thing drawing
-     * is the key just sent, which is true of a bare Neovim and false of a real
-     * configuration: a status line, a notifier and a plugin's timer all draw
-     * on their own, so the next frame is usually not the one the key caused.
+     * Waits until every key sent has run and the mirror caught up. Use this after sending keys,
+     * not `awaitFlush`: under a real configuration a status line, a notifier or a plugin timer
+     * draws on its own, so the next frame is usually not the one the key caused.
      */
     readonly settle: Effect.Effect<void, NvimRpcError>;
     /**
@@ -510,12 +405,9 @@ export interface NvimBridgeOptions {
   readonly cwd?: string | undefined;
   readonly env?: Record<string, string | undefined> | undefined;
   /**
-   * The developer's configuration directory, `~` allowed.
-   *
-   * Left out, the session starts `--clean`: no configuration, no plugins.
-   * That is what the conformance harness drives, and it is never what a real
-   * editor session gets — a missing configuration directory is reported as a
-   * `config-missing` error rather than quietly becoming a bare Neovim.
+   * The developer's configuration directory, `~` allowed. Omitted, the session starts `--clean`,
+   * which only the conformance harness uses. A real session with a missing directory gets a
+   * `config-missing` error rather than a bare Neovim.
    */
   readonly configDirectory?: string | undefined;
   /** Overridable so the launch can be driven against a temporary home. */
@@ -642,15 +534,9 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   };
 
   /**
-   * Applies one `nvim_buf_lines_event`, the incremental text path.
-   *
-   * With one correction Neovim does not send. A buffer can never hold zero
-   * lines: delete every line and Neovim reports the deletion, then silently
-   * puts a single empty line back without telling attached clients about it.
-   * A mirror that applies the event faithfully therefore ends up empty while
-   * `nvim_buf_get_lines` answers `[""]` — one line apart, which is enough to
-   * write an empty file over a real one on the next save. Found by driving
-   * `ggVGd`, which none of the ordinary delete sequences reaches.
+   * Applies one `nvim_buf_lines_event`, with one correction Neovim does not send: after deleting
+   * every line (`ggVGd`), Neovim restores one empty line without an event. A mirror left empty
+   * against Neovim's `[""]` would write an empty file over a real one on the next save.
    */
   const applyLinesEvent = (params: ReadonlyArray<unknown>) => {
     const [handle, changedtick, firstLine, lastLine, replacement] = params as [
@@ -663,18 +549,9 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     // A buffer the mirror has left can still have events in flight, and
     // applying one of them splices the previous file's text into this one.
     if (typeof handle?.id === "number" && handle.id !== attachedBuffer) return null;
-    // Neovim defines this rather than merely allowing it, in `:help
-    // nvim_buf_lines_event`: "When {changedtick} is |v:null| this means the
-    // screen lines (display) changed but not the buffer contents."
-    //
-    // A null `changedtick` marks a preview rather than a change, and `:s` sends
-    // a stream of them: `inccommand` defaults to `nosplit`, so every keystroke
-    // of a replacement being typed reports what the line *would* become. The
-    // buffer itself does not move — `nvim_buf_get_lines` answers the old text
-    // throughout — and every preview names the same range against the original,
-    // so they are not deltas and do not compose. Applying them turns
-    // `:%s/two/TWO\rMORE/` into a growing pile of half-typed fragments before
-    // Enter is ever pressed. The committed event arrives with a real tick.
+    // A null `changedtick` is a display-only preview (`:help nvim_buf_lines_event`). `inccommand`
+    // sends one per keystroke of an `:s`, each against the original text, so they do not compose
+    // and applying them piles up fragments. The committed change arrives with a real tick.
     if (changedtick === null || changedtick === undefined) return null;
     // The trailing `more` flag is deliberately unread. It marks a large update
     // split across several events, and each chunk's splice is self-consistent,
@@ -704,12 +581,9 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     if (buffer === attachedBuffer) return;
     const previous = attachedBuffer;
 
-    // Attach and read first, and only then say which buffer this is following.
-    // Committing up front costs the session its mirror for good: the attach can
-    // fail — the buffer was wiped, the session is going away — and the failure
-    // is logged rather than fatal, so the field would name a buffer no event
-    // will ever arrive for, and the `buffer === attachedBuffer` line above would
-    // refuse every later attempt to attach to it again.
+    // Attach and read before committing `attachedBuffer`. The attach can fail (buffer wiped,
+    // session closing) and the failure is only logged. Committing first would name a buffer no
+    // event arrives for, and the `buffer === attachedBuffer` guard would refuse every retry.
     yield* rpc.request("nvim_buf_attach", [buffer, true, {}]);
     const current = (yield* rpc.request("nvim_buf_get_lines", [buffer, 0, -1, false])) as string[];
 
@@ -725,14 +599,6 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     }
   });
 
-  /**
-   * Asks for the cursor, the mode and the current window in one round trip.
-   *
-   * Asked for rather than read out of the redraw stream, because the stream's
-   * own cursor lags behind what a mapping has already done. The window comes
-   * along because the grid model cannot work it out: `win_pos` says where
-   * every window is and never which one the developer is in.
-   */
   /** Takes what `mesura.cursor_state` answered, from a read or a push. */
   const applyCursorState = (state: CursorState) => {
     cursor = { line: state.line, col: state.col };
@@ -748,14 +614,9 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   };
 
   /**
-   * Asks for the cursor, the mode and the current window in one round trip.
-   *
-   * Asked for rather than read out of the redraw stream, because the stream's
-   * own cursor lags behind what a mapping has already done. The window comes
-   * along because the grid model cannot work it out: `win_pos` says where
-   * every window is and never which one the developer is in. The host plugin
-   * pushes the same state on its own after most keys (`mesura:cursor`); this
-   * read is the fallback for what moves the cursor without telling it.
+   * Requests the cursor, mode and current window in one round trip. The redraw stream's cursor lags
+   * behind mappings, and `win_pos` never says which window is current. The host plugin pushes this
+   * state after most keys (`mesura:cursor`); this read covers what moves the cursor silently.
    */
   const refreshCursorAndMode = Effect.gen(function* () {
     cursorReads += 1;
@@ -774,7 +635,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         Effect.tapCause((cause) =>
           Effect.logWarning("could not read the cursor after a frame", { cause }),
         ),
-        Effect.catchCause(() => Effect.void),
+        Effect.ignoreCause,
       );
       // A `cursor` event carries the freshly read values to the manager, which
       // reads them the same way it reads them from a frame. The drawing frame
@@ -837,11 +698,8 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         grid.applyRedraw(notification.params as ReadonlyArray<ReadonlyArray<unknown>>);
         const batch = notification.params as ReadonlyArray<ReadonlyArray<unknown>>;
         const hasFlush = batch.some((event) => event[0] === "flush");
-        // Accumulated across batches, not read off the one carrying the flush.
-        // Neovim is free to split a redraw: `mode_change` can arrive in one
-        // notification and the `flush` that ends the frame in the next, and a
-        // flag read only at the flush is then false for a mode change that
-        // certainly happened. Cleared once the frame it belongs to is handled.
+        // Accumulated across batches: Neovim can split a redraw, so `mode_change` and the `flush`
+        // that ends the frame arrive in separate notifications. Cleared once that frame is handled.
         if (batch.some((event) => event[0] === "mode_change")) pendingModeChange = true;
         if (batch.some((event) => event[0] === "win_viewport")) pendingViewport = true;
         if (!hasFlush) return;
@@ -850,32 +708,10 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         overlays = collected.overlays;
         highlightRuns = collected.highlightRuns;
 
-        // The cursor and the mode are re-read after a frame that could have
-        // moved them, and this is the only place a key a person pressed can
-        // update them. `input` is `nvim_input`, which is asynchronous and
-        // answers nothing, so a motion that changes no text — `j`, `l`, an
-        // arrow key — leaves every other channel silent: the buffer did not
-        // change, and on a file that fits the window the viewport did not
-        // either. Without this the session reported the cursor it was spawned
-        // with for as long as it lived, the manager compared that unchanged
-        // value against itself and published nothing, and the caret on screen
-        // never moved.
-        //
-        // Forked, never awaited here. This is the one fiber consuming
-        // notifications, so awaiting a response inside it stops the whole
-        // stream until Neovim answers — and Neovim does not always answer.
-        // `:!make`, a `press ENTER` prompt and `vim.fn.input()` all hold the
-        // main loop with drawing already on screen. Awaiting here made every
-        // frame wait behind that, `mesura_settled` markers never arrived, and
-        // `settle` — which has no timeout and is called under the thread's
-        // lock — would never resolve, taking the thread with it.
-        //
-        // One in flight at a time. Triggers arriving while a read is pending
-        // collapse into one more read after it, which keeps a burst of typing
-        // to two round trips rather than one per frame. Dropping them instead
-        // lost the frame that ends a flash jump when it landed mid-read, and
-        // left the client showing FLASH with Escape routed to a Neovim that
-        // was no longer waiting for it.
+        // Re-read here: it is the only update for a typed motion that changes no text (`j`).
+        // Forked, never awaited: Neovim can hold its loop (`:!make`, a press-ENTER prompt), and
+        // awaiting on this sole notification fiber hung `settle` and the thread. One read in
+        // flight, later triggers queue one more: dropping them lost the frame ending a flash jump.
         const trigger: CursorReadTrigger = {
           hasModeChange: pendingModeChange,
           hasViewport: pendingViewport,
@@ -907,7 +743,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         releaseFlushWaiters();
       }),
     ),
-    Effect.catchCause(() => Effect.void),
+    Effect.ignoreCause,
     // Reached only when the stream ends on its own, which `NvimRpc` makes it
     // do when the process's output closes. A scope closing interrupts this
     // fiber instead, so a session being stopped on purpose says nothing here.
@@ -920,7 +756,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     Stream.runForEach((line: string) =>
       line.trim().length === 0 ? Effect.void : Effect.logWarning("nvim", { line }),
     ),
-    Effect.catchCause(() => Effect.void),
+    Effect.ignoreCause,
     Effect.forkScoped,
   );
 
@@ -931,24 +767,10 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   });
 
   /**
-   * Drains Neovim's typeahead, then waits for a notification sent behind it.
-   *
-   * Both halves are load-bearing, and neither is a clock.
-   *
-   * `nvim_feedkeys` with the `x` flag and an empty string answers only once
-   * Neovim has executed every key it holds, so its response is proof the keys
-   * ran — no guess about how many frames a mapping takes.
-   *
-   * The round trip after it is a barrier on a different fiber. Buffer events
-   * are applied to the mirror by the fiber that drains the notification queue,
-   * and a request's response is resolved directly, so a response can overtake
-   * the events it caused and leave the mirror one edit behind. Asking Neovim
-   * to send a notification puts a marker in the same stream, behind those
-   * events; when the marker arrives, they have been applied.
-   *
-   * A forced frame was the obvious barrier and it is the wrong one: `:redraw`
-   * emits nothing when nothing changed, so a key that draws nothing — `gg` at
-   * the top of a buffer — waits for a frame that never comes.
+   * Drains the typeahead (`nvim_feedkeys` with `x` answers once every held key ran), then waits
+   * for a marker notification: a response can overtake the buffer events it caused, but the marker
+   * queues behind them. Not `:redraw`: it emits nothing when nothing changed, so `gg` at the top of
+   * a buffer would wait for a frame that never comes.
    */
   const settle = Effect.gen(function* () {
     yield* rpc.request("nvim_feedkeys", ["", "x", false]);
@@ -1108,7 +930,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         Effect.tapCause((cause) =>
           Effect.logWarning("could not read the cursor after a redraw", { cause }),
         ),
-        Effect.catchCause(() => Effect.void),
+        Effect.ignoreCause,
       );
     }),
     floorProbe: Effect.fn(function* (keys) {

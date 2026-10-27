@@ -1,10 +1,7 @@
 /**
- * Phase 1 fence of phone push notifications: acceptance criterion 1, the VAPID
- * key pair in the secret store.
- *
- * Entry point: `VapidKeys.layer`, the layer `server.ts` builds once per server
- * run over the real `ServerSecretStore`. A restart is a fresh secret store and
- * a fresh `VapidKeys` layer over the same server directory.
+ * Push fence, acceptance criterion 1: the VAPID key pair in the secret store, through
+ * `VapidKeys.layer` over the real `ServerSecretStore`. A restart is a fresh secret store and a
+ * fresh `VapidKeys` layer over the same server directory.
  */
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no P-256 ECDH, which checks the key pair here.
 import * as NodeCrypto from "node:crypto";

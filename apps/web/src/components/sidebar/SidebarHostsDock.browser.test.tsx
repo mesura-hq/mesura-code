@@ -1,15 +1,9 @@
 import { act, render as renderBrowser, type Screen, fakeTimers } from "../../../test/render";
 /**
- * Entry point: AppRoot, with a memory router rendering the real sidebar footer
- * (`SidebarChromeFooter` inside `SidebarProvider`, as `Sidebar.tsx` mounts it).
- * The footer's utility row, both docks, their controllers, the keybindings
- * atom with the shipped defaults, the shared host stats projection and the
- * dock's own clock stay real. The fixture replaces only the transport: the
- * environments list, the usage dock's data and the hosts dock's sources.
- *
- * Phase 5 fence, one describe per acceptance criterion it can reach from here.
- * What only a real browser can show — the dimming as rendered, the layout at
- * 224 px and 400 px, the gap as drawn — is left to the headless verifier.
+ * AppRoot with a memory router rendering the real sidebar footer, both docks, their controllers,
+ * the shipped keybindings, the host stats projection and the dock's clock. Only the transport is
+ * replaced: the environments list, the usage dock's data and the hosts dock's sources. What only
+ * a real browser shows (dimming, layout at 224 px and 400 px) is left to the headless verifier.
  */
 
 import {
@@ -20,6 +14,7 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { page } from "vite-plus/test/browser";
 
 import type { AppRouter } from "../../router";
 import type { HostStatsSources } from "../../state/hostStats";
@@ -98,6 +93,7 @@ let router: ReturnType<typeof createRouter>;
 const now = Date.UTC(2026, 8, 29, 10, 0, 0);
 
 async function setupBrowserFixture0() {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
   vi.setSystemTime(now);
   fixture.sources = hostStatsFleet(now);
   fixture.sourcesEnabled = [];
@@ -112,11 +108,15 @@ async function setupBrowserFixture0() {
       root = undefined;
       container.remove();
       vi.unstubAllGlobals();
+      await page.viewport(previousViewport.width, previousViewport.height);
     },
   };
 }
 
 async function mountSidebar(options: { path?: string; sidebarOpen?: boolean } = {}) {
+  // `SidebarProvider` reads the viewport's own media query, not `useIsMobile`.
+  if (fixture.mobile) await page.viewport(412, 915);
+  else await page.viewport(1440, 900);
   const rootRoute = createRootRoute({
     component: () => (
       <SidebarProvider defaultOpen={options.sidebarOpen ?? true}>
@@ -165,6 +165,11 @@ function usagePanel(): HTMLElement {
 /** A closed dock is `inert`: out of focus, pointer targeting and find-in-page. */
 const isOpen = (panel: HTMLElement) => panel.closest("[inert]") === null;
 const hostsOpen = () => isOpen(hostsPanel());
+/** The Settings and Usage modals leave the sidebar's docks mounted behind them, closed. */
+const hostsShown = () => {
+  const panel = container.querySelector<HTMLElement>("[data-hosts-panel]");
+  return panel !== null && isOpen(panel);
+};
 const usageOpen = () => isOpen(usagePanel());
 
 async function press(type: "keydown" | "keyup", init: KeyboardEventInit) {
@@ -305,7 +310,7 @@ describe("Hosts dock: the palette's Show hosts from every page", () => {
       await using _browserFixture0 = await setupBrowserFixture0();
 
       await mountSidebar({ path });
-      expect(container.querySelector("[data-hosts-panel]")).toBeNull();
+      expect(hostsShown()).toBe(false);
       await act(async () => requestSidebarDockPin("hosts"));
       await vi.waitFor(() => expect(router.state.location.pathname).toBe("/"));
       await vi.waitFor(() => expect(hostsOpen()).toBe(true));
@@ -339,7 +344,7 @@ describe("Hosts dock regressions: requests and pins that must not linger", () =>
     await mountSidebar({ path: "/usage" });
     await act(async () => requestSidebarDockPin("hosts"));
     expect(router.state.location.pathname).toBe("/usage");
-    expect(container.querySelector("[data-hosts-panel]")).toBeNull();
+    expect(hostsShown()).toBe(false);
     await root?.[Symbol.asyncDispose]();
     fixture.mobile = false;
     await mountSidebar();

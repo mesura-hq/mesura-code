@@ -1,19 +1,8 @@
 /**
- * Neovim's view of the text, as Monaco edit operations.
- *
- * Pure on purpose: the driver that applies these owns a live editor and is
- * awkward to test, while the arithmetic is where the mistakes are and it is
- * all here.
- *
- * Two coordinate systems meet in this file and they agree about nothing.
- * Neovim counts lines from zero and gives half-open ranges, so `first` is the
- * first line replaced and `last` is one past it. Monaco counts lines and
- * columns from one and gives closed ranges. Rather than convert at the edges
- * and hope, every function here takes Neovim's terms and returns Monaco's.
- *
- * The second rule is that an edit which changes nothing must not be produced.
- * Monaco moves decorations, markers and the caret for an applied edit, so
- * replacing a line with an identical line is a visible event.
+ * Neovim's view of the text as Monaco edits, pure so the arithmetic is testable. Every function
+ * takes Neovim's terms (zero-based lines, half-open: `last` is one past) and returns Monaco's
+ * (one-based, closed). An edit that changes nothing is never produced: Monaco would move
+ * decorations and caret.
  */
 
 /** A Monaco range, in Monaco's own one-based closed terms. */
@@ -46,21 +35,10 @@ export interface NvimLinesEvent {
 const END_OF_LINE = Number.MAX_SAFE_INTEGER;
 
 /**
- * The edits that apply one lines event to a model of `lineCount` lines.
- *
- * Four shapes come out of this, and they differ only in what the range can
- * anchor to. A replacement in the middle spans whole lines, so it starts at
- * the first column of `first` and ends at the first column of `last` — taking
- * the trailing newline with it, which is why the replacement text carries one.
- * A whole-buffer reset (`last === -1`) spans everything. An append, where
- * `first` is already past the last line, has no line to anchor to: it hangs
- * off the end of the last line and brings its own leading newline. And a
- * replacement that reaches the buffer's current last line has no line `last`
- * to end on, so it ends at the end of the text and brings no newline at all.
- *
- * The last of the four is the one a test written from the arithmetic does not
- * think of, and it is the everyday case: it is what typing on the last line of
- * a file produces.
+ * The edits for one lines event on a model of `lineCount` lines. A middle replacement spans whole
+ * lines and carries a trailing newline; `last === -1` resets everything; an append hangs off the
+ * last line with a leading newline; a replacement reaching the last line ends at the end of the
+ * text with no newline. That last shape is the everyday one: typing on a file's last line.
  */
 export function editsForLinesEvent(
   lineCount: number,
@@ -102,12 +80,8 @@ export function editsForLinesEvent(
   }
 
   if (endLine > lineCount) {
-    // The replacement reaches the buffer's current last line, so there is no
-    // line `endLine` to anchor the end of the range on. Monaco clamps a line
-    // past the end of the text to the end of the text, which leaves the
-    // trailing newline of the replacement with nothing after it and adds a
-    // blank line. Measured against a real Neovim: `G` `A` `!` on a two-line
-    // buffer produced `["one", "two!", ""]` before this branch existed.
+    // Reaching the current last line, there is no `endLine` to anchor on, and Monaco's clamping
+    // would leave a blank line (`G` `A` `!` on two lines gave `["one", "two!", ""]`).
     const lastLine = Math.max(1, lineCount);
 
     if (event.lines.length === 0) {
@@ -153,22 +127,15 @@ export function editsForLinesEvent(
 }
 
 /**
- * The edits that reconcile a model with a whole snapshot.
- *
- * Line by line rather than as one replacement of everything, because a
- * snapshot arrives when a client attaches to a session that is already running
- * and the model is usually almost right. Replacing the whole text would move
- * every decoration and the caret to reproduce a handful of differences.
+ * The edits that reconcile a model with a whole snapshot, line by line: on attach the model is
+ * usually almost right, and a whole-text replace would move every decoration and the caret.
  */
 export function editsForSnapshot(
   current: ReadonlyArray<string>,
   target: ReadonlyArray<string>,
 ): ReadonlyArray<MonacoEdit> {
-  // Neither Neovim nor Monaco has a buffer with no lines in it, so a caller
-  // asking for one is asking for the empty document: one line, with nothing on
-  // it. Without this the per-line loop below runs zero times and the tail
-  // delete starts at the end of line 1, which leaves line 1's old text on
-  // screen with everything after it gone.
+  // Neither Neovim nor Monaco has a zero-line buffer, so an empty target means one empty line.
+  // Without this the tail delete leaves line 1's old text on screen.
   const snapshot = target.length === 0 ? [""] : target;
   const edits: MonacoEdit[] = [];
   const shared = Math.min(current.length, snapshot.length);
@@ -187,12 +154,9 @@ export function editsForSnapshot(
     const tail = snapshot.slice(current.length).join("\n");
     const last = edits[edits.length - 1];
     if (last !== undefined && last.range.startLineNumber === anchor) {
-      // The line the new text hangs off is itself being replaced. Left as two
-      // edits they start at the same position — the end of a line that the
-      // other edit is rewriting — and Monaco's order between them decides the
-      // result. One edit that carries both is the only version with a single
-      // answer. Reached whenever the last line changed and lines were added
-      // after it, which is what `o` on the last line of a file does.
+      // The line the tail hangs off is itself being replaced; as two edits at one position,
+      // Monaco's order would decide the result. One combined edit has one answer (`o` on the last
+      // line).
       edits[edits.length - 1] = { range: last.range, text: `${last.text}\n${tail}` };
     } else {
       edits.push({

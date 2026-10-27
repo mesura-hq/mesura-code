@@ -1,23 +1,8 @@
 /**
- * Counts which components rendered in each React commit, by name, the way the
- * React DevTools see it: through `__REACT_DEVTOOLS_GLOBAL_HOOK__`, which
- * `react-dom` reads once, when it loads.
- *
- * Install it from `vi.hoisted`, before anything imports `react-dom`:
- *
- * ```ts
- * const commits = await vi.hoisted(async () =>
- *   (await import("./test/reactCommitCounter")).installReactCommitCounter(),
- * );
- * ```
- *
- * It has no runtime imports, so loading it there loads nothing of React's.
- *
- * A fiber rendered in a commit when its current object changed since the
- * previous commit — React swaps a fiber with its alternate when it renders it,
- * and a subtree that bailed out keeps its objects — and its function ran
- * (`PerformedWork`). The walk covers every fiber of the root on every commit,
- * so it is only for tests with one root.
+ * Counts components rendered per React commit through `__REACT_DEVTOOLS_GLOBAL_HOOK__`, which
+ * `react-dom` reads once at load: install it from `vi.hoisted` before anything imports `react-dom`.
+ * A fiber rendered when its current object changed and its function ran (`PerformedWork`). The walk
+ * covers every fiber on every commit, so use it only in tests with one root.
  */
 
 /** React's `PerformedWork` fiber flag. */

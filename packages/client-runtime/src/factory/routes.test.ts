@@ -1,12 +1,7 @@
 /**
- * Phase 4 fence, acceptance criteria 2 (defaults), 4 (the routing rules) and
- * 5 (fallbacks), for the shared module web and Android both build from.
- *
- * Entry point: `./routes.ts`, fed with provider model lists shaped as the
- * server sends them (`ServerProvider[]`, see `makeFactoryRouteProviders`).
- * The rules are sf-team's *Frame*: the verifier runs on Codex, and the
- * reviewer runs on the other family from the implementer. The file shape is
- * sf-team's `--routes` file (`~/.agent-env/skills/core/sf-team/ROUTES.md`).
+ * Fed provider model lists shaped as the server sends them (`ServerProvider[]`). The rules are
+ * sf-team's *Frame*: the verifier runs on Codex, and the reviewer runs on the other family from
+ * the implementer.
  */
 import { ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";

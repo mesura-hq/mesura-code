@@ -1,8 +1,7 @@
 /**
- * The background pull-request sweep backs off thread groups whose lookup fails
- * for a cause a retry cannot change, and keeps its per-sweep refresh for the
- * rest. Entry point: `ThreadPullRequestService.make` started through
- * `ThreadPullRequestService.testkit.ts`, which runs the startup backfill and
+ * The pull-request sweep backs off thread groups whose lookup fails for a cause
+ * a retry cannot change, and keeps refreshing the rest on every sweep. The
+ * harness in `ThreadPullRequestService.testkit.ts` runs the startup backfill,
  * then one sweep per minute of `TestClock` time, as the server does.
  */
 import {
@@ -12,11 +11,11 @@ import {
   VcsProcessTimeoutError,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
-import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
-import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
-import * as BitbucketApi from "@t3tools/source-control-bitbucket/server/BitbucketApi";
-import * as ForgejoCli from "@t3tools/source-control-forgejo/server/ForgejoCli";
-import * as GitLabCli from "@t3tools/source-control-gitlab/server/GitLabCli";
+import * as GitHubRequestPolicy from "../../../../packages/source-control-github/src/server/GitHubRequestPolicy.ts";
+import * as GitHubCredentials from "../../../../packages/source-control-github/src/server/GitHubCredentials.ts";
+import * as BitbucketApi from "../../../../packages/source-control-bitbucket/src/server/BitbucketApi.ts";
+import * as ForgejoCli from "../../../../packages/source-control-forgejo/src/server/ForgejoCli.ts";
+import * as GitLabCli from "../../../../packages/source-control-gitlab/src/server/GitLabCli.ts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 

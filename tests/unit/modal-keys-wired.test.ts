@@ -7,26 +7,10 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * The modal key layer (docs/mesura/adr-009-modal-keys.md) lives in fork-owned
- * files: `packages/keys`, `apps/web/src/keys`, `apps/web/src/commands` and
- * `apps/web/src/lib/paneEdges.ts`. It reaches the app through small seams in
- * upstream files, and every weekly sync can drop one of them.
- *
- * A dropped seam leaves the layer present but unwired: the engine never
- * installs, a leader key runs a command nobody registers, `y` cites nothing,
- * PANE mode skips a border. The fork's own tests keep passing, because each
- * one exercises its module and not the upstream caller. So each seam is
- * asserted at its call site, as `fork-features-wired.test.ts` does.
- *
- * Assertions name calls and keys, never exact lines or formatting: every
- * source and every expected fragment is read as canonical tokens (comments
- * removed, whitespace kept only where it separates two words), so an upstream
- * reformat passes and a seam left behind in a comment fails. The seam list
- * comes from `git diff --name-only <branch base> -- apps packages`, filtered
- * to files with upstream history. `modal-keys-command-registry.test.ts`
- * checks that every leader command has some owner; the registry tests below
- * check that each upstream owner keeps its own `useCommandHandlers` block,
- * which a second owner of the same command would otherwise hide.
+ * The modal key layer (docs/mesura/adr-009-modal-keys.md) reaches the app through small seams in
+ * upstream files that a sync can drop while the fork's own tests pass, so each seam is asserted at
+ * its call site. Sources and fragments are compared as canonical tokens with comments removed: an
+ * upstream reformat passes, and a seam left behind in a comment fails.
  */
 
 /** Source text as tokens, and which characters belong to a string or regex literal. */
@@ -258,9 +242,14 @@ it("modal keys seam guard matcher: an apostrophe in JSX text spoils only its lin
 it("modal keys seam guard: main.tsx installs the key engine before the router exists", () => {
   const main = readCanonical("apps/web/src/main.tsx");
   const [install] = callArguments(main, "installKeyEngine");
-  const [router] = callArguments(main, "getRouter");
+  // Upstream builds the router inside startAppServices() (appInit.tsx).
+  const [router] = callArguments(main, "startAppServices");
   assert.isDefined(install, "main.tsx no longer calls installKeyEngine()");
-  assert.isDefined(router, "main.tsx no longer calls getRouter()");
+  assert.isDefined(router, "main.tsx no longer calls startAppServices()");
+  assert.isDefined(
+    callArguments(readCanonical("apps/web/src/appInit.tsx"), "getRouter")[0],
+    "startAppServices() no longer builds the router",
+  );
   // Its capture listener has to be registered before any component's, which
   // is what makes the engine see a key first.
   assert.isBelow(
@@ -395,7 +384,7 @@ it("modal keys seam guard: the timeline minimap answers turn jump requests", () 
     "apps/web/src/components/chat/MessagesTimeline.tsx",
     "subscribeTurnJumpRequest",
     [
-      "onManualNavigation()",
+      "navigateTimeline()",
       "listRef.current?.scrollToIndex(",
       "index: item.rowIndex",
       "request.rowId = item.id",
@@ -437,7 +426,8 @@ it("modal keys seam guard: the right panel's left edge is a pane edge", () => {
   );
   assert.match(
     read("apps/web/src/hooks/useResizableWidth.ts"),
-    /return\{[^}]*\bresizeTo\b[^}]*\breset\b[^}]*\}/,
+    // The returned object nests `handlers`, so match its tail, not a brace-free body.
+    /\bresizeTo,reset,?\};\}/,
     "useResizableWidth no longer returns resizeTo and reset",
   );
 });
@@ -583,9 +573,15 @@ const countOf = (source: string, fragment: string) => source.split(tokens(fragme
 
 it("modal keys seam guard round 2: the sidebar numbers and jumps to the threads on screen", () => {
   const file = "apps/web/src/components/Sidebar.tsx";
+  // The show delay runs in the modifier leaf, so a quick chord re-renders only that leaf.
+  assert.include(
+    read("apps/web/src/components/sidebar/ThreadJumpHintModifierSync.tsx"),
+    tokens("const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);"),
+    "the jump hints no longer wait for their show delay",
+  );
   assert.include(
     read(file),
-    tokens("showThreadJumpHints: showJumpHints"),
+    tokens("onChange={setShowJumpHints}"),
     "the jump targets no longer use the visibility state for jump hints",
   );
   // The labels and the number keys come from one list of the rows on screen
@@ -659,8 +655,14 @@ it("modal keys seam guard round 2: arrows move over the sidebar rows and only En
   // both hand their keys to the row handler below.
   const rowFile = "apps/web/src/components/sidebar/SidebarThreadRow.tsx";
   const rowSource = read(rowFile);
+  // Mesura: Working section rows mount the same row outside the sortable items.
+  assert.include(
+    sidebar.text,
+    tokens('const ThreadRow = section === "working" ? UnsortableThreadRow : SortableThreadRow;'),
+    "Sidebar no longer picks its row component per section",
+  );
   assert.isTrue(
-    rendersElement(sidebar.text, "SortableThreadRow"),
+    rendersElement(sidebar.text, "ThreadRow"),
     "Sidebar no longer mounts its thread rows",
   );
   assert.isTrue(

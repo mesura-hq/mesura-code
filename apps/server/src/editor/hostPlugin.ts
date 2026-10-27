@@ -1,42 +1,13 @@
 /**
- * The Lua the host forces on every embedded Neovim.
- *
- * Kept as a string rather than a `.lua` asset so the desktop bundle needs no
- * asset rule: the server is packed with `vp pack`, and a file read at runtime
- * from beside the bundle is one more thing that can be absent in a packaged app.
- *
- * It is written into a scratch runtime path and sourced with `-c`, not left
- * for Neovim to find under `plugin/` or `after/plugin/`. That is not a
- * preference — the runtime path is not a place a host can rely on:
- * **lazy.nvim replaces `runtimepath` wholesale** while `init.lua` runs, so a
- * directory put there with `--cmd 'set runtimepath^=…'` is gone before Neovim
- * scans for plugin files, and `after/plugin/mesura_host.lua` is never sourced.
- * Measured, not assumed: with the developer's configuration loaded, the
- * runtime path contained the host's directory at `--cmd` time and did not
- * contain it afterwards, and `getscriptinfo()` listed no host script at all.
- * Every forced option quietly did nothing.
- *
- * `-c` is argv rather than state, so no configuration can take it away. It
- * runs after every startup plugin has been sourced and before `VimEnter`.
- *
- * Setting an option first is not the same as owning it. The developer's own
- * settings load before this, plugins such as statuscol set window options per
- * window afterwards, and lazy-loaded plugins arrive later still — so the
- * options are also re-applied from autocommands rather than assigned once.
+ * The Lua the host forces on every embedded Neovim, as a string so `vp pack` needs no asset rule.
+ * The launch sources it with `-c`: lazy.nvim replaces `runtimepath` while `init.lua` runs, so a
+ * `plugin/` file is never sourced. Plugins set window options later, so autocommands re-apply them.
  */
 
 /**
- * The options the host must own, and why each one.
- *
- * The first group is not cosmetic. Every one of these keeps grid column N
- * equal to buffer column N, which is the assumption the whole virtual-text
- * classification rests on. With line numbers left on, a flash jump produced
- * 132 phantom labels in the prototype, because every character on the line
- * differed from the buffer character it was compared against. `list` and
- * `conceallevel` break the same equality from the other direction: `list`
- * paints a character where the buffer holds a space, and `conceallevel`
- * replaces buffer text with something of a different width.
- * `vscode-neovim` forces the same set for the same reason.
+ * The options that keep grid column N equal to buffer column N, which the virtual-text
+ * classification needs: a gutter shifts every column, `list` paints over spaces and
+ * `conceallevel` changes widths. `vscode-neovim` forces the same set.
  */
 export const HOST_PLUGIN_LUA = `
 -- Written by Mesura Code. The host draws the gutter, the status line and the
@@ -121,7 +92,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
 --- every keystroke, for colours the editor is already drawing itself.
 ---
 --- Only the highlighter is stopped, not the parser, so plugins that query the
---- syntax tree — flash's treesitter mode is the one that matters here — keep
+--- syntax tree (flash's treesitter mode is the one that matters here) keep
 --- working.
 local function stop_highlighting(buf)
   if not vim.api.nvim_buf_is_valid(buf) then
@@ -386,23 +357,9 @@ stop_highlighting(vim.api.nvim_get_current_buf())
 export const HOST_PLUGIN_RELATIVE_PATH = "mesura_host.lua";
 
 /**
- * Applies a batch of text edits as one undo step.
- *
- * Sent as one `nvim_exec_lua` rather than one RPC per edit, because a separate
- * call is a separate undo block: an agent's write would then take several `u`
- * to take back, and the developer would undo half of somebody else's change
- * with no way of knowing there was more. Measured, not assumed — two
- * `nvim_buf_set_text` calls then one `u` left the second edit in place.
- *
- * The edits are sorted here rather than trusted from the caller. They have to
- * be applied from the end of the buffer backwards, because every edit's
- * positions describe the text as it was before any of them ran; applying an
- * earlier one first moves the later one's target. An earlier version relied on
- * the caller passing them in order and corrupted the text silently when it did
- * not — the undo step stayed single, which is what made it hard to see.
- *
- * Exported because the conformance harness drives this exact string. A test
- * with its own copy of the Lua proves the copy works.
+ * Applies a batch of text edits as one undo step: one `nvim_exec_lua`, because each RPC call is
+ * its own undo block. It sorts the edits itself and applies them from the end backwards, since
+ * every position describes the text before any edit ran. The conformance harness drives it.
  */
 export const APPLY_EDITS_LUA = `local buffer, edits = ...
 -- Columns arrive in UTF-16 units, as Monaco counts them, and nvim_buf_set_text
@@ -426,13 +383,8 @@ for index = #edits, 1, -1 do
 end`;
 
 /**
- * Puts the cursor where the client put it, in the window showing the file.
- *
- * Not `nvim_win_set_cursor(0, ...)`. Window `0` is whichever window is
- * current, and a plugin owning the window while the mirror is on the file is
- * the ordinary case — so the current window is regularly the wrong one.
- * A buffer with no window is not an error: the client is describing a file
- * nothing is showing, and there is nothing to move.
+ * Puts the cursor where the client put it, in the window showing the file. Not window `0`:
+ * a plugin often owns the current window. A buffer with no window has nothing to move.
  */
 export const SET_CURSOR_LUA = `local buffer, line, col = ...
 local window = vim.fn.bufwinid(buffer)
@@ -446,26 +398,9 @@ local text = vim.api.nvim_buf_get_lines(buffer, target - 1, target, false)[1] or
 vim.api.nvim_win_set_cursor(window, { target, vim.str_byteindex(text, "utf-16", col, false) })`;
 
 /**
- * Puts Neovim's window where the client's window is.
- *
- * `winrestview({ topline })` on its own does not hold. Neovim will not keep a
- * window that hides the cursor, so the moment the call returns the view snaps
- * back — measured: topline reads as the requested value from inside the same
- * Lua call and as the old one on the very next round trip, with no key sent.
- * That is exactly the case this exists for, a wheel scroll with the cursor
- * left where it was, so setting topline alone does nothing at all.
- *
- * The cursor therefore moves into the window, and only when it would otherwise
- * be outside it. That is what Vim's own mouse wheel does, and it is the
- * behaviour a developer who chose modal editing already has in their editor.
- *
- * Only for a scroll the pointer made. A window the client follows because a
- * key scrolled Neovim (`keep_cursor`, the fourth argument) never moves the
- * cursor: the request can be older than the keys Neovim has already run, or
- * describe fewer lines than Neovim's window holds because Monaco wraps them,
- * and pulling the cursor into it undid the keys — 50 `j` from the top of the
- * bench's Markdown ended on line 41. The topline then goes as near the
- * requested one as keeps the cursor in view.
+ * Puts Neovim's window where the client's is. Neovim snaps back a view that hides the cursor,
+ * so a pointer scroll moves the cursor into view, as Vim's mouse wheel does. With `keep_cursor`
+ * (a key scrolled Neovim) the cursor stays, because a stale request would undo the keys.
  */
 export const SET_VIEWPORT_LUA = `local buffer, topline, rows, keep_cursor = ...
 local window = vim.fn.bufwinid(buffer)

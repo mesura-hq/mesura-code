@@ -337,11 +337,9 @@ const unavailableGpu = (id: string, vendor: HostStatsGpu["vendor"]): HostStatsGp
 });
 
 /**
- * Every DRM card that reports something. AMD and Intel expose busy percent
- * and VRAM in sysfs. NVIDIA needs `nvidia-smi`, which wakes a
- * runtime-suspended GPU and drains a laptop battery, so a suspended card is
- * reported as sleeping and nothing is spawned. A card with no metric files
- * (a virtual display adapter) is skipped; no measurable card is null.
+ * Every DRM card that reports something; null when none is measurable. `nvidia-smi` wakes a
+ * runtime-suspended GPU and drains a laptop battery, so a suspended NVIDIA card is reported as
+ * sleeping and nothing is spawned. A card with no metric files (a virtual display) is skipped.
  */
 export const readGpus = Effect.fn(
   function* (roots: HostStatsRoots) {

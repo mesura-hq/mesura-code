@@ -1,14 +1,9 @@
 import { page } from "vite-plus/test/browser";
 import { act, type Screen, fakeTimers } from "../test/render";
-/**
- * Entry point: AppRoot with the real chat route, ChatComposer, key engine and
- * MesuraFileManagerLayer. Shared AppRoot boundaries replace RPCs and unrelated
- * chrome. Only the vendor App/bridge are replaced here; the layer's portal,
- * mount focus, unmount cleanup and native Escape boundary remain production.
- * Chromium loads the app's styles and owns layout, hidden-composer focus and
- * visibility. Control the full clock to exercise the focus and release frames;
- * wait for the editor and focus before exercising a return.
- */
+// AppRoot with the real chat route, ChatComposer, key engine and MesuraFileManagerLayer. Only the
+// vendor App and bridge are replaced, so the layer's portal, focus, cleanup and Escape boundary are
+// production. Chromium owns layout and focus. Control the full clock to step the focus and release
+// frames, and wait for the editor and focus before exercising a return.
 import { type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 

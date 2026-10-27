@@ -1,22 +1,8 @@
 /**
- * Entry point: `createHyprlandWidgetRules`, which `DesktopDictationWidget` builds with the
- * process environment and `executeHyprctl`, and whose `apply` the widget window awaits before
- * its first show. `hyprlandWidgetRuleCommands` is the pure rule list it sends, tested directly.
- *
- * Search unification, phase 5, criteria 1 to 5.
- *
- * Facts checked on this box's Hyprland 0.56.2 (2026-10-25), which the fake runner mirrors:
- * - `hyprctl keyword windowrule[name]:effect value` sets one key of a named rule; setting it
- *   again replaces it. Hyprland prints `ok` for an accepted key and the error text (for example
- *   `config option <windowrule:bogus> does not exist.`) for a rejected one, and exits 0 either way.
- * - `hyprctl --batch` prints one result per command, so a rejected rule in a batch shows as an
- *   error line among `ok` lines.
- * - `move` expressions read `monitor_h` as the whole monitor (`CWindow::calculateSingleExpr`
- *   uses `m_size`), so the usable bottom is the monitor's bottom less its reserved area, which
- *   `hyprctl -j monitors` reports as `reserved: [left, top, right, bottom]`.
- * - On first map `window_w`/`window_h` read the client's requested geometry, the whole monitor
- *   for a Wayland window, and a floating window without a `size` rule opens at the monitor's
- *   size; so the rules carry the widget's own 440 x 64 (measured with a headless output).
+ * Entry point: `createHyprlandWidgetRules`; `hyprlandWidgetRuleCommands` is tested directly.
+ * The fake runner mirrors Hyprland 0.56.2: `hyprctl keyword` and `--batch` exit 0 even when they
+ * reject a rule and print the error text per command instead of `ok`. `hyprctl -j monitors`
+ * reports `reserved` as `[left, top, right, bottom]`.
  */
 import { describe, expect, it, vi } from "vite-plus/test";
 

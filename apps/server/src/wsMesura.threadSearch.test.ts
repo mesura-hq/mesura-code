@@ -1,8 +1,7 @@
-// Mesura: search conversations over the WebSocket (ADR-010), across two
-// connections. Entry point: `layerWsRpcMesura`, built once per connection the
-// way `ws.ts` builds it, on one server-scope context, and called through
-// `RpcTest` clients. Every `RpcTest` client is client 0 on its own server, as
-// every WebSocket is on its own RPC protocol.
+// Mesura: search conversations over two WebSocket connections (ADR-010). `layerWsRpcMesura` is
+// built per connection on one server-scope context, as `ws.ts` does, and called through
+// `RpcTest` clients; each is client 0 on its own server, as every WebSocket has its own RPC
+// protocol.
 import { assert, it } from "@effect/vitest";
 import {
   AuthOrchestrationOperateScope,

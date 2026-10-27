@@ -992,9 +992,11 @@ describe("resolveShortcutCommand", () => {
 });
 
 describe("isRichTextBoldShortcut", () => {
+  const selected = { isCollapsed: false };
+
   it("matches the B key on non-Latin layouts, like the sidebar toggle does", () => {
     const cyrillicB = event({ key: "и", code: "KeyB", ctrlKey: true });
-    assert.isTrue(isRichTextBoldShortcut(cyrillicB));
+    assert.isTrue(isRichTextBoldShortcut(cyrillicB, selected));
     assert.strictEqual(
       resolveShortcutCommand(cyrillicB, DEFAULT_BINDINGS, { platform: "Win32" }),
       "sidebar.toggle",
@@ -1002,8 +1004,18 @@ describe("isRichTextBoldShortcut", () => {
   });
 
   it("follows the letter a Latin layout types, not the physical key", () => {
-    assert.isFalse(isRichTextBoldShortcut(event({ key: "x", code: "KeyB", ctrlKey: true })));
-    assert.isTrue(isRichTextBoldShortcut(event({ key: "b", code: "KeyN", ctrlKey: true })));
+    assert.isFalse(
+      isRichTextBoldShortcut(event({ key: "x", code: "KeyB", ctrlKey: true }), selected),
+    );
+    assert.isTrue(
+      isRichTextBoldShortcut(event({ key: "b", code: "KeyN", ctrlKey: true }), selected),
+    );
+  });
+
+  it("leaves the chord to the sidebar toggle when no text is selected", () => {
+    const modB = event({ key: "b", metaKey: true });
+    assert.isFalse(isRichTextBoldShortcut(modB, { isCollapsed: true }));
+    assert.isFalse(isRichTextBoldShortcut(modB, null));
   });
 });
 
@@ -1133,14 +1145,9 @@ describe("shipped defaults on Linux", () => {
   });
 
   it("leaves AltGr+Q free to type the character it produces", () => {
-    // Chromium on Linux reports AltGr as ctrl+alt, and a Latin American layout
-    // types "@" there. Matching on alt alone would eat that keystroke while
-    // the user writes their own answer in the composer.
-    //
-    // `code` has to be set for this to test anything. resolveEventKeys falls
-    // back to the physical letter whenever event.key is not a Latin letter, so
-    // "@" alone would resolve against no shortcut for a reason that has nothing
-    // to do with the modifiers this guards.
+    // Chromium on Linux reports AltGr as ctrl+alt; a Latin American layout types "@" there.
+    // `code` must be set: resolveEventKeys falls back to the physical letter for a non-Latin
+    // key, so "@" alone would match no shortcut for a reason unrelated to the modifiers.
     assert.strictEqual(resolve(press("@", { ctrlKey: true, altKey: true, code: "KeyQ" })), null);
   });
 
@@ -1263,14 +1270,9 @@ it("resolves mod+alt+k to the thread search outside terminal focus", () => {
 });
 
 /**
- * A stub `document` for the focus helpers below, focused on `activeElement`.
- *
- * Answering `querySelector` is part of the contract, not a detail. Shortcut
- * resolution reads the page at event time to see whether the file manager is up
- * over the window, so a stub carrying only `activeElement` throws there instead
- * of reporting a closed file manager, and every test that installs one fails.
- * Returning null is the honest answer: nothing here puts a file manager in the
- * page. A test that wants the opposite should return an element instead.
+ * A stub `document` focused on `activeElement`. It must answer `querySelector`: shortcut
+ * resolution queries the page for an open file manager, and a stub without it throws.
+ * Null means no file manager; a test that wants one returns an element.
  */
 const noFileManagerInPage = () => null;
 
@@ -1531,11 +1533,9 @@ describe("the sidebar's list chords", () => {
   });
 
   it("is a motion, not a chord, inside the editor in the right panel", () => {
-    // GUARD. `j` is `down` in the embedded Neovim editor and the editor
-    // lives in the right panel, so the pane read is what keeps the letter a
-    // letter there. Asserted through the focus tree rather than an explicit
-    // context, because an explicit context is exactly what the editor does
-    // not pass.
+    // GUARD. `j` is `down` in the embedded Neovim editor in the right panel; the pane read
+    // keeps it a letter there. Asserted through the focus tree, because the editor passes
+    // no explicit context.
     withFocusOn(PANEL_ROOT, "TEXTAREA", () => {
       assert.isNull(resolve(event({ key: "j" })));
       assert.isNull(resolve(event({ key: "k" })));
@@ -1662,16 +1662,6 @@ describe("composer and pull request shortcuts", () => {
       }
     },
   );
-
-  const shortcuts = [
-    ["a", "composer.mode"],
-    ["x", "composer.workspace"],
-    ["g", "composer.branch"],
-    ["l", "composer.previousWorktree"],
-    ["c", "thread.copyReference"],
-    ["k", "pullRequest.copyNumber"],
-    ["Enter", "thread.steerQueuedMessage"],
-  ] as const;
 
   it.each(["MacIntel", "Win32", "Linux"])(
     "reserves the alternate send chord for the focused composer on %s",

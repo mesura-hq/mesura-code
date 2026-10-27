@@ -1,14 +1,7 @@
-// Mesura: the server side of one agent thread search step when the client asks
-// for Jev (`engine: "jev"`), and the signal the client falls back on.
-// Entry point: `makeReasonThreadSearch`, the effect `wsMesura.ts` serves as
-// `orchestration.reasonThreadSearch`. OpenRouter is a stub `fetch` behind the
-// server's `FetchHttpClient`; no test here reaches it. The key is `OPENROUTER_JEV_SEARCH_API_KEY`, read from the
-// server's environment.
-//
-// The fallback contract these specs fix: an unset key, a network failure or a
-// 5xx answer fails the step with an error `isJevUnavailableError` accepts, and
-// the client then runs the configured text model instead. Any other Jev
-// failure is an ordinary failure, reported to the conversational model.
+// Mesura: `makeReasonThreadSearch` for `engine: "jev"`, with OpenRouter as a stub `fetch`.
+// Fallback contract: an unset `OPENROUTER_JEV_SEARCH_API_KEY`, a network failure or a 5xx fails
+// the step with an error `isJevUnavailableError` accepts, so the client reruns on the configured
+// text model. Any other Jev failure is an ordinary failure for the conversational model.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {

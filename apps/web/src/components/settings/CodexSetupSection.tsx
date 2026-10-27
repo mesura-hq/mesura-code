@@ -296,6 +296,7 @@ function ManagedCodexSetup({
     (auth?.phase === "succeeded" || awaitingProvider === "handoff");
   // A render reset clears a new request against the previous terminal receipt.
   // Reset only when the external receipt or authenticated snapshot changes.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: clears the pending request only when the external auth receipt changes (WORKAROUND below)
   useEffect(() => {
     if (authenticated || auth?.phase === "failed" || auth?.phase === "cancelled") {
       // WORKAROUND: React's setter rule cannot model external receipt transitions.
@@ -380,6 +381,7 @@ function ManagedCodexSetup({
     importedAttempt.current = attemptId;
     void transferFinishedProfile(handoffQuery.data.profile);
   }, [handoff, handoffQuery.data]);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: imports finished handoff data before disposing a failed query (WORKAROUND below)
   useEffect(() => {
     if (
       handoff &&

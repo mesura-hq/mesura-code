@@ -3,12 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
-  type OrchestrationV2ThreadProjection,
   type ProviderApprovalDecision,
   type RuntimeRequestId,
   type ThreadId,
   type UserInputAttachments,
 } from "@t3tools/contracts";
+import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import {
   isAtomCommandInterrupted,
@@ -36,7 +36,7 @@ export function useMesuraPendingThreadRequests(input: {
   environmentId: EnvironmentId;
   activeThreadId: ThreadId | null;
   activeThread: { readonly id: ThreadId } | undefined;
-  serverProjection: OrchestrationV2ThreadProjection | null;
+  serverProjection: Pick<ThreadStructure, "runtimeRequests" | "turnItems"> | null;
   supportsQuestionAttachments: boolean;
   maxFileAttachmentBytes: number | null;
   activeEnvironmentUnavailable: boolean;
@@ -79,6 +79,7 @@ export function useMesuraPendingThreadRequests(input: {
   );
   const activePendingApproval = pendingApprovals[0] ?? null;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
+  // oxlint-disable-next-line t3code/react-effect-budget -- prunes external draft stores when the server's pending set changes; no handler owns that change
   useEffect(() => {
     if (!activeThread) return;
     const questionThread = activeThread;
@@ -259,6 +260,7 @@ export function useMesuraPendingThreadRequests(input: {
   };
 
   // A dictated answer that submits itself goes through this thread's own respond while shown.
+  // oxlint-disable-next-line t3code/react-effect-budget -- registers with an external registry for the thread's lifetime and unregisters on cleanup
   useEffect(
     () =>
       activeThreadId

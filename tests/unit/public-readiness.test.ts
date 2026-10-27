@@ -12,18 +12,10 @@ import { commandOutput, expectSuccessfulCommand, repositoryRoot, run } from "./c
 // agent harness loads it. These guards hold the repository ready to be made
 // public; they do not decide that it is public.
 
-// ── Client project names ────────────────────────────────────────────────────
-//
-// The developer works for clients, and their project names leak into fixtures
-// by way of real directory names. A guard that listed those names in plain text
-// would publish them itself, so it keeps SHA-256 digests of the lowercase name
-// and hashes every substring of the tracked tree's letter runs instead.
-//
-// Deliberately NOT in this list, although they are names the developer works
-// with: a name that is also a common word (a Spanish noun), a name that is a
-// hex fragment (it matches inside lockfile checksums), and a name that is also
-// an upstream package identifier. Each of those would fail on text that names
-// no client.
+// Client project names leak into fixtures through real directory names, so the guard keeps SHA-256
+// digests of the lowercase names rather than publishing them. Deliberately NOT listed: names that are
+// also a common word, a hex fragment, or an upstream package identifier, because each would fail on
+// text that names no client.
 const CLIENT_PROJECT_NAME_DIGESTS = new Set([
   "267e4fc577a7bb3849986387c6ff6b279524f3c4a64f2a0687d3ac8c2503ea19",
   "fa08d34011acaa81bac69abd1f40d213a4fa3da88caafc8f3c2f4dfe5dcb7ee8",
@@ -232,13 +224,9 @@ describe("client project names before publishing", () => {
   );
 });
 
-// ── AGENTS.md identity text ─────────────────────────────────────────────────
-//
-// These read the opening and the "What this fork is, and is not" section, which
-// carry the fork's identity. They check only what is mechanical: a forbidden
-// claim, and where upstream's facts sit. Whether the prose still says what the
-// fork is belongs to review, because any phrase a guard pinned here is one a
-// legitimate rewording would break (AGENTS.md, "A guard may not pin …").
+// AGENTS.md identity text: only mechanical checks (a forbidden claim, where upstream's facts sit).
+// Whether the prose still says what the fork is belongs to review, because a pinned phrase would
+// break on a legitimate rewording (AGENTS.md, "A guard may not pin …").
 
 const agentsInstructions = NodeFS.readFileSync(NodePath.join(repositoryRoot, "AGENTS.md"), "utf8");
 

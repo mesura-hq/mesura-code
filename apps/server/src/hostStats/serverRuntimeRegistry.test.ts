@@ -1,13 +1,7 @@
 /**
- * The per-user runtime registry: what a server writes about itself, where,
- * and for how long.
- *
- * Entry point: `ServerRuntimeRegistry.layer`, the layer the server's host
- * stats block builds, over `ServerConfig.layerTest` and a
- * `HostProcess.Environment` whose `XDG_RUNTIME_DIR` is a temp directory. The
- * pure directory rule and the dead-entry sweep are reached through the same
- * module's `serverRuntimeRegistryDirectory` and `register`. The round trip
- * reads what `register` wrote through `MesuraServerDiscovery.make`.
+ * The per-user runtime registry: what a server writes about itself, where, and
+ * for how long. `XDG_RUNTIME_DIR` points at a temp directory, and the round
+ * trip reads the entries back through `MesuraServerDiscovery.make`.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";

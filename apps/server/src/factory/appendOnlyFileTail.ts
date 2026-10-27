@@ -1,15 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * Follows a file that only grows, such as a Software Factory run's `events.jsonl`
- * or a role's output: complete lines, read from a byte offset, so a file of
- * megabytes is read once and then only by its new bytes.
- *
- * The file may not exist yet. A partial last line waits for its newline, and a
- * file that shrank, or another file now at its path, is read again from the
- * start and reported as truncated. Content never decides which file it is:
- * equal bytes in another file are still another file.
- *
- * @module appendOnlyFileTail
+ * Follows a file that only grows (a Software Factory run's `events.jsonl`, a role's output):
+ * complete lines from a byte offset, so a large file is read once, then only its new bytes.
+ * A partial last line waits for its newline. A file that shrank, or another file at the path,
+ * is read again from the start and reported as truncated; equal bytes do not make it the same file.
  */
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
@@ -93,14 +87,10 @@ interface OpenFile {
 }
 
 /**
- * A tail of an absolute path, positioned at the file's start, for the life of
- * the scope.
- *
- * The tail holds the file it follows open until the scope closes. A file then
- * created at the path cannot get its inode number, which ext4 otherwise hands
- * to a new file as soon as the old one is deleted, so a different number at
- * the path is exactly a replaced file. A deleted file stays held, its disk
- * space included, until another file appears at the path or the scope closes.
+ * A tail of an absolute path, positioned at the file's start, for the life of the scope.
+ * The tail holds the file open so ext4 cannot hand its inode number to a file created next at
+ * the path: a different number is exactly a replaced file. A deleted file, disk space included,
+ * stays held until another file appears at the path or the scope closes.
  */
 export const makeAppendOnlyFileTail = Effect.fn("makeAppendOnlyFileTail")(function* (
   filePath: string,
@@ -209,19 +199,10 @@ export const makeAppendOnlyFileTail = Effect.fn("makeAppendOnlyFileTail")(functi
 });
 
 /**
- * Signals when the file may have grown. The parent directory is watched,
- * non-recursively, and the watch is acquired HERE, before the caller's first
- * read: a stream that only watched once pulled would miss an append landing
- * between that read and the watch. Watching the directory rather than the file
- * also sees a file that does not exist yet. The order and the recheck follow
- * `workspace/WorkspaceFileWatcher.ts`, which only resolves workspace-relative
- * paths.
- *
- * A watch on a deleted directory goes inert without an error, so every recheck
- * also compares the directory's identity with the one watched, and watches it
- * again, and signals, when the directory is gone, new, or its watch died. The
- * watch holds the directory open, because ext4 gives a directory created
- * again the inode number of the one deleted unless something still holds it.
+ * Signals when the file may have grown. The watch on the parent directory (which also sees a
+ * file not created yet) is acquired here, before the first read, so no append lands unwatched.
+ * A watch on a deleted directory goes inert silently: each recheck compares the directory's
+ * identity and rewatches and signals when it is gone, new, or its watch died.
  */
 export const watchAppendOnlyFile = Effect.fn("watchAppendOnlyFile")(function* (
   tail: AppendOnlyFileTail,

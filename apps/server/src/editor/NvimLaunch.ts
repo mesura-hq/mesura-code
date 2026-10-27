@@ -5,26 +5,9 @@ import * as FileSystem from "effect/FileSystem";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 
 /**
- * Deciding how to start the developer's own Neovim, before anything spawns.
- *
- * The hard part is not the argument list, it is `stdpath('config')`. The
- * configuration this host loads is a repository of its own, not the one
- * Neovim reads by default, and three of the obvious levers do not work:
- *
- * - `-u <dir>/init.lua` leaves `stdpath('config')` at `~/.config/nvim`, so the
- *   directory's own `lua/` never joins the runtime path and its `require`
- *   calls fail. A configuration that loads its modules by name — which is
- *   every configuration of any size — dies on the first line.
- * - `NVIM_APPNAME` moves config **and** data together, so every plugin would
- *   install a second time under a second data directory.
- * - Copying the directory somewhere is a copy that goes stale.
- *
- * Neovim resolves its configuration as `$XDG_CONFIG_HOME/nvim`, so the lever
- * that works is `XDG_CONFIG_HOME`. When the configured directory already is
- * that path, nothing is built and the variable is left exactly as it was.
- * Otherwise the launch gets a scratch config home holding a symlink named
- * `nvim`. Data, state and cache are untouched, so plugins installed for a
- * terminal Neovim are reused rather than downloaded again.
+ * Points `stdpath('config')` at the configured directory through `XDG_CONFIG_HOME`: a scratch
+ * config home holds an `nvim` symlink. `-u` breaks `require` of the directory's `lua/`, and
+ * `NVIM_APPNAME` also moves data, reinstalling every plugin. Data, state and cache stay put.
  */
 
 export class NvimLaunchError extends Data.TaggedError("NvimLaunchError")<{
@@ -49,14 +32,8 @@ export interface NvimLaunchInput {
   /** The server's state directory, which the scratch config home lives under. */
   readonly stateDir: string;
   /**
-   * A file to open at startup, rather than after connecting.
-   *
-   * It goes in argv because startup is the only moment a host can be sure of.
-   * A configuration that opens a dashboard does so from a deferred callback
-   * some milliseconds after `VimEnter`, so a file opened over RPC right after
-   * connecting is opened and then taken away again, and the session ends up on
-   * a scratch buffer nobody asked for. With the file in argv the dashboard
-   * never runs, because it checks whether Neovim was given anything to open.
+   * A file to open from argv at startup. A dashboard opens from a deferred callback after
+   * `VimEnter` and replaces a file opened over RPC; with a file in argv it never runs.
    */
   readonly initialFile?: string | undefined;
 }
@@ -75,24 +52,14 @@ export interface NvimLaunchPlan {
 const DROPPED_ENV_KEYS = new Set(["NVIM", "NVIM_LISTEN_ADDRESS"]);
 
 /**
- * Every variable Neovim must not see, including the whole `TMUX` family.
- *
- * `TMUX` and `TMUX_PANE` make `vim-tmux-navigator` and friends talk to a tmux
- * server that has no window for this process. `TMUX_PLUGIN_MANAGER_PATH` is
- * the one that actually bites: the developer's `init.lua` spawns a rename
- * script on `VimEnter` when it is set, which would rename a tmux window
- * belonging to a real terminal session.
+ * Every variable Neovim must not see, including the whole `TMUX` family: with
+ * `TMUX_PLUGIN_MANAGER_PATH` set, the developer's `init.lua` renames a real terminal's tmux window.
  */
 const isDroppedEnvKey = (key: string) => key.startsWith("TMUX") || DROPPED_ENV_KEYS.has(key);
 
 /**
- * Drops trailing separators, so two spellings of one directory compare equal.
- *
- * `~/.config/nvim/` and `~/.config/nvim` are the same directory, and a shell
- * that completes a directory name adds the slash. Compared as raw strings they
- * differ, and the launch quietly takes the long way round: it builds a scratch
- * config home and the git mirror that goes with it for a directory that needed
- * neither. Root is left alone, because `/` is all separator.
+ * Drops trailing separators, so `~/.config/nvim/` matches the default config home and no
+ * scratch config home is built for it. Root is left alone, because `/` is all separator.
  */
 const withoutTrailingSeparator = (value: string) => {
   const trimmed = value.replace(/[/\\]+$/, "");
@@ -104,20 +71,9 @@ const defaultConfigHome = (env: Record<string, string | undefined>, homeDir: str
   withoutTrailingSeparator(env["XDG_CONFIG_HOME"] ?? `${homeDir}/.config`);
 
 /**
- * Makes `path` a symlink to `target`, leaving it alone if it already is one.
- *
- * The config home is a fixed path under the server's state directory rather
- * than a scratch directory per launch, and deliberately so: `stdpath('config')`
- * is part of what lazy.nvim keys its compiled cache on, so a path that changed
- * every run would make every session recompile. The cost of that stability is
- * that two launches can meet here, which is why an already-correct link is left
- * untouched — removing and recreating it would open a window in which a running
- * Neovim reading through it finds nothing.
- *
- * When it does have to be replaced: `remove` rather than a check, because a
- * stale link from a previous run can point at a directory that is gone, and
- * `exists` follows the link, so it answers `false` for a link that is very much
- * in the way.
+ * Makes `path` a symlink to `target`. The path is fixed because lazy.nvim keys its cache on
+ * `stdpath('config')`, so a correct link stays untouched for Neovims already reading through it.
+ * It uses `remove`, not `exists`: `exists` follows a stale link and answers `false`.
  */
 const relink = Effect.fn("NvimLaunch.relink")(function* (path: string, target: string) {
   const fs = yield* FileSystem.FileSystem;
@@ -128,12 +84,8 @@ const relink = Effect.fn("NvimLaunch.relink")(function* (path: string, target: s
 });
 
 /**
- * Quotes a path as a Lua string literal.
- *
- * A long bracket — `[[…]]` — reads more nicely and is wrong: it ends at the
- * first `]]` in the path, so a directory named with one would turn the rest of
- * the argument into Lua source. An ordinary quoted string with the two
- * characters that matter escaped has no such ending to collide with.
+ * Quotes a path as a Lua string literal. Not a long bracket `[[…]]`: a `]]` in the path
+ * would end it and turn the rest of the argument into Lua source.
  */
 const luaStringLiteral = (value: string) =>
   `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
@@ -189,12 +141,9 @@ export const resolveNvimLaunch = Effect.fn("NvimLaunch.resolve")(function* (
       ),
     );
 
-    // WORKAROUND: git reads its own configuration from `$XDG_CONFIG_HOME/git`,
-    // and moving that variable takes it away from every git the session
-    // spawns — gitsigns and lazy.nvim's update checker both run one. Mirroring
-    // the entry as a second symlink gives them back the file they expect.
-    // Remove this once Neovim gains a flag that names the configuration
-    // directory on its own, which would mean not moving XDG_CONFIG_HOME at all.
+    // WORKAROUND: mirror `$XDG_CONFIG_HOME/git` as a second symlink, because moving
+    // XDG_CONFIG_HOME hides the git configuration from gitsigns and lazy.nvim's git.
+    // Remove once Neovim has a flag that names the config directory without XDG_CONFIG_HOME.
     const gitConfigHome = `${defaultConfigHome(input.env, input.homeDir)}/git`;
     const hasGitConfig = yield* fs.exists(gitConfigHome).pipe(Effect.orElseSucceed(() => false));
     yield* (

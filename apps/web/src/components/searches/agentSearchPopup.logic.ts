@@ -131,11 +131,9 @@ export function shouldShowAgentSearchSparkle(input: {
 }
 
 /**
- * The sidebar Search's keys that belong to the agent search. Tab (no modifier)
- * in a non-empty field hands its text to a new search. Escape while the popup
- * is open belongs to the popup, which closes: focus can still sit in the field
- * just after Tab. Returns whether the key was the agent search's; the field's
- * own handling applies otherwise.
+ * The sidebar Search's keys that belong to the agent search: Tab in a non-empty field hands its
+ * text to a new search, and Escape while the popup is open closes it (focus can still sit in the
+ * field just after Tab). Returns whether the key was the agent search's.
  */
 export function routeAgentSearchFieldKey(
   event: {

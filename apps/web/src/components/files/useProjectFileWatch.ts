@@ -16,13 +16,8 @@ const EMPTY_PROJECT_FILE_WATCH_ATOM = Atom.make(
 ).pipe(Atom.withLabel("project-file-watch:empty"));
 
 /**
- * Re-reads the open file when it changes on disk.
- *
- * Subscribing keeps a server watcher alive for exactly as long as this hook is
- * mounted. Whether a given event should cause a read is decided purely, in
- * `projectFileWatchRefresh`, because the interesting cases are sequences: the
- * baseline that must not read, a change during a local save that must wait, and
- * a reconnect whose baseline is genuinely new information.
+ * Re-reads the open file when it changes on disk. Subscribing keeps a server watcher alive while
+ * this hook is mounted; `projectFileWatchRefresh` decides purely which events cause a read.
  */
 export function useProjectFileWatch(input: {
   readonly environmentId: EnvironmentId;
@@ -47,15 +42,12 @@ export function useProjectFileWatch(input: {
   const lastResourceKeyRef = useRef<string>(resourceKey);
   const lastEventRef = useRef<ProjectFileWatchEvent | null>(null);
   /**
-   * The last revision handled for each path, kept across subscriptions.
-   *
-   * A file the user leaves and returns to gets a fresh subscription whose
-   * baseline is the only report of anything that happened while it was in the
-   * background. Comparing it against this decides whether that baseline is news.
-   * One short string per file opened, released with the panel.
+   * The last revision handled for each path, kept across subscriptions: a returned-to file's new
+   * baseline is the only report of changes made while it was in the background.
    */
   const seenRevisionsRef = useRef(new Map<string, string>());
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: feeds watch-stream events from the external subscription into the refresh decision
   useEffect(() => {
     // A different file is a different subscription, so nothing carried over
     // from the previous one is true of this one.
@@ -65,17 +57,10 @@ export function useProjectFileWatch(input: {
       lastEventRef.current = null;
     }
 
-    // This effect also runs when only `enabled` changed. Offering the same
-    // event again would re-handle it, so an event is offered once and `null`
-    // stands for "nothing new arrived, re-check whether a deferred change may
-    // be applied now".
-    //
-    // ASSUMPTION, unverified by any test because this project's web tests have
-    // no DOM to mount a hook in: the atom hands back the same object reference
-    // across renders until a genuinely new stream element arrives. Every other
-    // subscription consumer in this app relies on the same thing. If it ever
-    // stopped holding, two distinct events arriving in one render would collapse
-    // into one and a change would be missed.
+    // This effect also runs when only `enabled` changed, so an event is offered once and `null`
+    // means "re-check whether a deferred change may apply now". ASSUMPTION (untested): the atom
+    // keeps the same event reference until a new stream element arrives, as every other
+    // subscription consumer here relies on; otherwise two events in one render collapse into one.
     const isNewEvent = event !== null && event !== lastEventRef.current;
     if (isNewEvent) lastEventRef.current = event;
 

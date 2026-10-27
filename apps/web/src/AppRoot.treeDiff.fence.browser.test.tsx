@@ -1,37 +1,10 @@
 import { flushBrowserTasks } from "./test/browserTasks";
 import { page } from "vite-plus/test/browser";
 import { act, render as renderBrowser, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router rendering the real ChatView, whose
- * right panel is opened on the Diff surface through `useRightPanelStore`, the
- * same store the Diff tab and `diff.toggle` write. ChatView, DiffPanel, the
- * Tree diff view and the diff store remain real.
- *
- * Tree diff phase 3's keys and file tabs (the `Tree diff keys fence:` tests)
- * mount the same way, with the root route wrapping the real `CommandPalette`
- * around the page and the thread route mounting `useFileTreeShortcut`, as
- * `routes/__root.tsx` and `routes/_chat.tsx` do. Keys are dispatched on the
- * focused element and reach the window listeners the app installs.
- *
- * Tree diff phase 2, acceptance criteria 1–5, 7 and 8. Criterion 6 (colours)
- * is a visual criterion: the colours are CSS custom properties on the tree host
- * and a letter swapped in CSS, and AGENTS.md rules out asserting markup; the
- * status mapping behind them is pinned in `treeDiff.logic.test.ts`, and the
- * colours themselves are verified in the dev server.
- *
- * Boundaries the fixture replaces, and nothing else:
- * - The server, at the four atom-family factories in
- *   `@t3tools/client-runtime/state/runtime`. Every query and subscription the
- *   app builds becomes a fixture atom that records each read (a request) by RPC
- *   tag or label, and answers `review.subscribeWorkingTreeChanges`,
- *   `review.getWorkingTreeChanges` and `subscribeVcsStatus` from the fixture.
- *   Pushing a new live value re-renders its readers, as a stream emission does.
- * - Environment, thread and project reads, RPC commands and unrelated chrome,
- *   as `AppRoot.pendingUserInput.test.tsx` does, and the diff highlighting
- *   worker pool, which happy-dom cannot start.
- * - The HTTP session source, with explicit chat and file-read permissions.
- *   The real scope checks and filesystem-access hooks remain mounted.
- */
+// Tree diff through AppRoot and the real ChatView, DiffPanel and diff store, opened through
+// `useRightPanelStore`. The colours (criterion 6) are CSS: the dev server checks them and
+// `treeDiff.logic.test.ts` pins the status mapping. The server is replaced at the four atom-family
+// factories of `@t3tools/client-runtime/state/runtime`, which record each read by RPC tag or label.
 import { makeFenceThreadProjection, makeFenceThreadShell } from "./test/fenceThreadShell";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
 import { type ReactNode } from "react";
@@ -275,11 +248,9 @@ vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadA
 vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
-// happy-dom has no module workers. Files diff's code view and a file tab's
-// source preview render without their highlighting pool, which is unrelated to
-// the trees under test. The real module is not loaded at all: it imports
-// Pierre's worker script, which then runs on the page and logs every window
-// message it does not recognise, outliving the run.
+// happy-dom has no module workers, and the highlighting pool is unrelated to the trees under test.
+// The real module is not loaded: it imports Pierre's worker script, which runs on the page and logs
+// every unknown window message after the run ends.
 vi.mock("./components/DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
 }));

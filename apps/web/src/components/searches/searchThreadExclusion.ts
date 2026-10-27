@@ -1,11 +1,7 @@
 /**
- * Mesura: search conversations live in a hidden project
- * (docs/mesura/adr-010-search-chats.md) and stay out of every project list and
- * thread list. The server keeps them in the shell snapshot, because the popup
- * reads them from there, so the client lists drop them here.
- *
- * Results are cached per input array, and an input without search items comes
- * back unchanged, so callers keep the identity their memoization relies on.
+ * Mesura: search conversations live in a hidden project (docs/mesura/adr-010-search-chats.md).
+ * The server keeps them in the shell snapshot for the popup, so client lists drop them here.
+ * Results are cached per input array, and an input without search items comes back unchanged.
  */
 import { THREAD_SEARCH_PROJECT_ID } from "@t3tools/contracts";
 

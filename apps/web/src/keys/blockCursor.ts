@@ -9,22 +9,10 @@ import { subscribeComposerLayout } from "./composer/composerExpanded";
 import { paintHighlight } from "./highlights";
 
 /**
- * The block cursor of the chat and the composer. On a glyph it is the CSS
- * highlight, which paints only the glyph's own box: on `l`, `i` or `.` that
- * is a sliver. A glyph narrower than half an em gets an overlay instead, half
- * an em wide and centred on the glyph, which redraws the glyph inside it.
- *
- * The highlight is clipped and covered exactly where its glyph is, so the
- * overlay renders in the glyph's own context rather than above every layer:
- * in a container the surface names (the chat row; the composer editor's
- * host, because Lexical owns the editable content), positioned from an anchor
- * there. Whatever covers or clips the container covers or clips the overlay.
- * Clipping ancestors between the glyph and that container (the composer's
- * scrolling editor) are applied as a `clip-path`.
- *
- * It is measured again on scroll, on a resize of its container (a pane
- * resize reflows the text) and on composer layout changes, while the cursor
- * is on a narrow glyph, in the event: no frame loop.
+ * A CSS highlight paints only the glyph's box, a sliver on `l` or `.`, so a glyph under half an em
+ * gets an overlay instead, rendered in a container the surface names (not the composer's editable,
+ * which Lexical owns) so it is clipped and covered like the glyph; clipping ancestors in between
+ * become a `clip-path`. Re-measured in scroll, resize and composer layout events, never by a loop.
  */
 
 /** The narrowest block cursor, in em of the glyph's own font size. */

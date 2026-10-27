@@ -1,27 +1,9 @@
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, render as renderBrowser, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, whose root route wraps the real `CommandPalette` around
- * the page, as `routes/__root.tsx` does. The palette mounts the global
- * `ProjectIconDiscoveryDialogHost`; each spec opens the dialog through
- * `openProjectIconDiscoveryDialog`, the call the palette's "Find project icon
- * with agent…" and "Find missing project icons with agent…" actions make.
- *
- * Project icon discovery phase 1, acceptance criteria 2 (preview before Start),
- * 4 (only the confirmed projects, one at a time), 6 (Stop after this project and
- * closing the client leave later projects unstarted) and 8 (the persisted
- * outcome reaches the dialog through the project, correlated by job token).
- *
- * Boundaries the fixture replaces, and nothing else:
- * - The server's two RPCs, at `useAtomCommand`: `projectIcons.preview` answers
- *   from the fixture, and `projectIcons.discover` records the submission and
- *   accepts it with a job token at once, as the server does.
- * - The project store, at `./state/entities`: pushing a project with a new
- *   `iconDiscovery` re-renders its readers, as a `project-upserted` shell event
- *   does.
- * - Environments, settings and unrelated chrome, as
- *   `AppRoot.treeDiff.fence.test.tsx` does.
- */
+// Project icon discovery phase 1 through the real CommandPalette's dialog host, opened with
+// `openProjectIconDiscoveryDialog`. `projectIcons.preview` answers from the fixture, and
+// `projectIcons.discover` accepts with a job token at once. Pushing a project with a new
+// `iconDiscovery` re-renders its readers, as a `project-upserted` shell event does.
 
 import {
   createMemoryHistory,

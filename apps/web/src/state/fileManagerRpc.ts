@@ -25,13 +25,9 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { connectionAtomRuntime } from "../connection/runtime";
 
 /**
- * The file manager's four RPCs, on the connection runtime.
- *
- * Pushes are the one thing not read from an atom's value: a stream atom keeps
- * the last element of each chunk, and a `changed` burst must reach the file
- * manager whole. The events atom therefore runs the stream to a callback and
- * carries nothing itself; subscribing to it is what keeps the session open,
- * exactly as the file panel's watch atom keeps its server watcher alive.
+ * Pushes are not read from an atom's value: a stream atom keeps only the last element of
+ * each chunk, and a `changed` burst must arrive whole. The events atom runs the stream to a
+ * callback; subscribing to it is what keeps the session open.
  */
 
 export const fileManagerHost = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
@@ -133,14 +129,9 @@ export function followSession(
 }
 
 /**
- * Subscribe to an atom and compute it now.
- *
- * A runtime atom's effect starts on the atom's first read, and a plain
- * `registry.subscribe` never reads: it only asks to be told of changes. The
- * events atom below has nothing to change until its stream runs, so a plain
- * subscription left the session never opened, every bridge call waiting on a
- * readiness that could not come, and the columns empty with no error
- * anywhere. `immediate` is the read.
+ * `immediate` is load-bearing: a runtime atom's effect starts on its first read, and a
+ * plain `registry.subscribe` never reads, which left the session unopened and the columns
+ * silently empty.
  */
 export function watchAtom<A>(
   registry: AtomRegistry.AtomRegistry,

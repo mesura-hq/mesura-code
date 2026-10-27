@@ -1,15 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off - A one-shot git maintenance script.
 /**
- * Deletes the native mobile paths an upstream merge brought back (ADR-008), and the
- * `patchedDependencies` entries in `pnpm-workspace.yaml` for packages only those apps used.
- *
- * Run it from the repository root after `git merge upstream/main`, conflicts or not:
- * `git rm` resolves a modify/delete conflict on these paths as a deletion, and also removes
- * files upstream added under them. It changes nothing when no such path is tracked.
- *
- * `--force` is required, not a shortcut: a merge stages every file it brings in, and `git rm`
- * refuses a path whose staged content differs from HEAD unless forced. These paths are being
- * deleted on purpose, so no content worth keeping is lost.
+ * Deletes the native mobile paths and native-only `patchedDependencies` an upstream merge brought back
+ * (ADR-008). Run it from the repository root after `git merge upstream/main`, conflicts or not.
+ * `git rm --force` is required: a merge stages what it brings in, and `git rm` refuses staged content
+ * that differs from HEAD. These paths are deleted on purpose, so nothing worth keeping is lost.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

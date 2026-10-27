@@ -1,10 +1,7 @@
 /**
- * Records dictation audio from the window's microphone: one `MediaRecorder` per recording,
- * opus in WebM where the browser has it (MP4 otherwise), at 32 kbps so 45 minutes stay far
- * under OpenAI's 25 MB limit. An `AnalyserNode` reports the input level for the waveform.
- *
- * The browser surface sits behind `DictationMediaBackend`: happy-dom has none of it, so tests
- * install a fake through `setDictationMediaBackend`.
+ * Records dictation audio with one `MediaRecorder` per recording: opus in WebM where available
+ * (MP4 otherwise), at 32 kbps so 45 minutes stay far under OpenAI's 25 MB limit, plus an
+ * `AnalyserNode` for the waveform level. Tests install a fake `DictationMediaBackend`.
  */
 export interface DictationLevelMeter {
   /** The current input level, 0-1. */

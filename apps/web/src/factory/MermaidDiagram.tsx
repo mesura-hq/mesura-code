@@ -63,6 +63,7 @@ function MermaidSvg({
  */
 function MermaidRender({ source, theme, onRetry }: MermaidDiagramProps & { onRetry: () => void }) {
   const [request] = useState(() => requestMermaidDiagram(source, theme));
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: retains the queued render while mounted so an unmounted one is skipped
   useEffect(() => request.retain(), [request]);
   return (
     <RenderErrorBoundary

@@ -1,28 +1,8 @@
 /**
- * How wide a grid the host gives Neovim's window.
- *
- * With 'nowrap', a cursor that reaches the grid's last column scrolls the
- * window sideways, and every cell after that is read against the wrong buffer
- * character unless the classification knows the shift (`GridModel`'s
- * `leftcol`). The cheap way to keep `leftcol` at 0 is a grid wider than any
- * line the cursor can reach: the cells past the text are blanks, which Neovim
- * sends as one repeated cell per row and which classify as nothing.
- *
- * The host owns this rather than the client, because only the host sees every
- * key. A client sizes its request to what it shows and sends one only when it
- * scrolls, so typing at the end of the widest line ran past its width a key
- * at a time with no new request — measured on the bench's Markdown: `A` on a
- * 940-character line in a 940-column grid scrolled the window at once, and 40
- * typed characters scrolled it 40 times. The client's `cols` is a floor here.
- *
- * Bounded, because the grid is memory and work on both sides: `GridModel`
- * keeps a cell per column per row and reads every one of them on each frame
- * that changed. A line wider than `MAX_GRID_COLUMNS` scrolls the window
- * sideways when the cursor goes past the bound, and the classification then
- * reads it against `leftcol` — correct, only costlier, because every row
- * redraws when the window shifts.
- *
- * @module gridWidth
+ * Sizes Neovim's grid wider than any line the cursor can reach, so 'nowrap' never scrolls it
+ * sideways and `leftcol` stays 0. The host owns this because only it sees every key; the
+ * client's `cols` is a floor. Past `MAX_GRID_COLUMNS` the window scrolls and `GridModel` reads
+ * the row against `leftcol`: correct, but every row redraws.
  */
 import { displayWidth } from "./GridModel.ts";
 
@@ -66,15 +46,9 @@ export function widestReachableLine(input: GridWidthInput): number {
 }
 
 /**
- * Widths already measured, by tabstop and then by the line's text.
- *
- * This runs before every key batch, over three windows of lines, so it has to
- * cost what changed rather than what is on screen: measured on seven rows of
- * 1,100-character lines with one accent each, measuring every line every time
- * took 90 ms a batch, against 0.01 ms for ASCII. The key is the text itself,
- * so an edited line is measured again and an unchanged one is a lookup; the
- * mirror hands the same string objects back until a line changes, and V8
- * keeps a string's hash on the string.
+ * Widths already measured, by tabstop and then by the line's text. This runs before every key
+ * batch, and re-measuring non-ASCII lines cost 90 ms a batch. The mirror reuses a line's string
+ * until it changes, so an unchanged line is a lookup on a hash V8 caches.
  */
 const measuredWidths = new Map<number, Map<string, number>>();
 
@@ -99,14 +73,9 @@ function lineWidth(text: string, tabstop: number): number {
 }
 
 /**
- * The width to give the grid for a viewport request of `requested` columns,
- * when it is `current` columns wide now.
- *
- * A grid that already fits keeps its width unless it is more than
- * `2 * SPARE_COLUMNS` wider than needed. A resize makes Neovim redraw every
- * row and the host re-send every row's decorations, and a width recomputed
- * exactly on each scroll would change on most scroll steps of an ordinary
- * source file, whose widest reachable line changes as lines come into view.
+ * The grid width for a viewport request of `requested` columns. A grid that fits keeps its
+ * width unless it is more than `2 * SPARE_COLUMNS` too wide, because each resize redraws and
+ * re-sends every row, and an exact width would change on most scroll steps.
  */
 export function gridColumnsForViewport(
   requested: number,
@@ -129,16 +98,9 @@ export function lineFits(text: string, tabstop: number, cols: number): boolean {
 }
 
 /**
- * Whether `keys`, sent in `mode`, can widen a line by more than the keys
- * themselves spell.
- *
- * A put (`p`, `P`, `<C-r>` in insert mode), a repeat (`.`), a macro (`@`), a
- * join (`J`), a count or an Ex command can add any number of cells, and the
- * register or the command is Neovim's to know. The host cannot grow from the
- * change instead: measured, Neovim sends the change and the frame that scrolls
- * for it in one burst, so the scroll has already happened when the host hears
- * of the change. Typed text in insert mode is its own width, so a `p` typed
- * there reserves nothing.
+ * Whether `keys` in `mode` can widen a line by more than they spell: a put, a repeat, a macro,
+ * a join, a count or an Ex command. The host must grow first, because Neovim sends the change
+ * and the scroll it causes in one burst. Typed text in insert mode is its own width.
  */
 export function mayExpandUnpredictably(keys: string, mode: string): boolean {
   const inserting = mode.startsWith("i") || mode.startsWith("R");
@@ -151,23 +113,15 @@ export function mayExpandUnpredictably(keys: string, mode: string): boolean {
 }
 
 /**
- * How many key batches a reservation outlives.
- *
- * Long enough that the viewport requests between two counted or repeated
- * keys do not shrink the grid only for the next key to widen it again: each
- * resize redraws every row. Measured by "widens the grid at most once for a
- * burst of counts and repeats on short lines", which saw three resizes in
- * twelve keys when every viewport could shrink a reserved grid.
+ * How many key batches a reservation outlives: long enough that viewport requests between
+ * counted or repeated keys do not shrink the grid for the next key to widen again.
  */
 export const RESERVATION_BATCHES = 20;
 
 /**
- * The width to grow the grid to before `pendingCells` more cells may land on
- * the cursor's line, or `null` when the grid already has room.
- *
- * `pendingCells` overestimates on purpose: the keys about to be sent, counted
- * as if each character were typed text. Key notation (`<Esc>`) is shorter on
- * screen than in the batch, so the grid at worst grows a little early.
+ * The width to grow the grid to before `pendingCells` more cells land on the cursor's line, or
+ * `null` when it has room. `pendingCells` counts every key character as typed text, so key
+ * notation (`<Esc>`) overestimates and the grid at worst grows a little early.
  */
 export function grownGridColumns(
   current: number,

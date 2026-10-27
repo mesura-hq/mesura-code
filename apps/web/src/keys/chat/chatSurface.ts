@@ -42,16 +42,9 @@ import {
 } from "./chatBuffer";
 
 /**
- * The chat buffer's key surface: a read-only Vim over the timeline.
- *
- * Motions run in `@vimee/core`, a pure Vim engine, over the text projection
- * in `chatBuffer.ts`. The cursor is painted with a CSS highlight; a visual
- * selection is the browser's native selection, so the existing cite toolbar,
- * copy and the selection colours all work on it unchanged.
- *
- * The cursor is stored as a row and an offset, never as a line number,
- * because the buffer is rebuilt on every key from whatever rows are mounted.
- * Each thread keeps its last cursor for the page's lifetime, in memory only.
+ * A read-only Vim (`@vimee/core`) over the timeline. Visual selection is the native selection, so
+ * the cite toolbar and copy work on it unchanged. The cursor is stored as a row and an offset,
+ * never a line number, because the buffer is rebuilt on every key from the mounted rows.
  */
 
 const MOTION_KEYS = new Set([
@@ -103,11 +96,9 @@ function storeCursor(next: RowPosition | null): void {
 }
 
 /**
- * Tells the chat surface which thread is open. Its remembered cursor comes
- * back, painted where it was if its row is mounted; a thread not seen this
- * session paints nothing and starts at the first visible line on the first
- * key. A remembered row the virtual list has not mounted yet stays stored,
- * and a key puts the cursor on the first visible line until it mounts.
+ * A thread's remembered cursor is repainted if its row is mounted. An unseen thread, or a
+ * remembered row not yet mounted, starts at the first visible line on the next key; the
+ * remembered position stays stored.
  */
 export function setChatThreadKey(key: string | null): void {
   if (key === threadKey) return;
@@ -258,11 +249,9 @@ function revealRange(range: Range): void {
 }
 
 /**
- * WORKAROUND: tells ChatView the reader moved away from the live edge, so a
- * streaming reply does not yank the timeline back to the end. ChatView only
- * learns that from wheel, touch, pointer and a few keys on its scroll node;
- * a synthetic upward wheel event reaches its existing handler without an
- * edit to ChatView. Remove once live-follow exposes a "reader moved" call.
+ * WORKAROUND: a synthetic wheel event tells ChatView the reader left the live edge, so a streaming
+ * reply does not yank the timeline back; ChatView only learns that from input events on its scroll
+ * node. Remove once live-follow exposes a "reader moved" call.
  */
 function breakLiveFollow(scroller: HTMLElement, direction: "up" | "down"): void {
   scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: direction === "up" ? -1 : 1 }));

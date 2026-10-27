@@ -7,52 +7,10 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * The file panel edits through Monaco. One editor serves every file the panel
- * opens, and these assertions hold the wiring that keeps the open file's undo
- * stack, selection and scroll position alive underneath it.
- *
- * Undo survives a switch to another file and back, because the undo stack
- * belongs to the Monaco text model and a cache keeps one model per file. Two
- * things have to hold for that, and both were got wrong first:
- *
- * - The cache disposes the models, so nothing else may.
- * - The cache has to outlive the surface, and the surface is unmounted more
- *   often than it looks. Reading a file the client has not seen takes a round
- *   trip, and the panel used to draw its spinner *instead of* the editor for
- *   that moment. Every switch to a new file therefore tore the editor down, so
- *   no amount of care inside the editor could have kept the undo stack.
- *
- * Every assertion below marks something that broke at least once while it was
- * built, and not one of those breakages is reachable from a test that runs the
- * code: the editor still rendered, the text on screen was still right, and the
- * loss only showed when somebody pressed Ctrl+Z or Escape. That is why these
- * read source instead of behaviour.
- *
- * - **The mount carries no React key.** It was once keyed on path AND resolved
- *   theme, which remounted the editor on every theme toggle and destroyed the
- *   undo stack with it, while the typed text stayed on screen because the query
- *   cache still held it. It looked retained and was not.
- * - **The editor is created once, not once per file.** Building it in a hook
- *   that depends on the file path is the original defect; the editor owns the
- *   undo stack, so a new editor per file threw the stack away every time.
- * - **An incoming change is gated on `canReuse`.** Without that gate a
- *   confirmed save comes back as an external change and gets re-applied,
- *   moving the caret for nothing.
- * - **Applying an external change does not echo it back as a save.** Monaco
- *   raises the same content-change event for a programmatic edit as for a typed
- *   one, so an unguarded listener answers an agent's write by saving it back.
- *   If a second write lands inside the save debounce, that echo overwrites it.
- *   The behaviour is proved in a browser; this only holds the guard in place.
- * - **The external change is its own undo element.** `pushEditOperations` does
- *   not open one, so Monaco merges an incoming rewrite into whatever typing
- *   group is still open. One Ctrl+Z then reverts the agent's write together
- *   with the user's last keystrokes, leaving a half-typed line on screen. This
- *   was observed, not theorised.
- * - **Dismissal blurs whatever is focused, by asking the document.** Monaco
- *   0.56 runs with `editContext` on and keeps the caret in a
- *   `native-edit-context` div, not the hidden textarea older versions used.
- *   Reaching for a textarea by tag name finds nothing and blurs nothing, so
- *   Escape silently stopped working.
+ * One Monaco editor serves every file, and a cache that outlives the surface owns one model (and its
+ * undo stack) per file. Each assertion marks a break no running test caught: a React key on the mount,
+ * an editor per file, an ungated or echoed external change, an external change merged into the typing
+ * undo group, and a textarea-based blur (Monaco 0.56 focuses a `native-edit-context` div).
  */
 
 const read = (relativePath: string) =>
@@ -248,16 +206,9 @@ it("keeps the models further from the surface than the surface can reach", () =>
   const panel = panelSource();
   const surface = surfaceSource();
 
-  // This guard used to say the *panel* owns the cache, which was right when
-  // the only thing it had to survive was the spinner shown while a file is
-  // read. It does not say that any more, because the panel unmounts for two
-  // more ordinary things — opening Settings, and switching to a thread in
-  // another project — and both are route changes. What has to stay true is the
-  // property rather than the place: whoever holds the cache must outlive
-  // whoever draws the editor.
-  // The call, not the identifier: an import that is still there while the
-  // call has gone back to building a cache satisfies a looser assertion and
-  // proves nothing.
+  // The panel unmounts on route changes (Settings, a thread in another project), so whoever holds
+  // the cache must outlive whoever draws the editor. Assert the call, not the identifier: a
+  // surviving import beside a call that builds its own cache would pass a looser assertion.
   assert.include(
     panel,
     "useProjectEditorModels(environmentId, cwd)",

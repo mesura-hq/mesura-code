@@ -1,9 +1,6 @@
-// Entry point: `buildChatBuffer` (`chatBuffer.ts`), which the chat surface
-// calls on the timeline's `[data-assistant-citation-viewport]` before every
-// key. The markup mirrors what the timeline renders: one
-// `[data-timeline-row-id]` per row, a screen-reader-only author heading, and
-// an assistant row whose prose sits in `[data-assistant-citation-source]`.
-// Chromium lays out the rows in document order and supplies real computed styles.
+// The markup mirrors what the timeline renders: one `[data-timeline-row-id]` per
+// row, a screen-reader-only author heading, and an assistant row whose prose
+// sits in `[data-assistant-citation-source]`. Chromium supplies real layout.
 import { describe, expect, it } from "vite-plus/test";
 
 import { mountKeyDom } from "~/test/keyBrowserFixtures";

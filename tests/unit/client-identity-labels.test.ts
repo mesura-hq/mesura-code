@@ -7,20 +7,10 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * The label a client reports for itself is the one place this fork's name
- * reaches a server, a session list and upstream's analytics. During the
- * 2026-W35 sync upstream added a new file carrying "T3 Code Desktop" and
- * "T3 Code Web", and because the file was new it merged without a conflict —
- * nothing flagged it, every suite stayed green, and the fork silently started
- * calling itself T3 Code again.
- *
- * `mesura-identity.test.ts` guards the state-home literal rather than product
- * labels, so it does not cover this. These do.
- *
- * Each label is asserted at its producer rather than by sweeping for the string,
- * because the fork deliberately keeps upstream's name in places a rename would
- * be wrong: the macOS and Windows artifact names, upstream's theme names, and
- * the Clerk appearance keys.
+ * A client's self-reported label is where the fork's name reaches a server, a session list and
+ * upstream's analytics; a new upstream file once brought "T3 Code Desktop" back with no conflict.
+ * Each label is asserted at its producer, not by a string sweep, because the fork keeps upstream's
+ * name where a rename is wrong: macOS and Windows artifact names, theme names, Clerk appearance keys.
  */
 
 const LABEL_PRODUCERS = [

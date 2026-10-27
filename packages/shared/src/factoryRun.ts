@@ -1,11 +1,7 @@
 /**
- * The fold of a Software Factory run: `events.jsonl` lines in, `FactoryRunState`
- * out. Pure, so the server's run tracker and both clients share one reading of
- * record version 1.
- *
- * The record's single definition is `skills/core/sf-team/bin/run-events.mjs` in
- * the agent-env repository; `factoryRun.test.ts` folds a copy of that skill's
- * fixture, so a change on either side shows up there.
+ * Folds `events.jsonl` into `FactoryRunState`, shared by the server's run tracker and the clients.
+ * The record's single definition is `skills/core/sf-team/bin/run-events.mjs` in the agent-env
+ * repository; `factoryRun.test.ts` folds a copy of that skill's fixture to catch drift.
  */
 import {
   FACTORY_RUN_RECORD_VERSION,
@@ -541,11 +537,9 @@ export interface FactoryPhaseVerification {
 }
 
 /**
- * Each phase's criteria with their result: the last verdict of verify ② that
- * names a criterion wins, else the last verdict of verify ①. A re-run verify
- * replaces the verdict a repair answered, and a verify ② that recorded no
- * criteria (NOT_NEEDED) leaves verify ①'s results standing. Every criterion
- * of the plan is listed, named by a verdict or not.
+ * The last verify ② verdict naming a criterion wins, else the last verify ① verdict. A re-run
+ * verify replaces the verdict a repair answered; a verify ② with no criteria (NOT_NEEDED) leaves
+ * verify ①'s results standing. Every plan criterion is listed, named by a verdict or not.
  */
 export function deriveFactoryRunVerification(
   state: FactoryRunState,

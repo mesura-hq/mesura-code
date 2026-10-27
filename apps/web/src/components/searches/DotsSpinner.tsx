@@ -10,6 +10,7 @@ const FRAME_INTERVAL_MS = 110;
  */
 export function DotsSpinner() {
   const [frame, setFrame] = useState(0);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: interval timer that steps the frame while mounted, cleared on unmount
   useEffect(() => {
     const interval = window.setInterval(
       () => setFrame((current) => (current + 1) % FRAMES.length),

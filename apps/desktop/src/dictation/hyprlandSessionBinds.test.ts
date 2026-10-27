@@ -1,13 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off - the rework specs run the generated bind lines
 // through `/bin/sh` against a real Unix socket, as Hyprland would.
 /**
- * Entry point: `createHyprlandSessionBinds`, which the desktop main process
- * drives from the renderer's dictation state and from app quit, with the
- * `hyprctl` execution injected the way `snapShot/CaptureShortcutConfig.ts`
- * injects its own.
- *
- * STT redesign, phase 6, criterion 5. Search unification, phase 4, criteria 4 and 5: the
- * socket client each key runs, with the PATH lookup injected as `resolveCommand`.
+ * Entry point: `createHyprlandSessionBinds`, driven by the renderer's dictation state and app quit,
+ * with `hyprctl` injected as in `snapShot/CaptureShortcutConfig.ts` and the PATH lookup injected
+ * as `resolveCommand`.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

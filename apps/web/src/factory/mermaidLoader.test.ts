@@ -1,9 +1,6 @@
 /**
- * The Mermaid loader's cache and queue: failures are not kept, retained SVG
- * stays inside its byte budget, and work for diagrams no longer shown is
- * dropped. `MermaidDiagram` holds one request per mount, so these are the
- * loader's whole contract; the drawing itself is covered through
- * `ChatMarkdown.test.tsx`.
+ * `MermaidDiagram` holds one request per mount, so the cache and queue are the loader's
+ * whole contract. The drawing itself is covered through `ChatMarkdown.test.tsx`.
  */
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 

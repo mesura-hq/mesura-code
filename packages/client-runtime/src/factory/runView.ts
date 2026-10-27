@@ -1,9 +1,6 @@
 /**
- * What a Run tab draws, from one `subscribeFactoryRun` item: the web Factory
- * pane and the Android Factory screen both render this model, so they show
- * the same phase states, return edges and totals. The components only render
- * it; every decision about a run's shape (which node is in flight, where a
- * return went back to, what the clock and the cost read) is made here.
+ * Every decision about a run's shape (which node is in flight, where a return went back to, what
+ * the clock and the cost read) is made here; the Run tab components only render it.
  */
 import {
   isFactoryRunFinished,
@@ -53,7 +50,7 @@ export interface FactoryReturnEdge {
   readonly to: string;
   readonly kind: "repair" | "rework";
   readonly signal: string;
-  /** `repair 2/5 — Verify ①: <change>`. */
+  /** `repair 2/5 (Verify ①): <change>`. */
   readonly text: string;
   /** The implementer still holds it: the phase has not re-entered the spine. */
   readonly pending: boolean;

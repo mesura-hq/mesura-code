@@ -30,29 +30,10 @@ import { focusPane, getFocusedPane, notePointerPane } from "~/lib/paneFocus";
 import { handlePaneKey, isPaneModeActive, startPaneMode, stopPaneMode } from "./paneMode";
 
 /**
- * The modal key engine's host: one `keydown` listener on `window`, in the
- * capture phase, installed before React renders anything.
- *
- * Installing it first is what lets it outrank every other window listener:
- * listeners on the same target and phase run in registration order, and
- * ChatView's type-to-focus, the pane chords and the sidebar all register in
- * effects that run later. A consumed key is stopped with
- * `stopImmediatePropagation`, so none of them ever sees it.
- *
- * Routing for a key, in order:
- * 1. Off, or a composition in progress: not ours.
- * 2. A passthrough scope (terminal, Neovim editor, open dialog or menu,
- *    command palette): not ours. In a tree, only the leader and the sequence
- *    it starts are ours.
- * 3. The composer: its surface decides (insert passes keys, Escape leaves).
- * 4. Any other text input: not ours.
- * 5. PANE mode (`<leader>w`), while active, takes every key; a key it does
- *    not know ends it and continues below.
- * 6. Normal or visual mode: a pending surface sequence (Vim's `g`, `f`, an
- *    operator) first; then the keymap for the leader or a pending sequence;
- *    then the scope's surface; then the keymap's other root keys; then, in
- *    the chat, any printable key is swallowed so it never types into the
- *    composer.
+ * One capture-phase `keydown` listener on `window`, installed before React renders: same-target
+ * listeners run in registration order, so it outranks ChatView's type-to-focus, the pane chords and
+ * the sidebar, which register later in effects. A consumed key is stopped with
+ * `stopImmediatePropagation`, so none of them sees it.
  */
 
 export interface KeySurface {
@@ -202,11 +183,9 @@ function settleOnInput(): void {
 }
 
 /**
- * For the command palette as it closes: puts the keys back where it was
- * opened from. The chat gets the keyboard back on `<body>` with its cursor
- * where it was; the composer in normal mode gets focus and normal mode at the
- * same cursor. Returns false when the palette's own focus target applies:
- * Vim mode off, or anywhere else, composer insert mode included.
+ * As the command palette closes, returns the keys to the chat on `<body>` or to the composer in
+ * normal mode at the same cursor. False means the palette's own focus target applies: Vim mode
+ * off, or any other origin, composer insert mode included.
  */
 export function restorePaletteOrigin(): boolean {
   if (!enabled) return false;

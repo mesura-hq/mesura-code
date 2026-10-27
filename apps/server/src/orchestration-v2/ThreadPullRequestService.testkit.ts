@@ -1,8 +1,7 @@
 /**
- * Drives `ThreadPullRequestServiceV2` the way the server does: one startup
- * backfill pass, then one sweep per minute of `TestClock` time, plus the
- * domain events that queue a single thread. Thread shells and the project come
- * from fakes the test controls; git and repository identity are the test's.
+ * Drives `ThreadPullRequestServiceV2` as the server does: one startup backfill, then one
+ * sweep per minute of `TestClock` time, plus the domain events that queue one thread.
+ * The test supplies the thread shells, the project, git and the repository identity.
  *
  * @module orchestration-v2/ThreadPullRequestService.testkit
  */
@@ -29,7 +28,6 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
-import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as References from "effect/References";
@@ -37,6 +35,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitManager from "../git/GitManager.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
@@ -269,12 +268,16 @@ export const makeSweepHarness = (input: {
       }),
       Layer.mock(ProjectStore.ProjectStoreV2)({
         listShells: () => Effect.succeed([input.project]),
-        getShell: () => Effect.succeed(Option.some(input.project)),
+        getShell: () => Effect.succeedSome(input.project),
       }),
       Layer.mock(GitManager.GitManager)({
         branchPullRequest: input.git.branchPullRequest,
       }),
       Layer.mock(PullRequestService.PullRequestService)({}),
+      // A client is present, so the periodic sweep runs.
+      Layer.mock(BackgroundPolicy.BackgroundPolicy)({
+        shouldRunOpportunisticWork: Effect.succeed(true),
+      }),
       Layer.succeed(
         RepositoryIdentityResolver.RepositoryIdentityResolver,
         input.repositoryIdentities,

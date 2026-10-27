@@ -12,19 +12,18 @@ import {
   sessionGrantsScope,
 } from "./auth.ts";
 
-const decodeEnvironmentScopes = Schema.decodeUnknownSync(AuthEnvironmentScopes);
-const decodeGrantScopes = Schema.decodeUnknownSync(AuthGrantScopes);
-const decodeAuthSessionState = Schema.decodeUnknownSync(AuthSessionState);
-
 describe("authorization grants", () => {
   it("decodes legacy review credentials without offering them in new grants", () => {
-    expect(decodeEnvironmentScopes(["review:write"])).toEqual(["review:write"]);
-    expect(() => decodeGrantScopes(["review:write"])).toThrow();
+    const decodeAuthEnvironmentScopes = Schema.decodeSync(AuthEnvironmentScopes);
+
+    expect(decodeAuthEnvironmentScopes(["review:write"])).toEqual(["review:write"]);
+    const decodeAuthGrantScopes = Schema.decodeUnknownSync(AuthGrantScopes);
+
+    expect(() => decodeAuthGrantScopes(["review:write"])).toThrow();
     expect(AuthStandardClientScopes).not.toContain("review:write");
   });
 
-  // Frozen vocabulary from the client before granular scopes shipped. Do not
-  // derive it from the current enum: that would hide compatibility regressions.
+  // Keep the pre-granular vocabulary frozen to expose compatibility regressions.
   const oldScopes = Schema.Array(
     Schema.Literals([
       "orchestration:read",
@@ -57,6 +56,8 @@ describe("authorization grants", () => {
   });
 
   it("ignores unknown response permissions without falling back to broader scopes", () => {
+    const decodeAuthSessionState = Schema.decodeUnknownSync(AuthSessionState);
+
     const session = decodeAuthSessionState({
       authenticated: true,
       auth: {

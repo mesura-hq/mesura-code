@@ -1,28 +1,9 @@
 import { act } from "../../../../test/render";
 /**
- * Entry point: `MonacoFileSurface`, the file panel's editor, mounted whole with
- * modal editing on (`mountMonacoFileSurface` in `~/test/nvimEditorHarness`):
- * its Neovim hook and driver, its own-edit bookkeeping and its external-change
- * effect. The model takes edits (`makeEditableHarnessModel`), so Neovim's
- * `lines` events really write it. The file store the surface writes on every
- * edit (`setProjectFileQueryData`) is an in-memory map here; the save
- * coordinator, comment zones, settings and worker setup are stubbed.
- *
- * Phase 6 of the editor latency cycle, criterion 4: no typed key is lost or
- * reverted under the S8 load. The base reverted one typed character during a
- * ~400 ms server stall (bench `p6-base-s8-web-final`, settled window 0:
- * "measure" painted, then "mesure"). The cause, as replayed here:
- *
- * 1. Neovim's text reaches the model synchronously (phase 4), and every model
- *    change writes the file store at once.
- * 2. The panel hands the surface that store's text as `contents` through React
- *    state set in a passive effect, so a render can carry a text that is one
- *    or more of the editor's own edits old.
- * 3. A burst of `lines` events between two commits — a stall releasing
- *    coalesced keys, a main thread busy with background streams — puts the
- *    model ahead of the `contents` such a render carries. The surface read
- *    that older text as somebody else's write and sent it to Neovim as
- *    `replaceText`, which deleted the newer character inside Neovim.
+ * Phase 6, criterion 4: no typed key is lost or reverted under the S8 load. The panel's `contents`
+ * can lag the model by the editor's own edits; the surface once sent that older text to Neovim as
+ * `replaceText` and deleted a newer character (bench `p6-base-s8-web-final`: "measure", then
+ * "mesure"). Mounts the whole `MonacoFileSurface` with modal editing on and an editable model.
  */
 import { useSyncExternalStore } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";

@@ -5,12 +5,8 @@ import { applyEditorSessionEvent, EMPTY_EDITOR_SESSION_STATE } from "./editorSes
 import recorded from "./editorSessionFold.recorded.json";
 
 /**
- * Guard: the attach fold gives the same state for a recorded event sequence.
- *
- * The events were recorded from `EditorSessionManager.attachEventStream` over
- * a real Neovim (`source` in the fixture names the keys). The expected steps
- * are what this fold produced for them at the base of the editor latency
- * cycle, which changes how events are grouped into stream chunks and must not
+ * Events recorded from `EditorSessionManager.attachEventStream` over a real Neovim (the
+ * fixture's `source` names the keys). How events are grouped into stream chunks must not
  * change what they fold to.
  */
 

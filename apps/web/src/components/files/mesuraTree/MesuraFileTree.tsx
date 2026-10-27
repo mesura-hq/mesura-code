@@ -40,12 +40,9 @@ interface MesuraFileTreeProps {
 }
 
 /**
- * The tree's own state — cursor, collapsed folders, scroll anchor — outlives
- * this component. The file panel unmounts for a spinner, for Settings and for
- * a thread switch, and a tree that forgot its shape on each of those would be
- * worse than the one it replaced. Bounded and least-recently-used, like the
- * file manager's own `TreeStateCache`. A record is created from the shape
- * persisted for the project, so the first render already shows it.
+ * The tree's cursor, collapsed folders and scroll anchor outlive this component, which
+ * unmounts for a spinner, Settings and a thread switch. Bounded LRU, like the file
+ * manager's `TreeStateCache`; a record starts from the persisted shape, so the first render shows it.
  */
 const records = new Map<string, TreeRecord>();
 const RECORD_LIMIT = 8;
@@ -83,12 +80,9 @@ function deferTreeReveal(record: TreeRecord, absolute: string): void {
 const openFileManager = () => useFileManagerStore.getState().setOpen(true);
 
 /**
- * The Symmetria file tree, mounted in the files surface.
- *
- * The tree renders the server's file list and never reads a filesystem; keys
- * reach it through its command port from the table in `treeKeymap`, so this
- * host owns every chord; a file it activates goes out through `onOpenFile`,
- * the same route the file picker, diffs and chat links use to reach the editor.
+ * The Symmetria file tree over the server's file list; it never reads a filesystem.
+ * This host owns every chord (`treeKeymap`, through the command port), and an activated
+ * file leaves through `onOpenFile`, the editor route the file picker and chat links use.
  */
 export function MesuraFileTree({
   environmentId,
@@ -117,6 +111,7 @@ export function MesuraFileTree({
     viewport?.focus({ preventScroll: true });
     return viewport !== null && viewport !== undefined;
   }, []);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the tree as a focus target while mounted
   useEffect(() => registerFocusTarget("tree", focusViewport), [focusViewport]);
   // The panel's entry when no editor shows beside the tree; a ref callback,
   // because the wrapper first renders after the entries load.
@@ -134,6 +129,7 @@ export function MesuraFileTree({
   );
   // Registered here for as long as the tree is mounted, which is the only time
   // a move out of the tree can be asked for; the composer's owner is upstream's.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the composer focus target for the tree's lifetime
   useEffect(
     () =>
       registerFocusTarget("composer", () => {
@@ -145,6 +141,7 @@ export function MesuraFileTree({
     [composerRef],
   );
   // A chord that opened the surface asked for focus before the tree existed.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: focuses the DOM after mount for a chord that fired first
   useEffect(() => {
     if (useFileTreeStore.getState().consumePendingFocus()) focusViewport();
   }, [focusViewport]);
@@ -167,6 +164,7 @@ export function MesuraFileTree({
   // again would only move a cursor that is already there.
   const openedFromTree = useRef<string | null>(null);
   const handledReveal = useRef<HandledReveal | null>(null);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: drives the imperative tree controller from the selected-path prop
   useEffect(() => {
     const next = nextRevealRequest(handledReveal.current, selectedPath, selectedPathRevealId);
     handledReveal.current = next.handled;

@@ -210,7 +210,10 @@ it.layer(testLayer)("Mesura Factory lifecycle through the orchestrator", (it) =>
           importedRun,
         );
         const sequence = yield* events.latestSequence({ threadId });
-        assert.deepStrictEqual(yield* orchestrator.dispatch(command), result);
+        assert.deepStrictEqual(yield* orchestrator.dispatch(command), {
+          ...result,
+          replayed: true,
+        });
         assert.equal(yield* events.latestSequence({ threadId }), sequence);
         yield* maintenance.rebuild;
         yield* Effect.gen(function* () {
@@ -229,7 +232,10 @@ it.layer(testLayer)("Mesura Factory lifecycle through the orchestrator", (it) =>
           importedRun,
         );
         assert.deepStrictEqual(yield* cards.get(reportId), record);
-        assert.deepStrictEqual(yield* orchestrator.dispatch(command), result);
+        assert.deepStrictEqual(yield* orchestrator.dispatch(command), {
+          ...result,
+          replayed: true,
+        });
         assert.deepStrictEqual(
           yield* events.readByCommandId({ commandId: command.commandId }).pipe(Stream.runCollect),
           persisted,
@@ -330,7 +336,10 @@ it.layer(testLayer)("Mesura Factory lifecycle through the orchestrator", (it) =>
           assert.deepStrictEqual(updated.card, changed);
           assert.equal(updated.status, "completed");
           const sequenceBeforeRetry = yield* events.latestSequence({ threadId });
-          assert.deepStrictEqual(yield* orchestrator.dispatch(command), result);
+          assert.deepStrictEqual(yield* orchestrator.dispatch(command), {
+            ...result,
+            replayed: true,
+          });
           assert.equal(yield* events.latestSequence({ threadId }), sequenceBeforeRetry);
           assert.deepStrictEqual(
             yield* events.readByCommandId({ commandId }).pipe(Stream.runCollect),

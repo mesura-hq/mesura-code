@@ -17,11 +17,9 @@ afterAll(() => {
 });
 
 describe("pickerActionBus", () => {
-  // Every subscription goes through `track`, and cleanup runs from afterEach
-  // rather than from the end of each test body. One shared EventTarget serves
-  // the whole file, so a failing assertion — which skips whatever cleanup
-  // follows it — would otherwise leak listeners into the next test and make it
-  // fail for a reason of its own, hiding the real one.
+  // Cleanup runs from afterEach, not the test body: the file shares one
+  // EventTarget, and a failing assertion would skip in-body cleanup and leak
+  // listeners into the next test, hiding the real failure.
   const active: Array<() => void> = [];
   const track = (action: PickerAction, listener: () => void) => {
     const stop = subscribePickerAction(action, listener);
@@ -45,10 +43,8 @@ describe("pickerActionBus", () => {
 
   it("never delivers one action to another target", () => {
     // Every target shares one event name, so a missing detail check would make
-    // alt+w open the traits menu as well as the workspace one. The question
-    // fold is the costliest of these to get wrong: it is the only subscriber
-    // that is mounted while the user reads, so a stray delivery hides the very
-    // question they are answering.
+    // alt+w open the traits menu too. The question fold is mounted while the
+    // user reads, so a stray delivery there hides the question being answered.
     const seen: string[] = [];
     track("traits", () => seen.push("traits"));
     track("workspace", () => seen.push("workspace"));

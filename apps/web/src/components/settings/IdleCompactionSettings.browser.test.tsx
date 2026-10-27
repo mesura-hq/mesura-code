@@ -27,6 +27,8 @@ vi.mock(import("./SettingsScopeContext"), async (original) => ({
     connectedEnvironments: state.serversReadSwitch.map((idleCompactionSwitch) => ({
       serverConfig: { environment: { capabilities: { idleCompactionSwitch } } },
     })),
+    // No targets: the stored mode is read from `state.settings` alone.
+    targets: [],
   })) as never,
 }));
 // The real row reads write permission and inheritance from live environment

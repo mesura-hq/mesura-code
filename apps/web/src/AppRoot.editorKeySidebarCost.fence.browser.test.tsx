@@ -1,47 +1,10 @@
 import { act, type Screen } from "../test/render";
 import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout — and in it the real
- * `Sidebar`, with six thread rows — and whose chat layout is the real
- * `_chat.tsx` route component around the real ChatView. The file panel, its
- * Monaco editor and the modal editor's Neovim driver are real; Neovim's side
- * is the nvim harness's transport (`test/nvimEditorHarness.tsx`), which the
- * connection runtime is pointed at. Keys are real `keydown`/`keyup` events
- * dispatched from the focused element, which is the editor's own text node.
- *
- * Phase 4 of the editor latency cycle ("One key costs one small render"),
- * criterion 2: editor keystrokes re-render nothing outside the file panel —
- * `SidebarThreadRow` and `TooltipTrigger` commit 0 times per keystroke.
- *
- * What the baseline measured (6.1 `SidebarThreadRow` and 25 `TooltipTrigger`
- * commits per key) was not spread over every key. Re-attributed at this
- * phase's base (`/tmp/editor-perf/p4-fence/why-rows.ts`): plain keys — `j`,
- * `k`, insert-mode text — re-render no sidebar row. A Control chord does:
- * the sidebar tracks held modifiers for its thread jump hints
- * (`useShortcutModifierState`, a capture listener on `window`), so the
- * Control keydown and keyup of every `Ctrl-d`/`Ctrl-u` re-render the whole
- * `Sidebar`, and with it every row and every row's tooltips, because the row
- * memo does not hold across a sidebar render. Four chords measured 8 sidebar
- * renders, 528 row renders and 2,144 tooltip-trigger renders.
- *
- * The fixture is `test/appRootFenceMocks.tsx` without its sidebar stub.
- *
- * Phase 6 ("Desktop background thread sync does not tax the editor") adds one
- * spec here, for the same harness: with ten agents streaming, every running
- * thread's shell changes every few seconds, and the editor bench (S8) measured
- * about 20 ms of main-thread work per shell frame, inside the WebSocket
- * message, ahead of the editor's own replies and paints. A shell update for
- * one thread re-rendered every row and every row's tooltips, because the
- * memoized row's `sortable` bag was new each time: the drag sensor's options
- * were rebuilt with each sidebar render, which renews every row's listeners,
- * and the sortable ids were a new array, which dnd-kit reads as a reorder.
- *
- * The thread attention cycle (phase 3) reuses the harness for the one thing
- * only the real sidebar shows: a live Working row at Pixel 7 size, opened
- * through the sidebar sheet, beside a Waiting row it must look like.
- */
+// Editor latency: keys in the real file panel (Monaco, Neovim over `test/nvimEditorHarness.tsx`)
+// must not re-render `SidebarThreadRow` or `TooltipTrigger` in the real Sidebar. Control chords
+// did, through `useShortcutModifierState`; shell updates did, through a new `sortable` bag on each
+// sidebar render. The fixture is `test/appRootFenceMocks.tsx` without its sidebar stub.
 import { type ReactNode } from "react";
 import * as monaco from "monaco-editor";
 import { PromiseClipboardItem } from "./test/promiseClipboardItem";
@@ -446,6 +409,11 @@ function describeFocus(): string {
   return `<${active.tagName.toLowerCase()} class="${active.className}"> ${label ?? ""}`;
 }
 
+/** Upstream's Working shelf, on by default, lists running threads and starts collapsed. */
+function expandWorkingShelf(): void {
+  window.localStorage.setItem("t3code:sidebar:working-expanded", "true");
+}
+
 /**
  * Mounts the app on the first of `THREAD_COUNT` threads, opens the source
  * file from the Files tree with `Space p f`, `j`, Enter, and clicks its text.
@@ -478,6 +446,7 @@ async function mountWithEditorFocused({
   }
   sidebarLists.threads = [...fixture.threads.values()];
   sidebarLists.projects = [fixture.project];
+  if (backgroundStreaming) expandWorkingShelf();
   ({ root } = await renderFenceApp(container, threads[0]!, { vimMode: true }));
   await expect.element(page.getByTestId("sidebar-row-card").first()).toBeInTheDocument();
   await settle();
@@ -598,13 +567,17 @@ describe("editor keys and the sidebar (phase 4, criterion 2)", () => {
     expect(
       {
         Sidebar: countByName(rendered, "Sidebar"),
-        SortableThreadRow: countByName(rendered, "SortableThreadRow"),
+        // A running thread's row sits in the Working section, outside the sortable items.
+        rowWrapper:
+          countByName(rendered, "SortableThreadRow") + countByName(rendered, "UnsortableThreadRow"),
+        UnsortableThreadRow: countByName(rendered, "UnsortableThreadRow"),
         SidebarThreadRow: countByName(rendered, "SidebarThreadRow"),
       },
       "renders for one background streaming tick",
     ).toEqual({
       Sidebar: 0,
-      SortableThreadRow: 1,
+      rowWrapper: 1,
+      UnsortableThreadRow: 1,
       SidebarThreadRow: 1,
     });
     expect(editorHasFocus(), `focus is on ${describeFocus()}`).toBe(true);
@@ -880,18 +853,21 @@ describe("the first key after opening a file (phase 4, criterion 2)", () => {
   });
 });
 
-/** The status label in a row's top slot, found by its live-region text. The phone's sidebar
- * sheet is portaled to the body, so the search covers the document. */
+/** The status label in a row's top slot: the span holding the label as its own text. The phone's
+ * sidebar sheet is portaled to the body, so the search covers the document. */
 function rowStatusLabel(rowTitle: string, label: string): HTMLElement {
   const row = [...document.querySelectorAll<HTMLElement>('[data-testid="sidebar-row-card"]')].find(
     (candidate) => candidate.textContent?.includes(rowTitle),
   );
   expect(row, `a card row for ${rowTitle}`).toBeDefined();
-  const live = [...row!.querySelectorAll<HTMLElement>('[role="status"]')].find(
-    (candidate) => candidate.textContent === label,
+  const slot = [...row!.querySelectorAll<HTMLElement>("span")].find((candidate) =>
+    [...candidate.childNodes].some(
+      (node) => node.nodeType === Node.TEXT_NODE && node.textContent === label,
+    ),
   );
-  expect(live, `${rowTitle} shows ${label}; row reads ${row!.textContent}`).toBeDefined();
-  return live!.parentElement!;
+  expect(slot, `${rowTitle} shows ${label}; row reads ${row!.textContent}`).toBeDefined();
+  // A working label's text sits in the Working section's band (workingSweep.tsx).
+  return slot!.closest<HTMLElement>("[data-working-sweep]")?.parentElement ?? slot!;
 }
 
 /** The opacity a reader sees: the product of every ancestor's, up to the row's list item. */
@@ -907,7 +883,7 @@ function effectiveOpacity(element: HTMLElement): number {
 // Phase 3 of the thread attention cycle: no witness could produce a live Working row, so this
 // mounts the real sidebar at Pixel 7 size with one running and one waiting thread.
 describe("thread attention: Working and Waiting rows at phone width", () => {
-  it("sidebar attention row spec: Working keeps its timer, has no icon and looks like Waiting at Pixel 7", async () => {
+  it("sidebar attention row spec: Working keeps its timer, has no icon and reads azure apart from Waiting at Pixel 7", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await page.viewport(412, 915);
 
@@ -953,6 +929,7 @@ describe("thread attention: Working and Waiting rows at phone width", () => {
     );
     sidebarLists.threads = [...fixture.threads.values()];
     sidebarLists.projects = [fixture.project];
+    expandWorkingShelf();
     ({ root } = await renderFenceApp(container, openId!, { vimMode: false }));
     await settle();
     // At phone width the sidebar is a sheet; the toggle chord opens it, as a keyboard would.
@@ -979,7 +956,9 @@ describe("thread attention: Working and Waiting rows at phone width", () => {
         opacity: effectiveOpacity(element),
       };
     };
-    expect(look(working)).toEqual(look(waiting));
-    expect(look(working).opacity, "quiet, not full strength").toBeLessThan(1);
+    // The developer's working-state prototype (2026-10-26) gave Working its azure label.
+    expect(look(working).color, "Working reads apart from Waiting").not.toBe(look(waiting).color);
+    expect(look(working).opacity, "Working at full strength").toBe(1);
+    expect(look(waiting).opacity, "Waiting stays quiet").toBeLessThan(1);
   });
 });

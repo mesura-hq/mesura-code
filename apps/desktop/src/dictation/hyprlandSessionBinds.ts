@@ -14,19 +14,10 @@ import {
 } from "./hyprctl.ts";
 
 /**
- * The dictation keys, bound in Hyprland only while a dictation session exists, so they reach
- * Mesura while another app has focus and stay free the rest of the time. Each key writes its
- * `--dictation …` words to this instance's command socket through `socat`, or `python3` when
- * `socat` is missing or cannot address the path. With neither, or when the client fails, the
- * key launches the desktop binary with the same words, which the single-instance lock hands to
- * the running instance: that works everywhere, but costs a full Electron start per key press.
- *
- * Every bind is preceded by its unbind: an instance that crashed mid-session leaves its binds
- * behind, and a second `bind` would add a duplicate instead of replacing it.
- *
- * Binds that already sit on these combos (Symmetria Shell keeps Alt+Space and Alt+X; the user's
- * config may bind others) are read at session start and put back at session end, because a
- * plain unbind deletes them until the next Hyprland reload.
+ * Bound only while a session exists. Each key writes its `--dictation …` words to the command
+ * socket via `socat` or `python3`; failing both, it launches the binary (a full Electron start).
+ * Every bind is preceded by its unbind: a crashed instance leaves its binds and `bind` duplicates.
+ * Existing binds on these combos are read at start and restored at end; an unbind deletes them.
  */
 const SESSION_KEYS: ReadonlyArray<readonly [key: string, command: DictationKeybindingCommand]> = [
   ["S", "dictation.mode.clipboard"],

@@ -9,15 +9,8 @@ import { NvimBridge } from "../NvimBridge.ts";
 import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * The host plugin's buffer module, run rather than read.
- *
- * `Manager.test.ts` drives the manager against a fake Neovim that matches on
- * the string `mesura.open` and answers with a made-up buffer number. That
- * proves the manager sends the right call; it proves nothing at all about what
- * the call does, because no Lua runs. This file is the other half, and it is
- * the half where the mistakes were: the first version looked buffers up with
- * `vim.fn.bufnr`, which treats its argument as a Vim pattern whenever nothing
- * matches exactly — which is always, the first time a path is opened.
+ * The host plugin's buffer module, run in a real Neovim. `Manager.test.ts` fakes `mesura.open`
+ * and runs no Lua, so only this file proves what the call does.
  */
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));
@@ -94,14 +87,10 @@ if (nvimAvailable)
     it.effect("looks a buffer up by its exact name, not by pattern", () =>
       withHost((bridge, root) =>
         Effect.gen(function* () {
-          // `vim.fn.bufnr(name)` falls back to Vim-pattern matching when no
-          // buffer matches exactly — which is always the case the first time a
-          // path is opened. Measured, with a real Neovim: with a buffer named
-          // `…/plain.ts` open, `bufnr("…/plain")` answers that buffer rather
-          // than -1. So a repository holding both `README` and `README.md` —
-          // or `index` and `index.ts` — is enough for a lookup to hand back
-          // the wrong file under the right name, and the developer edits one
-          // believing it is the other.
+          // `vim.fn.bufnr(name)` falls back to Vim-pattern matching when no buffer matches exactly,
+          // which is always the case on a path's first open. Measured: with `…/plain.ts` open,
+          // `bufnr("…/plain")` answers that buffer, not -1. So `README` beside `README.md` would
+          // open the wrong file under the right name.
           const extended = `${root}/README.md`;
           const bare = `${root}/README`;
 

@@ -1,16 +1,8 @@
 /**
- * Fork addition: the Diff surface's Tree diff mode, a port of Symmetria IDE's
- * Active Changes panel.
- *
- * The working tree, file first: the branch and the side summary (staged ● /
- * unstaged ○ / untracked ✦) over a tree of the changed files that fills the
- * column, each row with its status letter and line counts. Picking a file
- * opens it in its own tab, as the IDE opened it in the editor. The other Diff
- * modes read changes as one long stream of patches; this one answers "what is
- * uncommitted right now, and where does it live".
- *
- * The IDE's second half — the selected file's diff beside or under the tree —
- * is left out for now; the tree gets the whole column.
+ * Fork addition: the Diff surface's Tree diff mode, a port of Symmetria IDE's Active Changes
+ * panel. It answers "what is uncommitted right now, and where does it live": the branch and side
+ * summary over a tree of changed files, each opening in its own tab. The IDE's diff beside the
+ * tree is left out for now.
  */
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { GitBranchIcon } from "lucide-react";

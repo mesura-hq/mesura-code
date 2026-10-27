@@ -1,7 +1,4 @@
-/**
- * There are intentionally no per-driver Context tags because tags are
- * singleton-per-runtime and we need many instances of the same driver.
- */
+// Context tags are runtime singletons; drivers need multiple instances.
 import type {
   ProviderConsumeResetCreditOutcome,
   AccountLimitsAccount,
@@ -34,11 +31,7 @@ import type { ProviderUsageReader } from "./usage.ts";
 
 export interface ProviderDriverMetadata {
   readonly displayName: string;
-  /**
-   * Defaults to `true`. Set to `false` for drivers that wrap a global
-   * resource (e.g. a single desktop app socket) — the registry then
-   * rejects multi-instance configurations with a clear error.
-   */
+  /** Defaults to true; false rejects multiple instances of a global resource. */
   readonly supportsMultipleInstances?: boolean;
   readonly hasDefaultInstance?: boolean;
 }
@@ -110,11 +103,10 @@ export interface ProviderInstance {
 }
 
 /**
- * Mesura: one account-limit reading: the driver-native payload the usage
- * normalizers parse, plus the subscription it was read from. A reader returns
- * a list of these, one per subscription it can see. `account` is absent when
- * the provider does not name an account, which keeps that reading unfoldable
- * against another environment's.
+ * Mesura: one account-limit reading, the driver-native payload the usage normalizers parse plus the
+ * subscription it was read from. A reader returns one per subscription it can see. An absent
+ * `account` means the provider names none, which keeps the reading unfoldable against another
+ * environment's.
  */
 export interface AccountLimitsRead {
   readonly payload: unknown;
@@ -145,25 +137,14 @@ export interface ProviderDriverCreateInput<Config> {
   readonly config: Config;
 }
 
-/**
- * Two calls to `create` with different `instanceId` / `config` MUST yield
- * instances with no shared mutable state.
- */
+/** create calls with different instanceId/config must share no mutable state. */
 export interface ProviderDriver<Config, R = never, UsageR = never> {
   readonly driverKind: ProviderDriverKind;
   readonly metadata: ProviderDriverMetadata;
-  /**
-   * Using `Codec` rather than `Schema` pins `DecodingServices = never` — if
-   * we used `Schema<Config>`, the erased `any` in `AnyProviderDriver` would
-   * widen `DecodingServices` to `unknown` and poison the R channel of every
-   * caller of `decodeUnknownEffect`.
-   */
+  // Codec keeps DecodingServices = never; Schema would widen it through AnyProviderDriver.
   readonly configSchema: Schema.Codec<Config, unknown>;
   readonly defaultConfig: () => Config;
-  /**
-   * Failures become unavailable shadow snapshots — the driver MUST NOT throw
-   * defects.
-   */
+  /** Failures become unavailable snapshots; never throw defects. */
   readonly create: (
     input: ProviderDriverCreateInput<Config>,
   ) => Effect.Effect<ProviderInstance, ProviderDriverError, R | Scope.Scope>;

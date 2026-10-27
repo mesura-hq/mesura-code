@@ -18,12 +18,9 @@ function openFactoryInRightPanel(target: FactoryOpenTarget, selection: FactoryPa
 }
 
 /**
- * The plan card's Open: the plan in the Factory surface, maximized where the
- * panel sits beside the chat. The caller passes its own maximize setter
- * because the chat view's toggle reads `canMaximizeRightPanel` from the render
- * before this click, when the panel may still be closed. Where the panel is a
- * sheet it already covers the chat; the maximize takes effect if the window
- * widens to the inline layout.
+ * The plan card's Open: the plan in the Factory surface, maximized where the panel sits beside the
+ * chat. The caller passes its own maximize setter because the chat view's toggle reads
+ * `canMaximizeRightPanel` from before this click, when the panel may still be closed.
  */
 export function openFactoryPlanInRightPanel(
   input: FactoryOpenTarget & {

@@ -1,16 +1,16 @@
 import { useEffect, useLayoutEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 /**
- * The sidebar thread list as the screen shows it, read from the DOM.
- *
- * `Sidebar.tsx` marks each thread row with `data-mesura-thread-key`; this
- * module measures those rows against the list's scroll viewport. It is how
- * `Ctrl+1..9` number the threads on screen rather than the first nine of the
- * list (ADR-009, decision 8), and how `Ctrl+D` / `Ctrl+U` scroll the list
- * without opening a thread (#79).
+ * Measures the rows `Sidebar.tsx` marks with `data-mesura-thread-key` against the list's
+ * scroll viewport, so `Ctrl+1..9` number the threads on screen rather than the first nine
+ * of the list (ADR-009, decision 8).
  */
 
 const THREAD_ROW_SELECTOR = "[data-mesura-thread-key]";
+/** What Up and Down walk: the rows, and section headers such as Working's. */
+const NAV_STOP_SELECTOR = "[data-mesura-thread-key], [data-mesura-nav-stop]";
+/** The sidebar's Search field; Down from it, while empty, enters the list. */
+const THREAD_SEARCH_SELECTOR = "[data-mesura-thread-search]";
 const SCROLL_VIEWPORT_SELECTOR = '[data-slot="scroll-area-viewport"]';
 
 /**
@@ -27,7 +27,7 @@ const PENDING_SCROLL_EVENT = "mesura:thread-list-scroll-target";
 
 function threadListScroller(): HTMLElement | null {
   return (
-    document.querySelector(THREAD_ROW_SELECTOR)?.closest<HTMLElement>(SCROLL_VIEWPORT_SELECTOR) ??
+    document.querySelector(NAV_STOP_SELECTOR)?.closest<HTMLElement>(SCROLL_VIEWPORT_SELECTOR) ??
     null
   );
 }
@@ -136,29 +136,22 @@ const sameKeys = (left: readonly string[] | null, right: readonly string[] | nul
     left.every((key, index) => key === right[index]));
 
 /**
- * The thread keys on screen while `active` (the jump hints show). Null while
- * inactive or off screen.
- *
- * Read after every commit of the caller: a reorder, a new thread or a removed
- * one moves the rows without a scroll, and a number must always name the key
- * that opens its row. The read is in a layout effect, so a changed list
- * renders again before the frame paints. Also read at most once a frame while
- * the list scrolls, so the numbers follow a `Ctrl+D` made with `Ctrl` held.
+ * Read after every commit, because a reorder or an added or removed thread moves rows
+ * without a scroll. A layout effect, so a changed list renders again before paint. Also
+ * read once a frame while the list scrolls, so the numbers follow a held `Ctrl+D`.
  */
 export function useViewportThreadKeys(active: boolean): readonly string[] | null {
   const [keys, setKeys] = useState<readonly string[] | null>(null);
-  // No dependency list on purpose: every commit can move the rows, and the
-  // rows on screen come from measuring the committed DOM. It compares with
-  // this render's `keys` and sets nothing when they match. A functional
-  // update here queued a no-op update on every commit, and the sidebar, which
-  // does not bail out of its own updates, committed again each time until
-  // React stopped it with "Maximum update depth exceeded".
+  // No dependency list on purpose; compares with this render's `keys`. A functional update
+  // here queued a no-op update per commit and hit "Maximum update depth exceeded".
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the committed DOM after every commit, which render cannot read
   useLayoutEffect(() => {
     if (!active) return;
     const next = readViewportThreadKeys();
     // oxlint-disable-next-line react/set-state-in-effect -- The rows on screen come from measuring the committed DOM, which render cannot read.
     if (!sameKeys(keys, next)) setKeys(next);
   });
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the thread list's scroll events while the jump hints show
   useLayoutEffect(() => {
     if (!active) return;
     const scroller = threadListScroller();
@@ -189,12 +182,20 @@ function refreshViewportThreadKeys(
   setKeys((previous) => (sameKeys(previous, next) ? previous : next));
 }
 
+function navStops(scroller: HTMLElement): HTMLElement[] {
+  return [...scroller.querySelectorAll<HTMLElement>(NAV_STOP_SELECTOR)].filter(
+    (stop) => stop.closest("[inert]") === null,
+  );
+}
+
 /**
- * Up and Down move the keyboard focus over the thread rows, which shows a
- * row's hover tint and its details tooltip without opening the thread; Enter
- * opens it. Only while focus is in the thread list.
+ * Up and Down move the keyboard focus over the thread rows and section
+ * headers, which shows a row's hover tint and its details tooltip without
+ * opening the thread; Enter opens it. Only while focus is in the thread list,
+ * or Down in the empty Search field, which enters the list at its top.
  */
 export function useThreadRowArrowKeys(): void {
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: window keydown listener for thread-row arrow navigation, removed on unmount
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -202,18 +203,29 @@ export function useThreadRowArrowKeys(): void {
       if (event.shiftKey) return;
       const scroller = threadListScroller();
       const active = document.activeElement;
-      if (scroller === null || !(active instanceof HTMLElement) || !scroller.contains(active)) {
-        return;
-      }
+      if (scroller === null || !(active instanceof HTMLElement)) return;
+      const fromEmptySearch =
+        event.key === "ArrowDown" &&
+        active instanceof HTMLInputElement &&
+        active.matches(THREAD_SEARCH_SELECTOR) &&
+        active.value === "";
+      if (!fromEmptySearch && !scroller.contains(active)) return;
       // A row's own controls (rename field, menus) keep their arrows.
-      const current = active.closest<HTMLElement>(THREAD_ROW_SELECTOR);
+      const current = fromEmptySearch ? null : active.closest<HTMLElement>(NAV_STOP_SELECTOR);
       if (current !== null && current !== active) return;
       event.preventDefault();
-      const rows = threadRows(scroller);
+      const rows = navStops(scroller);
       const index = current === null ? -1 : rows.indexOf(current);
+      // Up from the top stop returns to Search, the way Down came in.
       const next =
-        event.key === "ArrowDown" ? rows[index + 1] : index === -1 ? rows.at(-1) : rows[index - 1];
-      if (next === undefined) return;
+        event.key === "ArrowDown"
+          ? rows[index + 1]
+          : index === -1
+            ? rows.at(-1)
+            : index === 0
+              ? document.querySelector<HTMLElement>(THREAD_SEARCH_SELECTOR)
+              : rows[index - 1];
+      if (next === undefined || next === null) return;
       next.focus({ preventScroll: true });
       next.scrollIntoView({ block: "nearest" });
     };

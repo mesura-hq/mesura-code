@@ -1,10 +1,6 @@
 /**
- * The line a reveal request should actually land on.
- *
- * A request can name a line the file does not have: a link written against an
- * older revision, or a search hit in a file an agent has since shortened.
- * Landing on the last line is better than landing nowhere, so requests are
- * clamped rather than ignored.
+ * The line a reveal request lands on. A stale link or search hit can name a line past the end, and
+ * landing on the last line beats landing nowhere, so requests are clamped rather than ignored.
  */
 export function resolveRevealLine(requestedLine: number, lineCount: number): number {
   // Monaco counts an empty document as one line; a caller computing its own

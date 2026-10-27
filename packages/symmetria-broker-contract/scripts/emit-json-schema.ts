@@ -1,14 +1,7 @@
 /**
- * Writes the generated JSON Schema artifacts under `schema/`.
- *
- * Run it with `vp run generate` from inside the package. Every file it writes
- * is derived from the Effect schemas in `src/`, so a schema change followed by
- * a run is the only way an artifact ever changes. Nothing under `schema/` is
- * edited by hand, and the suite fails if it is.
- *
- * The script holds no logic of its own beyond reading and writing files: the
- * documents, the index and the checksum are all built by `src/jsonSchema.ts`,
- * which the tests use directly.
+ * Writes the generated JSON Schema artifacts under `schema/` (`vp run generate` from the package).
+ * Nothing under `schema/` is edited by hand, and the suite fails if it is. All logic lives in
+ * `src/jsonSchema.ts`, which the tests use directly.
  */
 // @effect-diagnostics nodeBuiltinImport:off - a build script writes files with
 // the platform API rather than through an Effect runtime it would have to boot.

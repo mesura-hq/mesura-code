@@ -74,6 +74,7 @@ export function useThreadJumpTargets(input: {
 
   const shownTargetsRef = useRef(shownTargets);
   const orderedThreadKeysRef = useRef(orderedThreadKeys);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-ref, so the jump handler reads the targets on screen without re-registering
   useLayoutEffect(() => {
     shownTargetsRef.current = shownTargets;
     orderedThreadKeysRef.current = orderedThreadKeys;
@@ -103,6 +104,7 @@ export function useThreadJumpTargets(input: {
  */
 export function usePreviewFocusWhile(active: boolean): boolean {
   const [previewFocus, setPreviewFocus] = useState(false);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: follows document focus changes, which do not render the sidebar, while active
   useLayoutEffect(() => {
     if (!active) return;
     const read = () => setPreviewFocus(isPreviewFocused());

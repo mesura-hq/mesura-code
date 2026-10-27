@@ -1,25 +1,9 @@
 import { act, fakeTimers } from "../../../../../test/render";
 /**
- * Entry point: `useNvimFileEditor`, the hook `MonacoFileSurface` mounts for
- * modal editing, rendered under React with the status strip below it as
- * `MonacoFileSurface` renders it. Keys enter where Monaco delivers them, the
- * editor's `onKeyDown`, and leave through the real `editorSession.input`
- * command to an RPC session whose replies the test controls. See
- * `~/test/nvimEditorHarness.tsx` for what is real and what is replaced.
- *
- * Phase 1 of the editor latency cycle, criteria 1 to 3:
- * - 1: while an `editorSession.input` request is in flight, later keys are
- *   accumulated and sent as one request when it settles; at most one input
- *   request per thread is in flight.
- * - 2: a batch never exceeds the contract's 1024-character bound and is split
- *   in order instead, never inside one key's notation.
- * - 3: a failed input request (disconnect, server error) never applies a key
- *   twice and never drops one silently: the keys are re-sent in order once
- *   the session is reachable, or the loss is shown in the status strip as an
- *   element marked `data-nvim-input-lost`.
- *
- * Criterion 5 (the latency benchmark) has no spec: the coordinator and the
- * verifier run `bench/bench.sh` for it.
+ * `useNvimFileEditor` with its status strip; keys enter through `onKeyDown` and leave through the
+ * real `editorSession.input`. At most one input request per thread is in flight, later keys batch
+ * up to the contract's 1024-character bound without splitting a key's notation, and a failed
+ * request neither repeats nor silently drops a key (re-sent in order, or `data-nvim-input-lost`).
  */
 import { useEffect } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";

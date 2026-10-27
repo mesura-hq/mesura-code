@@ -4,12 +4,9 @@ import type * as Electron from "electron";
 import { DICTATION_WIDGET_STATE_CHANNEL } from "../ipc/channels.ts";
 
 /**
- * The small window that shows a dictation while another app has focus. It is drawn by the web
- * bundle's widget page from the state the main window's renderer publishes; this module decides
- * when it is on screen and relays that state to it.
- *
- * The title is what the Hyprland window rules in `hyprlandWidgetRules.ts` match: without them
- * Hyprland tiles the window, focuses it, frames it and keeps it on one workspace.
+ * The window that shows a dictation while another app has focus; the web bundle's widget page
+ * draws it. The Hyprland rules in `hyprlandWidgetRules.ts` match this title: without them
+ * Hyprland tiles, focuses and frames the window and pins it to one workspace.
  */
 export const DICTATION_WIDGET_TITLE = "mesura-dictation-overlay";
 /** How long the delivery result stays on screen. */

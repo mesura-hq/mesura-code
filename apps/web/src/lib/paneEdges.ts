@@ -6,26 +6,10 @@ import {
   useRef,
 } from "react";
 
-/**
- * The resizable edges between panes, and the one way to move them from the
- * keyboard.
- *
- * Three components own a resize today, each with its own drag code: the
- * sidebar rail (`ui/sidebar.tsx`), the right panel's handle
- * (`PreviewPanelShell` through `useResizableWidth`) and the terminal drawer's
- * top edge (`ThreadTerminalDrawer`). Each registers its edge here through
- * `usePaneEdge` with a `resizeTo` that runs the same clamp and persistence as
- * its drag. Two keyboard paths then share that code:
- *
- * - The separator itself, focused with Tab: arrow keys move the border in the
- *   arrow's direction. This is the W3C ARIA window splitter pattern
- *   (https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/).
- * - Vim mode's PANE mode (`keys/paneMode.ts`): `h`/`l`/`k`/`j` move a border
- *   left, right, up and down in the same way; the focused pane only picks
- *   which border.
- *
- * One step is 5% of the viewport along the edge's axis.
- */
+// Each resizable edge registers a `resizeTo` running the same clamp and persistence
+// as its drag, so the focused separator's arrow keys (W3C ARIA window splitter
+// pattern) and PANE mode's `h`/`l`/`k`/`j` share it. One step is 5% of the
+// viewport along the edge's axis.
 
 export type PaneEdgeId = "sidebar" | "right-panel" | "terminal-drawer";
 
@@ -154,6 +138,7 @@ export interface UsePaneEdgeOptions extends Omit<PaneEdge, "id" | "side"> {
  */
 export function usePaneEdge(options: UsePaneEdgeOptions) {
   const latest = useRef(options);
+  // oxlint-disable-next-line t3code/react-effect-budget -- latest-ref: the registered edge reads the owner's newest callbacks without re-registering
   useLayoutEffect(() => {
     latest.current = options;
   });
@@ -170,6 +155,7 @@ export function usePaneEdge(options: UsePaneEdgeOptions) {
     [id, side],
   );
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes the edge to the module registry for the mount's lifetime
   useEffect(() => {
     if (!enabled) return;
     return registerPaneEdge(edge);
