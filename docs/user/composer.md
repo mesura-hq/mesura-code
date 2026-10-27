@@ -45,9 +45,10 @@ Uploads begin when you add an attachment. All uploads must finish before the
 message can send. Retry or remove a failed upload. On web and desktop, reloading
 before an upload finishes requires you to attach that file again.
 
-Use the attachment control to choose files from your device. On a phone, the
-browser opens the device's file picker. You can also drag or paste images into
-the composer when your browser supports it. HEIC and HEIF photos are converted
+Use the attachment control to choose files from your device. On a phone or
+tablet, it offers **Photos and videos**, which opens the device's photo picker
+directly, and **Files** for anything else or the camera. You can also drag or
+paste images into the composer when your browser supports it. HEIC and HEIF photos are converted
 to JPEG before upload; photos over the image limit are also resized to fit.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
