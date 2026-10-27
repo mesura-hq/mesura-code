@@ -70,8 +70,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-new(t3-mobil
   }
 }
 
+/* The group is the chat pane's box; clipping it keeps the headline's exit rise
+   from painting over the header. */
 html[data-mobile-composer-route-transition="true"]::view-transition-group(t3-mobile-draft-headline) {
   animation-duration: var(--mobile-composer-transition-duration);
+  overflow: clip;
 }
 
 html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobile-draft-headline) {
