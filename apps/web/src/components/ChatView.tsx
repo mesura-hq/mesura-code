@@ -3679,13 +3679,9 @@ export default function ChatView(props: ChatViewProps) {
                   : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
               }
             >
-              {/* The hero headline sits in flow above the stack, with an equal spacer below it,
-                  so the composer stays centred while there is room and is pushed down rather
-                  than letting the headline rise over the header when the keyboard shrinks the
-                  pane. Past that, the overlay clips the headline and the composer stays whole.
-                  The overlay, not the headline, carries the headline's view-transition name: a
-                  snapshot ignores its ancestors' clip, so a headline snapshot would paint its
-                  clipped part over the header while it fades out. */}
+              {/* In flow with an equal spacer, so the keyboard pushes the composer down instead of
+                  lifting the headline over the header; past that the overlay clips the headline.
+                  The overlay carries the view-transition name: a snapshot ignores ancestor clips. */}
               <div
                 ref={draftHeroTransitionGroupRef}
                 className={
