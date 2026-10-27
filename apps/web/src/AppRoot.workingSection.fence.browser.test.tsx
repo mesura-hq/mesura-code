@@ -383,6 +383,7 @@ const TOGGLE_WORKING_CHORD: Chord = { key: "z", code: "KeyZ", altKey: true };
 const PALETTE_CHORD: Chord = { key: "o", code: "KeyO", ctrlKey: true };
 const DOWN: Chord = { key: "ArrowDown", code: "ArrowDown" };
 const UP: Chord = { key: "ArrowUp", code: "ArrowUp" };
+const THREAD_SEARCH_CHORD: Chord = { key: "k", code: "KeyK", ctrlKey: true, altKey: true };
 
 function section(): HTMLElement | null {
   return document.querySelector<HTMLElement>("[data-working-section]");
@@ -677,6 +678,18 @@ describe("working section: the ways in and out", () => {
     await vi.waitFor(() =>
       expect(router!.state.location.pathname).toBe(`/${environmentId}/working-a`),
     );
+  });
+
+  it("working section spec: Down from a Search that threadSearch.toggle focused still reaches the header", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads([workingThread("working-a", "Work A", 5)], { expanded: true });
+
+    await press(THREAD_SEARCH_CHORD);
+    await vi.waitFor(() => expect(document.activeElement).toBe(sidebarSearchField()));
+    await press(DOWN);
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(header());
+    await press(UP);
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(sidebarSearchField());
   });
 
   it("working section spec: Left and Right on the header collapse and expand, and collapsing moves focus off a hidden row", async () => {

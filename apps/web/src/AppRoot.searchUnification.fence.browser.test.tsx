@@ -5,7 +5,7 @@ import { act, type Screen } from "../test/render";
 // Sidebar Search as the one thread search, project filter on keys (search unification phase 1),
 // through AppRoot, the real Sidebar over two projects, CommandPalette and ChatView. Message search
 // (`useThreadSearch`) answers from the fixture; chords are the shipped defaults. The setup follows
-// `AppRoot.editorKeySidebarCost.fence.browser.test.tsx`, without its editor.
+// `AppRoot.editorKeySidebarCost.fence.browser.test.tsx`, without its editor. Also the Search way back.
 import { describe, expect, it, vi } from "vite-plus/test";
 
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
@@ -169,6 +169,7 @@ import * as DateTime from "effect/DateTime";
 
 import { startMainAppLocationTracking } from "./components/sidebar/mainAppLocation";
 import { installKeyEngine } from "./keys/keyEngine";
+import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
 import { useProjectScopeStore } from "./projectScopeStore";
 import {
   addFenceThread,
@@ -322,10 +323,38 @@ const THREAD_SEARCH_CHORD: Chord = { key: "k", code: "KeyK", ctrlKey: true, altK
 const PROJECT_SCOPE_CHORD: Chord = { key: "F", code: "KeyF", ctrlKey: true, shiftKey: true };
 const TOGGLE_ALL_CHORD: Chord = { key: "p", code: "KeyP", ctrlKey: true, altKey: true };
 const PALETTE_CHORD: Chord = { key: "o", code: "KeyO", ctrlKey: true };
+const SIDEBAR_TOGGLE_CHORD: Chord = { key: "b", code: "KeyB", ctrlKey: true };
+const ESCAPE: Chord = { key: "Escape", code: "Escape" };
 
 /** The sidebar's Search field. At phone width it lives in the drawer, portaled to the body. */
 function sidebarSearchField(): HTMLInputElement | null {
   return document.querySelector<HTMLInputElement>('input[aria-label="Search threads"]');
+}
+
+function composerEditor(): HTMLElement {
+  const editor = document.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+  expect(editor, "the composer").not.toBeNull();
+  return editor!;
+}
+
+/** The wide layout's sidebar, whose `data-state` is `expanded` or `collapsed`. */
+function desktopSidebarState(): string | null {
+  return (
+    document.querySelector<HTMLElement>('div[data-slot="sidebar"][data-side]')?.dataset.state ??
+    null
+  );
+}
+
+/** Puts the keyboard in the composer, the entry point the way-back fences start from. */
+async function focusComposer(): Promise<void> {
+  await act(async () => composerEditor().focus());
+  await settle();
+}
+
+async function expectSearchFocused(): Promise<void> {
+  await vi.waitFor(() =>
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(sidebarSearchField()),
+  );
 }
 
 function projectSearchInput(): HTMLInputElement | null {
@@ -576,6 +605,181 @@ describe("search unification: the thread-search command lands in the sidebar Sea
     await vi.waitFor(() =>
       expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(sidebarSearchField()),
     );
+  });
+});
+
+describe("search unification: the Search field hands the keyboard back", () => {
+  it("search unification spec: the thread-search chord again returns focus to the composer", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await focusComposer();
+    await press(THREAD_SEARCH_CHORD);
+    await expectSearchFocused();
+
+    const event = await press(THREAD_SEARCH_CHORD);
+
+    expect(event.defaultPrevented, "the toggle owns the chord").toBe(true);
+    await vi.waitFor(() =>
+      expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(composerEditor()),
+    );
+  });
+
+  it("search unification spec: Escape on the empty Search field returns focus to the composer", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await focusComposer();
+    await press(THREAD_SEARCH_CHORD);
+    await expectSearchFocused();
+
+    await press(ESCAPE);
+
+    await vi.waitFor(() =>
+      expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(composerEditor()),
+    );
+  });
+
+  it("search unification spec: the composer gets its caret back the moment it gets focus back", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await focusComposer();
+    await userEvent.keyboard("hello world");
+    await settle();
+    // The caret moves inside the text the way a pointer puts it there; the editor follows selectionchange.
+    await act(async () => {
+      const text = window.getSelection()?.anchorNode;
+      expect(text?.textContent).toBe("hello world");
+      window.getSelection()?.collapse(text!, 8);
+    });
+    await settle();
+    const before = window.getSelection();
+    const caret = { node: before?.anchorNode, offset: before?.anchorOffset };
+    expect(caret.offset, "the caret sits inside the text").toBe(8);
+    await press(THREAD_SEARCH_CHORD);
+    await expectSearchFocused();
+
+    // Read in the same task as the key: a bare DOM focus leaves the native
+    // caret at the start until the editor resyncs its selection a moment later.
+    const after = await act(async () => {
+      (document.activeElement ?? document.body).dispatchEvent(
+        new KeyboardEvent("keydown", { ...THREAD_SEARCH_CHORD, bubbles: true, cancelable: true }),
+      );
+      const selection = window.getSelection();
+      return { node: selection?.anchorNode, offset: selection?.anchorOffset };
+    });
+
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(composerEditor());
+    expect(after).toEqual(caret);
+  });
+
+  it("search unification spec: Escape over a query clears it first and leaves on the next press", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await focusComposer();
+    await press(THREAD_SEARCH_CHORD);
+    await expectSearchFocused();
+    // Typed through the field's own input event, so focus stays where the chord put it.
+    await typeIntoSearch("rename");
+    expect(searchResultKeys()).not.toEqual([]);
+
+    await press(ESCAPE);
+    expect(sidebarSearchField()?.value).toBe("");
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(sidebarSearchField());
+
+    await press(ESCAPE);
+    await vi.waitFor(() =>
+      expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(composerEditor()),
+    );
+  });
+
+  it("search unification spec: in Vim mode Escape returns the keys to the chat buffer", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads(), { vimMode: true });
+    await pressLeader("ft");
+    await expectSearchFocused();
+
+    await press(ESCAPE);
+
+    await vi.waitFor(() => expect(readKeyEngineSnapshot().scope).toBe("chat"));
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(document.body);
+  });
+
+  it("search unification spec: in Vim mode the composer gets the keyboard back in NORMAL mode", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads(), { vimMode: true });
+    await focusComposer();
+    await press(ESCAPE);
+    expect(readKeyEngineSnapshot().mode, "the composer starts in NORMAL").toBe("NORMAL");
+    await press(THREAD_SEARCH_CHORD);
+    await expectSearchFocused();
+
+    await press(THREAD_SEARCH_CHORD);
+
+    await vi.waitFor(() =>
+      expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(composerEditor()),
+    );
+    await vi.waitFor(() => expect(readKeyEngineSnapshot().mode).toBe("NORMAL"));
+    expect(readKeyEngineSnapshot().scope).toBe("composer");
+  });
+
+  it("search unification spec: a collapsed sidebar expands for the Search field and collapses again on Escape", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await press(SIDEBAR_TOGGLE_CHORD);
+    expect(desktopSidebarState(), "the sidebar starts collapsed").toBe("collapsed");
+    await focusComposer();
+
+    await press(THREAD_SEARCH_CHORD);
+    expect(desktopSidebarState(), "the command showed the sidebar").toBe("expanded");
+    await expectSearchFocused();
+
+    await press(ESCAPE);
+    await vi.waitFor(() => expect(desktopSidebarState()).toBe("collapsed"));
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(composerEditor());
+  });
+
+  it("search unification spec: an expanded sidebar stays expanded when the Search field hands the keyboard back", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await focusComposer();
+    await press(THREAD_SEARCH_CHORD);
+    await expectSearchFocused();
+
+    await press(ESCAPE);
+
+    await vi.waitFor(() => expect(document.activeElement).toBe(composerEditor()));
+    expect(desktopSidebarState()).toBe("expanded");
+  });
+
+  it("search unification spec: the thread-search chord again at Pixel 7 width closes the drawer", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await page.viewport(412, 915);
+    await mountWithThreads(crossProjectThreads());
+    await press(THREAD_SEARCH_CHORD);
+    await vi.waitFor(() => expect(mobileDrawerOpen(), "the drawer opened").toBe(true));
+    await expectSearchFocused();
+
+    await press(THREAD_SEARCH_CHORD);
+
+    await vi.waitFor(() => expect(mobileDrawerOpen(), "the drawer closed").toBe(false));
+  });
+
+  it("search unification guard: Escape after focus left the field by other means does not jump back", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await focusComposer();
+    await press(THREAD_SEARCH_CHORD);
+    await expectSearchFocused();
+    // The keyboard moves on by pointer, then comes back to the field the same way.
+    await userEvent.click(projectFilterTrigger());
+    await settle();
+    await press(ESCAPE);
+    await act(async () => sidebarSearchField()!.focus());
+    await settle();
+
+    await press(ESCAPE);
+
+    expect(document.activeElement, `focus is on ${describeFocus()}`).not.toBe(composerEditor());
+    expect(document.activeElement).not.toBe(sidebarSearchField());
   });
 });
 
