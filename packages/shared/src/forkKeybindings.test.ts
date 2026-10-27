@@ -27,6 +27,9 @@ const FORK_BINDINGS = [
   // project. mod+shift+p stays thread.pin; mod+shift+0 types `=` on the Latin
   // American layout.
   { command: "projectScope.toggleAll", keys: ["mod+alt+p"] },
+  // The sidebar's Working section. alt+z was free in the app and in the
+  // developer's Hyprland when it was chosen (2026-10-26).
+  { command: "sidebar.toggleWorking", keys: ["alt+z"] },
 ] as const;
 
 describe("fork keybindings", () => {

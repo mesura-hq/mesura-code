@@ -7,6 +7,7 @@ import { requestCustomSnooze } from "../CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { useDeadlinePassed } from "~/hooks/useDeadline";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/client-runtime/thread-pull-requests";
+import { useDraggable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -52,6 +53,7 @@ import {
   memo,
   useRef,
   useState,
+  type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -89,9 +91,11 @@ import {
 import {
   resolveSidebarThreadAttention,
   sidebarThreadAttentionLook,
+  sidebarThreadAttentionSweeps,
   threadHasOpenPullRequest,
 } from "../sidebarThreadAttention";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
+import { WorkingSweepText } from "./workingSweep";
 import {
   ThreadPullRequestBadgeControl,
   ThreadPullRequestsMiniList,
@@ -481,6 +485,28 @@ export const SortableThreadRow = memo(function SortableThreadRow(
     useThreadShell(scopeThreadRef(rowProps.thread.environmentId, rowProps.thread.id)) ??
     rowProps.thread;
   // Keyed by variant so a card/slim switch remounts the row.
+  return <SidebarThreadRow key={rowProps.variant} {...rowProps} thread={thread} sortable={bag} />;
+});
+/**
+ * Mesura: a Working section row (SidebarWorkingSection.tsx). It sits outside the sortable items, so
+ * it never reorders, but it still drags into a message as a thread reference, as upstream's do.
+ */
+export const UnsortableThreadRow = memo(function UnsortableThreadRow(
+  props: ComponentProps<typeof SortableThreadRow>,
+) {
+  const { sortableId, sortableDisabled, contextDrag: _contextDrag, ...rowProps } = props;
+  const canOperateThread = useEnvironmentScope(
+    rowProps.thread.environmentId,
+    AuthOrchestrationOperateScope,
+  );
+  const { listeners, setNodeRef } = useDraggable({
+    id: sortableId,
+    disabled: sortableDisabled || !canOperateThread,
+  });
+  const bag = { listeners, setNodeRef, transform: null, transition: undefined, isDragging: false };
+  const thread =
+    useThreadShell(scopeThreadRef(rowProps.thread.environmentId, rowProps.thread.id)) ??
+    rowProps.thread;
   return <SidebarThreadRow key={rowProps.variant} {...rowProps} thread={thread} sortable={bag} />;
 });
 export type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
@@ -1352,7 +1378,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           {/* Not a live region: a collapsed sidebar is inert, so
                             BackgroundThreadAnnouncer and the open thread's
                             timeline speak status changes instead. */}
-                          {topStatus.label}
+                          {sidebarThreadAttentionSweeps(topStatus.kind) ? (
+                            <WorkingSweepText text={topStatus.label} />
+                          ) : (
+                            topStatus.label
+                          )}
                           {topStatus.kind === "working" ? (
                             <span aria-hidden>
                               <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />

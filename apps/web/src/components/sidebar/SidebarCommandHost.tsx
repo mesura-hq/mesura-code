@@ -15,10 +15,11 @@ import { closeAgentSearchPopupForWorkspace } from "../searches/agentSearchPopupS
 import { toastManager } from "../ui/toast";
 import { useSidebar } from "../ui/sidebar";
 import { useCloseAppModal } from "./mainAppLocation";
+import { setWorkingSectionExpanded } from "./workingSection";
 
 /**
  * The keyboard's way into the sidebar (`threadSearch.toggle`, `projectScope.toggle`,
- * `projectScope.toggleAll`). The request is a store, not an event, because the target may be
+ * `projectScope.toggleAll`, `sidebar.toggleWorking`). The request is a store, not an event, because the target may be
  * unmounted (the phone drawer) or inert (the Settings modal, an open command palette):
  * `SidebarCommandHost` opens or closes those, and the sidebar serves the request once it can.
  */
@@ -72,10 +73,15 @@ const FOCUS_TARGET_BY_COMMAND = {
   "projectScope.toggle": "projectFilter",
 } as const satisfies Partial<Record<KeybindingCommand, SidebarFocusTarget>>;
 
-type SidebarCommand = keyof typeof FOCUS_TARGET_BY_COMMAND | "projectScope.toggleAll";
+const STATE_COMMANDS = ["projectScope.toggleAll", "sidebar.toggleWorking"] as const;
+
+type SidebarCommand = keyof typeof FOCUS_TARGET_BY_COMMAND | (typeof STATE_COMMANDS)[number];
 
 function isSidebarCommand(command: KeybindingCommand | null): command is SidebarCommand {
-  return command === "projectScope.toggleAll" || (command ?? "") in FOCUS_TARGET_BY_COMMAND;
+  return (
+    (STATE_COMMANDS as ReadonlyArray<string | null>).includes(command) ||
+    (command ?? "") in FOCUS_TARGET_BY_COMMAND
+  );
 }
 
 /**
@@ -93,6 +99,13 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
       toggleAllProjects();
       return;
     }
+    const sidebarHidden = isMobile ? !openMobile : !open;
+    if (command === "sidebar.toggleWorking") {
+      // A hidden sidebar opens on its Working section rather than flipping a state nobody sees.
+      setWorkingSectionExpanded((expanded) => sidebarHidden || !expanded);
+      if (sidebarHidden) (isMobile ? setOpenMobile : setOpen)(true);
+      return;
+    }
     if (props.surface === "legacy") {
       openCommandPalette();
       return;
@@ -105,13 +118,14 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
     // The modal keeps the sidebar inert until its route is gone, so the request waits for that.
     if (props.surface === "settings") void closeAppModal().then(request);
     else request();
-    if (isMobile ? !openMobile : !open) (isMobile ? setOpenMobile : setOpen)(true);
+    if (sidebarHidden) (isMobile ? setOpenMobile : setOpen)(true);
   };
 
   useCommandHandlers({
     "threadSearch.toggle": () => run("threadSearch.toggle"),
     "projectScope.toggle": () => run("projectScope.toggle"),
     "projectScope.toggleAll": () => run("projectScope.toggleAll"),
+    "sidebar.toggleWorking": () => run("sidebar.toggleWorking"),
   });
 
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: window keydown listener for the sidebar commands, re-bound each render to read the latest run

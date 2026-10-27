@@ -251,6 +251,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "alt+space", command: "dictation.pause", when: "dictationActive" },
   { key: "alt+r", command: "dictation.restart", when: "dictationActive" },
   { key: "alt+x", command: "dictation.cancel", when: "dictationActive" },
+  // Fork addition: the sidebar's Working section. alt+z is free in the app and in the developer's
+  // Hyprland (checked 2026-10-26), so per-command backfill installs it.
+  { key: "alt+z", command: "sidebar.toggleWorking", when: "!terminalFocus" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },

@@ -7,6 +7,10 @@ import { useEffect, useLayoutEffect, useState, type Dispatch, type SetStateActio
  */
 
 const THREAD_ROW_SELECTOR = "[data-mesura-thread-key]";
+/** What Up and Down walk: the rows, and section headers such as Working's. */
+const NAV_STOP_SELECTOR = "[data-mesura-thread-key], [data-mesura-nav-stop]";
+/** The sidebar's Search field; Down from it, while empty, enters the list. */
+const THREAD_SEARCH_SELECTOR = "[data-mesura-thread-search]";
 const SCROLL_VIEWPORT_SELECTOR = '[data-slot="scroll-area-viewport"]';
 
 /**
@@ -23,7 +27,7 @@ const PENDING_SCROLL_EVENT = "mesura:thread-list-scroll-target";
 
 function threadListScroller(): HTMLElement | null {
   return (
-    document.querySelector(THREAD_ROW_SELECTOR)?.closest<HTMLElement>(SCROLL_VIEWPORT_SELECTOR) ??
+    document.querySelector(NAV_STOP_SELECTOR)?.closest<HTMLElement>(SCROLL_VIEWPORT_SELECTOR) ??
     null
   );
 }
@@ -178,10 +182,17 @@ function refreshViewportThreadKeys(
   setKeys((previous) => (sameKeys(previous, next) ? previous : next));
 }
 
+function navStops(scroller: HTMLElement): HTMLElement[] {
+  return [...scroller.querySelectorAll<HTMLElement>(NAV_STOP_SELECTOR)].filter(
+    (stop) => stop.closest("[inert]") === null,
+  );
+}
+
 /**
- * Up and Down move the keyboard focus over the thread rows, which shows a
- * row's hover tint and its details tooltip without opening the thread; Enter
- * opens it. Only while focus is in the thread list.
+ * Up and Down move the keyboard focus over the thread rows and section
+ * headers, which shows a row's hover tint and its details tooltip without
+ * opening the thread; Enter opens it. Only while focus is in the thread list,
+ * or Down in the empty Search field, which enters the list at its top.
  */
 export function useThreadRowArrowKeys(): void {
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: window keydown listener for thread-row arrow navigation, removed on unmount
@@ -192,18 +203,29 @@ export function useThreadRowArrowKeys(): void {
       if (event.shiftKey) return;
       const scroller = threadListScroller();
       const active = document.activeElement;
-      if (scroller === null || !(active instanceof HTMLElement) || !scroller.contains(active)) {
-        return;
-      }
+      if (scroller === null || !(active instanceof HTMLElement)) return;
+      const fromEmptySearch =
+        event.key === "ArrowDown" &&
+        active instanceof HTMLInputElement &&
+        active.matches(THREAD_SEARCH_SELECTOR) &&
+        active.value === "";
+      if (!fromEmptySearch && !scroller.contains(active)) return;
       // A row's own controls (rename field, menus) keep their arrows.
-      const current = active.closest<HTMLElement>(THREAD_ROW_SELECTOR);
+      const current = fromEmptySearch ? null : active.closest<HTMLElement>(NAV_STOP_SELECTOR);
       if (current !== null && current !== active) return;
       event.preventDefault();
-      const rows = threadRows(scroller);
+      const rows = navStops(scroller);
       const index = current === null ? -1 : rows.indexOf(current);
+      // Up from the top stop returns to Search, the way Down came in.
       const next =
-        event.key === "ArrowDown" ? rows[index + 1] : index === -1 ? rows.at(-1) : rows[index - 1];
-      if (next === undefined) return;
+        event.key === "ArrowDown"
+          ? rows[index + 1]
+          : index === -1
+            ? rows.at(-1)
+            : index === 0
+              ? document.querySelector<HTMLElement>(THREAD_SEARCH_SELECTOR)
+              : rows[index - 1];
+      if (next === undefined || next === null) return;
       next.focus({ preventScroll: true });
       next.scrollIntoView({ block: "nearest" });
     };
