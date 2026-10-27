@@ -13,6 +13,16 @@ describe("a stored rule with a renamed command", () => {
     ).toEqual({ key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" });
   });
 
+  it("maps the retired settle toggle while keeping a custom shortcut and condition", () => {
+    expect(
+      withCurrentKeybindingCommand({
+        key: "alt+shift+s",
+        command: "thread.toggleSettled",
+        when: "chatFocus",
+      }),
+    ).toEqual({ key: "alt+shift+s", command: "thread.settle", when: "chatFocus" });
+  });
+
   it("leaves every other entry alone, malformed ones included", () => {
     const current = { key: "mod+e", command: "fileTree.toggle" };
     expect(withCurrentKeybindingCommand(current)).toBe(current);

@@ -49,10 +49,6 @@ const THREAD_KEYBINDING_COMMANDS = [
   "thread.nextPage",
   "thread.copyReference",
   "thread.settle",
-  // Bound to no chord since the 2026-W35 sync: upstream's thread.settle owns
-  // mod+shift+s and does the same thing. The handlers here stay until the two
-  // are unified, which is follow-up work, not part of the merge.
-  "thread.toggleSettled",
   "thread.pin",
   "thread.undo",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
@@ -208,10 +204,6 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // sidebar, and this acts on the open thread from the chat header. The rename warning above
   // applies to this id too.
   "thread.rename",
-  // Settle and un-settle in one command. Kept out of THREAD_KEYBINDING_COMMANDS
-  // because that group is traversal, dispatched by the sidebar; this acts on the
-  // open thread's lifecycle and is dispatched by the chat view. The rename
-  // warning above applies to this id too.
   ...CHAT_SCROLL_KEYBINDING_COMMANDS,
   "usage.cost",
   "usage.tokens",

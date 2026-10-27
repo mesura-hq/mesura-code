@@ -1100,7 +1100,7 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(
       resolve(press("s", { ctrlKey: true, shiftKey: true })),
       // Upstream's thread.settle owns this chord since the 2026-W35 sync; the
-      // fork's thread.toggleSettled does the same thing and is now unbound.
+      // retired fork alias migrates to this command, including custom chords.
       "thread.settle",
     );
     assert.strictEqual(resolve(press("s", { ctrlKey: true, shiftKey: true }), true), null);

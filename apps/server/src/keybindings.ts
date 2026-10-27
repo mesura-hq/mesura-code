@@ -49,7 +49,10 @@ import {
   migrateRetiredKeybindingDefaults,
   parseKeybindingShortcut,
 } from "@t3tools/shared/keybindings";
-import { withCurrentKeybindingCommand } from "@t3tools/shared/renamedKeybindingCommands";
+import {
+  RENAMED_KEYBINDING_COMMANDS,
+  withCurrentKeybindingCommand,
+} from "@t3tools/shared/renamedKeybindingCommands";
 
 export {
   ADDED_KEYBINDING_DEFAULTS,
@@ -344,11 +347,13 @@ const make = Effect.gen(function* () {
     {
       readonly keybindings: readonly KeybindingRule[];
       readonly issues: readonly ServerConfigIssue[];
+      readonly renamedCommandCounts: ReadonlyMap<string, number>;
     },
     KeybindingsConfigError
   > {
+    const renamedCommandCounts = new Map<string, number>();
     if (!(yield* readConfigExists)) {
-      return { keybindings: [], issues: [] };
+      return { keybindings: [], issues: [], renamedCommandCounts };
     }
 
     const rawConfig = yield* readRawConfig;
@@ -358,13 +363,15 @@ const make = Effect.gen(function* () {
       return {
         keybindings: [],
         issues: [malformedConfigIssue(detail)],
+        renamedCommandCounts,
       };
     }
 
     const keybindings: KeybindingRule[] = [];
     const issues: ServerConfigIssue[] = [];
     for (const [index, entry] of decodedEntries.value.entries()) {
-      const decodedRule = decodeKeybindingRuleExit(withCurrentKeybindingCommand(entry));
+      const currentEntry = withCurrentKeybindingCommand(entry);
+      const decodedRule = decodeKeybindingRuleExit(currentEntry);
       if (decodedRule._tag === "Failure") {
         const detail = Cause.pretty(decodedRule.cause);
         issues.push(invalidEntryIssue(index, detail));
@@ -390,9 +397,18 @@ const make = Effect.gen(function* () {
         continue;
       }
       keybindings.push(decodedRule.value);
+      if (
+        currentEntry !== entry &&
+        typeof entry === "object" &&
+        entry !== null &&
+        "command" in entry &&
+        typeof entry.command === "string"
+      ) {
+        renamedCommandCounts.set(entry.command, (renamedCommandCounts.get(entry.command) ?? 0) + 1);
+      }
     }
 
-    return { keybindings, issues };
+    return { keybindings, issues, renamedCommandCounts };
   });
 
   // Withdrawals share the ledger: each is offered once, like an addition.
@@ -519,6 +535,14 @@ const make = Effect.gen(function* () {
   const syncDefaultKeybindingsOnStartup = upsertSemaphore.withPermits(1)(
     Effect.gen(function* () {
       const appliedMigrationIds = yield* readAppliedMigrationIds;
+      // Normalize ids through the existing reader, then persist and record them through the startup
+      // migration path. The reader also handles old files restored after the migration was recorded.
+      const commandRenames = Object.entries(RENAMED_KEYBINDING_COMMANDS).map(([from, to]) => ({
+        from,
+        to,
+        id: `rename:${from}:${to}`,
+      }));
+      const pendingCommandRenames = commandRenames.filter(({ id }) => !appliedMigrationIds.has(id));
       const pendingLateDefaults = LATE_DEFAULT_KEYBINDINGS.filter(
         (late) => !appliedMigrationIds.has(late.id),
       );
@@ -529,10 +553,11 @@ const make = Effect.gen(function* () {
         // them as offered. Without this the next start reports each one as
         // "already present" and rewrites the file for no change.
         yield* writeAppliedAdditionIds(allIntroducedIds());
-        if (pendingLateDefaults.length > 0) {
+        if (pendingLateDefaults.length > 0 || pendingCommandRenames.length > 0) {
           yield* recordAppliedMigrations([
             ...appliedMigrationIds,
             ...LATE_DEFAULT_KEYBINDINGS.map((late) => late.id),
+            ...pendingCommandRenames.map(({ id }) => id),
           ]);
         }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
@@ -721,6 +746,7 @@ const make = Effect.gen(function* () {
         (entry) => entry.outcome === "dropped",
       );
       if (
+        [...runtimeConfig.renamedCommandCounts.values()].some((count) => count > 0) ||
         withdrawalsChangedConfig ||
         migration.rewrites.length > 0 ||
         additionsChangedConfig ||
@@ -738,11 +764,23 @@ const make = Effect.gen(function* () {
       const settledLateDefaults = pendingLateDefaults.filter(
         (late) => !skippedDefaults.includes(late.rule),
       );
-      if (settledLateDefaults.length > 0) {
+      if (settledLateDefaults.length > 0 || pendingCommandRenames.length > 0) {
         yield* recordAppliedMigrations([
           ...appliedMigrationIds,
           ...settledLateDefaults.map((late) => late.id),
+          ...pendingCommandRenames.map(({ id }) => id),
         ]);
+      }
+      // Restoring an old file can apply a rename again after its ledger entry exists. Log actual
+      // rewrites, rather than only first-time offers, so every persisted command change is visible.
+      for (const rename of commandRenames) {
+        const count = runtimeConfig.renamedCommandCounts.get(rename.from) ?? 0;
+        if (count === 0) continue;
+        yield* Effect.logInfo("applied keybinding command migration", {
+          path: keybindingsConfigPath,
+          ...rename,
+          count,
+        });
       }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
     }),
