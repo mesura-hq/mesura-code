@@ -14,11 +14,10 @@ import {
 } from "./directedComposerSubmission";
 
 /**
- * Send-when-ready: an armed draft sends by itself once its prompt holds no marker; the draft's
- * marker count decides, so a fill and a Discard both count. A marker the user deletes by hand
- * disarms the draft instead: the text around it was written to wait for that transcript. Every
- * send goes through the directed submission, so a thread the user left still sends. A question
- * card's answer is armed by request and submitted by the card, which owns the answer's validation.
+ * Send-when-ready: an armed draft sends once its prompt holds no marker, through the directed
+ * submission so a thread the user left still sends. A fill and a Discard count; a marker deleted by
+ * hand disarms instead, since the text around it waited for that transcript. A question card's
+ * answer is armed by request and submitted by the card, which owns the answer's validation.
  */
 
 interface DraftSendState {

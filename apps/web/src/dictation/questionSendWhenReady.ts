@@ -25,11 +25,9 @@ import {
 } from "./sendWhenReady";
 
 /**
- * Send-when-ready for question cards: a request armed by send mode, or by Submit pressed while a
- * transcription was pending, is answered once none of its answers holds a marker, whether or not
- * its card is on screen. While the thread is shown, the answer goes through that thread's own
- * respond, so the card shows it sending; otherwise it is sent from here. A marker the user
- * deletes by hand disarms the request, as it does a draft.
+ * Send-when-ready for question cards: an armed request is answered once no answer holds a marker,
+ * on screen or not. A shown thread answers through its own respond, so the card shows it sending;
+ * otherwise it is sent from here. A marker deleted by hand disarms the request, as for a draft.
  */
 
 type QuestionResponder = (
