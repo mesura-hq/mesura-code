@@ -1,12 +1,7 @@
 /**
- * Mesura: pure decisions for a project's Luna icon search, called from
- * `planProjectCommand`.
- *
- * `ProjectService` plans each project command under the project's lock, so
- * comparing the job token, generation, captured root and starting icon fields
- * here is what protects a manual choice: a completion either saves its image
- * together with its outcome in one event, or changes nothing on the project.
- *
+ * Mesura: pure icon-search decisions for `planProjectCommand`, which runs under the project's
+ * lock. Comparing job token, generation, captured root and starting icon fields here protects a
+ * manual choice: a completion saves image and outcome in one event, or changes nothing.
  * @module projectIconDiscovery
  */
 import {

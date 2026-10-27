@@ -9,23 +9,10 @@ import { NvimBridge, type NvimBridgeError } from "../NvimBridge.ts";
 import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * The mirror follows the file, and nothing else.
- *
- * A real configuration puts a plugin behind a great many keys, and a plugin
- * shows itself by opening a buffer in the window: a picker, a git status, a
- * prompt, a terminal. Neovim announces every one of those the same way it
- * announces a file, so a host that follows the announcement follows the plugin.
- *
- * That is not a display problem. The mirrored lines are what the client renders
- * as the file and what the host later writes back to disk, so following a
- * plugin's buffer means the panel shows the plugin's window as though it were
- * the file, and the next save puts it on top of the source.
- *
- * **Measured, not imagined.** Driving the developer's own configuration
- * through the web app, `<C-e>` replaced the panel's contents with a git-status
- * window and `<C-f>` replaced them with a one-line prompt holding a single
- * emoji. `apps/server/src/editor/hostPlugin.ts` was on disk as that emoji, five
- * bytes, and was recovered from the commit.
+ * The mirror follows the file, and nothing else. Neovim announces a plugin's buffer (picker, git
+ * status, prompt, terminal) the same way as a file, and the mirror is what the next save writes.
+ * Measured: under the developer's configuration, `<C-f>` mirrored a one-line emoji prompt, and the
+ * save overwrote `apps/server/src/editor/hostPlugin.ts` with it.
  */
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));
@@ -41,13 +28,9 @@ const withNvim = <A>(
 const THE_FILE = ["first", "second", "third"];
 
 /**
- * Opens a file exactly the way the manager does.
- *
- * Both halves, because both are load-bearing: `mesura.open` puts the buffer in
- * the window, and `followBuffer` points the mirror at the buffer it answered
- * with. Nothing else moves the mirror — the `BufEnter` announcement that used
- * to is gone, because Neovim announces a plugin's window the same way it
- * announces a file.
+ * Opens a file exactly the way the manager does: `mesura.open` puts the buffer in the window, and
+ * `followBuffer` points the mirror at the buffer it answered with. Nothing else moves the mirror;
+ * a `BufEnter` announcement does not, because a plugin's window announces itself the same way.
  */
 const openFile = (bridge: NvimBridge.Session, path: string, lines: ReadonlyArray<string>) =>
   Effect.gen(function* () {

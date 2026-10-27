@@ -3,15 +3,9 @@ import { act, render as renderBrowser } from "../../test/render";
 import "../index.css";
 import "../mesura.css";
 /**
- * Mounts the application entry point for the command palette suites:
- * `AppRoot` with a memory router whose root route renders the real
- * `CommandPalette` around an `Outlet` plus the `ConfirmDialogHost`, the same
- * shell `routes/__root.tsx` builds. The data it renders comes from
- * `commandPaletteFence.testFixtures.ts`, which the suites wire through `vi.mock`.
- *
- * Kept apart from the fixtures on purpose: the mock factories import the
- * fixtures while the application graph is loading, and a fixture module that
- * itself imported `CommandPalette` would deadlock on that circular import.
+ * Mounts `AppRoot` with the shell `routes/__root.tsx` builds, for the command palette suites.
+ * Kept apart from the fixtures: the mock factories import those while the application graph is
+ * loading, and a fixture module importing `CommandPalette` would deadlock on that circular import.
  */
 import {
   createMemoryHistory,

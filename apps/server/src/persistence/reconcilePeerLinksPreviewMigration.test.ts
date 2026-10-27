@@ -7,6 +7,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
 import LegacyPeerLinks from "./Migrations/061_PeerLinks.ts";
+import ReleasedPeerLinks from "./Migrations/070_PeerLinks.ts";
+import ReleasedPeerLinkFence from "./Migrations/071_PeerLinkFence.ts";
+import ReleasedWaitingLinkRequestIndex from "./Migrations/072_WaitingLinkRequestIndex.ts";
 
 const seedPeerLinkPreview = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -23,6 +26,23 @@ const seedPeerLinkPreview = Effect.gen(function* () {
       (environment_id, secret_name, label, urls_json, access, linked_at, expires_at)
     VALUES ('peer', 'peer-secret', 'Laptop', '["https://peer.example"]', 'auto',
       '2026-10-10T00:00:00Z', '2026-11-10T00:00:00Z')
+  `;
+});
+
+// Releases from upstream's preview branch recorded the series at 68–70, before main's 68 and 69.
+const seedPeerLinkRelease = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* runMigrations({ toMigrationInclusive: 67 });
+  yield* Migrator.make({})({
+    loader: Migrator.fromRecord({
+      "68_PeerLinks": ReleasedPeerLinks,
+      "69_PeerLinkFence": ReleasedPeerLinkFence,
+      "70_WaitingLinkRequestIndex": ReleasedWaitingLinkRequestIndex,
+    }),
+  });
+  yield* sql`
+    UPDATE effect_sql_migrations SET created_at = '2026-10-13 23:57:18'
+    WHERE migration_id = 68
   `;
 });
 
@@ -51,7 +71,7 @@ describe("peer-link preview upgrade", () => {
         migrationManifest.map(([id, name]) => [id, name]),
       );
       assert.deepStrictEqual(
-        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 68`,
+        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 70`,
         [{ created_at: "2026-10-10 00:00:00" }],
       );
       assert.deepStrictEqual(yield* sql`SELECT * FROM peer_environment_links`, [
@@ -103,6 +123,36 @@ describe("peer-link preview upgrade", () => {
         yield* sql`SELECT name FROM sqlite_master WHERE name = 'pull_request_review_guides'`,
         [],
       );
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("moves the release-numbered series after main's migrations and applies them", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* seedPeerLinkRelease;
+
+      yield* runMigrations();
+      const recorded = yield* sql<{ readonly migration_id: number; readonly name: string }>`
+        SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id
+      `;
+      assert.deepStrictEqual(
+        recorded.map((row) => [row.migration_id, row.name]),
+        migrationManifest.map(([id, name]) => [id, name]),
+      );
+      assert.deepStrictEqual(
+        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 70`,
+        [{ created_at: "2026-10-13 23:57:18" }],
+      );
+      assert.strictEqual(
+        (yield* sql`
+          SELECT name FROM sqlite_master
+          WHERE name = 'orchestration_v2_projection_turn_items_stop_request_idx'
+        `).length,
+        1,
+      );
+      const settledHistory = yield* history;
+      assert.deepStrictEqual(yield* runMigrations(), []);
+      assert.deepStrictEqual(yield* history, settledHistory);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });

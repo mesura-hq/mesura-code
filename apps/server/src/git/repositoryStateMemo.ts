@@ -1,29 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * Mesura: the background pull-request sweep's local git reads (remotes, a
- * branch's upstream, remote-tracking refs, the default branch, config values)
- * answered from memory while the repository has not changed, so a steady-state
- * sweep spawns no git for a group whose state it already knows.
- *
- * Only reads made under `UseRepositoryStateMemo` are answered from memory; the
- * sweep sets it around its lookups. Every other GitManager caller (status, diff,
- * branch pickers, pull-request creation, push and pull) reads live.
- *
- * "Not changed" is a fingerprint built without spawning anything: `stat` of the
- * `.git` entry, the checkout's HEAD, `packed-refs`, every directory and loose
- * ref file under `refs/heads` and `refs/remotes`, and every config file git
- * reads — system, global, the repository's and the worktree's — with their
- * `include.path` and `includeIf` files followed recursively (every `includeIf`
- * target counts, whatever its condition). A config source whose location
- * cannot be worked out (an include that uses `%(prefix)`, a system config git
- * does not name) turns the memo off for that checkout, so those reads run as
- * before. A fingerprint that differs drops what was remembered.
- *
- * The fingerprint is computed at most once per event-loop turn per checkout,
- * so the reads of one sweep share it, and a change made by any process is seen
- * by the next turn's reads.
- *
- * @module git/repositoryStateMemo
+ * Mesura: answers the pull-request sweep's local git reads (only those under
+ * `UseRepositoryStateMemo`) from memory while a spawn-free `stat` fingerprint of HEAD, refs and
+ * every config file git reads (includes followed) is unchanged. A config source it cannot locate
+ * turns the memo off for that checkout. The fingerprint is computed once per event-loop turn.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

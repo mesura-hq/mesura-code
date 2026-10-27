@@ -156,12 +156,9 @@ const delivering = new Set<string>();
 /** After a reload the mode keys pick the newest job back up, once, if it still transcribes. */
 let lastJobRestored = false;
 /**
- * Transcripts this tab placed, watched until the user's own draft no longer holds them.
- *
- * Tabs persist the whole draft store and the last writer wins (upstream behaviour this feature
- * does not redesign), so another tab's write can erase a transcript from storage while this tab
- * still shows it. When that happens the user is told it is kept in Transcriptions, once per job,
- * instead of losing it silently at the next reload.
+ * Transcripts this tab placed, watched until the user's own draft no longer holds them. Tabs
+ * persist the whole draft store and the last writer wins (upstream behaviour), so another tab can
+ * erase a transcript from storage; the user is told once per job it is kept in Transcriptions.
  */
 const placedTranscripts = new Map<
   string,
@@ -220,11 +217,9 @@ function isComposerOfThread(composer: DictationComposer, thread: DictationThread
 const composerFocus: DictationComposerFocus = { current: null, thread: null };
 
 /**
- * The thread the recording in progress belongs to, and the focus among that thread's own
- * composers. It is fixed when the recording starts, so a composer of another thread that mounts
- * during the recording (the user opened that thread) never takes the marker. A recording started
- * in a new-thread draft has no thread here and follows `composerFocus`, as before: sending the
- * draft turns it into a thread while the recording runs.
+ * The thread the recording belongs to, and the focus among its own composers, fixed at start so
+ * another thread's composer mounting mid-recording never takes the marker. A recording started in
+ * a new-thread draft follows `composerFocus`, since sending the draft creates the thread mid-run.
  */
 let recordingThread: {
   readonly thread: DictationThreadTarget;
@@ -909,11 +904,10 @@ function restoreLastJob(environmentId: EnvironmentId, jobs: ReadonlyArray<Dictat
 }
 
 /**
- * The server keeps jobs in memory: a restart or the retention sweep drops a job this tab never saw
- * finish. The last job then never clears, and the mode keys keep Alt+S and the other Alt keys from
- * everything else (the Hosts peek). A job an earlier snapshot listed and this one does not is
- * gone, and so is an accepted job a snapshot well after its start still lacks (a restart before
- * the first listing). Otherwise the snapshot may only predate the job, so it stays.
+ * The server keeps jobs in memory, so a restart or the retention sweep drops a job this tab never
+ * saw finish, and the mode keys would keep the Alt keys forever. A job an earlier snapshot listed
+ * and this one lacks is gone, as is an accepted job still missing well after its start; anything
+ * else may only predate the job, so it stays.
  */
 function rememberJobStamp(job: DictationJob) {
   if (job.epoch === undefined || job.revision === undefined || jobStamps.has(job.id)) return;

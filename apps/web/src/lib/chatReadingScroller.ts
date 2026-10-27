@@ -21,11 +21,9 @@ export interface ChatReadingScrollerOptions {
   /** Height of the composer floating over the bottom of the timeline. */
   readonly getComposerOverlayHeight: () => number;
   /**
-   * Called before an upward move. A programmatic scroll fires no wheel or
-   * pointer event, so the timeline's own live-follow opt-out listeners never
-   * observe it and the next stream chunk would yank the reader back to the
-   * live edge. Downward moves need no break, for the same reason a downward
-   * wheel does not: they travel toward the end.
+   * Called before an upward move: a programmatic scroll fires no wheel or pointer event,
+   * so live-follow would yank the reader back on the next stream chunk. Downward moves
+   * travel toward the end and need no break.
    */
   readonly onBreakLiveFollow: () => void;
   readonly prefersReducedMotion: () => boolean;
@@ -44,12 +42,8 @@ export interface ChatReadingScroller {
 const USER_GESTURE_EVENTS = ["wheel", "touchstart", "pointerdown"] as const;
 
 /**
- * Drives the animated half-viewport reading scroll behind
- * `chat.scrollHalfPageUp` and `chat.scrollHalfPageDown`.
- *
- * Every effectful dependency is injected so the behaviour that carries the
- * risk — which direction breaks live-follow, cancelling a frame loop on
- * re-press, yielding to a real gesture — is testable without a DOM.
+ * Every effectful dependency is injected, so breaking live-follow, cancelling the frame
+ * loop on re-press and yielding to a real gesture are testable without a DOM.
  */
 export function createChatReadingScroller(
   options: ChatReadingScrollerOptions,

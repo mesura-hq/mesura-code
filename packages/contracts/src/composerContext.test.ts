@@ -12,7 +12,6 @@ import {
 
 const decodeRecord = Schema.decodeUnknownOption(ComposerContextRecord);
 const decodeContext = Schema.decodeUnknownSync(OrchestrationMessageContext);
-const encodeContextJson = Schema.encodeUnknownSync(Schema.toCodecJson(OrchestrationMessageContext));
 const decodeContextType = Schema.decodeUnknownExit(Schema.toType(OrchestrationMessageContext));
 
 const base = { version: 1, contextId: "ctx_1" } as const;
@@ -213,7 +212,11 @@ describe("OrchestrationMessageContext", () => {
   });
 
   it("sends a message without the records the wire cannot carry", () => {
-    const wire = encodeContextJson({
+    const encodeOrchestrationMessageContext = Schema.encodeUnknownSync(
+      Schema.toCodecJson(OrchestrationMessageContext),
+    );
+
+    const wire = encodeOrchestrationMessageContext({
       version: 1,
       records: [
         decodeContext({ version: 1, records: [knownRecords.terminal] }).records[0],

@@ -7,13 +7,9 @@ import {
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 
 /**
- * Reports a failed thread action, and stays quiet on an interruption — a
- * command the user cancelled is not an error to announce.
- *
- * Upstream has its own copies of this body in `useThreadActionMenu.ts` and
- * `Sidebar.tsx`. They are deliberately left alone: lifting them out would put a
- * conflict in two weekly-rewritten files for four lines. This copy lives in a
- * file of ours so the next caller can import it instead of writing a fifth.
+ * Quiet on an interruption: a command the user cancelled is not an error to announce.
+ * Upstream's copies in `useThreadActionMenu.ts` and `Sidebar.tsx` stay on purpose, since
+ * lifting them out would conflict in two weekly-rewritten files. New callers import this.
  */
 export function reportThreadActionFailure(
   title: string,

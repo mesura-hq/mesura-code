@@ -17,7 +17,7 @@ import {
   ensureClientSettingsHydrated,
 } from "~/hooks/useSettings";
 import { AppAtomRegistryProvider } from "~/rpc/atomRegistry";
-import { Route as SettingsGeneralRoute } from "~/routes/settings.general";
+import { Route as SettingsGeneralRoute } from "~/routes/_chat.settings.general";
 
 import { render as renderBrowser } from "../../test/render";
 

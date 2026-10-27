@@ -24,12 +24,9 @@ import {
 } from "./pinnedRuntime.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
-// Every install fetches the release archive, checks it against SHA256SUMS,
-// and unpacks it with tar. The fake client serves both files; the fake runner
-// stands in for tar and drops the executable where extraction would.
-// Mesura Code publishes no release archive, so `installFromArchive` refuses
-// without an origin rather than falling back to upstream's release server.
-// Every install below names one so the download path stays exercised.
+// The fake client serves the release archive and SHA256SUMS, and the fake runner stands in for tar.
+// `installFromArchive` refuses without a release origin, because Mesura Code publishes no archive,
+// so every install below names one to keep the download path exercised.
 const TEST_RELEASE_BASE_URL = "https://releases.example/download";
 const version = "1.2.3";
 const archiveName = `t3-${version}-linux-x64.tar.gz`;
@@ -163,12 +160,9 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     }),
   );
 
-  // The fork's own guarantee, and the one most likely to stop working quietly:
-  // every OTHER test here names a release origin, so without this one the
-  // refusal path is never exercised. Three routes reach this function —
-  // `t3 service install`, server self-update, and `t3 update` — and each would
-  // otherwise resolve upstream's release server and install T3 Code's server
-  // under this fork's name. The assertion is that nothing is fetched at all.
+  // Every OTHER test names a release origin, so only this one exercises the refusal. Without it,
+  // `t3 service install`, server self-update and `t3 update` would install T3 Code's server from
+  // upstream's release server under this fork's name. Nothing may be fetched.
   it.effect("refuses to install when no release origin is configured", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -540,14 +534,15 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
         const path = yield* Path.Path;
         const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
         const entry = path.join(versionsDir, "1.0.0", "t3");
-        yield* fs.copyFile("/bin/sleep", entry);
+        // Multicall coreutils (Ubuntu's uutils) refuse to run renamed, so copy Node instead.
+        yield* fs.copyFile(process.execPath, entry);
         yield* fs.chmod(entry, 0o755);
         const link = path.join(baseDir, "t3");
         yield* fs.symlink(entry, link);
         // Its argv names only the link, as with `t3 serve` run from PATH. Removing the link after
         // spawning leaves the process's executable as the only reference.
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-        yield* spawner.spawn(ChildProcess.make(link, ["30"]));
+        yield* spawner.spawn(ChildProcess.make(link, ["-e", "setTimeout(() => {}, 30_000)"]));
         yield* fs.remove(link);
 
         const removed = yield* prunePinnedRuntimes({ baseDir, keep: ["2.0.0"] }).pipe(

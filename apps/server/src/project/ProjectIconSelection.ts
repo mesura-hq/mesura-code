@@ -1,11 +1,7 @@
 /**
- * The Luna request that picks a project icon from local candidates.
- *
- * Shared by the discovery service, which decides when a search may run, and by
- * the Codex driver, which owns the configured runner that answers it. The
- * types drivers share live in provider-core's `projectIconSelection` module,
- * because provider-core cannot import the server.
- *
+ * The Luna request that picks a project icon from local candidates, shared by the discovery
+ * service and the Codex driver. Driver-shared types live in provider-core's
+ * `projectIconSelection` module, because provider-core cannot import the server.
  * @module ProjectIconSelection
  */
 import {

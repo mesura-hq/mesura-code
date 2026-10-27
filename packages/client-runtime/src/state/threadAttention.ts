@@ -1,16 +1,8 @@
 /**
- * Mesura: whether anything can still wake a thread's agent, which keeps a finished run at
- * Waiting instead of Done.
- *
- * Upstream's `backgroundWorkHoldsCompletion` lets a pending command through (#14872: a dev
- * server can run for hours). On this fork long-lived servers run as `mesura-agent-service`
- * workloads, so a pending command is finite work whose end wakes the agent; it holds here. A
- * shell that never ends keeps its thread at Waiting until Stop ends it.
- *
- * An undelivered delegated-task result needs no case of its own: the server keeps the finished
- * task in `pendingBackgroundTasks` until the parent receives it.
- *
- * Scheduled tasks never hold: they are not tied to the turn that finished.
+ * Mesura: upstream's `backgroundWorkHoldsCompletion` lets a pending command through (a dev server
+ * can run for hours). Here long-lived servers run as `mesura-agent-service` workloads, so a pending
+ * command is finite work whose end wakes the agent, and it holds the thread at Waiting. Scheduled
+ * tasks never hold; an undelivered delegated-task result stays in `pendingBackgroundTasks`.
  */
 import {
   factoryRunHoldsCompletion,

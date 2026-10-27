@@ -13,24 +13,10 @@ import { NvimBridge } from "../NvimBridge.ts";
 import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * The insert-mode bench, and the number the design decision rests on.
- *
- * The question it settles is whether keys in insert mode can go to Neovim like
- * every other key (naive), or whether Monaco has to edit locally and hand the
- * result over when insert mode ends (delegated). It is a question about time,
- * so it is answered with measurements rather than with an argument, and it can
- * only be answered against the developer's real configuration: `--clean` says
- * nothing useful, because it is the plugins that run on every inserted
- * character — autopairs, nvim-cmp, LuaSnip — that cost the time.
- *
- * Gated on `MESURA_NVIM_CONFIG_DIR`, and it cannot run in continuous
- * integration: the configuration is a separate repository whose first start
- * installs its plugins. Run it twice and take the second, so the first start's
- * work is not in the numbers.
- *
- * Deliberately not an assertion against a threshold. A bench that fails on a
- * loaded machine reports a defect that is not there; this records what it saw
- * and writes it where the decision can cite it.
+ * Can insert-mode keys go to Neovim (naive), or must Monaco edit locally (delegated)? Only the
+ * real config answers that: its per-character plugins (autopairs, nvim-cmp, LuaSnip) cost the time.
+ * Gated on `MESURA_NVIM_CONFIG_DIR`, not in CI. The first start installs plugins: use a second run.
+ * It records numbers and asserts no threshold, because a loaded machine would fail one falsely.
  */
 
 const configDirectory = (() => {
@@ -80,20 +66,9 @@ const somethingHappened = (
 ) => after.gridCells !== before.gridCells || after.cursorMoves !== before.cursorMoves;
 
 /**
- * Counts the gaps in which something happened with no key in flight.
- *
- * This is the bench's error bar, and it is not decoration. A configuration
- * can make Neovim flush with nothing going on: an earlier state of the
- * developer's flushed about every four milliseconds while idle (114 frames in
- * 500 idle milliseconds, nearly all of them drawing nothing), while at
- * `~/.neovim` `c730dae` it flushes not at all. A bench that timed "the next
- * frame" after a key would time such a stream rather than the key: an earlier
- * version of this file did exactly that and reported a p50 of 1.73 ms, which
- * was about half the gap between two empty frames.
- *
- * So `probe` waits for a frame in which something happened, and this counts
- * how often something happens when nothing should. A total near zero says the
- * timings have nothing to be confused with.
+ * The bench's error bar: gaps in which something happened with no key in flight. Some configs
+ * flush empty frames while idle (about every 4 ms), and an earlier bench that timed "the next
+ * frame" measured that stream, not the key. A total near zero means the timings are clean.
  */
 const idleSignals = (bridge: NvimBridge.Session, milliseconds: number) =>
   Effect.gen(function* () {
@@ -119,31 +94,16 @@ const median = (values: ReadonlyArray<number>) => quantile(values, 0.5);
 const round = (value: number) => Math.round(value * 100) / 100;
 
 /**
- * Sends one key and times the frame in which something happened.
- *
- * "Something" is a cell drawn **or** the cursor moving, and it has to be both
- * of those. Cells alone miss every closer: with autopairs on, typing the `)`
- * it already inserted only steps the cursor over it and draws nothing, and
- * about one key in twelve of ordinary code is such a closer — enough to put
- * every one of them in the tail, which is how an earlier version of this file
- * came to report a p50 of 1.8 ms beside a p95 of 515 ms. The cursor alone
- * misses the keys that redraw without moving it.
- *
- * Waiting for the next frame whatever it held is worse than either: under a
- * configuration that emits empty frames while idle (an earlier state of the
- * developer's did, about every four milliseconds), that version timed the
- * background stream and not the key.
+ * Times the frame in which a cell is drawn **or** the cursor moves; it needs both. Cells alone miss
+ * autopairs closers (the cursor steps over a `)` and draws nothing), which once gave p50 1.8 ms
+ * beside p95 515 ms. The cursor alone misses in-place redraws, and "any frame" times idle frames.
  */
 const probe = (bridge: NvimBridge.Session, keys: string) =>
   waitingFor(bridge, keys, (before) => somethingHappened(before, bridge.metrics));
 
 /**
- * Sends keys and times the frame in which virtual text appears.
- *
- * For flash that is the frame carrying the labels, which is the number the
- * document talks about. Timing the first frame instead measured the cheap
- * redraw on entering the search and published it beside a sentence about the
- * expensive one.
+ * Times the frame in which virtual text appears: for flash, the frame with the labels. The first
+ * frame is the cheap redraw on entering the search, which an earlier version published by mistake.
  */
 const probeUntilOverlays = (bridge: NvimBridge.Session, keys: string) =>
   waitingFor(bridge, keys, () => bridge.overlays.length > 0);
@@ -173,10 +133,7 @@ function waitingFor(
 
     let waited = 0;
     while (waited < 400) {
-      yield* frame.pipe(
-        Effect.timeout("1 second"),
-        Effect.catchCause(() => Effect.void),
-      );
+      yield* frame.pipe(Effect.timeout("1 second"), Effect.ignoreCause);
       waited += 1;
       if (done(before)) break;
       frame = yield* bridge.nextFrame;
@@ -279,23 +236,15 @@ if (enabled)
             normal.push(yield* probe(bridge, index % 2 === 0 ? "j" : "k"));
           }
 
-          // Flash: the plugin that draws the most, and the reason the grid is
-          // classified at all.
-          //
-          // Timed to its *labels*, not to its first frame. `s` redraws once on
-          // entering the search and again when the labels land, so a probe that
-          // took the first frame measured the cheap one and published it beside
-          // a sentence about the expensive one. Twenty runs rather than five,
-          // because a p95 over five samples is the maximum wearing a label.
+          // Flash draws the most and is why the grid is classified. Time its labels, not
+          // its first frame, which is the cheap redraw on entering the search. Twenty
+          // runs, because a p95 over five samples is only the maximum.
           const flash: Sample[] = [];
           for (let index = 0; index < 20; index += 1) {
             flash.push(yield* probeUntilOverlays(bridge, "se"));
             yield* bridge.input("<Esc>");
-            // `settle`, not the next frame. The next frame only came for free
-            // while the configuration's status line redrew on its own; with
-            // those plugins left out under Mesura an idle Neovim draws
-            // nothing, and an `<Esc>` that finds nothing to clear then waited
-            // for a frame that never came.
+            // `settle`, not the next frame: with the status-line plugins off under Mesura, an
+            // idle Neovim draws nothing, so an `<Esc>` with nothing to clear waits forever.
             yield* bridge.settle;
           }
 

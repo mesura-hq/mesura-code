@@ -36,6 +36,7 @@ const workspaceFiles = [
   "packages/source-control-azure-devops/package.json",
   "packages/source-control-bitbucket/package.json",
   "packages/source-control-core/package.json",
+  "packages/source-control-definitions/package.json",
   "packages/source-control-forgejo/package.json",
   "packages/source-control-gitcafe/package.json",
   "packages/source-control-github/package.json",
@@ -49,11 +50,10 @@ const workspaceFiles = [
   "packages/symmetria-broker-contract/package.json",
   // Same rule: `apps/web` depends on the fork's modal key engine.
   "packages/keys/package.json",
-  // Same rule, for the vendored file manager. All four are workspace members
-  // and all four are depended on — `apps/web` takes every one, `apps/server`
-  // takes fm-core and fm-main — so every manifest has to be here or the
-  // regenerated lockfile fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND. Adding a
-  // fifth workspace member under vendor/ means adding it here too.
+  // Same rule, for the vendored file manager: all four packages are depended-on workspace members
+  // (`apps/web` takes every one, `apps/server` fm-core and fm-main), so a missing manifest fails
+  // the regenerated lockfile with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND. Add any new vendor/ member
+  // here too.
   "vendor/symmetria-file-manager/packages/fm-core/package.json",
   "vendor/symmetria-file-manager/packages/fm-ui/package.json",
   "vendor/symmetria-file-manager/packages/fm-search/package.json",

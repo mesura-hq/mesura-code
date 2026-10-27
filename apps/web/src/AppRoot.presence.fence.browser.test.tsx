@@ -1,23 +1,7 @@
-/**
- * Entry point: AppRoot, the component `main.tsx` mounts around the app's
- * router (`test/presenceFenceApp.tsx`), on fake timers and a fake page
- * (`test/presenceFenceMocks.ts`, which lists the replaced boundaries).
- *
- * Phone push phase 4, the client's half:
- * - Criterion 1: a client reports active when its page is visible, its
- *   window has focus, and the developer gave input in the last two minutes,
- *   and inactive otherwise.
- * - Criterion 2, as built: a client reports every transition, and while the
- *   developer stays active it also renews the unchanged `active` report at
- *   most once per 30 seconds, while input continues. No two reports are
- *   closer than 30 seconds. The renewals keep the host's two-minute expiry
- *   (criterion 4) from lapsing under a developer who keeps working, which
- *   criterion 3 needs; criterion 2 read literally ("only when its state
- *   changes") forbids them, and the run records that contradiction.
- *
- * A report is a `push.presence` call that stays open while it holds; the
- * client keeps at most one open and closes it when it replaces it.
- */
+// Phone push phase 4, the client's half, through AppRoot on fake timers
+// (`test/presenceFenceMocks.ts`). As built, an unchanged `active` is renewed at most every 30 s
+// while input continues, so the host's two-minute expiry does not lapse; criterion 2 read literally
+// forbids that. A report is an open `push.presence` call, and the client keeps at most one open.
 import { describe, expect, it, vi } from "vite-plus/test";
 
 const fenceMocks = vi.hoisted(() => () => import("./test/presenceFenceMocks"));

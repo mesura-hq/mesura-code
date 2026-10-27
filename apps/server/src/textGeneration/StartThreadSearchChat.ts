@@ -1,12 +1,8 @@
 /**
- * Mesura: start a search conversation (docs/mesura/adr-010-search-chats.md).
- * Each search is an ordinary thread in one hidden project, owned by the
- * configured text-generation model, which searches with the `find_threads`
- * MCP tool.
- *
- * One starter serves the whole server: its lock and its record of the
- * prepared workspace must be shared by every WebSocket connection, or two
- * clients' first searches race to initialize the workspace.
+ * Mesura: starts a search conversation (docs/mesura/adr-010-search-chats.md), an ordinary thread
+ * in one hidden project that the text-generation model runs with the `find_threads` MCP tool.
+ * One starter serves the whole server: its lock and prepared-workspace record must be shared by
+ * every WebSocket connection, or two clients' first searches race to initialize the workspace.
  */
 import {
   CommandId,

@@ -98,12 +98,10 @@ const sourceChanged = () =>
   new ProjectIconFileError({ detail: "The image changed while it was being imported." });
 
 /**
- * Reads an image to import, after every authorization step, from the file it
- * names now: still inside `root`, still an image type, at most 2 MiB. The file
- * is opened once and read through that descriptor (`openMediaFile` checks
- * that the path and descriptor are one file), and never more than the limit
- * plus one byte is read, so a swap or growth after `locateProjectIconSource`
- * cannot import another file or an oversized one.
+ * Reads an image to import after every authorization step: still inside `root`, still an
+ * image type, at most 2 MiB. One descriptor (`openMediaFile` checks path and descriptor are
+ * one file) and a read capped at the limit plus one byte, so a swap or growth after
+ * `locateProjectIconSource` cannot import another file or an oversized one.
  */
 export const readProjectIconSource = Effect.fn("readProjectIconSource")(function* (source: {
   readonly source: string;
@@ -130,11 +128,10 @@ export const readProjectIconSource = Effect.fn("readProjectIconSource")(function
 }, Effect.scoped);
 
 /**
- * Runs inside the writer process. Each directory is entered with `chdir`, then
- * checked: the kernel holds the current directory by identity, so once the
- * check passes every later operation is relative to that very directory and a
- * symlink swapped in above it cannot redirect it. A segment that is a link,
- * or a path that no longer names the entered directory, stops the write.
+ * Runs inside the writer process. The kernel holds the current directory by identity, so
+ * after `chdir` and a check, later operations stay relative to that very directory and a
+ * symlink swapped in above it cannot redirect them. A segment that is a link, or a path
+ * that no longer names the entered directory, stops the write.
  */
 const WRITER_SCRIPT = `
 "use strict";
@@ -200,17 +197,10 @@ try {
 `;
 
 /**
- * WORKAROUND: creates the import directories and file from a short-lived child
- * process that walks them with `chdir`.
- * Why: a pathname write (even with `wx`) re-resolves every ancestor, so a
- * `.mesura` or `project-icons` symlink swapped in after a check redirects it
- * outside the project. The clean fix is directory-relative `openat`/`mkdirat`
- * with no symlink traversal, which Node does not expose, and the server's own
- * cwd is process-wide, so it must never change. A child's cwd pins each
- * checked directory on every platform the server runs on. The child is
- * `process.execPath`; the desktop backend already runs it with
- * `ELECTRON_RUN_AS_NODE=1`, which the child inherits.
- * Remove once Node ships directory-handle relative file operations.
+ * WORKAROUND: a child process (`process.execPath`, inheriting `ELECTRON_RUN_AS_NODE=1`)
+ * writes the file, pinning each checked directory with `chdir`. A pathname write re-resolves
+ * ancestors, so a swapped-in symlink escapes the project; Node lacks `openat`/`mkdirat` and
+ * the server's own cwd is process-wide. Remove once Node ships directory-relative file ops.
  */
 function writeInPinnedDirectories(input: {
   readonly root: string;

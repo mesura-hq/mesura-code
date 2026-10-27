@@ -45,9 +45,10 @@ Uploads begin when you add an attachment. All uploads must finish before the
 message can send. Retry or remove a failed upload. On web and desktop, reloading
 before an upload finishes requires you to attach that file again.
 
-Use the attachment control to choose files from your device. On a phone, the
-browser opens the device's file picker. You can also drag or paste images into
-the composer when your browser supports it. HEIC and HEIF photos are converted
+Use the attachment control to choose files from your device. On a phone or
+tablet, it offers **Photos and videos**, which opens the device's photo picker
+directly, and **Files** for anything else or the camera. You can also drag or
+paste images into the composer when your browser supports it. HEIC and HEIF photos are converted
 to JPEG before upload; photos over the image limit are also resized to fit.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
@@ -301,9 +302,13 @@ row above the composer shows the goal and its progress.
 
 - `/goal` alone shows the current goal. `/goal clear` removes it.
 - Codex also supports `/goal pause` and `/goal resume`. Stopping a Codex goal
-  pauses it.
+  pauses it, and so does Codex ending its work without meeting the goal.
 - Stopping Claude ends the current turn, but the goal stays set. Claude checks it
   again at the end of your next message.
+- Sending a new goal, or `/goal resume`, while the agent works stops the current
+  turn and starts the goal, unless you queue it. `/goal clear` and `/goal pause`
+  stop the turn only when it is working on the goal. Other goal commands wait for
+  the turn to end.
 
 ## Context in your message
 

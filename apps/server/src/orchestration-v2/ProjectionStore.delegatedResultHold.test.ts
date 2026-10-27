@@ -1,8 +1,6 @@
-// Entry point: the projection store's two shell reads, `getThreadShell` and
-// `getShellSnapshot`, which are what every client receives for a thread. A delegated task that
-// finished before its parent's run completed leaves the active roster before its result reaches
-// the parent; four live cases (wake-causes.md) showed Done in that gap. The parent's shell must
-// still name the task as pending work until the result is delivered.
+// Regression: a delegated task that finished before its parent's run leaves the active roster
+// before its result reaches the parent, and live shells showed Done in that gap. Both shell reads
+// must name the task as pending work until the result is delivered.
 import { assert, expect, it } from "@effect/vitest";
 import {
   EventId,

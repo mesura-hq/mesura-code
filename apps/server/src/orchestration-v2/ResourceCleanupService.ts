@@ -6,7 +6,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import { resolveAttachmentPathById } from "../attachmentStore.ts";
+import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
+import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as EditorSessionManager from "../editor/Manager.ts";
 import * as PreviewManager from "../preview/Manager.ts";
@@ -51,17 +52,22 @@ export const layer = Layer.effect(
     const config = yield* ServerConfig.ServerConfig;
     const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
     return {
-      cleanupScheduledTasks: (threadId: ThreadId) =>
-        scheduledTasks
+      cleanupScheduledTasks: Effect.fn("ResourceCleanupService.cleanupScheduledTasks")(function (
+        threadId: ThreadId,
+      ) {
+        return scheduledTasks
           .deleteForThread(threadId)
           .pipe(
             Effect.mapError(
               (cause) =>
                 new ResourceCleanupError({ operation: "scheduled-tasks", threadId, cause }),
             ),
-          ),
-      cleanupTerminals: (threadId: string) =>
-        terminals.close({ threadId, deleteHistory: true }).pipe(
+          );
+      }),
+      cleanupTerminals: Effect.fn("ResourceCleanupService.cleanupTerminals")(function (
+        threadId: string,
+      ) {
+        return terminals.close({ threadId, deleteHistory: true }).pipe(
           Effect.mapError(
             (cause) => new ResourceCleanupError({ operation: "terminal", threadId, cause }),
           ),
@@ -72,36 +78,50 @@ export const layer = Layer.effect(
               ? editorSessions.value.closeThread({ threadId: ThreadId.make(threadId) })
               : Effect.void,
           ),
-        ),
-      cleanupPreviews: (threadId: string) =>
-        previews
+        );
+      }),
+      cleanupPreviews: Effect.fn("ResourceCleanupService.cleanupPreviews")(function (
+        threadId: string,
+      ) {
+        return previews
           .close({ threadId: ThreadId.make(threadId) })
           .pipe(
             Effect.mapError(
               (cause) => new ResourceCleanupError({ operation: "preview", threadId, cause }),
             ),
-          ),
-      cleanupAttachments: (attachmentIds: ReadonlyArray<string>) =>
-        Effect.forEach(
+          );
+      }),
+      cleanupAttachments: Effect.fn("ResourceCleanupService.cleanupAttachments")(function (
+        attachmentIds: ReadonlyArray<string>,
+      ) {
+        return Effect.forEach(
           attachmentIds,
           (attachmentId) => {
-            const path = resolveAttachmentPathById({
-              attachmentsDir: config.attachmentsDir,
-              attachmentId,
-            });
+            const extension = parseAttachmentFileExtension(attachmentId);
+            const path =
+              resolveAttachmentPathById({
+                attachmentsDir: config.attachmentsDir,
+                attachmentId,
+              }) ??
+              (extension
+                ? resolveAttachmentRelativePath({
+                    attachmentsDir: config.attachmentsDir,
+                    relativePath: `${attachmentId}.${extension}`,
+                  })
+                : null);
             return path === null
               ? Effect.void
-              : fileSystem
-                  .remove(path, { force: true })
-                  .pipe(
-                    Effect.mapError(
-                      (cause) =>
-                        new ResourceCleanupError({ operation: "attachment", attachmentId, cause }),
-                    ),
-                  );
+              : fileSystem.remove(path, { force: true }).pipe(
+                  Effect.andThen(fileSystem.remove(`${path}.txt`, { force: true })),
+                  Effect.mapError(
+                    (cause) =>
+                      new ResourceCleanupError({ operation: "attachment", attachmentId, cause }),
+                  ),
+                );
           },
           { discard: true, concurrency: 4 },
-        ),
+        );
+      }),
     };
   }),
 );

@@ -26,24 +26,10 @@ export const SETTINGS_ACCESS_MANAGED_BY_TASK_LABEL = "Managed by task";
 const UNCONSUMED_OPTION_REASON = "Not used for generated text, so it cannot change here.";
 
 /**
- * The options each text-generation service reads from its ModelSelection.
- * Read-only backend sources:
- * - Codex: apps/server/src/textGeneration/CodexTextGeneration.ts
- *   (reasoningEffort, and serviceTier through getCodexServiceTierOptionValue
- *   in apps/server/src/codexModelOptions.ts, which maps legacy fastMode)
- * - Claude: apps/server/src/textGeneration/ClaudeTextGeneration.ts (effort,
- *   thinking, fastMode; contextWindow through the model suffix that
- *   resolveClaudeCatalogApiModelId adds)
- * - Cursor: packages/provider-cursor/src/server/textGeneration.ts, which
- *   passes every option through cursorSdkModelSelection (`"all"`)
- * - Grok: packages/provider-grok/src/server/textGeneration.ts (reasoningEffort)
- * - Muse: packages/provider-muse/src/server/textGeneration.ts (reasoningEffort)
- * - OpenCode: packages/provider-opencode/src/server/textGeneration.ts and
- *   v2/textGeneration.ts (agent, variant)
- * - Pi: packages/provider-pi/src/server/textGeneration.ts (model only)
- * - Antigravity: apps/server/src/textGeneration/AntigravityTextGeneration.ts (model only)
- * ACP registry agents do not generate text. Update this table when one of
- * those services starts reading another option.
+ * The options each server text-generation service reads from its ModelSelection, per
+ * apps/server/src/textGeneration and packages/provider-<name>/src/server/textGeneration.ts
+ * (Codex's serviceTier via codexModelOptions.ts). ACP registry agents generate no text.
+ * Update this table when one of those services starts reading another option.
  */
 const WRITING_CONSUMED_OPTION_IDS: Readonly<Record<string, ReadonlySet<string> | "all">> = {
   codex: new Set(["reasoningEffort", "serviceTier", "fastMode"]),
@@ -87,11 +73,9 @@ export type SettingsPickerApplyPlan =
   | { kind: "write"; modelSelection?: ModelSelection; runtimeMode?: RuntimeMode };
 
 /**
- * Which fields one applied opening deliberately changed. A row click or Enter
- * chooses that model; Use changes the model only when the row differs from the
- * saved one or its options were edited, so an access-only edit keeps a Mixed
- * or inherited model. A changed model must be available on every target, or
- * nothing is written.
+ * Which fields one applied opening deliberately changed. A row click or Enter chooses that model;
+ * Use changes it only when the row differs from the saved one or its options were edited, so an
+ * access-only edit keeps a Mixed or inherited model. A changed model must be available everywhere.
  */
 export function planSettingsPickerApply(input: {
   kind: SettingsPickerKind;
@@ -170,16 +154,10 @@ export interface LegacyCodexFastPresentation {
 }
 
 /**
- * How the Settings picker shows a saved legacy Codex Fast selection, or null
- * when the selection is not one. The Codex backend reads `fastMode: true`
- * without an explicit `serviceTier` as the "fast" tier
- * (apps/server/src/codexModelOptions.ts, getCodexServiceTierOptionValue); an
- * explicit `serviceTier` wins over it. The picker selects the advertised fast
- * tier (id `fast`, or labelled Fast as the traits trigger reads it). A custom
- * catalog may list neither; the model's service tier then gains a selected,
- * display-only "Fast (legacy)" entry, so the control neither claims Standard
- * nor loses the way back to it. `keepLegacyCodexFast` keeps that entry out of
- * saved options.
+ * How the Settings picker shows a saved legacy Codex Fast selection (`fastMode: true` without an
+ * explicit `serviceTier`, per apps/server/src/codexModelOptions.ts), or null. It selects the
+ * advertised fast tier, or adds a display-only "Fast (legacy)" entry when the catalog lists none,
+ * so the control neither claims Standard nor loses the way back; `keepLegacyCodexFast` drops it.
  */
 export function presentLegacyCodexFast(input: {
   driverKind: ProviderDriverKind;

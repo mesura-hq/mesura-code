@@ -8,12 +8,9 @@ const threadA = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-a
 const threadB = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-b"));
 
 /**
- * Commands whose completion the test decides, so the lock can be observed.
- *
- * `finish` waits on the command's own promise rather than counting microtask
- * turns. A counted drain passes for the wrong reason the moment an await layer
- * is added: it under-drains, the release is never observed, and the assertion
- * that the lock cleared silently stops testing anything.
+ * `finish` waits on the command's own promise, not a counted microtask drain: a counted
+ * drain under-drains once an await layer is added, and the lock-cleared assertion then
+ * silently stops testing anything.
  */
 function deferredCommands() {
   const calls: string[] = [];

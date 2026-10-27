@@ -1,13 +1,7 @@
 /**
- * Entry point: the real CombinedPickerSettings around the real
- * ProviderModelPicker, CombinedModelPickerContent and ModelPickerContent, as
- * General Settings and Source Control mount them. Pointer and key events drive
- * the real picker; what each row receives through `onChange` is the write the
- * scoped settings would get.
- *
- * Boundaries replaced, and nothing else: router navigation, the shipped
- * keybindings (read from the server in the app), and the virtual list's
- * mounting boundary, so every fixture model is available to keyboard assertions.
+ * The real CombinedPickerSettings around the real model pickers, as General Settings and Source
+ * Control mount them; each row's `onChange` is the write the scoped settings would get. Only router
+ * navigation, the shipped keybindings and the virtual list's mounting boundary are replaced.
  */
 import { type ReactNode } from "react";
 import { act, render as renderBrowser } from "../../../test/render";

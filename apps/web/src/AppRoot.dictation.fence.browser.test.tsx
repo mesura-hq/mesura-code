@@ -1,34 +1,10 @@
 import { page, userEvent } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, render as renderBrowser, type Screen, fakeTimers } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * AppSidebarLayout around the real ChatView, as `_chat.tsx` does. The layout is
- * where the app-wide dictation listener lives, so a job that completes for a
- * thread that is not on screen is still filled.
- *
- * Phase 4 of the STT redesign, criteria 1–8: record in the desktop and web
- * window and place the marker. Phase 5, criteria 1–7: send a draft when its
- * last marker fills, on screen, off screen and from an open question card.
- * Phase 6, criteria 1–4 on the renderer side: a `--dictation …` command line
- * the desktop forwards runs the in-window command, and the widget window's
- * page (`DictationWidgetPage`, mounted beside the app) draws what the app
- * publishes. The desktop bridge is a loopback stand-in for the preload one.
- *
- * Boundaries the fixture replaces, and nothing else:
- * - The browser media APIs, through the `setDictationMediaBackend` seam in
- *   `dictation/recorder.ts` (happy-dom has no getUserMedia, MediaRecorder or
- *   AudioContext).
- * - The upload, at `runAttachmentUploadCycle`, the cycle the plan names, and the check of an
- *   earlier upload, at `verifyPersistedAttachmentUpload`.
- * - Every RPC command, at `runAtomCommand` and `useAtomCommand`, so the
- *   dictation start and setMode commands are observed as they leave.
- * - The job stream, at phase 2's `useDictationJobs` hook: the fixture pushes
- *   job lists through it as the server would.
- * - The sidebars and the thread entity reads, as `AppRoot.pendingUserInput.test.tsx` does,
- *   including the registry reads (`environmentThreadDetails.detailAtom`,
- *   `environmentProjects.projectAtom`) that a send off screen resolves the thread with.
- */
+// STT redesign phases 4-6 through AppRoot and the real AppSidebarLayout, which hosts the app-wide
+// dictation listener, so a job for an off-screen thread still fills. Media goes through
+// `setDictationMediaBackend` (no getUserMedia, MediaRecorder or AudioContext here). Uploads, RPC
+// commands and the `useDictationJobs` stream are replaced; the desktop bridge is a loopback.
 import { type ReactNode } from "react";
 import {
   createMemoryHistory,

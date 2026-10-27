@@ -87,6 +87,16 @@ describe("KeybindingsSettings.logic", () => {
     );
   });
 
+  // Mesura: the Working section's toggle is a rebindable Navigation row on Alt+Z.
+  it("lists the Working section toggle under Navigation with its Alt+Z default", () => {
+    const rows = filterKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS), "working");
+    expect(rows).toContainEqual(
+      expect.objectContaining({ command: "sidebar.toggleWorking", key: "alt+z", conflicts: [] }),
+    );
+    const navigation = groupKeybindingRows(rows).find((group) => group.id === "navigation");
+    expect(navigation?.rows.map((row) => row.command)).toContain("sidebar.toggleWorking");
+  });
+
   // Mesura: the tenth thread jump lists after the ninth, in the rows and the choices.
   it("lists the thread jumps in number order, the tenth after the ninth", () => {
     const jumpCommands = [
@@ -380,9 +390,8 @@ describe("KeybindingsSettings.logic", () => {
   });
 });
 
-// Mesura: the fork's own capture wrapper (bare Tab passed through, plain
-// letters ignored) was superseded by upstream #14548, which records plain keys
-// and Tab while recording. These keep the chords this fork relies on covered.
+// Mesura: upstream's recorder now records plain keys and Tab, superseding the fork's own capture
+// wrapper. These keep the chords this fork relies on covered.
 describe("keybindingFromKeyboardEvent for the fork's chords", () => {
   const event = (
     key: string,

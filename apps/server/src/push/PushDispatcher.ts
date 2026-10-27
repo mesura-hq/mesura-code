@@ -1,23 +1,8 @@
 /**
- * Mesura: pushes a thread to the subscribed phones when it starts needing the
- * developer — an approval, a question, a failure, or, for devices that ask,
- * a finished run.
- *
- * It follows the domain events the way upstream's `AgentAwarenessRelay` does
- * and projects each touched thread with `projectThreadAwarenessV2`, but sends
- * through this server's own Web Push subscriptions instead of T3's relay.
- *
- * A push goes out the first time a thread shows a send key: its phase plus the
- * pending request for approval and input, or the run for a failure or
- * completion. Every key a thread has announced is kept in
- * `mesura_push_announced`, not only the latest: resolving a newer request can
- * bring an older pending one back as the thread's current request, and that
- * one was already announced. At start every thread's current key counts as
- * announced without sending, so a restart never re-announces work that
- * already needed the developer.
- *
- * No push goes out while a client of this host reports the developer active
- * (`ClientPresence`); the key is still recorded, so that push never goes out.
+ * Mesura: pushes a thread to subscribed phones when it starts needing the developer, via
+ * this server's own Web Push subscriptions, not T3's relay. Every announced key stays in
+ * `mesura_push_announced`: resolving a newer request can resurface an already-announced one.
+ * Keys present at boot count as announced; a key held while a client is active never sends.
  */
 import type {
   EnvironmentId,
@@ -207,11 +192,9 @@ export const make = Effect.gen(function* () {
   });
 
   /**
-   * Counts every active thread's current key as announced, without sending,
-   * and returns the stream cursor. It runs before `start` returns, which keeps
-   * it on the server's readiness path: seeding later would read a state some
-   * events had already changed, and count a thread that started waiting in
-   * between as waiting at boot, so its push would never go out.
+   * Counts every active thread's current key as announced, without sending, and returns the
+   * stream cursor. It must run before `start` returns: seeding later would count a thread
+   * that started waiting in between as waiting at boot, so its push would never go out.
    */
   const seed = Effect.fn("PushDispatcher.seed")(function* (environmentId: EnvironmentId) {
     const persisted = yield* sql<{ readonly thread_id: ThreadId; readonly push_key: string }>`

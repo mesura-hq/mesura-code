@@ -1,22 +1,10 @@
 import { flushBrowserTasks } from "../test/browserTasks";
 import { act, render as renderBrowser, type Screen } from "../../test/render";
 /**
- * Phase 8 fence on the web: acceptance criteria 1, 3 and 6, through the run
- * card a `factory_card` turn item renders in the timeline. Phase 9 fence on the
- * web: acceptance criteria 1 (Open lands on the Run tab, maximized), 5 (every
- * turn's file opens in the files panel), 6 (the run stream is subscribed only
- * while the Run tab is visible) and 7 (the floor on screen), through the same
- * card's Open and the Factory pane it opens.
- *
- * Entry point: AppRoot with its memory router and the real ChatView,
- * MessagesTimeline and FactoryRunCard, mounted as `FactoryPlanApproval.test.tsx`
- * mounts them. The thread shell and its projected turn items are fixtures.
- * A new turn item with the run card's id replaces the old one. The
- * `subscribeFactoryRun` stream is the `factoryEnvironment.factoryRun` atom
- * family, replaced by one atom per run that records when the registry builds
- * it (a subscription opened) and finalizes it (the subscription ended). What
- * only a browser shows: the tones' colours, the phase marks' shapes, and the
- * card's layout on a narrow pane.
+ * AppRoot with the real ChatView, MessagesTimeline and FactoryRunCard over fixture thread shells
+ * and turn items; the `factoryEnvironment.factoryRun` family is one recording atom per run, so a
+ * spec sees when a run stream subscription opens and ends. Colours, mark shapes and the narrow
+ * layout are left to a real browser.
  */
 /// <reference types="vite-plus/client" />
 import { type ReactNode } from "react";
@@ -561,8 +549,8 @@ it("phase9 web AC1 opens the run card's run on the Run tab of the Factory pane, 
   );
   // Amended for review finding P2-2: the title is part of each entry's accessible name.
   expect(railLabels).toEqual([
-    `Phase 1: running — ${PHASE_1_TITLE}`,
-    `Phase 2: pending — ${PHASE_2_TITLE}`,
+    `Phase 1: running, ${PHASE_1_TITLE}`,
+    `Phase 2: pending, ${PHASE_2_TITLE}`,
   ]);
 });
 

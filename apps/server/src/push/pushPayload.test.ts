@@ -1,16 +1,8 @@
 /**
- * Phase 3 fence of phone push notifications: acceptance criterion 5, the
- * notification a thread's awareness state turns into.
- *
- * Entry point: `buildPushPayload` (`pushPayload.ts`), the pure function the
- * dispatcher calls for every push it sends. `PushDispatcher.test.ts` checks
- * that the payload a device receives is this one.
- *
- * The URL is the web router's thread route, `/<environmentId>/<threadId>`,
- * each segment URL-encoded: the form `threadRoutePath` writes and
- * `parseNotificationTargetPath` reads in `apps/web/src/pushNotifications/`.
- * It is not `projectThreadAwarenessV2`'s `deepLink`, whose `/threads/` prefix
- * the web router does not serve.
+ * Push fence, acceptance criterion 5: what `buildPushPayload` turns an awareness state into. The
+ * URL is the web router's `/<environmentId>/<threadId>` with each segment URL-encoded, the form
+ * `threadRoutePath` writes and `parseNotificationTargetPath` reads; not the awareness `deepLink`,
+ * whose `/threads/` prefix the web router does not serve.
  */
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { AgentAwarenessPhase, AgentAwarenessState } from "@t3tools/shared/agentAwareness";

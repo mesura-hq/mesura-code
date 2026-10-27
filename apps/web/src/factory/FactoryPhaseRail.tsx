@@ -26,7 +26,7 @@ export const FactoryPhaseRail = memo(function FactoryPhaseRail({
           ) : null}
           <button
             type="button"
-            aria-label={`Phase ${item.index}: ${item.status} — ${item.title}`}
+            aria-label={`Phase ${item.index}: ${item.status}, ${item.title}`}
             aria-pressed={item.selected}
             onClick={() => onSelect(item.index)}
             className={cn(

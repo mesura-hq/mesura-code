@@ -34,22 +34,10 @@ import {
 } from "./composerUndo";
 
 /**
- * Vim inside the composer.
- *
- * Insert mode is the composer as upstream built it: every key goes to Lexical
- * untouched. Escape enters normal mode, where keys run through `@vimee/core`
- * over the projected prompt (`composerProjection.ts`) and the result is
- * written back through the composer's own replacement path. A second Escape
- * leaves the composer for the chat buffer.
- *
- * The composer registers an adapter while it is mounted; that is the only
- * seam in `ChatComposer.tsx`. Two can be mounted (the agent search popup's
- * conversation over the main one): the last registered is the active one, and
- * unmounting it hands Vim back to the one below.
- *
- * `u` and `<C-r>` walk the draft's whole edit history (`composerUndo.ts`),
- * not vimee's, whose stack lives in one normal-mode session's buffer: an
- * insert session is one step, and each normal-mode change is one more.
+ * Insert mode leaves every key to Lexical untouched; normal mode runs `@vimee/core` over the
+ * projected prompt and writes back through the composer's own path. The adapter is the only seam in
+ * `ChatComposer.tsx`; with two composers mounted, the last registered is active. `u`/`<C-r>` walk
+ * `composerUndo.ts`, not vimee's per-session stack.
  */
 
 export interface ComposerVimAdapter {
@@ -439,12 +427,9 @@ export function composerNormalOffset(): number | null {
 }
 
 /**
- * Makes focus arriving in the composer resume normal mode at `offset` instead
- * of entering insert mode, until the next key or pointer press. For a surface
- * that hands focus back, such as the command palette closing: focus arrives
- * more than once as it closes (React restores the focus it saw before the
- * commit, then Lexical takes it back for its selection), so a single resume
- * after the first arrival would be undone by the next.
+ * Holds until the next key or pointer press, not for one focus: a closing surface such as the
+ * command palette hands focus back more than once (React restores it, then Lexical takes it for its
+ * selection), so a one-shot resume would be undone by the second arrival.
  */
 export function resumeComposerNormalOnFocus(offset: number): void {
   pendingNormalOffset = offset;

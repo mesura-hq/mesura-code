@@ -60,15 +60,9 @@ it("leaves no product code defaulting to T3 Code's shared home", () => {
   assert.deepEqual(files, SITES_ALLOWED_TO_KEEP_THE_T3_LITERAL);
 });
 
-// The five files whose default home moved. Their prose has to move with it:
-// `--help` output naming `~/.t3` is worse than no help at all here, because it
-// tells an operator this fork reads the installed T3 Code's database. Verification
-// found exactly that in migrate-dev-db's flag description and command
-// description, where the code beside them already resolved to `~/.mesura-code`.
-//
-// This scans for `~/.t3` and not for `.t3` alone, on purpose: `<worktree>/.t3`
-// still appears in migrate-dev-db's doc comment and is still correct, because a
-// linked worktree keeps its own local directory.
+// `--help` text naming `~/.t3` in these files would tell an operator this fork reads the installed
+// T3 Code's database. The scan is for `~/.t3`, not `.t3`: `<worktree>/.t3` in migrate-dev-db's doc
+// comment is correct, because a linked worktree keeps its own local directory.
 const FILES_WHOSE_DEFAULT_HOME_MOVED = [
   "apps/desktop/src/app/DesktopStatePaths.ts",
   "apps/server/scripts/migrate-dev-db.ts",
@@ -91,24 +85,10 @@ it("leaves no prose naming T3 Code's home where the default already moved", () =
   assert.equal((found.stdout ?? "").trim(), "");
 });
 
-// ⚠ The rename sweep searched for `T3 Code`, with a space, and that alphabet is
-// not the only one the name appears in. `packages/client-runtime` builds an
-// OAuth token-exchange body, so its expected fixture carries the name
-// FORM-ENCODED — `client_label=T3+Code+Mobile`, where the space is a `+`. The
-// sweep renamed the label that FEEDS that request and could not see the
-// expectation it had to match, because no search for `T3 Code` reaches
-// `T3+Code`. It sat broken from 992a7122b until the first upstream sync ran the
-// package, five days later.
-//
-// Two things hid it for that long, and both are fixed elsewhere: CI had never
-// run on this fork (#8), and the verification sweep covered ten of sixteen
-// packages. This guard is the third defence, and the only one that is specific
-// to the failure rather than to the process around it.
-//
-// Encodings, not spellings. `T3-Code` is deliberately ABSENT from this list:
-// it is the packaging artifact name (`T3-Code-0.0.4-x64.dmg`), which the
-// approved plan defers along with the rest of the packaging identity. Adding it
-// here would fail on work that was scoped out on purpose.
+// ⚠ A sweep for `T3 Code` cannot see encoded forms: the client-runtime OAuth fixture carries
+// `client_label=T3+Code+Mobile` FORM-ENCODED, and a rename once broke it unseen for five days.
+// List encodings, not spellings. `T3-Code` is deliberately ABSENT: it is the packaging artifact
+// name, which the plan deferred with the rest of the packaging identity.
 const ENCODED_PRODUCT_NAMES = [
   "T3+Code", // application/x-www-form-urlencoded — the one that actually broke
   "T3%20Code", // percent-encoded space, in a URL path or query

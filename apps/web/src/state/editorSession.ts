@@ -52,18 +52,9 @@ const keyScheduler = createAtomCommandScheduler();
 const lifecycleScheduler = createAtomCommandScheduler();
 
 /**
- * The calls that drive Neovim go in order, per thread.
- *
- * Not an optimisation — a correctness requirement. `d` and `w` are one command
- * and two messages; delivered out of order they are two commands, and the
- * second is a motion that moves the cursor rather than the operator's target.
- *
- * Keys do not reach this scheduler one by one: `editorKeyLane` below sends
- * them, coalescing every key typed while a request is in flight into the next
- * request, so a burst costs one round trip instead of one per key. Each batch
- * carries a sequence number, which lets the lane re-send a batch whose reply
- * it lost and the server skip it if Neovim already has it. The scheduler
- * still orders the lane's calls against anything else on the key lane.
+ * Order per thread is a correctness requirement: `d` then `w` is one command, and out of
+ * order the `w` is a motion rather than the operator's target. Keys arrive here batched
+ * by `editorKeyLane`; this still orders the lane's calls against anything else.
  */
 const serialPerThread = { mode: "serial" as const, key: editorThreadKey };
 
@@ -155,15 +146,9 @@ const KEY_ATTEMPTS = 6;
 const SESSION_OUTAGE_LIMIT_MS = 60_000;
 
 /**
- * Waits for the environment's RPC session after a request failed on the wire.
- *
- * When the session still reads as connected the socket is usually about to be
- * replaced, so this pauses for `pauseMs` — but a session that drops meanwhile
- * ends the pause, and the wait goes on until one is back, at most `waitMs`.
- * The lane therefore re-sends on the session's return, never on a timer that
- * has backed off past it. `connected` means the pause ran out with the
- * session still there, `reconnected` that a session came back, `unreachable`
- * that none did within the wait.
+ * A session that still reads as connected after a wire failure is usually about to be
+ * replaced, so this pauses `pauseMs`; a drop ends the pause and waits up to `waitMs` for
+ * one to return. The lane re-sends on the session's return, never on a backed-off timer.
  */
 const editorSessionReachable = createEnvironmentCommand(connectionAtomRuntime, {
   label: "environment-data:editor-session:reachable",
@@ -215,15 +200,10 @@ export interface EditorKeyLane {
   /** Queues a call that must land between the keys around it: a click, an agent's edit. */
   readonly call: (run: () => Promise<AtomCommandResult<unknown, unknown>>) => void;
   /**
-   * Whether Neovim is known to be at rest in plain normal mode: nothing is
-   * queued or in flight, and the last batch's answer said `n`, not blocking,
-   * no flash label. Escape releases the editor only then; otherwise it is a
-   * key Neovim has to get.
-   *
-   * Only an answer confirms: a batch's, read after the keys ran, or an
-   * `open`'s (`openBegins`). A snapshot never does: it can be older than the
-   * last answer, and it carries no `blocking`, so a reattach while `f` waits
-   * would read as resting.
+   * Nothing queued or in flight and the last answer said `n`, not blocking, no flash label;
+   * only then does Escape release the editor. Only a batch's or an `open`'s answer confirms:
+   * a snapshot can be older and carries no `blocking`, so a reattach while `f` waits would
+   * read as resting.
    */
   readonly restsInNormalMode: () => boolean;
   /**
@@ -242,21 +222,10 @@ export type OpenMark = number | null;
 const keyLanes = new WeakMap<AtomRegistry.AtomRegistry, Map<string, EditorKeyLane>>();
 
 /**
- * The one sender of a thread's keys.
- *
- * At most one request is in flight. Keys typed meanwhile wait, and go out
- * together as the next batch once it settles, cut at key boundaries to the
- * contract's bound. A batch that fails is kept and sent again, exactly as it
- * was and under the same sequence number, before anything after it: a
- * disconnect may have lost only the reply, and the server skips a batch it
- * already applied. After a connection failure the lane waits for the session
- * to come back, for up to `SESSION_OUTAGE_LIMIT_MS`, and keys typed meanwhile
- * queue behind the batch. After a failure the server answered, it re-sends on
- * a backoff and at once when another key is typed. Either way, keys it cannot
- * deliver are dropped and reported `lost` rather than vanishing.
- *
- * Module-level per registry rather than per component, because the panel
- * remounts per file and the keys in flight belong to the thread, not the view.
+ * One request in flight; a failed batch is re-sent unchanged under the same sequence
+ * number before anything after it, since a disconnect may have lost only the reply and the
+ * server skips a batch it applied. Undeliverable keys are reported `lost`. Per registry, not
+ * per component: the panel remounts per file, and keys in flight belong to the thread.
  */
 export function editorKeyLane(
   registry: AtomRegistry.AtomRegistry,

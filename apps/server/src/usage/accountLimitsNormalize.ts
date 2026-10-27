@@ -186,13 +186,9 @@ export function normalizeClaudeRateLimitEvent(value: unknown): AccountLimitsWind
   const meta = claudeWindowMeta(key);
   if (meta === null) return null;
 
-  // Claude's full account-limits response reports utilization as a percentage,
-  // but its passive rate-limit event reports a 0-1 ratio. Reusing the full
-  // response's number directly made 0.99 render as 1% instead of 99%.
-  //
-  // Newer events also repeat every window under `unifiedWindows`. A rejected
-  // event can omit the top-level utilization, so use the named window there
-  // before falling back to the status itself.
+  // Claude's passive rate-limit event reports a 0-1 ratio where the full response reports a
+  // percentage; reusing the latter's handling rendered 0.99 as 1%. A rejected event can omit
+  // the top-level utilization, so read the named `unifiedWindows` entry before the status.
   const unifiedWindows = isRecord(info.unifiedWindows) ? info.unifiedWindows : null;
   const unifiedWindow =
     unifiedWindows && isRecord(unifiedWindows[key]) ? unifiedWindows[key] : null;
@@ -212,13 +208,9 @@ export function normalizeClaudeRateLimitEvent(value: unknown): AccountLimitsWind
 }
 
 /**
- * The identity and label of a window of a given length.
- *
- * One formula, because the Codex and Z.ai normalizers both need it and two
- * copies drift: one gets a day-versus-hour formatting fix and the other does
- * not. `unknown` is what a caller returns when it could not work out a length
- * at all — Codex always can, Z.ai cannot when the vendor uses a duration unit
- * this fork has never seen.
+ * The identity and label of a window of a given length, shared by Codex and Z.ai so the two
+ * cannot drift. `unknown` is for a length the caller could not determine (a Z.ai duration unit
+ * this fork has never seen).
  */
 function windowIdAndLabel(
   minutes: number | null,
@@ -347,15 +339,9 @@ function openCodeGoWindow(
 }
 
 /**
- * The OpenCode Go plan's rolling, weekly and monthly windows.
- *
- * Its endpoint is three weeks old and already serves a different shape from the
- * one its own pull request documented, so both spellings are read.
- *
- * `nowMs` is the reading's own time, and only the documented spelling needs it:
- * that one reports a second offset rather than a time. It is a parameter rather
- * than a clock read so this stays a pure function — the caller already holds
- * the attempt time.
+ * The OpenCode Go plan's rolling, weekly and monthly windows. The endpoint already serves a
+ * different shape from the one its pull request documented, so both spellings are read. `nowMs`
+ * resolves the documented spelling's second offset; a parameter keeps this a pure function.
  */
 export function normalizeOpenCodeGoAccountLimits(
   value: unknown,
@@ -378,16 +364,10 @@ const ZAI_UNIT_MINUTES: Readonly<Record<number, number>> = {
 
 function zaiWindow(entry: unknown): AccountLimitsWindow | null {
   if (!isRecord(entry)) return null;
-  // `usage` is the limit and `currentValue` the spend — inverted from the
-  // obvious reading — so the reported percentage is taken verbatim and never
-  // recomputed from them.
-  //
-  // Note the Codex normalizer above rejects a zero percentage with no reset
-  // time, and that guard deliberately does NOT apply here. Codex's windows are
-  // optional nested objects, so there "0 with no reset" is indistinguishable
-  // from an absent payload. Z.ai reports an array of limits where `percentage`
-  // is always explicitly present — and it really does omit `nextResetTime` on a
-  // window at 0%, which was seen live. Copying the guard would drop a real row.
+  // `usage` is the limit and `currentValue` the spend (inverted), so take `percentage` verbatim.
+  // The Codex guard against 0% with no reset deliberately does not apply: Z.ai always reports
+  // `percentage` and really omits `nextResetTime` on a window at 0% (seen live), so copying the
+  // guard would drop a real row.
   const usedPercent = readNumber(entry.percentage);
   if (usedPercent === null) return null;
 
@@ -418,12 +398,9 @@ function zaiWindow(entry: unknown): AccountLimitsWindow | null {
 }
 
 /**
- * The Z.ai GLM Coding Plan's rolling windows and tier.
- *
- * The endpoint answers HTTP 200 for its own errors and carries the real status
- * in the body, so the transport status decides nothing here — a wrong path
- * returns 200 with code 404, and trusting it would render an error page as a
- * confident empty panel.
+ * The Z.ai GLM Coding Plan's rolling windows and tier. The endpoint answers HTTP 200 for its own
+ * errors with the real status in the body (a wrong path is 200 with code 404), so only `success`
+ * decides; trusting the transport would render an error page as a confident empty panel.
  */
 export function normalizeZaiAccountLimits(value: unknown): NormalizedAccountLimits | null {
   if (!isRecord(value) || value.success !== true) return null;

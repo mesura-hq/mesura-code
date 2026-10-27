@@ -432,3 +432,82 @@ html[data-theme-id]:not([data-theme-id=""]) {
   max-height: 50vh;
   padding-left: 3.5ch;
 }
+
+/**
+ * The Working section's label colour and band (components/sidebar/workingSweep.tsx). Azure sits
+ * near hue 240, on the far side of Needs input's indigo (~277). The band is two layers, a sliding
+ * window holding a counter-sliding bright copy, so only `transform` moves and Chrome composites it
+ * without layout or paint. It runs once per flip of `data-working-sweep-tick`; with no flip
+ * nothing animates and nothing draws.
+ */
+:root {
+  --mesura-working: light-dark(oklch(0.55 0.2 243), oklch(0.75 0.16 238));
+  --mesura-working-glint: light-dark(oklch(0.78 0.13 225), oklch(0.97 0.03 230));
+}
+[data-working-sweep] {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+}
+[data-working-sweep-window] {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent 0%, #000 40%, #000 60%, transparent 100%);
+  transform: translateX(-100%);
+}
+[data-working-sweep-bright] {
+  display: block;
+  color: var(--mesura-working-glint);
+  transform: translateX(100%);
+}
+[data-working-sweep-tick="a"] [data-working-sweep-window] {
+  animation: mesura-working-sweep-a 900ms linear 1 both;
+}
+[data-working-sweep-tick="a"] [data-working-sweep-bright] {
+  animation: mesura-working-sweep-counter-a 900ms linear 1 both;
+}
+[data-working-sweep-tick="b"] [data-working-sweep-window] {
+  animation: mesura-working-sweep-b 900ms linear 1 both;
+}
+[data-working-sweep-tick="b"] [data-working-sweep-bright] {
+  animation: mesura-working-sweep-counter-b 900ms linear 1 both;
+}
+@keyframes mesura-working-sweep-a {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes mesura-working-sweep-b {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes mesura-working-sweep-counter-a {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+@keyframes mesura-working-sweep-counter-b {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-working-sweep-window],
+  [data-working-sweep-bright] {
+    animation: none !important;
+  }
+}

@@ -1,70 +1,76 @@
+import { changeRequestReferenceAutolinker } from "@t3tools/client-runtime/pull-request-markdown";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { MarkdownNode } from "~/vendor/mdast-find-and-replace";
-import { remarkPullRequestAutolinks } from "./pullRequestMarkdown.logic";
+import {
+  remarkPullRequestAutolinks,
+  sameRepositoryReferenceAutolinker,
+} from "./pullRequestMarkdown.logic";
+
+type Node = {
+  type: string;
+  value?: string;
+  url?: string;
+  data?: { hProperties?: Record<string, unknown> };
+  children?: Node[];
+};
+
+function links(
+  markdown: string,
+  autolinks = changeRequestReferenceAutolinker({
+    provider: "github",
+    url: "https://github.com/team/repo/pull/8",
+  })!,
+) {
+  const tree = unified().use(remarkParse).parse(markdown) as Node;
+  remarkPullRequestAutolinks({ autolinks })(tree as never);
+  const found: Array<[string | undefined, string | undefined, unknown]> = [];
+  const visit = (node: Node) => {
+    if (node.type === "link") {
+      found.push([
+        node.children?.[0]?.value,
+        node.url,
+        node.data?.hProperties?.["dataPullRequestAutolink"],
+      ]);
+    }
+    node.children?.forEach(visit);
+  };
+  visit(tree);
+  return found;
+}
+
+describe("remarkPullRequestAutolinks", () => {
+  it("links the host's references in prose and leaves links and code alone", () => {
+    expect(links("Fixes #12 in **abcdef1**. [#13](https://example.com) `#14`")).toEqual([
+      ["#12", "https://github.com/team/repo/issues/12", "reference"],
+      ["abcdef1", "https://github.com/team/repo/commit/abcdef1", "commit"],
+      ["#13", "https://example.com", undefined],
+    ]);
+  });
+});
 
 describe("same-repository reference autolinks (issues phase 3 fence)", () => {
   const SHA = "0123456789abcdef0123456789abcdef01234567";
 
-  function paragraph(...children: MarkdownNode[]): MarkdownNode {
-    return { type: "root", children: [{ type: "paragraph", children }] };
-  }
-
-  function links(tree: MarkdownNode): Array<{ url: string | undefined; text: string }> {
-    const found: Array<{ url: string | undefined; text: string }> = [];
-    const visit = (node: MarkdownNode) => {
-      if (node.type === "link") {
-        found.push({
-          url: node.url,
-          text: (node.children ?? []).map((child) => child.value ?? "").join(""),
-        });
-      }
-      node.children?.forEach(visit);
-    };
-    visit(tree);
-    return found;
-  }
-
-  it("issues phase 3 guard: pull request prose still links references and commits", () => {
-    const tree = paragraph({ type: "text", value: `Fixes #7 in ${SHA}.` });
-    remarkPullRequestAutolinks({ repositoryUrl: "https://github.com/acme/alpha/" })(tree);
-
-    expect(links(tree)).toEqual([
-      { url: "https://github.com/acme/alpha/issues/7", text: "#7" },
-      { url: `https://github.com/acme/alpha/commit/${SHA}`, text: SHA.slice(0, 7) },
-    ]);
-  });
-
   it("issues phase 3 fence: agent prose links an explicit issue-number reference without linking commit hashes", () => {
-    const tree = paragraph({ type: "text", value: `See #17402 after ${SHA} lands.` });
-    remarkPullRequestAutolinks({
-      repositoryUrl: "https://github.com/pingdotgg/t3code",
-      commits: false,
-    })(tree);
-
-    expect(links(tree)).toEqual([
-      { url: "https://github.com/pingdotgg/t3code/issues/17402", text: "#17402" },
+    const autolinks = sameRepositoryReferenceAutolinker("https://github.com/pingdotgg/t3code");
+    expect(links(`See #17402 after ${SHA} lands.`, autolinks)).toEqual([
+      ["#17402", "https://github.com/pingdotgg/t3code/issues/17402", "reference"],
     ]);
   });
 
   it("issues phase 3 guard: agent prose leaves code, authored links and lookalike numbers untouched", () => {
-    const tree = paragraph(
-      { type: "text", value: "Run " },
-      { type: "inlineCode", value: "git log #7" },
-      { type: "text", value: ", read " },
-      { type: "link", url: "https://example.com/notes", children: [{ type: "text", value: "#8" }] },
-      { type: "text", value: ", jump " },
-      { type: "link", url: "#9", children: [{ type: "text", value: "section #9" }] },
-      { type: "text", value: ", not abc#10, #11a or #0, but #12." },
-    );
-    remarkPullRequestAutolinks({ repositoryUrl: "https://github.com/acme/alpha", commits: false })(
-      tree,
-    );
-
-    expect(links(tree)).toEqual([
-      { url: "https://example.com/notes", text: "#8" },
-      { url: "#9", text: "section #9" },
-      { url: "https://github.com/acme/alpha/issues/12", text: "#12" },
+    const autolinks = sameRepositoryReferenceAutolinker("https://github.com/acme/alpha");
+    expect(
+      links(
+        "Run `git log #7`, read [#8](https://example.com/notes), jump [section #9](#9), not abc#10, #11a or #0, but #12.",
+        autolinks,
+      ),
+    ).toEqual([
+      ["#8", "https://example.com/notes", undefined],
+      ["section #9", "#9", undefined],
+      ["#12", "https://github.com/acme/alpha/issues/12", "reference"],
     ]);
   });
 });

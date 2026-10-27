@@ -86,11 +86,9 @@ export type KeyScope =
   | "panel";
 
 export function resolveKeyScope(active: Element | null = deepActiveElement()): KeyScope {
-  // Read first, before any early return: `getFocusedPane` records the pane
-  // that a later blur to <body> falls back to. Skipped for the composer, it
-  // left the terminal recorded after a click from the terminal into the
-  // composer, and `Esc Esc` then handed every key to the terminal's
-  // passthrough instead of the chat.
+  // Read before any early return: `getFocusedPane` records the pane a later blur
+  // to <body> falls back to. Skipped for the composer, a click from the terminal
+  // left the terminal recorded and `Esc Esc` handed every key to its passthrough.
   const focusedPane = getFocusedPane();
   if (isCommandPaletteOpen()) return "passthrough";
   if (active?.closest(COMPOSER_EDITOR_SELECTOR)) return "composer";

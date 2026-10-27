@@ -1,17 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off -- `node:net` has no Effect service, and the path is
 // pure string resolution for a bind line.
 /**
- * The dictation session's command socket: while a session exists, the Hyprland session binds
- * write one line per key press here instead of launching a second app process, which the
- * single-instance lock then has to hand back to this one (a 250-340 ms Electron start).
- *
- * A line holds the words `dictationCommandLineArguments` gives for the command, the same ones a
- * `--dictation …` launch carries, so `forwardDictationCommand` serves both paths. Anything that
- * does not parse is dropped: the socket is owner-only, but whatever reaches it must never take
- * the main process down.
- *
- * The filesystem and listener helpers are the Symmetria thread socket's, which have no
- * knowledge of what travels over them.
+ * While a session exists, the Hyprland binds write one line per key press here instead of
+ * launching a second process (a 250-340 ms Electron start the single-instance lock hands back).
+ * A line holds the `dictationCommandLineArguments` words, as a `--dictation …` launch does.
+ * Drop anything that does not parse: the socket is owner-only, but it must never crash main.
  */
 import * as NodeNet from "node:net";
 import * as NodePath from "node:path";

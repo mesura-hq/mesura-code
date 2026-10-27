@@ -1,10 +1,6 @@
 /**
- * Cutting typed keys into `editorSession.input` batches.
- *
- * Pure, beside the lane in `editorSession.ts` that uses it, so the one rule
- * that is easy to get wrong is held by a unit test: a batch is cut between
- * keys, never inside one. Neovim reads `<Es` followed by `c>` as five
- * letters, not as Escape.
+ * A batch is cut between keys, never inside one: Neovim reads `<Es` followed by `c>` as
+ * five letters, not as Escape. Kept pure so a unit test holds that rule.
  */
 
 /** The contract's bound on `editorSession.input`'s `keys`. */

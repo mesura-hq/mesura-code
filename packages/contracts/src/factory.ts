@@ -96,11 +96,8 @@ export class FactoryReadSnapshotError extends Schema.TaggedError<FactoryReadSnap
   }
 }
 
-// A run directory holds `events.jsonl`, one record-version-1 event per line.
-// The single definition of that record is
-// `skills/core/sf-team/bin/run-events.mjs` in the agent-env repository; the
-// schemas below decode the same shape, and `@t3tools/shared/factoryRun` folds
-// it into `FactoryRunState`.
+// `events.jsonl` holds one record-version-1 event per line. The single definition of that record is
+// `skills/core/sf-team/bin/run-events.mjs` in the agent-env repository; these schemas decode it.
 
 export const FACTORY_RUN_RECORD_VERSION = 1;
 
@@ -531,11 +528,8 @@ export const FactoryReportActivityPayload = Schema.Struct({
 export type FactoryReportActivityPayload = typeof FactoryReportActivityPayload.Type;
 
 /**
- * One Software Factory card in a thread's timeline. Under orchestrator v2 the
- * cards are `factory_card` turn items (orchestrationV2.ts), recorded by the
- * server with the internal `factory_card.record` command and upserted by
- * turn item id: `factoryPlanCardId`, `factoryRunActivityId`,
- * `factoryReportActivityId`.
+ * One Software Factory card in a thread's timeline: a `factory_card` turn item, recorded with the
+ * internal `factory_card.record` command and upserted by turn item id.
  */
 export const FactoryThreadCard = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("plan"), payload: FactoryPlanActivityPayload }),

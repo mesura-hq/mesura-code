@@ -1,15 +1,7 @@
-// Entry point: `ProjectIconsToolkit.handle("set_project_icon")` with the
-// production handlers behind their `McpToolAccess` declaration, invoked under
-// an `McpInvocationContext` as the MCP HTTP layer provides it. The harness
-// runs the real v2 `ProjectService` (planner, store and receipts) and the real
-// favicon resolver on an in-memory SQLite database; thread shells and their
-// user messages come from a `ThreadManagementService` stand-in, so thread
-// attachments are message records as the v2 projection returns them.
-//
-// Project icons phase 2, acceptance criteria 3 (own project; project, worktree
-// or own-thread attachment), 4 (nothing written outside the project), 5 (the
-// write names the root it prepared against), 6 (reset needs no Codex and starts
-// no search) and 7 (the result explains a repository icon that masks the save).
+// `set_project_icon` through the production handlers and their `McpToolAccess`,
+// on the real v2 `ProjectService` and favicon resolver. Thread messages come
+// from a `ThreadManagementService` stand-in, so attachments are message records
+// shaped as the v2 projection returns them.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import {

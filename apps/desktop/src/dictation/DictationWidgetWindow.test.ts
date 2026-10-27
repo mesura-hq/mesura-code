@@ -1,10 +1,7 @@
 /**
- * Entry point: `createDictationWidgetWindow`, the controller the desktop main
- * process feeds with the renderer's published dictation state and the main
- * window's focus, with the Electron window factory injected. The decision
- * itself is `shouldShowDictationWidget`, tested directly.
- *
- * STT redesign, phase 6, criteria 3 and 4.
+ * Entry point: `createDictationWidgetWindow`, fed the renderer's dictation state and the main
+ * window's focus, with the Electron window factory injected. `shouldShowDictationWidget` is
+ * tested directly.
  */
 import type * as Electron from "electron";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";

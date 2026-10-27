@@ -6,19 +6,9 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 import { isPanelLauncherKeyboardAvailable, openPanelLauncher } from "./panelLauncher";
 import { isTerminalFocused } from "./terminalFocus";
 
-/**
- * `rightPanel.nextTab` / `rightPanel.previousTab` (`Ctrl+Tab`,
- * `Ctrl+Shift+Tab` while the right panel has focus): the active tab moves to
- * the next or previous one, wrapping at the ends. Outside the panel the same
- * chords walk the threads; the `panelFocus` clause on these rules and
- * last-wins resolution are what tell the two apart. `rightPanel.newTab`
- * (`Ctrl+T` in the panel) opens the panel launcher. Focus then follows into
- * the surface that is active (`usePanelSurfaceKeys`).
- *
- * `tabBarRef` is any element inside the panel's tab bar. Only the panel that
- * holds focus acts, so a second tab bar mounted for another layout stays
- * quiet.
- */
+// Outside the panel the same chords walk the threads; the `panelFocus` clause and
+// last-wins resolution tell the two apart. Only the panel holding focus acts, so a
+// second tab bar mounted for another layout stays quiet.
 export function useRightPanelTabCycling<const Surface extends { readonly id: string }>(input: {
   readonly tabBarRef: RefObject<HTMLElement | null>;
   readonly panelOpen?: boolean;
@@ -28,10 +18,12 @@ export function useRightPanelTabCycling<const Surface extends { readonly id: str
 }): void {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const latest = useRef(input);
+  // oxlint-disable-next-line t3code/react-effect-budget -- latest-ref: the window listener reads the newest surfaces and callbacks without resubscribing
   useLayoutEffect(() => {
     latest.current = input;
   });
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes the capture-phase window keydown listener for the tab bar's lifetime
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;

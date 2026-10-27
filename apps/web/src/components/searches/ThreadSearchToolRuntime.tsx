@@ -53,6 +53,7 @@ const searchClient = Atom.family((environmentId: EnvironmentId) =>
 /** Mesura: this tab answers the search conversations' `find_threads` calls (ADR-010). */
 export function ThreadSearchToolRuntime() {
   const { environments } = useEnvironments();
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: publishes the environment list to the module-level search targets after commit
   useLayoutEffect(() => {
     searchTargets = environments.map(({ environmentId, label }) => ({ environmentId, label }));
   }, [environments]);

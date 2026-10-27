@@ -5,20 +5,14 @@ import { useTerminalFocus } from "../../hooks/useTerminalFocus";
 import { isModelPickerOpen } from "../../modelPickerVisibility";
 import { useShortcutModifierState } from "../../shortcutModifierState";
 import { shouldShowThreadJumpHintsForModifiers } from "../../keybindings";
+import { useThreadJumpHintsVisible } from "../Sidebar.logic";
 import { useEffect } from "react";
 
 /**
- * Follows the held modifiers for the sidebar's thread jump hints, and renders
- * nothing.
- *
- * Its own component so that a modifier press re-renders this and nothing
- * else. Held in `Sidebar` itself, every Control keydown and keyup re-rendered
- * the whole sidebar, every thread row and every row's tooltips — dnd-kit
- * rebuilds a row's listeners on a sidebar render, so the row memo did not
- * hold. A `Ctrl-d` typed in the modal editor cost 66 row renders twice. The
- * hints themselves still appear through `onChange`, which is the delayed
- * visibility controller: a modifier held past its delay shows them, a chord
- * shows nothing.
+ * Follows the held modifiers for the sidebar's thread jump hints, and renders nothing. Its own
+ * component so a modifier press re-renders only this: held in `Sidebar`, every Control key event
+ * re-rendered every thread row (dnd-kit defeats the row memo). The show delay runs here too, so
+ * `onChange` hears only a real change: a modifier held past the delay, never a quick chord.
  */
 export function ThreadJumpHintModifierSync(props: {
   readonly keybindings: ResolvedKeybindingsConfig;
@@ -45,8 +39,10 @@ export function ThreadJumpHintModifierSync(props: {
       },
     },
   );
+  const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reports the delayed hint visibility to the parent after commit
   useEffect(() => {
-    onChange(shouldShowJumpHintsNow);
-  }, [shouldShowJumpHintsNow, onChange]);
+    onChange(showJumpHints);
+  }, [showJumpHints, onChange]);
   return null;
 }

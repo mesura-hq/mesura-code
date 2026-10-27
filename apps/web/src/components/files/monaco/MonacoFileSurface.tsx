@@ -42,12 +42,8 @@ export interface MonacoFileSurfaceProps {
   readonly revealRequestId: number;
   readonly retention: FileEditorRetention;
   /**
-   * The models, owned by the panel rather than by this component.
-   *
-   * The undo stack lives in the model, so it survives exactly as long as the
-   * cache does. This component is unmounted whenever the panel shows something
-   * else in its place — the spinner while a file is read, the rendered markdown
-   * view — and a cache that died with it would take every file's history along.
+   * The models, owned by the panel: the undo stack lives in the model, and this component unmounts
+   * whenever the panel shows something else (the read spinner, rendered markdown).
    */
   readonly models: MonacoFileModels;
   readonly composerDraftTarget: ScopedThreadRef | DraftId;
@@ -82,11 +78,8 @@ export function MonacoFileSurface({
 }: MonacoFileSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-  // The same editor and model the refs hold, in state as well. Comments render
-  // React into Monaco view zones, so the pieces that own them have to re-render
-  // when the editor appears and when the open file changes; a ref cannot do
-  // that. The refs stay because the effects below read them without depending
-  // on them.
+  // The editor and model also in state, so the comment view zones re-render when either changes;
+  // the refs stay because the effects below read them without depending on them.
   const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [model, setModel] = useState<monaco.editor.ITextModel | null>(null);
 
@@ -96,6 +89,7 @@ export function MonacoFileSurface({
   // The editor is created once and torn down from a layout effect, which cannot
   // depend on a prop, so the cache is reached through a ref there.
   const modelsRef = useRef(models);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref for the layout-effect teardown of the once-created editor
   useEffect(() => {
     modelsRef.current = models;
   }, [models]);
@@ -104,6 +98,7 @@ export function MonacoFileSurface({
   const fontSizeCode = useClientSettings((settings) => settings.fontSizeCode);
   const initialOptionsRef = useRef({ resolvedTheme, modalEditing, wordWrap });
   const contentsRef = useRef(contents);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref read by the once-created editor's listeners
   useLayoutEffect(() => {
     contentsRef.current = contents;
   }, [contents]);
@@ -128,27 +123,20 @@ export function MonacoFileSurface({
   // once, so the listener reads the current handler through a ref instead of
   // being torn down and reinstalled.
   const saveRef = useRef(saveCoordinator);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref so the once-installed content listener sees the current save handler
   useEffect(() => {
     saveRef.current = saveCoordinator;
   }, [saveCoordinator]);
 
   /**
-   * True while an edit from outside is being applied to the model.
-   *
-   * Monaco raises one content-change event for a programmatic edit and a typed
-   * one alike, so without this the editor answers an incoming change by saving
-   * it straight back. That is not merely a redundant write and a pending
-   * indicator for something the user never did: if a second external edit lands
-   * inside the save debounce, the echo of the first one overwrites it.
+   * True while an external edit is applied. Monaco raises one content-change event for programmatic
+   * and typed edits alike; without this the editor saves the incoming change back, and that echo
+   * can overwrite a second external edit landing inside the save debounce.
    */
   const applyingExternalEditRef = useRef(false);
   /**
-   * The seam the Neovim driver shares with the effect below.
-   *
-   * One flag, two readers: the listener that turns a model change into a save
-   * has to ignore an edit that is not the developer typing, and so does the
-   * driver — for the driver, an agent's write read as typing would be undone
-   * and sent to Neovim one character at a time.
+   * The flag shared with the Neovim driver: both the save listener and the driver must ignore a
+   * non-typed edit, or the driver undoes an agent's write and resends it to Neovim key by key.
    */
   const externalEdits = useMemo(
     () => ({
@@ -160,6 +148,7 @@ export function MonacoFileSurface({
 
   // Layout effect rather than effect: the editor measures the node, and doing
   // that after paint shows one frame of an unsized editor.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: creates the Monaco editor once on the host node and disposes it on unmount
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
@@ -231,6 +220,7 @@ export function MonacoFileSurface({
 
   // The open file's model, kept in a cache so leaving a file and coming back
   // finds its undo stack, caret and scroll where they were.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: swaps the open file's cached model into the once-created editor
   useEffect(() => {
     const editor = editorRef.current;
     if (editor === null) return;
@@ -263,13 +253,12 @@ export function MonacoFileSurface({
       saveRef.current.change(next);
     });
     return () => subscription.dispose();
-    // `contents` is deliberately absent: a change to it for the SAME path is an
-    // external edit and is applied by the effect below, not by rebuilding the
-    // model, which would discard the undo stack. A reused model whose file
-    // changed while it was away is caught by that same effect, which runs after
-    // this one on the same render.
+    // `contents` is deliberately absent: a same-path change is an external edit applied by the
+    // effect below (which also catches a reused model that changed while away), not a model
+    // rebuild that would discard the undo stack.
   }, [environmentId, cwd, relativePath, retention, models]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: pushes the word-wrap setting into the once-created editor
   useEffect(() => {
     editorRef.current?.updateOptions({ wordWrap: wordWrap ? "on" : "off" });
   }, [wordWrap]);
@@ -277,6 +266,7 @@ export function MonacoFileSurface({
   // Redefined rather than only re-selected: an environment theme changes the
   // code-surface custom properties without changing light or dark, and the
   // colours have to be read off the node again to catch that.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: redefines the Monaco themes from the host's computed colours
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
@@ -285,6 +275,7 @@ export function MonacoFileSurface({
     monaco.editor.setTheme(resolvedTheme === "dark" ? MESURA_MONACO_DARK : MESURA_MONACO_LIGHT);
   }, [resolvedTheme]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: pushes the code font settings into the once-created editor
   useEffect(() => {
     const editor = editorRef.current;
     if (editor === null) return;
@@ -301,6 +292,7 @@ export function MonacoFileSurface({
     appliedFontRef.current = { editor, family: fontFamilyCode, size: fontSizeCode };
   }, [fontFamilyCode, fontSizeCode]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reveals and highlights the requested line in the editor
   useEffect(() => {
     const editor = editorRef.current;
     const decorations = decorationsRef.current;
@@ -355,23 +347,11 @@ export function MonacoFileSurface({
     },
   });
 
-  // Relative while Neovim is driving, absolute otherwise.
-  //
-  // The numbers are what `3j` and `d5k` are counted off, so they belong to the
-  // modal editing they serve. Monaco's `relative` is Vim's hybrid — the
-  // cursor's own line keeps its absolute number — which is what the
-  // developer's `number` plus `relativenumber` already gives them.
-  //
-  // Keyed on the driver being active, not on the setting. With the setting on
-  // and no session — `nvim` missing, a configuration directory that is not
-  // there — the panel is plain Monaco, and a relative gutter there counts off
-  // a cursor nothing is moving.
-  //
-  // Applied through `updateOptions` rather than only at creation, because the
-  // editor is created once on purpose and outlives every setting change.
-  // Adding this to the creating hook's dependencies would remount the editor
-  // and take the undo stack with it, which is the defect
-  // `monaco-file-surface-wired` exists to prevent.
+  // Relative line numbers while Neovim drives (counts like `3j`), absolute otherwise: keyed on the
+  // driver being active, not the setting, so a fallback plain Monaco has no relative gutter. Set
+  // via `updateOptions` because the editor is created once; adding this to the creating hook's
+  // dependencies would remount it and drop the undo stack (`monaco-file-surface-wired`).
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: switches the once-created editor's line numbers with the Neovim driver
   useEffect(() => {
     editorRef.current?.updateOptions({ lineNumbers: nvim.active ? "relative" : "on" });
   }, [nvim.active]);
@@ -379,6 +359,7 @@ export function MonacoFileSurface({
   // Through a ref because the effect that applies an external change must not
   // be torn down and re-run every time the driver's mode changes.
   const nvimRef = useRef(nvim.takeExternalEdit);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref so the external-change effect is not re-run on mode changes
   useLayoutEffect(() => {
     nvimRef.current = nvim.takeExternalEdit;
   }, [nvim.takeExternalEdit]);
@@ -386,22 +367,17 @@ export function MonacoFileSurface({
   // An external change to the open file: the watcher pushed one, or a save
   // confirmed. Applied as an edit, never `setValue`, because `setValue` clears
   // the undo stack.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: applies an external file change to the model as an undoable edit
   useEffect(() => {
     const editor = editorRef.current;
     const model = editor?.getModel();
     if (!editor || !model) return;
     const current = model.getValue();
     if (current === contents) return;
-    // A render older than the model. Every edit of the editor's own writes the
-    // file's contents at once (the listener above), while this prop reaches the
-    // surface through the panel's state a commit or more later. A burst of
-    // Neovim edits between two commits — a server stall releasing coalesced
-    // keys, a main thread busy with background streams — therefore hands the
-    // surface a text it produced itself a few keys ago. Taken for somebody
-    // else's write, it went to Neovim and deleted the newer keys there (the
-    // phase-6 bench's reverted "measure"). A write from outside reaches the
-    // file's contents first, so a current text that is the model's own means
-    // there is none.
+    // A render older than the model: own edits write the file contents at once, but this prop
+    // arrives a commit or more later, so a burst of Neovim edits can hand back our own older text.
+    // Taken as an external write, it once deleted newer keys in Neovim (phase-6 "measure"). An
+    // outside write reaches the file contents first, so contents equal to the model mean none.
     if (getProjectFileContents(environmentId, cwd, relativePath) === current) return;
     // Our own text coming back as a confirmation. Rewriting the model with what
     // it already said would move the caret for nothing.
@@ -414,11 +390,9 @@ export function MonacoFileSurface({
     const edit = minimalTextEdit(model.getValue(), contents);
     if (edit === null) return;
 
-    // With Neovim driving, the write goes to Neovim rather than to the model.
-    // One `nvim_buf_set_text` is one undo step there, which is what makes a
-    // single `u` take an agent's whole write back — and the `lines` event it
-    // sends afterwards is what puts the text on screen. Writing the model here
-    // as well would show the change twice.
+    // With Neovim driving, the write goes to Neovim, not the model: one `nvim_buf_set_text` is one
+    // undo step there, and its `lines` event puts the text on screen. Writing the model too would
+    // apply the change twice.
     const start = model.getPositionAt(edit.startOffset);
     const end = model.getPositionAt(edit.endOffset);
     const takenByNeovim = nvimRef.current({
@@ -444,6 +418,7 @@ export function MonacoFileSurface({
   }, [contents, environmentId, cwd, relativePath, retention]);
 
   const hasOpenDraftRef = useRef(comments.hasOpenDraft);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref read by the once-installed dismissal listener
   useEffect(() => {
     hasOpenDraftRef.current = comments.hasOpenDraft;
   }, [comments.hasOpenDraft]);
@@ -451,16 +426,19 @@ export function MonacoFileSurface({
   // Read through refs because the dismissal listener is installed once, on
   // mount, and must see Neovim as it is now rather than as it was then.
   const nvimActiveRef = useRef(nvim.active);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref read by the once-installed dismissal listener
   useLayoutEffect(() => {
     nvimActiveRef.current = nvim.active;
   }, [nvim.active]);
   // Layout effect, not render: written after commit and before any later
   // keydown can reach the listener, so it never decides on a stale answer.
   const nvimEscapeRef = useRef(nvim.escapeGoesToNeovim);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref, written after commit so the dismissal listener never reads a stale answer
   useLayoutEffect(() => {
     nvimEscapeRef.current = nvim.escapeGoesToNeovim;
   }, [nvim.escapeGoesToNeovim]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: installs the Escape dismissal listener on the host for its lifetime
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
@@ -473,27 +451,17 @@ export function MonacoFileSurface({
           const position = editor?.getPosition();
           if (editor && position) editor.setPosition(position);
         },
-        // Monaco 0.56 exposes `focus()` and blur *events*, but nothing that
-        // asks the editor to release the keyboard, so the focused node has to
-        // be blurred directly. Which node that is depends on the build: with
-        // the `editContext` option on, Monaco keeps the caret in a
-        // `native-edit-context` div; with it off, in a hidden textarea. Asking
-        // the document what is focused covers both and names neither, so this
-        // does not break when Monaco moves its input handling again.
+        // Monaco 0.56 has no API to release the keyboard, so blur the focused node directly. It is
+        // a `native-edit-context` div or a hidden textarea depending on `editContext`, so ask the
+        // document rather than naming either.
         blur: () => {
           const focused = document.activeElement;
           if (focused instanceof HTMLElement && host.contains(focused)) focused.blur();
         },
       },
-      // An open comment form owns Escape: it cancels the draft rather than
-      // blurring the editor underneath it.
-      //
-      // So does Neovim, unless it is known to rest in plain normal mode —
-      // Escape is how a developer leaves insert, visual or an operator, and a
-      // host that blurred the editor instead would strand them in that mode
-      // with the keyboard somewhere else. Known, not last heard of: a key
-      // still on its way can change the mode, so Escape stays Neovim's until
-      // the answer to every key says plain normal. See `escapeGoesToNeovim`.
+      // An open comment form owns Escape (it cancels the draft). So does Neovim unless it is known
+      // to rest in plain normal mode: a key still in flight can change the mode, and blurring then
+      // strands the developer in insert or visual mode. See `escapeGoesToNeovim`.
       isBlocked: () =>
         hasOpenDraftRef.current || (nvimActiveRef.current && nvimEscapeRef.current()),
       onDismiss: () => {},
@@ -544,11 +512,8 @@ function applyExternalModelEdit(
 ): void {
   applyingExternalEditRef.current = true;
   try {
-    // The edit gets its own undo element, on both sides. Without these,
-    // Monaco merges the incoming rewrite into whatever typing group is still
-    // open, and one Ctrl+Z then reverts the agent's write AND the user's
-    // last few keystrokes together. Measured, not guessed: undoing a
-    // merged group left a half-typed line on screen.
+    // Undo stops on both sides, or Monaco merges the agent's write into the open typing group and
+    // one Ctrl+Z reverts both (measured: it left a half-typed line on screen).
     model.pushStackElement();
     const range = monaco.Range.fromPositions(
       model.getPositionAt(edit.startOffset),

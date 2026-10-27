@@ -18,16 +18,10 @@ export function resolveGrokHome(environment: NodeJS.ProcessEnv, homeDirectory: s
 const isSafePathSegment = (value: string) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value);
 
 /**
- * Remove the native files of a Grok session this process created. Call after
- * the process closes. Two proofs of ownership, and nothing else is touched:
- *
- * - a project directory named for one of the step's own temporary working
- *   directories, which nothing else can share; this also covers a step
- *   cancelled before Grok reported its session ID;
- * - a session directory named for the session ID Grok returned to this step.
- *
- * Fails when a file cannot be removed, so the caller can report a transcript
- * left behind.
+ * Removes only files this step provably owns, after the process closes: a project directory named for
+ * one of the step's temporary working directories (covers a step cancelled before Grok reported its
+ * session ID), and a session directory named for the session ID Grok returned. Fails when a file
+ * cannot be removed, so the caller can report a transcript left behind.
  */
 export const removeGrokSessionFiles = Effect.fn("removeGrokSessionFiles")(function* (input: {
   readonly grokHome: string;

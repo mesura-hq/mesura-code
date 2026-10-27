@@ -1,9 +1,6 @@
 /**
- * Test data for the Factory specs on every client: `factory.plan` activities
- * as the server's `present_plan` handler writes them, and `factory.run`
- * activities as its run tracker writes them. Each test reads the plan and
- * events fixtures itself, since web, mobile and this package load a file
- * differently.
+ * `factory.plan` and `factory.run` activities as the server writes them. Each test reads the plan
+ * and events fixtures itself, since web and this package load a file differently.
  */
 import {
   FACTORY_PLAN_ACTIVITY_KIND,
@@ -269,16 +266,10 @@ export function readFactoryApprovalMessage(text: string): {
 export const FACTORY_RUN_TEST_DIR = "/srv/factory-runs/invoice-csv-export";
 
 /**
- * A point in the fixture run:
- * - `attached`: attached before any event, the provisional activity;
- * - `framed`: started and framed, no phase yet;
- * - `verify`: phase 1 at `verify-1`, one return used, $10.03 spent;
- * - `review`: phase 1 at `review`, the next event after `verify`'s verdict;
- * - `waiting`: phase 2 stopped at a question;
- * - `answered`: the question answered, phase 2 running again;
- * - `degraded`: finished with phase 2 closed degraded (the fixture's end);
- * - `done`: finished with both phases clean;
- * - `stopped`: finished by the coordinator after the answer.
+ * A point in the fixture run: `attached` (before any event), `framed` (no phase yet), `verify`
+ * (phase 1 at `verify-1`, one return, $10.03 spent), `review`, `waiting` (phase 2 at a question),
+ * `answered`, `degraded` (the fixture's end: phase 2 closed degraded), `done` (both phases clean)
+ * and `stopped` (by the coordinator after the answer).
  */
 export type FactoryRunFixturePoint =
   | "attached"

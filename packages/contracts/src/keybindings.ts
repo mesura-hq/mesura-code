@@ -159,12 +159,9 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "composer.workspace",
   "composer.previousWorktree",
   "composer.branch",
-  // Fork additions, kept as one block after upstream's run rather than sorted
-  // into it. Upstream keeps growing that run, and a fork id interleaved with it
-  // turns every one of those additions into a conflict.
-  //
-  // (ADR-003) Upstream ships no keyboard route to attaching at all, so retiring
-  // the fork's attachment stack would have taken the only one.
+  // Fork additions, kept as one block after upstream's run so that upstream's additions to that run
+  // do not conflict. Upstream ships no keyboard route to attaching (ADR-003), so retiring the
+  // fork's attachment stack would have taken the only one.
   "composer.attachFiles",
   // Reaches the Symmetria file tree in the files surface and leaves it again,
   // and opens the file manager over the window. The rename warning below
@@ -181,6 +178,9 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "usage.peek",
   // Held like usage.peek, and opens the sidebar's Hosts dock instead.
   "hosts.peek",
+  // Collapses or expands the sidebar's Working section. The rename warning below applies to this
+  // id too.
+  "sidebar.toggleWorking",
   "chat.new",
   "chat.newLocal",
   "chat.newWithoutProject",
@@ -198,22 +198,15 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "runContext.toggle",
   "runContext.cycleMachine",
   "runContext.toggleWorkspace",
-  // Folds the agent's question prompt into its header so the thread behind it
-  // is readable while the answer is still being composed. Reachable by click
-  // from that header too; the shortcut exists because the question arrives
-  // while the hands are on the keyboard.
-  //
-  // Never rename this id. It is written verbatim into every user's
-  // keybindings.json on first startup, and RETIRED_KEYBINDING_DEFAULTS migrates
-  // a rule's key only — it matches on the command, so it cannot carry a command
-  // to a new name. A rename orphans the rule in every config that already has
-  // it, silently.
+  // Folds the agent's question prompt into its header so the thread stays readable while the answer
+  // is composed. Never rename this id: it is written verbatim into every user's keybindings.json,
+  // and RETIRED_KEYBINDING_DEFAULTS matches on the command, so it cannot move a rule to a new name.
+  // A rename silently orphans the rule in every config that already has it.
   "question.toggleCollapse",
-  // Opens the chat header's inline title rename for the open thread, the
-  // same field a double-click on the title opens. Upstream has no keyboard
-  // route to it. Kept out of THREAD_KEYBINDING_COMMANDS: that group is
-  // traversal, dispatched by the sidebar, and this acts on the open thread
-  // from the chat header. The rename warning above applies to this id too.
+  // Opens the chat header's inline title rename for the open thread, like a double-click on the
+  // title. Kept out of THREAD_KEYBINDING_COMMANDS: that group is traversal, dispatched by the
+  // sidebar, and this acts on the open thread from the chat header. The rename warning above
+  // applies to this id too.
   "thread.rename",
   // Settle and un-settle in one command. Kept out of THREAD_KEYBINDING_COMMANDS
   // because that group is traversal, dispatched by the sidebar; this acts on the
@@ -320,11 +313,7 @@ export const ResolvedKeybindingRule = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "ignore" } });
 export type ResolvedKeybindingRule = typeof ResolvedKeybindingRule.Type;
 
-/**
- * Decoding drops those rules instead of failing the whole payload —
- * rejecting the config would take down the connection over a shortcut the
- * client couldn't dispatch anyway.
- */
+/** Drops undecodable rules without failing the connection. */
 export const ResolvedKeybindingsConfig = ForwardCompatibleArray(ResolvedKeybindingRule).check(
   Schema.isMaxLength(MAX_KEYBINDINGS_COUNT),
 );

@@ -1,16 +1,7 @@
 /**
- * Phase 1 fence of the dictation redesign: acceptance criteria 6 (the key in
- * the secret store, redacted for clients) and 8 (RPC scopes), plus the guard
- * on the usage-limit `managementKey` pattern this phase copies.
- *
- * Entry points:
- * - `ServerSettings.layer` over the real secret store, written through
- *   `updateSettings` as the `server.updateSettings` handler does, and
- *   `redactServerSettingsForClient`, which every settings payload in `ws.ts`
- *   passes through before it reaches a client (the get, update and stream
- *   handlers, and the config snapshot).
- * - `WsRpcGroup` and `requiredScopeForRpcMethod`, which the RPC layer
- *   enforces on every request.
+ * Covers the OpenAI key in the secret store, redacted by `redactServerSettingsForClient` (which
+ * every settings payload in `ws.ts` passes through), and the RPC scopes that
+ * `requiredScopeForRpcMethod` enforces, plus the usage-limit `managementKey` pattern it copies.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {

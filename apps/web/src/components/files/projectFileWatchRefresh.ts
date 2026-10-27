@@ -9,12 +9,9 @@ export type PendingProjectFileWatch =
   | { readonly type: "removed" };
 
 /**
- * What the panel has already acted on for one watched file.
- *
- * `handledRevision` is the revision whose contents the panel is showing, and is
- * null while the file is known to be gone. `baselineTaken` separates "this
- * subscription has said nothing yet" from "the file is currently absent", which
- * are both a null `handledRevision` and need opposite answers.
+ * What the panel has already acted on for one watched file. `handledRevision` is null while the
+ * file is gone; `baselineTaken` separates "nothing said yet" from "currently absent", which share
+ * a null `handledRevision` but need opposite answers.
  */
 export interface ProjectFileWatchState {
   readonly handledRevision: string | null;
@@ -40,19 +37,10 @@ function applyPending(pending: PendingProjectFileWatch): ProjectFileWatchState {
 }
 
 /**
- * Decides whether one watch event should make the panel re-read the file.
- *
- * Pure, because the interesting part is the sequence rather than the wiring:
- * a baseline that must not read, a save window that must defer, and a
- * reconnect whose baseline is real news.
- *
- * Pass `event` as null to re-evaluate when only `enabled` changed, which is how
- * a deferred event is applied once the save confirms.
- *
- * `seenRevision` is the last revision this client handled for this path in an
- * earlier subscription, or null when it has never watched this file. It is what
- * separates a baseline that confirms what is on screen from one that announces
- * a change made while nobody was watching.
+ * Decides whether one watch event should make the panel re-read the file. Pass `event` as null to
+ * apply a deferred event once the save confirms. `seenRevision` is the last revision handled for
+ * this path in an earlier subscription (null if never watched): it tells a baseline that confirms
+ * the screen from one announcing a change made while nobody watched.
  */
 export function nextProjectFileWatchAction(
   state: ProjectFileWatchState,
@@ -78,17 +66,9 @@ export function nextProjectFileWatchAction(
   }
 
   if (!state.baselineTaken) {
-    // On a file being opened for the first time, the baseline is the revision
-    // the panel just read, and recording it is the whole job — reading again
-    // would cost a second read of identical bytes on every file open.
-    //
-    // On a file being returned to, it is not. The panel holds that file's
-    // contents from the last visit and does not re-read them, and nothing
-    // watched the file in between, so a baseline that differs from the revision
-    // last handled for this path is the only notice we will ever get that the
-    // file changed while we were away. Ignoring it leaves the editor showing
-    // text the file no longer has, which is worse than a wasted read: an edit
-    // saved from that state writes the stale version back over the new one.
+    // A first open's baseline is the revision just read, so reading again is waste. A returned-to
+    // file was not watched meanwhile and is not re-read, so a baseline that differs from the last
+    // handled revision is the only notice it changed; ignoring it lets a save write stale text back.
     const changedWhileAway = seenRevision !== null && seenRevision !== event.revision;
     if (changedWhileAway && !enabled) {
       return {

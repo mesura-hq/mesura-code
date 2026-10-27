@@ -46,7 +46,9 @@ export function materializeMuseReplayApplicationMetadata(
                   ...firstPart,
                   text:
                     currentRuntimeInfoPrefix +
-                    firstPart.text.slice(recordedRuntimeInfoPrefix.length),
+                    firstPart.text
+                      .slice(recordedRuntimeInfoPrefix.length)
+                      .replace("T3 Code's files viewer", `${currentTitle}'s files viewer`),
                 },
                 ...params.input.slice(1),
               ],

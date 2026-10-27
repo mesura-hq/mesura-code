@@ -1,21 +1,8 @@
 /**
- * Phase 4 fence of phone push notifications: acceptance criteria 3 to 6 on
- * the dispatcher.
- *
- * Entry point: `PushDispatcher.layer` and its `start()`, over the phase 3
- * harness (`pushDispatcherHarness.testkit.ts`: the real orchestrator
- * stack, the real `PushSubscriptions`, a recording `PushSender`). The real
- * `ClientPresence` is added to the dispatcher's context, wrapped only so a
- * spec can see each time the dispatcher asks `isAnyClientActive()`.
- *
- * How a held push is observed without sleeps: the harness's `flushSends`
- * needs a push to reach its barrier device, which a held push never does.
- * While a client is active, a spec instead commits the one event under test,
- * waits for the dispatcher to ask the presence map or for a send, whichever
- * comes first, drains the dispatcher, and then reads the recorded sends. Before that, it clears the questions the
- * barrier traffic asked.
- *
- * Time is the `TestClock` of `it.effect`.
+ * Phone push criteria 3 to 6 on the dispatcher; the real `ClientPresence` is wrapped to
+ * record each `isAnyClientActive()` question. A held push never reaches `flushSends`'s
+ * barrier, so while a client is active a spec clears the barrier's questions, commits one
+ * event, waits for a presence question or a send, drains, then reads the recorded sends.
  */
 import { ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";

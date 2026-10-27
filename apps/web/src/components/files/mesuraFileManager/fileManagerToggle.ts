@@ -28,11 +28,9 @@ export function closeFileManager(): void {
 }
 
 /**
- * For a surface that restores focus as it closes, such as the command
- * palette: true when the file manager is open and should keep the keyboard,
- * so the surface must not hand it to the composer. Reads the store, not the
- * page, so the answer holds whether or not the layer has mounted yet; one
- * that has not takes focus itself when it mounts.
+ * For a closing surface that restores focus (the command palette): true when the
+ * file manager is open and keeps the keyboard. Reads the store, not the page, so it
+ * holds before the layer mounts; a layer that has not mounted takes focus on mount.
  */
 export function keepFocusInFileManager(): boolean {
   if (!useFileManagerStore.getState().open) return false;

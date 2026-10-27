@@ -2,56 +2,10 @@ import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
 // @effect-diagnostics nodeBuiltinImport:off - reads the app's stylesheets off the checkout, outside any Effect.
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout, as `routes/__root.tsx`
- * does, and whose chat layout is the real `_chat.tsx` route component (the
- * real KeyEngineHost, which draws the block cursor overlay, around the real
- * ChatView, and in it the real ChatComposer with its real Vim adapter). The
- * key engine is installed on `window` before React renders, as `main.tsx`
- * does. Keys are real `keydown` events dispatched from the focused element.
- *
- * Phase 7 of the modal keys production cycle (a readable block cursor on
- * narrow glyphs), in the chat buffer and in the composer:
- * - Criterion 1: on a glyph narrower than 0.5em the cursor is an overlay
- *   0.5em wide, centred on the glyph, drawn instead of the highlight.
- * - Criterion 2: the glyph under the widened cursor is drawn in
- *   `var(--background)`, in the glyph's own computed font family, size,
- *   weight and style.
- * - Criterion 3, guard: on a glyph 0.5em or wider the highlight paints the
- *   cursor as in the baseline, and no overlay is drawn. The composer's
- *   empty-line overlay stays as it is.
- * - Criterion 4: the widened cursor's background resolves to the highlight
- *   cursor's background, in the light and the dark theme.
- * - Criterion 5: the widened cursor follows a scroll, and a held `l` moves
- *   it, with no animation frame in between.
- * `keys/blockCursor.test.ts` covers the geometry decision exhaustively, and
- * `tests/unit/modal-keys-block-cursor-static.test.ts` guards criterion 6.
- *
- * The contract these specs read from the DOM:
- * - The widened cursor is the element `[data-mesura-block-cursor="glyph"]`,
- *   with inline `left`, `top`, `width` and `height` (px, or em against its
- *   own inline font size). It is drawn in the glyph's own container (the
- *   chat row, the composer editor's host), placed from an anchor there. The
- *   native overlay box converts those offsets to viewport coordinates.
- * - A colour is read from the element's inline style, else from the last
- *   `mesura.css` rule that matches it; `var()` resolves through the custom
- *   properties `index.css` and `mesura.css` declare for the theme. The
- *   highlight and widened cursor share the rules in `mesura.css`.
- *
- * Glyph geometry is controlled: a one-character range
- * inside the text node `GLYPH_LINE` has the box `GLYPH_WIDTHS` gives it, the
- * element that holds that text node computes the font `GLYPH_FONT`, and the
- * virtual list's wrapper is a scroll container. Other ranges retain native
- * geometry. Ordinary Vim motions reach `GLYPH_LINE` from the first visible line.
- *
- * Boundaries the fixture replaces, and nothing else: the environment and
- * thread reads, every RPC command and query, the chords (the shipped
- * defaults), unrelated chrome, the CSS highlight registry (recorded instead
- * of painted), the sidebar's thread list, the file manager
- * layer, the virtual list's measurement, and the layout reads named above.
- * The setup follows `AppRoot.composerUndo.fence.test.tsx`.
- */
+// Readable block cursor on narrow glyphs (modal keys phase 7), in the chat buffer and the composer.
+// The widened cursor is `[data-mesura-block-cursor="glyph"]` with inline geometry; a colour comes
+// from its inline style, else the last matching `mesura.css` rule. Glyph geometry is stubbed
+// through `GLYPH_LINE`, `GLYPH_WIDTHS` and `GLYPH_FONT`; other ranges keep native geometry.
 import indexStylesheet from "./index.css?raw";
 import mesuraStylesheet from "./mesura.css?raw";
 

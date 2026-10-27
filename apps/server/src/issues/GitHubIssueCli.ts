@@ -1,10 +1,6 @@
 /**
- * Mesura: runs the GitHub CLI for the issue reads.
- *
- * Upstream replaced its `gh` wrapper (`sourceControl/GitHubCli.ts`) with
- * GitHub API services that carry no issue reads, so the fork's issue reads
- * keep `gh` here, behind the server's process runner and its limits.
- *
+ * Mesura: runs `gh` for issue reads, behind the server's process runner. Upstream's
+ * GitHub API services replaced its `gh` wrapper and carry no issue reads.
  * @module GitHubIssueCli
  */
 import { type VcsError, type VcsProcessExitFailureKind } from "@t3tools/contracts";

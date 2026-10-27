@@ -55,19 +55,10 @@ import { NvimBridge } from "./NvimBridge.ts";
 import { makeEditorTrace, summarizeEditorEvent } from "./editorTrace.ts";
 
 /**
- * The editor sessions a server is holding, one per thread.
- *
- * One per thread rather than one per file, because a session is a whole
- * Neovim: starting one costs a plugin load, and what it accumulates — marks,
- * registers, the jumplist, undo — is exactly what a developer expects to still
- * be there when they move between two files in the same piece of work. Opening
- * a second file switches the window to another buffer inside the session that
- * is already running.
- *
- * Shaped after `terminal/Manager.ts`, deliberately and file by file: a thread
- * keeps a long-lived child process, clients attach and detach from it, it
- * survives a disconnect, and it has to be stopped when the server stops. Those
- * are the terminal's problems, already solved once here.
+ * One editor session per thread, not per file: a session is a whole Neovim, and its
+ * marks, registers, jumplist and undo must survive a switch between files of one thread.
+ * A second file opens as another buffer in the running session.
+ * Shaped after `terminal/Manager.ts`, which solves the same long-lived-child problems.
  */
 
 /** How many sessions a server holds before it starts letting the oldest go. */
@@ -101,12 +92,9 @@ interface Attachment {
 }
 
 /**
- * What the session knows about one client lane's key batches.
- *
  * `generation` is `Session.restarts` when the batch was first seen: a re-send
  * from an earlier Neovim cannot be vouched for (see `EditorSessionInputLostError`).
- * `accepted` counts the bytes of `keys` Neovim has taken, so a partial
- * acceptance resumes where it stopped.
+ * `accepted` counts the bytes of `keys` Neovim took, so a partial acceptance resumes.
  */
 interface InputReceipt {
   readonly index: number;
@@ -134,15 +122,10 @@ interface OpenBuffer {
 }
 
 /**
- * The longest a key's text waits for a cursor read before it goes out alone.
- *
- * Most keys never wait: the host plugin pushes the cursor ahead of the frame.
- * The read is the fallback, and it answers in about a millisecond, or in tens
- * of milliseconds on a loaded server; the text waits for it, so the caret
- * moves with the letter however slow the read is. This bound is only for a
- * Neovim whose main loop is held with the text already sent (`:!make`, a
- * prompt): past it the text is shown with the caret where it was, the caret
- * follows when Neovim answers, and the trace and the log say it happened.
+ * The longest a key's text waits for a fallback cursor read before it goes out alone.
+ * A normal read answers in milliseconds. This bound is for a Neovim whose main loop
+ * is held (`:!make`, a prompt): the text then goes out with the old caret, and the
+ * trace and the log record it.
  */
 const TEXT_WAIT_MS = 1_000;
 
@@ -169,12 +152,8 @@ interface Session {
   waitingForKey: boolean;
   readonly listeners: Map<Listener, Attachment>;
   /**
-   * Events on their way to the listeners.
-   *
-   * A queue rather than a call straight through, because the bridge tells its
-   * watchers from a plain callback and a listener is an Effect. One fiber
-   * drains this, so events reach every attachment in the order Neovim produced
-   * them rather than in whatever order a scheduler happened to pick.
+   * A queue because the bridge notifies from a plain callback and a listener is an
+   * Effect. One fiber drains it, so every attachment gets events in Neovim's order.
    */
   readonly outbox: Queue.Queue<StampedEvent>;
   /** The last sequence number given to an event; see `Attachment`. */
@@ -188,11 +167,9 @@ interface Session {
   /** Stops the bridge subscription when the session goes. */
   unsubscribe: (() => void) | null;
   /**
-   * Key batches by client lane, so a re-sent batch is applied once.
-   *
-   * Per lane, because two windows type into one session: a single "last
-   * batch" let window B's input erase window A's record, and A's re-send was
-   * applied twice. Bounded by `MAX_INPUT_LANES`, oldest lane first.
+   * Key batches by client lane, so a re-sent batch is applied once. Per lane because
+   * two windows type into one session: one shared record let window B erase window A's,
+   * and A's re-send was applied twice. Bounded by `MAX_INPUT_LANES`, oldest lane first.
    */
   readonly inputReceipts: Map<string, InputReceipt>;
   /** Publishes the events `wireNotifications` holds for a cursor; see there. */
@@ -223,13 +200,9 @@ export class EditorSessionManager extends Context.Service<
       input: EditorSessionOpenInput,
     ) => Effect.Effect<EditorSessionOpenResult, EditorSessionError>;
     /**
-     * Registers a listener for the life of the caller's scope, after sending
-     * it a snapshot of where the session is now.
-     *
-     * The snapshot comes first and it comes to this attachment only: a client
-     * that joins late has to be told the whole state before a delta means
-     * anything, and a client that is already attached must not be sent a
-     * second one.
+     * Registers a listener after sending it, and only it, a snapshot. A late client
+     * needs the whole state before a delta means anything, and an attached client
+     * must not get a second snapshot.
      */
     readonly attachStream: (
       input: EditorSessionAttachInput,
@@ -285,17 +258,9 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   const threadLocks = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
 
   /**
-   * One permit per thread, held for a whole session lifecycle operation.
-   *
-   * The map reference is synchronized, and that is not enough on its own: a
-   * `Session` is a mutable object living inside it, and every field that
-   * matters — which file the window shows, how many clients are attached,
-   * whether it is still alive — is written outside the reference. Two `open`
-   * calls for one thread would otherwise both find no session, both spawn a
-   * Neovim, and the second would overwrite the first in the map, leaving a
-   * live process nothing can reach and nothing will ever kill.
-   *
-   * Taken from `terminal/Manager.ts`, which had the same problem first.
+   * One permit per thread, held for a whole session lifecycle operation. The map
+   * reference is synchronized, but `Session` fields are mutated outside it: without
+   * this lock, two `open` calls both spawn a Neovim and the second orphans the first.
    */
   const getThreadLock = (threadId: string) =>
     SynchronizedRef.modifyEffect(threadLocks, (current) => {
@@ -310,12 +275,8 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     Effect.flatMap(getThreadLock(threadId), (semaphore) => semaphore.withPermit(effect));
 
   /**
-   * A counter, not a clock.
-   *
-   * Eviction only needs to know which session was used least recently, and a
-   * counter answers that exactly. A wall clock would answer it too, and would
-   * also make this depend on time, which is a service to thread through and a
-   * thing for a test to have to control.
+   * A counter, not a clock: eviction needs only the least recently used order, and a
+   * wall clock would add a time dependency for tests to control.
    */
   let activityTick = 0;
   const now = () => (activityTick += 1);
@@ -392,12 +353,8 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   };
 
   /**
-   * Resolves a path inside the project, the same way a read does.
-   *
-   * Neovim is given the name and never opens the file, so this is not an
-   * access check — but a name is still something the developer did not ask
-   * for, and a buffer called `../../.ssh/id_rsa` would be shown to them as
-   * though it were theirs.
+   * Resolves a path inside the project. Neovim never opens the file, so this is not an
+   * access check, but a buffer named `../../.ssh/id_rsa` must not appear as a project file.
    */
   const resolveWithinRoot = Effect.fn(function* (
     threadId: string,
@@ -444,28 +401,18 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     session.unsubscribe = null;
     yield* deliverNow(session, { type: "exited", code: null, reason });
     session.listeners.clear();
-    yield* Scope.close(session.scope, Effect.void as never).pipe(
-      Effect.catchCause(() => Effect.void),
-    );
+    yield* Scope.close(session.scope, Effect.void as never).pipe(Effect.ignoreCause);
   });
 
   /**
-   * Lets the oldest unattached session go once there are too many.
-   *
-   * By whether anybody is attached rather than by age alone: a session
-   * somebody is looking at must never be taken away underneath them, however
-   * long ago it started. The consequence, said out loud rather than left to be
-   * discovered: when every session is attached this evicts nothing, so the
-   * limit bounds idle sessions and not live ones. A developer with thirty
-   * threads open at once really would be running thirty Neovims. That is the
-   * right trade while the alternative is closing an editor somebody is typing
-   * into, and it is the thing to revisit if it ever bites.
+   * Lets the oldest unattached session go once there are too many. An attached session
+   * is never evicted, so the limit bounds idle sessions, not live ones: thirty attached
+   * threads run thirty Neovims. Revisit if that ever bites.
    */
   const evictIfNeeded = Effect.fn("EditorSessionManager.evictIfNeeded")(function* (
     /**
      * How many sessions are about to join. Eviction runs before the new
-     * session is in the map — so that it can never choose the one being
-     * opened — which means it has to be told that one is coming.
+     * session is in the map, so it can never choose the one being opened.
      */
     incoming: number,
   ) {
@@ -503,14 +450,9 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     );
 
   /**
-   * Starts a Neovim for a thread and wires its notifications to the listeners.
-   *
-   * `cwd` is the thread's project, and it is not optional in practice: the
-   * configuration's plugins root themselves at Neovim's working directory. Left
-   * at the server's own (the home directory, for the installed service),
-   * neo-tree built a tree of the whole home directory and re-rendered it on
-   * every edit — measured at 100% CPU and 1.7 GB, with each keystroke waiting
-   * ten seconds or more behind it.
+   * `cwd` must be the thread's project: plugins root themselves at Neovim's working
+   * directory. At the server's home directory, neo-tree re-rendered the whole home
+   * on every edit (measured: 100% CPU, 1.7 GB, keystrokes delayed 10 s or more).
    */
   const startSession = Effect.fn("EditorSessionManager.startSession")(function* (
     threadId: string,
@@ -566,7 +508,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         ),
       ),
       Effect.forever,
-      Effect.catchCause(() => Effect.void),
+      Effect.ignoreCause,
       Effect.forkIn(scope),
     );
 
@@ -605,15 +547,9 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     );
 
   /**
-   * Where the session is now.
-   *
-   * `withHighlightDefinitions` is for a client that has none of them yet: one
-   * that just attached, or every client after a restart renumbered them.
-   * Definitions otherwise go out once per session, so a client that attached
-   * later — a reload, a second window — never had the colours: flash's labels
-   * were drawn with no background over the letters they replace, and its
-   * dimmed backdrop was not dimmed. A file switch leaves them out, because
-   * every attached client already holds them and a long session has thousands.
+   * `withHighlightDefinitions` is for a client that has none yet: a new attachment, or
+   * every client after a restart renumbered them. Without it, a late client drew flash
+   * labels with no colours. A file switch omits them: attached clients already hold them.
    */
   const snapshotOf = (
     session: Session,
@@ -685,12 +621,8 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
 
         if (existing === undefined) {
           created = true;
-          // Everything a reader could need is set *before* the session becomes
-          // reachable. Published first and filled in after, an attachment that
-          // arrived in between would find a session with no file and send a
-          // snapshot whose `relativePath` is empty — which the contract
-          // refuses, so the client would get an encoding failure rather than
-          // an editor.
+          // Set before the session becomes reachable: an attachment in between would
+          // send a snapshot with an empty `relativePath`, which the contract refuses.
           session.currentPath = input.relativePath;
           yield* wireNotifications(session);
 
@@ -705,17 +637,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         session.lastActivityAt = now();
         // Before any non-fast request below: see `cancelPendingCommand`.
         yield* cancelPendingCommand(session, "open");
-        // Not `session.currentPath` yet. The path is what every snapshot and
-        // every published `lines` event is attributed to, so committing it
-        // before the buffer actually exists means a failure anywhere below
-        // leaves a live session naming the new file while the mirror still
-        // carries the old one's text — and the next attachment gets that pair
-        // and saves it. It is set once the mirror is on the buffer, just
-        // before the snapshot is built. Nothing has to be restored on failure:
-        // leaving it alone *is* the restore, because the old value is still
-        // there. A session created by this very call is dropped by the
-        // `tapCause` below, so its early assignment cannot outlive a failure
-        // either.
+        // Not `session.currentPath` yet: a failure below would leave the new name on the
+        // old buffer's text, and the next attachment would save that pair. It is set once
+        // the mirror is on the buffer, so failure needs no restore. A session created by
+        // this call is dropped by the `tapCause` below.
         session.buffers.set(absolutePath, {
           relativePath: input.relativePath,
           absolutePath,
@@ -723,16 +648,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         });
         yield* trimBuffers(session);
 
-        // The buffer `mesura.open` returns is the one the mirror must follow,
-        // and it is taken here rather than left to the `BufEnter`
-        // announcement. That announcement is a notification and lands whenever
-        // the notification fiber reaches it, which can be after the snapshot
-        // below is built — and a snapshot built from the previous buffer sends
-        // the client somebody else's text as the file it asked for. Under a
-        // configuration that restores a session or opens a picker at start,
-        // that somebody else is a plugin, and the client then saves a plugin's
-        // window over the file. Measured: a workflow file and a source file
-        // were both reduced to a picker's one-line prompt this way.
+        // Follow the buffer `mesura.open` returns, not the `BufEnter` notification: that
+        // can land after the snapshot, which then carries another buffer's text. Under a
+        // config that opens a picker at start, the client saved the picker's one-line
+        // prompt over real files (measured).
         const openedBuffer = (yield* request(session, "nvim_exec_lua", [
           "return mesura.open(...)",
           [absolutePath, [...input.lines]],
@@ -771,12 +690,9 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
 
         session.currentPath = input.relativePath;
         const snapshot = snapshotOf(session, { withHighlightDefinitions: created });
-        // Every attachment is told which file the session now has open, not
-        // just the caller. One session serves the whole thread, so a client
-        // that does not learn about the switch would keep applying this
-        // buffer's line events to the file it still believes is open.
-        // Held text goes first: the snapshot already contains it, and a
-        // `lines` event arriving after it would be applied a second time.
+        // Every attachment gets the snapshot, or it would apply this buffer's `lines` to
+        // the file it still believes is open. Held text goes first: the snapshot already
+        // contains it, and a `lines` event after it would be applied twice.
         session.releaseHeld();
         publish(session, { type: "snapshot", snapshot });
         // After the snapshot went out: the read is a Neovim round trip, and
@@ -793,18 +709,13 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   });
 
   /**
-   * Turns what a session reports into wire events.
-   *
-   * Three kinds arrive. Text comes as `lines`, passed through in Neovim's own
-   * zero-based half-open terms rather than translated, so the off-by-one lives
-   * in one place instead of somewhere nobody looks. A frame carries the cursor
-   * and mode, which are read rather than taken from the redraw stream because
-   * the stream's own cursor lags a mapping that has already run. And
-   * `mesura:write` is the one that is not drawing at all: Neovim asking for
-   * the buffer to be saved, which the host answers because the host, not
-   * Neovim, owns the file.
+   * `lines` keep Neovim's zero-based half-open ranges, so the off-by-one lives in one
+   * place. Cursor and mode are read, not taken from the redraw stream, whose cursor lags
+   * a mapping that already ran. `mesura:write` asks the host to save: the host owns the file.
    */
-  const wireNotifications = (session: Session) => {
+  const wireNotifications = Effect.fn("EditorSessionManager.wireNotifications")(function (
+    session: Session,
+  ) {
     let lastCursorLine = -1;
     let lastCursorCol = -1;
     let lastMode = "";
@@ -817,17 +728,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     let lastVisual = "";
 
     /**
-     * Events held back while a key's text waits for the cursor it moved.
-     *
-     * A `lines` event arrives before the frame that draws it. Published as
-     * it came, it left in a stream chunk of its own, and the RPC server sends
-     * the next chunk only after the client's Ack: the caret trailed the letter
-     * it typed by a whole round trip. So from a `lines` event on, everything is
-     * held, in order, and published together at the frame. The host plugin
-     * pushes the cursor ahead of that frame, so normally nothing waits on
-     * Neovim. When no push came, the frame forks a cursor read and the text
-     * waits for it; a watchdog bounds that wait for a read Neovim cannot
-     * answer while its main loop is held.
+     * From a `lines` event to its frame, events are held and published together: alone,
+     * `lines` left in its own stream chunk, and the RPC server waits for the client's Ack
+     * before the next, so the caret trailed by a round trip. Without a cursor push, the
+     * text waits for a cursor read, bounded by the `TEXT_WAIT_MS` watchdog.
      */
     // Stamped as they are made, not as they go out: a snapshot taken while
     // they wait already holds them, and an attachment made then must skip them.
@@ -906,11 +810,8 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         return;
       }
 
-      // A frame. Under a real configuration these arrive about every four
-      // milliseconds whether or not anything changed, so nothing is sent
-      // unless the cursor or the mode actually moved — otherwise an idle
-      // session would push a couple of hundred messages a second saying
-      // nothing.
+      // A frame. A real configuration produces one about every 4 ms even when idle,
+      // so only a cursor or mode change is sent.
       const { line, col } = session.bridge.cursor;
       if (line !== lastCursorLine || col !== lastCursorCol) {
         lastCursorLine = line;
@@ -1029,7 +930,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         Effect.forkIn(session.bridgeScope),
       );
     });
-  };
+  });
 
   const requireSession = (threadId: string) => lookup(threadId);
 
@@ -1041,14 +942,9 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * One request per batch in the normal case.
    */
   /**
-   * Gives the buffer's grid `cols` columns and `rows` rows.
-   *
-   * The buffer's own grid, not the outer one. With `ext_multigrid` the outer
-   * grid is the whole screen and resizing it leaves the window inside it
-   * whatever size it was, so the columns a flash label needs never reach the
-   * grid the label is drawn on. The id is not a constant: the redraw stream
-   * assigns it, and the bridge is what reads that stream. Before the first
-   * `win_pos` there is nothing to resize but the outer grid.
+   * Resizes the buffer's own grid: with `ext_multigrid`, resizing the outer grid leaves
+   * the window's size alone. The redraw stream assigns the grid id; before the first
+   * `win_pos`, only the outer grid exists.
    */
   const resizeGrid = Effect.fn(function* (session: Session, cols: number, rows: number) {
     // Unchanged is no request at all: Neovim would answer it with nothing.
@@ -1088,13 +984,9 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       unpredictable,
     });
     if (cols !== null) yield* resizeGrid(session, cols, session.grid.rows);
-    // A change nothing predicted (a mapping, a completion, a paste wider
-    // than the bound left room for) can still have scrolled the window
-    // sideways. Once the grid is wide enough again, scrolling back is what
-    // takes the shift away: Neovim does not undo it on a wider grid by
-    // itself, and it keeps the cursor in view if 0 would hide it.
-    // Only when the line fits: past the bound the shift is the window's
-    // to keep, and resetting it would redraw every row on every key.
+    // An unpredicted change (a mapping, a completion, a wide paste) can still scroll the
+    // window sideways, and Neovim does not undo that on a wider grid. Reset it only when
+    // the line fits: past the bound, a reset would redraw every row on every key.
     if (
       bridge.leftColumn > 0 &&
       lineFits(bridge.lines[bridge.cursor.line - 1] ?? "", bridge.tabstop, session.grid.cols)
@@ -1133,16 +1025,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   });
 
   /**
-   * Refuses a call whose Neovim request would wait for a key nobody can send.
-   *
-   * While Neovim waits for the rest of a command (`g`, `Z`, an operator), it
-   * defers every non-fast request, `nvim_exec_lua` included, until that key
-   * arrives. These calls hold the thread's lock, and the key arrives through
-   * `input`, which takes the same lock, so the request never answered and the
-   * thread stopped taking keys: the base of the editor latency cycle lost every
-   * key of five S8 windows that way, after a `Z` typed in normal mode. Asked
-   * with `nvim_get_mode`, which Neovim answers while it waits, and only when
-   * the last batch left it waiting, so the common path costs nothing.
+   * Refuses the call while Neovim waits for the rest of a command (`g`, `Z`, an operator):
+   * Neovim defers non-fast requests until that key, which `input` sends under the same
+   * lock, so the thread deadlocked. Checked with `nvim_get_mode`, which Neovim answers
+   * while waiting, and only when the last batch left it waiting.
    */
   const refuseWhileWaitingForKey = Effect.fn(function* (session: Session, method: string) {
     if (!session.waitingForKey) return;
@@ -1159,16 +1045,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   });
 
   /**
-   * Cancels the command Neovim is waiting in, for a call that must reach
-   * Neovim regardless: opening a file, applying an outside write.
-   *
-   * `refuseWhileWaitingForKey` is right for a cursor move or a viewport: the
-   * refused call is discarded, nothing retries it, and the user's next click
-   * or scroll sends a fresh one. These two carry state that must reach Neovim
-   * and a refusal would lose. The
-   * cancel is `<Esc>` through `nvim_input`, which Neovim takes while it waits,
-   * and the mode read after it is ordered behind it (see `modeAfterKeys`). A
-   * half-typed command is the user's to type again; a lost write is not.
+   * Sends `<Esc>` for calls that must reach Neovim (open, an outside write), where
+   * `refuseWhileWaitingForKey` would lose state. `nvim_input` is taken while Neovim
+   * waits, and the mode read is ordered behind it (see `modeAfterKeys`). A half-typed
+   * command is the user's to retype; a lost write is not.
    */
   const cancelPendingCommand = Effect.fn(function* (session: Session, method: string) {
     if (!session.waitingForKey) return;
@@ -1190,21 +1070,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   });
 
   /**
-   * Where Neovim is once it has consumed every key it was given: the answer to
-   * `input`, and `open`'s `escape`.
-   *
-   * `nvim_get_mode` is the one call ordered after the keys. Neovim defers it
-   * behind pending input unless it is blocked waiting for a key (neovim#6247),
-   * and answers at once when it is, with `blocking` set. Measured against a
-   * real Neovim, pipelined right after `nvim_input`, in
-   * `conformance/inputMode.test.ts`. A non-fast call is ordered after the keys
-   * too, but never answers while Neovim waits in a native `f`.
-   *
-   * Plain `n` that is not blocking is read once more, because two waits do not
-   * show in the mode: flash's `f`, which waits for its character in
-   * `getcharstr()` while Neovim still serves requests, and flash's labels.
-   * See `mesura.escape_state`. A batch typed in insert mode costs the one fast
-   * call.
+   * `nvim_get_mode` is ordered after pending keys, yet answers at once with `blocking`
+   * set when Neovim waits for a key (neovim#6247; see `conformance/inputMode.test.ts`).
+   * Plain non-blocking `n` is read again with `mesura.escape_state`, because flash's `f`
+   * (in `getcharstr()`) and flash's labels do not show in the mode.
    */
   const modeAfterKeys = Effect.fn(
     function* (session: Session) {
@@ -1440,7 +1309,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     settleForTest: Effect.fn(function* (input) {
       const session = (yield* SynchronizedRef.get(sessions)).get(input.threadId);
       if (session === undefined) return;
-      yield* session.bridge.settle.pipe(Effect.catchCause(() => Effect.void));
+      yield* session.bridge.settle.pipe(Effect.ignoreCause);
     }),
   };
 
@@ -1448,18 +1317,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     withThreadLock(input.threadId, dropSession(input.threadId, "closed"));
 
   /**
-   * Puts a new Neovim under a session whose process exited.
-   *
-   * In the same session object, so the client's attachment — which holds the
-   * session's listeners, not the process — keeps working and simply receives a
-   * snapshot. The alternative left a thread whose editor answered nothing until
-   * the server restarted: the attachment stayed open to a session with no
-   * process behind it, and every call on it failed.
-   *
-   * The file is reopened with the text the mirror last held, which is the text
-   * the client is showing. Neovim's undo history does not survive, and the
-   * message says so. Bounded, because a configuration that kills Neovim at
-   * start would otherwise restart it forever.
+   * Puts a new Neovim under the same session object, so attachments survive and get a
+   * snapshot; otherwise every call failed until the server restarted. The file reopens
+   * with the mirror's text, without undo history. Bounded by `MAX_RESTARTS_PER_SESSION`
+   * against a configuration that kills Neovim at start.
    */
   const restartSession = (session: Session, exited: NvimBridge.Session) =>
     withThreadLock(
@@ -1474,9 +1335,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         const lines = [...exited.lines];
         session.unsubscribe?.();
         session.unsubscribe = null;
-        yield* Scope.close(session.bridgeScope, Effect.void as never).pipe(
-          Effect.catchCause(() => Effect.void),
-        );
+        yield* Scope.close(session.bridgeScope, Effect.void as never).pipe(Effect.ignoreCause);
 
         if (session.restarts >= MAX_RESTARTS_PER_SESSION) {
           yield* giveUp(
@@ -1557,15 +1416,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
 });
 
 /**
- * One attachment as a stream, which is what the websocket layer serves.
- *
- * The attach runs on the stream's own fiber, so an attach that fails — no
- * session for the thread, as after a server restart — fails the stream and the
- * client hears it. REGRESSION: this was `Stream.callback` first, which runs its
- * registration on a forked fiber nothing watches. The failure vanished there,
- * the stream stayed open and silent, and the client never learned it had to
- * open the file again. A session that ends sends `exited`, and the stream ends
- * after it.
+ * The attach runs on the stream's own fiber, so a failed attach fails the stream.
+ * REGRESSION: `Stream.callback` registered on an unwatched forked fiber, so the
+ * failure vanished and the client never learned to reopen the file.
+ * The stream ends after an `exited` event.
  */
 export const attachEventStream = (
   manager: EditorSessionManager["Service"],

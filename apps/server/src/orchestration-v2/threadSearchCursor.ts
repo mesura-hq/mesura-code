@@ -2,13 +2,9 @@
 import * as NodeCrypto from "node:crypto";
 
 /**
- * Mesura: cursors for ThreadSearchEvidence.
- *
- * Opaque, exclusive keyset cursors for agent thread search pages. Clients must
- * treat them as opaque. Each carries a kind tag, so a catalog cursor replayed
- * against evidence (or the reverse) is rejected instead of being read as a
- * boundary of the wrong table. Decoders return null for anything malformed or
- * foreign; callers restart at the first page.
+ * Mesura: opaque, exclusive keyset cursors for ThreadSearchEvidence. A kind tag rejects a catalog
+ * cursor replayed against evidence (or the reverse). Decoders return null for anything malformed
+ * or foreign; callers restart at the first page.
  */
 
 /** Boundary of the last catalog row delivered, under `(created_at DESC, thread_id ASC)`. */
@@ -18,12 +14,9 @@ export interface ThreadSearchCatalogCursor {
 }
 
 /**
- * Where an evidence walk resumes; the next page reads strictly past it. A
- * global walk moves down the table by rowid. A walk inside one thread moves
- * down that thread's `(created_at, message_id)` index instead, the only order
- * SQLite can read a thread in without sorting all of its messages first. Its
- * boundary is stored as the boundary row's rowid, not its message_id: message
- * ids have no length limit, and the cursor has one.
+ * Where an evidence walk resumes, exclusive. A thread walk follows its `(created_at, message_id)`
+ * index, the only order SQLite reads without sorting the whole thread. Its boundary is a rowid,
+ * because message ids have no length limit and the cursor has one.
  */
 export type ThreadSearchEvidencePosition =
   | { readonly kind: "rowid"; readonly beforeScanId: number }

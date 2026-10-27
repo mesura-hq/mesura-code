@@ -4,13 +4,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 import PullRequestFilesViewed from "./Migrations/053_PullRequestFilesViewed.ts";
 
 /**
- * Mesura: dev builds of the fork recorded `053_ProjectionProjectIconDiscovery`
- * under the id upstream later gave to `053_PullRequestFilesViewed`. The
- * migrator skips every id at or below the latest recorded one, so such a
- * database would never get upstream's table. Run upstream's 053 (idempotent
- * DDL) and rename the ledger row. The fork's `icon_discovery_json` column
- * stays behind unused; icon discovery state now lives in the fork table that
- * `ensureMesuraSchema` creates.
+ * Mesura: fork dev builds recorded `053_ProjectionProjectIconDiscovery` under the id
+ * upstream later gave `053_PullRequestFilesViewed`, and the migrator skips ids at or below
+ * the latest recorded one. Run upstream's 053 (idempotent DDL) and rename the ledger row;
+ * the fork's `icon_discovery_json` column stays behind unused.
  */
 export const reconcileMesuraMigrations = Effect.fn("reconcileMesuraMigrations")(function* () {
   const sql = yield* SqlClient.SqlClient;

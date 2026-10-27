@@ -14,14 +14,9 @@ import { NvimAdapter, type NvimProcess, type NvimSpawnInput } from "./NvimAdapte
 import * as EditorSessionManager from "./Manager.ts";
 
 /**
- * A Neovim that is not there, for driving the manager.
- *
- * The fake answers msgpack-RPC rather than standing in for the bridge, so
- * everything between the manager and the wire — the framing, the mirror, the
- * launch resolution — is exercised too. What it cannot do is behave like
- * Neovim; that is the conformance harness's job, and the two are deliberately
- * separate. A fake that tried to be Neovim would be a second implementation of
- * it, and the tests would agree with whichever of the two was wrong.
+ * A fake Neovim that answers msgpack-RPC, so the framing, the mirror and the launch resolution
+ * run too. It does not imitate Neovim's behaviour: that is the conformance harness's job, and
+ * a second implementation would let the tests agree with whichever one was wrong.
  */
 
 const packr = new Packr({ useRecords: false });
@@ -46,6 +41,8 @@ export class FakeNvim {
   /** Replies to calls this matches wait in `#heldReplies` until released. */
   #holdMatch: ((method: string, params: ReadonlyArray<unknown>) => boolean) | null = null;
   #heldReplies: Uint8Array[] = [];
+  /** Completes when a reply is first held after `holdReplies`, so the call reached the fake. */
+  #replyHeld = Deferred.makeUnsafe<void>();
   /** Calls this matches are answered with an error, as a Neovim that refused them. */
   #failMatch: ((method: string, params: ReadonlyArray<unknown>) => boolean) | null = null;
 
@@ -57,6 +54,12 @@ export class FakeNvim {
   /** Holds the replies to matching calls, the way a busy or stalled Neovim does. */
   holdReplies(match: (method: string, params: ReadonlyArray<unknown>) => boolean): void {
     this.#holdMatch = match;
+    this.#replyHeld = Deferred.makeUnsafe<void>();
+  }
+
+  /** Waits until a reply matching `holdReplies` is held. */
+  awaitHeldReply(): Effect.Effect<void> {
+    return Deferred.await(this.#replyHeld);
   }
 
   /** Answers every held call, in order, and stops holding. */
@@ -133,8 +136,10 @@ export class FakeNvim {
       this.#outbound = queue;
     };
     const reply = (method: string, params: ReadonlyArray<unknown>, bytes: Uint8Array) => {
-      if (this.#holdMatch?.(method, params)) this.#heldReplies.push(bytes);
-      else if (this.#outbound !== null) Queue.offerUnsafe(this.#outbound, bytes);
+      if (this.#holdMatch?.(method, params)) {
+        this.#heldReplies.push(bytes);
+        Deferred.doneUnsafe(this.#replyHeld, Effect.void);
+      } else if (this.#outbound !== null) Queue.offerUnsafe(this.#outbound, bytes);
     };
 
     return Effect.gen(function* () {

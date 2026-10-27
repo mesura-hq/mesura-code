@@ -1,40 +1,9 @@
 import { flushBrowserTasks } from "./browserTasks";
 /**
- * The modal editor's key path, mounted for real down to the RPC session.
- *
- * What is real: `useNvimFileEditor` and `useNvimDriver` under React, the
- * `editorSession*` commands and their schedulers, `useAtomCommand`, the
- * environment command and subscription plumbing in `client-runtime`, and
- * `NvimStatusStrip`, rendered the way `MonacoFileSurface` renders it.
- *
- * What is replaced, and nothing else:
- * - `connectionAtomRuntime`: an atom runtime whose `EnvironmentRegistry`
- *   hands every call the fake supervisor below. Its RPC session answers
- *   `editorSession.*` from a log the test controls, so a request's reply,
- *   failure and timing are the test's to decide. A disconnect sets the
- *   supervisor's session to `None`, as the real supervisor does, and fails
- *   the requests in flight with a transport `RpcClientError`.
- * - the Monaco editor: an object that hands out `onKeyDown` and answers every
- *   other call with a disposable. `model` is null, so the driver's text and
- *   cursor effects never run; the keys effect needs only the editor. Given a
- *   `layout`, the editor also lays out a model with word wrap on
- *   (`makeHarnessModel`), so the text, cursor and viewport effects run against
- *   an editor that scrolls, reveals and reports its visible lines as Monaco's
- *   does — see `makeFakeEditor`.
- * - `monaco-editor` itself (see `mockMonacoEditor`) and the keybindings atom.
- *
- * `mountMonacoFileSurface` goes one level up: it mounts `MonacoFileSurface`
- * itself, with its dismissal installed, on an editor whose keys arrive through
- * the DOM — see there.
- *
- * Wire it up in the test file, before the imports that load the editor:
- *
- * ```ts
- * const harness = vi.hoisted(() => () => import("~/test/nvimEditorHarness"));
- * vi.mock("~/connection/runtime", async () => (await harness()).mockConnectionRuntime());
- * vi.mock("~/state/server", async () => (await harness()).mockServerState());
- * vi.mock("monaco-editor", async () => (await harness()).mockMonacoEditor());
- * ```
+ * The modal editor's key path, real down to the RPC session (`useNvimFileEditor`, `useNvimDriver`,
+ * the `editorSession*` commands, `NvimStatusStrip`). Replaced: `connectionAtomRuntime` (a fake
+ * supervisor whose session the test answers), the Monaco editor, `monaco-editor` and the keybindings
+ * atom. Mock `~/connection/runtime`, `~/state/server` and `monaco-editor` before the editor loads.
  */
 import { RegistryContext } from "@effect/atom-react";
 import {
@@ -183,23 +152,26 @@ function makeTransport() {
     notify();
   };
 
-  const receive = (method: HarnessRequest["method"], threadId: string, payload: string) =>
-    Effect.gen(function* () {
-      const reply = yield* Deferred.make<EditorSessionInputResult | undefined, HarnessReplyError>();
-      const request: PendingRequest = { method, threadId, payload, settled: false, reply };
-      requests.push(request);
-      maxInFlightInputs = Math.max(maxInFlightInputs, inFlightInputs());
-      maxInFlightKeyLane = Math.max(maxInFlightKeyLane, inFlightKeyLane());
-      notify();
-      // The server rejects what the contract would reject, so an oversized
-      // batch cannot pass by reaching a fake that does not check.
-      if (method === "input" && payload.length > INPUT_KEYS_LIMIT) {
-        settle(request, { kind: "server-error" });
-      } else if (method === "open" ? !opensHeld : autoReply || method === "viewport") {
-        settle(request, { kind: "ok" });
-      }
-      return yield* Deferred.await(reply);
-    });
+  const receive = Effect.fn("NvimEditorHarness.receive")(function* (
+    method: HarnessRequest["method"],
+    threadId: string,
+    payload: string,
+  ) {
+    const reply = yield* Deferred.make<EditorSessionInputResult | undefined, HarnessReplyError>();
+    const request: PendingRequest = { method, threadId, payload, settled: false, reply };
+    requests.push(request);
+    maxInFlightInputs = Math.max(maxInFlightInputs, inFlightInputs());
+    maxInFlightKeyLane = Math.max(maxInFlightKeyLane, inFlightKeyLane());
+    notify();
+    // The server rejects what the contract would reject, so an oversized
+    // batch cannot pass by reaching a fake that does not check.
+    if (method === "input" && payload.length > INPUT_KEYS_LIMIT) {
+      settle(request, { kind: "server-error" });
+    } else if (method === "open" ? !opensHeld : autoReply || method === "viewport") {
+      settle(request, { kind: "ok" });
+    }
+    return yield* Deferred.await(reply);
+  });
 
   /** What the harness file holds, as every attachment's snapshot and every `open` reply say. */
   const DEFAULT_SNAPSHOT: EditorSessionSnapshot = {
@@ -661,16 +633,9 @@ function wrappedLayout(layout: HarnessLayout) {
 }
 
 /**
- * A Monaco editor that delivers a keydown and a mouse click, and, given a
- * layout, scrolls: `setScrollTop`, `revealPosition` (the smallest scroll that
- * shows the position, as `ScrollType.Immediate` does), `getVisibleRanges` and
- * `onDidScrollChange`, with the arithmetic of `wrappedLayout`.
- *
- * Given a `host`, the editor also lives in the DOM, as Monaco 0.56 does: a
- * focusable `native-edit-context` node inside the host holds the caret,
- * `focus` and `hasTextFocus` are about that node, and `onKeyDown` listens to
- * keydowns on it. A key then reaches the driver only if nothing earlier in the
- * event's path — the dismissal's capture listener on the document — stopped it.
+ * A Monaco editor that delivers keydowns and clicks and, given a layout, scrolls as
+ * `ScrollType.Immediate` does. Given a `host`, it lives in the DOM as Monaco 0.56 does: a focusable
+ * `native-edit-context` node holds focus and keys, so the document's capture listeners see a key first.
  */
 function makeFakeEditor(layout?: HarnessLayout, host?: HTMLElement) {
   let keyListener: ((event: { browserEvent: KeyboardEvent }) => void) | undefined;
@@ -866,22 +831,9 @@ function makeSurfaceModels(model: HarnessModel) {
 }
 
 /**
- * Mounts `MonacoFileSurface` — the file panel's editor, with its Neovim hook,
- * its status strip and its dismissal listeners — on an editor that lives in
- * the DOM (`makeFakeEditor` with a host) and lays out `layout`.
- *
- * Keys are typed the way a browser delivers them: `type` dispatches a keydown
- * on whatever element has focus, so the dismissal's capture listener on the
- * document sees it first, and the editor's own listener only if the dismissal
- * let it through. A key typed after focus left the editor lands on the body.
- *
- * `keysOutsideEditor` records every keydown that reached the document with its
- * target outside the editor and not taken by anyone (`defaultPrevented` false):
- * the keys the chat composer's type-to-focus would take
- * (`shouldRedirectInputToComposer` in `ChatView.tsx`).
- *
- * The test file mocks what the surface needs beyond the editor and the
- * session; see `MonacoFileSurface.escape.browser.test.tsx`.
+ * Mounts `MonacoFileSurface` on a DOM-hosted fake editor; `type` dispatches keydowns on the focused
+ * element, as a browser does. `keysOutsideEditor` holds untaken keydowns that landed outside the
+ * editor: the keys the composer's type-to-focus would take (`shouldRedirectInputToComposer`).
  */
 export async function mountMonacoFileSurface(options: {
   readonly layout: HarnessLayout;

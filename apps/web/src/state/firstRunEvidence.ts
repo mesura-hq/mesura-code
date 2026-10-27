@@ -16,11 +16,9 @@ export interface FirstRunThreadEvidence {
 }
 
 /**
- * Mesura, phase 6 of the editor latency cycle (review finding P1-2): the gate
- * read every thread shell, so every streamed shell update re-rendered it. A
- * throttled list was wrong here — the gate could decide from a list one second
- * behind the live readiness flags and keep a wrong `wizard` decision. This is
- * live, and changes only when the evidence the decision reads changes.
+ * Mesura: live, but changes only when the evidence the decision reads changes, so streamed
+ * shell updates do not re-render the gate. Do not throttle it instead: a list behind the
+ * live readiness flags can keep a wrong `wizard` decision.
  */
 export function makeFirstRunThreadEvidenceAtom(
   source: Atom.Atom<ReadonlyArray<EnvironmentThreadShell>>,

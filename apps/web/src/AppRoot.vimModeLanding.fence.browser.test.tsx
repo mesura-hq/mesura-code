@@ -1,37 +1,10 @@
 import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
-/**
- * Entry point: AppRoot, with a memory router whose root renders the real
- * CommandPalette around the real AppSidebarLayout, as `routes/__root.tsx`
- * does, and whose chat layout is the real `_chat.tsx` route component: the
- * chat route's global shortcuts (pane navigation among them) and the real
- * KeyEngineHost around the real ChatView. The key engine is installed on
- * `window` before React renders, as `main.tsx` does. Keys are real `keydown`
- * events dispatched from the focused element.
- *
- * Phase 4 of the modal keys production cycle (Vim mode on, landing in normal
- * mode):
- * - Criterion 3: the palette opened and closed from the chat in normal mode
- *   leaves the chat scope in NORMAL with the chat cursor where it was.
- * - Criterion 4: the palette returns to the composer in the mode it left.
- * - Criterion 5, guard: a palette row that opens the file manager hands it the
- *   keyboard.
- * - Criterion 6: `Ctrl+K` from the terminal drawer and `Ctrl+L` from the
- *   sidebar land in the chat scope in NORMAL, never in the composer.
- * - Criterion 7, guards: with Vim mode off, closing the palette focuses the
- *   composer and the pane chords enter the composer, as upstream does.
- *
- * Boundaries the fixture replaces, and nothing else: the environment and
- * thread reads, every RPC command and query, the chords (the shipped
- * defaults, as a fresh keybindings file resolves them), unrelated chrome, the
- * CSS highlight paint (recorded for cursor assertions), the
- * sidebar's thread list (one focusable row), the terminal drawer (its root
- * and xterm's helper textarea, which is all the pane code reads), and the
- * file manager layer (its focusable root while the store is open; the vendor
- * app needs a live server). The setup follows
- * `AppRoot.commandRegistry.fence.test.tsx`.
- */
+// Vim mode landing in NORMAL (modal keys phase 4) through AppRoot, the chat route's global
+// shortcuts, KeyEngineHost and ChatView. The terminal drawer is replaced by its root and xterm's
+// helper textarea (all the pane code reads); the file manager layer by a focusable root (the vendor
+// app needs a live server). The setup follows `AppRoot.commandRegistry.fence.test.tsx`.
 
 import { flushSync } from "react-dom";
 import { describe, expect, it, vi } from "vite-plus/test";

@@ -10,31 +10,10 @@ import { getFocusedPane, getLastFocusedPane, type PaneId } from "~/lib/paneFocus
 import { updateKeyEngineSnapshot } from "./keyEngineStore";
 
 /**
- * PANE mode: resize the panes from the keyboard, entered with `<leader>w`.
- *
- * The mode is sticky, as Helix's sticky modes and Emacs's hydras are: `l l l`
- * moves three steps without the leader again. It leaves on `Esc`, `q` or
- * Enter; any other key leaves too and then runs as it would in normal mode,
- * so `i` after a resize still enters the composer.
- *
- * The keys move a border in their own direction, as tmux's `resize-pane -L`
- * and the arrow keys on a focused separator do: `h` left, `l` right, `k` up,
- * `j` down. The focused pane (or the last focused one, after a blur to
- * `<body>`) only picks which border:
- *
- * - sidebar: its right edge. `l` widens it.
- * - right panel: its left edge. `h` widens it, `l` narrows it.
- * - chat: the right panel's edge when the panel is open, otherwise the
- *   sidebar's; for `j` / `k`, the terminal drawer's top edge.
- *
- * A count multiplies the step (5% of the viewport): `3l`. `=` puts every edge
- * back to its default size, as Neovim's `<C-w>=` evens out every window.
- *
- * Why not "grow the focused pane" (Hyprland's `resizeactive`): the first
- * build did that, and on the right panel `l` then moved the border left,
- * against the key. The developer reads these keys as directions on screen,
- * so the border follows the key in every pane. Do not reintroduce a per-pane
- * sign.
+ * Sticky, as Helix's sticky modes are; an unknown key leaves and then runs as in normal mode.
+ * A key moves a border in its own screen direction, as tmux's `resize-pane` does; the focused pane
+ * only picks which border. "Grow the focused pane" once made `l` move the right panel's border
+ * left, against the key: do not reintroduce a per-pane sign.
  */
 
 /** Which border a key moves from the pane. `null` when the pane has none on that axis. */

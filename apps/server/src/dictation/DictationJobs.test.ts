@@ -1,19 +1,8 @@
 /**
- * Phase 1 fence of the dictation redesign: acceptance criteria 1, 2, 3, 4, 5
- * and 7 as a job runs.
- *
- * Entry point: `DictationJobs.layer`, the layer `server.ts` composes. Its
- * `start` and `retry` are what the `dictation.start` and `dictation.retry`
- * handlers in `ws.ts` call, and its `stream` is what `subscribeDictationJobs`
- * sends unchanged, so the events asserted here are the events a client
- * receives.
- *
- * Real pieces: `ServerSettings.layer` over the real secret store (the key and
- * the vocabulary hints are written through `updateSettings`, as a client
- * does), and the attachment store's directory (the audio is a file there, as
- * the signed `type: "file"` upload leaves it). OpenAI is an `HttpClient`
- * built with `HttpClient.make`; each request waits until the test answers it,
- * so every transition is observed in order without a sleep.
+ * Drives `DictationJobs.layer` as `server.ts` composes it: `stream` is what
+ * `subscribeDictationJobs` sends unchanged, so these events are what a client receives.
+ * Settings and the attachment directory are real. OpenAI is an `HttpClient` whose requests
+ * wait until the test answers, so every transition is observed in order without a sleep.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {

@@ -1,25 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * Fork addition: keeps one cwd's working-tree changes live for the Git status
- * surface.
- *
- * One session per cwd, shared by every subscriber on it and released by the
- * last one to leave. A session arms one non-recursive `fs.watch` per directory
- * that holds a tracked or untracked-but-not-ignored file, plus the git dir
- * (index, HEAD, MERGE_HEAD) and the directory of the current branch's ref.
- * Any event re-reads the changes after a debounce; a result equal to the last
- * one published is dropped.
- *
- * Every scan arms its watches before it reads. An edit that lands during the
- * read is then queued as an event and read again, rather than lost between a
- * read that missed it and a watch that did not exist yet.
- *
- * Deliberately never `recursive: true` and never `@parcel/watcher`: both
- * descend into ignored trees such as `node_modules` and exhaust the inotify
- * budget. See the measured failure in
- * `vendor/symmetria-file-manager/packages/fm-main/src/fs/watch.ts`.
- *
- * @module GitWorkingTreeWatcher
+ * Keeps one cwd's working-tree changes live: one shared session per cwd, one non-recursive
+ * `fs.watch` per directory holding a tracked or unignored file, plus the git dir and branch ref.
+ * Each scan arms its watches before it reads, so an edit during the read is not lost. Never
+ * `recursive: true` or `@parcel/watcher`: both descend into `node_modules` and exhaust inotify.
  */
 import * as NodeFS from "node:fs";
 

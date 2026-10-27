@@ -7,20 +7,9 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * The file panel re-reads a file when it changes on disk. Three pieces of
- * wiring carry that, and each fails in a way the unit tests cannot see: the
- * decision function stays correct, the watcher keeps running on the server, and
- * the panel simply never hears about it.
- *
- * - The panel calls the hook. Upstream rewrites this file often and a sync that
- *   drops the call leaves freshness back where it started, with the refresh
- *   button as the only way to see an agent's edit.
- * - The mutation heuristic and the refresh button stay. The watcher is not a
- *   replacement for either: the heuristic also refreshes the tree, and the
- *   button is the way out when the watcher is wrong.
- * - The subscription family stays out of the shared client package. Defining it
- *   there would offer a server-side file watcher to mobile, which reads files
- *   without subscribing and has no use for one.
+ * The file panel re-reads a file changed on disk through wiring unit tests cannot see: the panel
+ * must call the hook, the mutation heuristic and refresh button must stay (the watcher replaces
+ * neither), and the subscription family stays out of the shared client package.
  */
 
 const read = (relativePath: string) =>
@@ -44,9 +33,9 @@ it("keeps the mutation heuristic and the refresh button beside the watcher", () 
     "useWorkspaceMutationRefresh({",
     "the workspace mutation refresh was removed in favour of the watcher, but it also refreshes the tree",
   );
-  assert.include(
+  assert.match(
     panel,
-    "onRefreshSelectedFile: file.refresh",
+    /onRefreshSelectedFile: \(\) => \{\n\s*if \(!isDocument\) file\.refresh\(\);/,
     "the manual refresh button lost its handler, leaving no way out when the watcher is wrong",
   );
 });

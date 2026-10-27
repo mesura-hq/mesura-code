@@ -8,6 +8,7 @@ import {
   IssueReferenceInput,
   issueRepositoryUrl,
 } from "./issues.ts";
+import { SourceControlProviderKind } from "./sourceControl.ts";
 
 const decodeListInput = Schema.decodeUnknownExit(IssueListInput);
 const decodeDetail = Schema.decodeUnknownSync(IssueDetail);
@@ -109,7 +110,7 @@ describe("issueRepositoryUrl, the repository a recorded identity names (issues p
     expect(
       issueRepositoryUrl({
         canonicalKey: "github.acme.test/platform/api",
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         locator,
       }),
     ).toBe("https://github.acme.test/platform/api");
@@ -124,7 +125,7 @@ describe("issueRepositoryUrl, the repository a recorded identity names (issues p
       expect(
         issueRepositoryUrl({
           canonicalKey: "github.com/pingdotgg/t3code",
-          provider: "github",
+          provider: SourceControlProviderKind.make("github"),
           webUrl,
           owner: "pingdotgg",
           name: "t3code",
@@ -137,12 +138,16 @@ describe("issueRepositoryUrl, the repository a recorded identity names (issues p
 
   it("issues phase 3 regression: another provider or a web URL that is not a web address names no GitHub repository", () => {
     expect(
-      issueRepositoryUrl({ canonicalKey: "gitlab.com/acme/alpha", provider: "gitlab", locator }),
+      issueRepositoryUrl({
+        canonicalKey: "gitlab.com/acme/alpha",
+        provider: SourceControlProviderKind.make("gitlab"),
+        locator,
+      }),
     ).toBeNull();
     expect(
       issueRepositoryUrl({
         canonicalKey: "github.com/acme/alpha",
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         webUrl: "ssh://github.com/acme/alpha",
         locator,
       }),
@@ -150,7 +155,7 @@ describe("issueRepositoryUrl, the repository a recorded identity names (issues p
     expect(
       issueRepositoryUrl({
         canonicalKey: "github.com/acme/alpha/extra",
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         locator,
       }),
     ).toBeNull();

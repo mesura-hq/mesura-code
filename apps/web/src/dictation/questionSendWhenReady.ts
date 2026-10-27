@@ -182,6 +182,7 @@ function checkArmedQuestions() {
 
 /** Mounted once for the app, beside the dictation delivery. */
 export function useQuestionSendWhenReady(): void {
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the answer-draft and armed stores for the app's lifetime
   useEffect(() => {
     let queued = false;
     // After the update that triggered it, so the voiced mark that follows a fill has landed.

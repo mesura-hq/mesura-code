@@ -1,11 +1,7 @@
 /**
- * Mesura: every pointer press and key press on the page, for the presence
- * report (`useReportPresence.ts`).
- *
- * The listeners sit on `window` in the capture phase and must be added before
- * the key engine's (`keys/keyEngine.ts`): the engine consumes Vim keys there
- * with `stopImmediatePropagation`, which stops listeners added after it on the
- * same target and every listener further down. `main.tsx` installs this first.
+ * Mesura: page input for the presence report. These capture listeners on `window` must be
+ * added before `keys/keyEngine.ts`'s, whose `stopImmediatePropagation` on Vim keys hides
+ * them from later listeners. `main.tsx` installs this first.
  */
 
 const PAGE_INPUT_EVENTS = ["pointerdown", "keydown"] as const;

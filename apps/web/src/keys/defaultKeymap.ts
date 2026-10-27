@@ -42,6 +42,7 @@ const BRIDGED: ReadonlyArray<CommandEntry & { readonly command: KeybindingComman
   { keys: "<leader>ts", command: "thread.settle", title: "Settle / unsettle" },
   { keys: "<leader>ty", command: "thread.copyReference", title: "Copy reference" },
   { keys: "<leader>tq", command: "thread.steerQueuedMessage", title: "Steer queued message" },
+  { keys: "<leader>tw", command: "sidebar.toggleWorking", title: "Working section" },
   { keys: "]t", command: "thread.next", title: "Next thread" },
   { keys: "[t", command: "thread.previous", title: "Previous thread" },
   // The panel's launcher: surfaces and panel actions by letter (`lib/panelLauncher.ts`).

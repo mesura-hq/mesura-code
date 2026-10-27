@@ -27,14 +27,9 @@ import { buildUnavailableModelOptionDescriptors } from "./TraitsPicker";
 export { ULTRATHINK_PROMPT_PREFIX } from "@t3tools/client-runtime/model-traits";
 
 /**
- * Provider option rules for the combined model picker: which descriptors a
- * model exposes, which one is its inline effort, and how a change rewrites the
- * saved selections and the Claude Ultrathink prefix.
- *
- * The selection and prompt rules mirror `TraitsMenuContent` in
- * `TraitsPicker.tsx` (`getSelectedTraits` and `handleSelectChange`). That
- * composer menu stays available for the model-only controls. Shared descriptor
- * changes and trigger labels use the runtime model-traits helpers.
+ * Provider option rules for the combined model picker. The selection and prompt rules mirror
+ * `TraitsMenuContent` in `TraitsPicker.tsx` (`getSelectedTraits`, `handleSelectChange`), which stays
+ * available for the model-only controls; keep the two in step.
  */
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
@@ -49,11 +44,8 @@ export const ULTRATHINK_IN_BODY_REASON =
   'Your prompt contains "ultrathink" in the text. Remove it to change this option.';
 
 /**
- * The provider-owned select descriptor that the picker edits inline. Each
- * driver names its reasoning control differently; picking the first select
- * would mistake an OpenCode agent or a Cursor context window for effort.
- * A driver missing here, such as an ACP registry agent, has no inline effort;
- * its options stay in More options.
+ * Each driver names its reasoning control differently; the first select could be an OpenCode agent or
+ * a Cursor context window. A driver missing here (an ACP registry agent) has no inline effort.
  */
 const INLINE_EFFORT_DESCRIPTOR_ID_BY_DRIVER: Readonly<Record<string, string>> = {
   codex: "reasoningEffort",

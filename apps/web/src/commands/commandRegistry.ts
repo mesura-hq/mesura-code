@@ -2,21 +2,9 @@ import type { KeybindingCommand } from "@t3tools/contracts";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 /**
- * The command registry: each owner of a keybinding command registers the
- * function that runs it, and Vim mode's leader keys (`keys/keyEngine.ts`) run
- * commands through it.
- *
- * The owners are the components whose own chord listeners already handle the
- * command (`ChatView`, `CommandPalette`, the sidebar layout, …). Each registers
- * the same function its chord branch calls, so a leader key and a chord have
- * one effect. The chord listeners and the palette rows keep their own
- * dispatch for now (#87).
- *
- * A stack per command rather than one slot: the most recent registration
- * runs, and disposing it restores the previous one. Two owners of one command
- * can be mounted together (the chat route and the pull requests route both
- * own the right panel), and the inner one wins while it is mounted. The same
- * shape as the edge registry in `lib/paneEdges.ts`.
+ * Owners register the function their chord branch already calls, so a Vim leader key and a chord
+ * run one effect. A stack per command: two owners can be mounted together (chat and pull requests
+ * both own the right panel), the newest wins, and disposing it restores the previous one.
  */
 
 /** An owner's handlers; a command left `undefined` is not registered, so an owner can opt out while it does not apply. */
@@ -67,6 +55,7 @@ export function runRegisteredCommand(command: KeybindingCommand): boolean {
  */
 export function useCommandHandlers(entries: CommandHandlers): void {
   const latest = useRef(entries);
+  // oxlint-disable-next-line t3code/react-effect-budget -- latest-ref: the registered closures read the newest handlers without re-registering
   useLayoutEffect(() => {
     latest.current = entries;
   });
@@ -82,5 +71,6 @@ export function useCommandHandlers(entries: CommandHandlers): void {
     ) as CommandHandlers;
   }, [commandsKey]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- registers in the module-level registry while mounted; cleanup unregisters
   useEffect(() => registerCommandHandlers(stable), [stable]);
 }

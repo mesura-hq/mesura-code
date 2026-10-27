@@ -1,13 +1,7 @@
 /**
- * Phase 8 fence, acceptance criteria 1, 3, 4 and 5: what the run card and the
- * thread status label say, for every run status, phase mark and node.
- *
- * Entry point: the shared presentation module both clients render from
- * (`runPresentation.ts`), fed with the compact summary and the shell summary
- * the server's run tracker publishes, folded from the recorder's fixture
- * (`packages/shared/src/fixtures/factory-events.v1.jsonl`). What only a
- * browser or the emulator shows: the colours of each tone, the card frame, and
- * that the web sidebar row and the Android thread list row draw this label.
+ * Fed the compact and shell summaries the server's run tracker folds from
+ * `packages/shared/src/fixtures/factory-events.v1.jsonl`. Only a browser shows each tone's colour,
+ * the card frame, and that the sidebar row draws this label.
  */
 /// <reference types="vite-plus/client" />
 import type { FactoryRunShellSummary, FactoryRunSummary } from "@t3tools/contracts";

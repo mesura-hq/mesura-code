@@ -1,14 +1,7 @@
 /**
- * Mesura: reads recorded Software Factory cards across threads.
- *
- * The run tracker re-attaches unfinished runs after a restart from their
- * recorded run cards, and a Factory pane opened on a run nobody follows reads
- * the run directory from its card. Cards are `factory_card` turn items
- * (`FactoryCards.ts`); their ids start with a kind prefix
- * (`factoryPlanCardId`, `factoryRunActivityId`, `factoryReportActivityId`),
- * so a kind is a range scan on the turn item primary key, not a scan of every
- * turn item. Archived threads are included; deleted threads are not.
- *
+ * Mesura: reads recorded Software Factory cards across threads. Card ids start
+ * with a kind prefix, so a kind is a range scan on the turn item primary key.
+ * Archived threads are included; deleted threads are not.
  * @module FactoryCardQuery
  */
 import {

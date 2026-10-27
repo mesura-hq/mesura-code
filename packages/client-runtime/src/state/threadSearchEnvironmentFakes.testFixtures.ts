@@ -1,14 +1,7 @@
 /**
- * Disposable environment fakes for thread search tests. Each fake environment
- * answers the real orchestration RPC tags through a fake `RpcSession`, and the
- * fake `EnvironmentRegistry` routes `registry.run` to that environment's
- * supervisor. Code under test therefore reaches the fakes through the same
- * `request(tag, input)` path it uses against a real server.
- *
- * The evidence fake mirrors the server contract from phase 1: newest message
- * first, a fixed scan window per request, case-insensitive contiguous match,
- * pages that can be empty while `nextCursor` is set, and cursors bound to one
- * query and thread scope.
+ * Fakes answer the real orchestration RPC tags through the same `request(tag, input)` path as a
+ * server. The evidence fake mirrors the server: newest message first, a fixed scan window, case
+ * insensitive contiguous match, empty pages with a `nextCursor`, cursors bound to one query.
  */
 import {
   DEFAULT_SERVER_SETTINGS,

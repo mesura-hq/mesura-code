@@ -1,13 +1,9 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * The expanded composer: half the window high, with a line-number gutter, so
- * a long prompt reads and edits like a buffer. A toggle for the session, not
- * a setting. The height lives in `mesura.css` under
- * `[data-mesura-composer-expanded]`; the gutter is `ComposerLineNumbers`.
- *
- * `bumpComposerLayout` marks that the composer's text or cursor may have
- * moved, so the gutter re-measures only then, never on a timer.
+ * A session toggle, not a setting; the height lives in `mesura.css` under
+ * `[data-mesura-composer-expanded]`. `bumpComposerLayout` marks that the text or
+ * cursor may have moved, so the gutter re-measures only then, never on a timer.
  */
 
 let expanded = false;
