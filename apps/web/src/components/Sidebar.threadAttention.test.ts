@@ -180,7 +180,7 @@ describe("sidebar thread attention: the shared status pill ignores the agent sig
     setAt: "2026-06-20T01:00:00.000Z",
   });
 
-  it("sidebar thread attention pill guard: a needs_input or ready_to_close signal leaves Completed", () => {
+  it("sidebar thread attention pill guard: agent signals preserve the underlying Completed pill", () => {
     expect(pillOf(completedUnread)).toBe("Completed");
     expect(pillOf({ ...completedUnread, agentSignal: signal("needs_input") })).toBe("Completed");
     expect(pillOf({ ...completedUnread, agentSignal: signal("ready_to_close") })).toBe("Completed");

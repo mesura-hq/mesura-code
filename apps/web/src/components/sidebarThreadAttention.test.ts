@@ -1,7 +1,3 @@
-// `resolveSidebarThreadAttention` is the one decision the sidebar's top status slot and the
-// in-tab notifications read. Its input is `resolveSidebarThreadStatus`'s status plus the shell
-// facts it does not carry: the agent signal, the Software Factory run summary and whether an
-// open pull request remains.
 import { RunId, type FactoryRunShellSummary, type ThreadAgentSignal } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -30,7 +26,6 @@ function attention(
     isWoke: boolean;
     agentSignal: ThreadAgentSignal | null;
     factoryRun: FactoryRunShellSummary | null;
-    hasOpenPullRequest: boolean;
   }> = {},
 ) {
   return resolveSidebarThreadAttention({
@@ -39,7 +34,6 @@ function attention(
     isWoke: false,
     agentSignal: null,
     factoryRun: null,
-    hasOpenPullRequest: false,
     ...input,
   });
 }
@@ -76,10 +70,10 @@ describe("sidebar thread attention mapping", () => {
     ).toBe("input");
   });
 
-  it("sidebar attention AC3: a ready_to_close signal with no live work reads a calm Ready to close, not Done", () => {
-    const expected = { kind: "ready_to_close", text: "Ready to close", emphasis: "calm" };
+  it("sidebar attention AC3: a ready_to_close signal uses the normal finished presentation", () => {
+    const expected = { kind: "done", text: "Done", emphasis: "calm" };
     expect(attention({ agentSignal: readyToClose, isUnread: true })).toEqual(expected);
-    expect(attention({ agentSignal: readyToClose, isUnread: false })).toEqual(expected);
+    expect(attention({ agentSignal: readyToClose, isUnread: false })).toBeNull();
   });
 
   it("sidebar attention AC3: live work outranks a ready_to_close signal", () => {
@@ -119,39 +113,23 @@ describe("sidebar thread attention mapping", () => {
   // The developer, 2026-10-24: a run that finished degraded is finished; the degraded phases
   // belong in its report, not in a row label that never goes away.
   it("sidebar attention: a Factory run that finished degraded reads like a done run, not Needs input", () => {
-    expect(attention({ factoryRun: factoryRunAt("degraded", null), isUnread: false })).toEqual({
-      kind: "ready_to_close",
-      text: "Ready to close",
-      emphasis: "calm",
-    });
+    expect(attention({ factoryRun: factoryRunAt("degraded", null), isUnread: false })).toBeNull();
     expect(
       attention({
         factoryRun: factoryRunAt("degraded", null),
-        hasOpenPullRequest: true,
         isUnread: true,
       })?.kind,
     ).toBe("done");
-    expect(
-      attention({ factoryRun: factoryRunAt("degraded", null), hasOpenPullRequest: true }),
-    ).toBeNull();
   });
 
-  it("sidebar attention AC5: a done Factory run reads Ready to close with no open pull request, otherwise Done", () => {
-    expect(attention({ factoryRun: factoryRunAt("done", null), isUnread: false })).toEqual({
-      kind: "ready_to_close",
-      text: "Ready to close",
-      emphasis: "calm",
-    });
+  it("sidebar attention AC5: a done Factory run uses the normal finished presentation", () => {
+    expect(attention({ factoryRun: factoryRunAt("done", null), isUnread: false })).toBeNull();
     expect(
       attention({
         factoryRun: factoryRunAt("done", null),
-        hasOpenPullRequest: true,
         isUnread: true,
       })?.kind,
     ).toBe("done");
-    expect(
-      attention({ factoryRun: factoryRunAt("done", null), hasOpenPullRequest: true }),
-    ).toBeNull();
   });
 
   it("sidebar attention AC8: approval and failure stay loud; quiet kinds never take the loud emphasis", () => {
@@ -170,7 +148,7 @@ describe("sidebar thread attention mapping", () => {
     expect(attention({ factoryRun: factoryRunAt("running") })?.emphasis).toBe("quiet");
   });
 
-  it("sidebar attention AC8: a needs_input row never recedes; a read Ready to close row does", () => {
+  it("sidebar attention AC8: a needs_input row never recedes; a read finished row does", () => {
     const row = { isWoke: false, isActive: false, isSelected: false };
     for (const status of ["ready", "waiting", "working"] as const) {
       const kind = attention({ status, agentSignal: needsInput })?.kind ?? null;
@@ -196,7 +174,7 @@ describe("sidebar thread attention mapping guards", () => {
     expect(attention({ isUnread: false })).toBeNull();
   });
 
-  it("sidebar attention guard: Woke outranks Ready to close and Done and yields to busy work", () => {
+  it("sidebar attention guard: Woke outranks Done and yields to busy work", () => {
     expect(attention({ isWoke: true, isUnread: true })?.kind).toBe("woke");
     expect(attention({ isWoke: true })?.text).toBe("Woke");
     expect(attention({ isWoke: true, agentSignal: readyToClose })?.kind).toBe("woke");

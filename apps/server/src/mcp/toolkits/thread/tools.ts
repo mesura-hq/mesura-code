@@ -67,7 +67,7 @@ const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
 
 // Mesura: the agent's needs-input / ready-to-close mark.
 const ThreadSignalTool = Tool.make("t3_thread_signal", {
-  description: `Mark a thread for the user. needs_input: you are ending your turn with a question or a decision only the user can make. ready_to_close: the whole task is finished and nothing else will happen. clear: remove the mark. note is the question in at most ${THREAD_AGENT_SIGNAL_NOTE_MAX_LENGTH} characters. Omit threadId for this thread. The user's next message clears the mark, a new turn clears ready_to_close, and settling clears both.`,
+  description: `Mark a thread for the user. needs_input: you are ending your turn with a question or a decision only the user can make. ready_to_close: call it only when you judge that the thread's purpose (the goal the user gave this thread) is fulfilled and no background command, subagent, delegated task, or watch is still running. Do not call it just because a turn or one step ended. The user may give the thread a new purpose afterwards. clear: remove the mark. note is the question in at most ${THREAD_AGENT_SIGNAL_NOTE_MAX_LENGTH} characters. Omit threadId for this thread. The user's next message clears the mark, a new turn clears ready_to_close, and settling clears both.`,
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),

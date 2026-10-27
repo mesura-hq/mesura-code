@@ -112,7 +112,6 @@ const input = (overrides: Partial<PinnedActionDockInput> = {}): PinnedActionDock
   factoryPlans: [],
   messages: [],
   planFollowUp: null,
-  agentSignal: null,
   unpins: NO_UNPINS,
   ...overrides,
 });
@@ -340,26 +339,25 @@ describe("phase6 dock AC4: every pending approval has an X that declines it", ()
   });
 });
 
-describe("phase6 dock AC5: the plan follow-up and the agent signal live in the dock", () => {
+describe("phase6 dock AC5: the plan follow-up stays in the dock and signals stay outside it", () => {
   const followUp = {
     id: PlanId.make("proposed-plan-1"),
     createdAt: "2026-10-24T10:02:00.000Z",
     title: "Ship the dock",
   };
 
-  it("phase6 dock AC5 the plan follow-up and the agent signal are dock items", () => {
-    const items = derivePinnedActionDockItems(
-      input({ planFollowUp: followUp, agentSignal: signal("2026-10-24T10:03:00.000Z") }),
-    );
-    expect(kinds(items)).toEqual(["agent-signal", "plan-follow-up"]);
+  it.each(["needs_input", "ready_to_close"] as const)("the dock ignores a %s signal", (kind) => {
+    const sources = {
+      ...input({ planFollowUp: followUp }),
+      agentSignal: { ...signal("2026-10-24T10:03:00.000Z"), kind },
+    };
+    const items = derivePinnedActionDockItems(sources);
+    expect(kinds(items)).toEqual(["plan-follow-up"]);
   });
 
-  it("phase6 dock AC5 the X on the agent signal clears it and the X on the follow-up dismisses it", () => {
-    const items = derivePinnedActionDockItems(
-      input({ planFollowUp: followUp, agentSignal: signal("2026-10-24T10:03:00.000Z") }),
-    );
+  it("phase6 dock AC5 the X on the follow-up dismisses it", () => {
+    const items = derivePinnedActionDockItems(input({ planFollowUp: followUp }));
     expect(items.map(pinnedActionDockCloseAction)).toEqual([
-      { type: "clear-agent-signal" },
       { type: "dismiss-plan-follow-up", planId: "proposed-plan-1" },
     ]);
   });
@@ -384,16 +382,10 @@ describe("phase6 dock AC6: newest first, at most two expanded at phone width", (
     approvals: [approval("approval-1", "2026-10-24T10:00:00.000Z")],
     userInputs: [question("question-1", "2026-10-24T10:01:00.000Z", false)],
     factoryPlans: [planItem({ at: "2026-10-24T10:02:00.000Z" })],
-    agentSignal: signal("2026-10-24T10:03:00.000Z"),
   });
 
   it("phase6 dock AC6 stacks the items newest first", () => {
-    expect(kinds(derivePinnedActionDockItems(several))).toEqual([
-      "agent-signal",
-      "plan",
-      "question",
-      "approval",
-    ]);
+    expect(kinds(derivePinnedActionDockItems(several))).toEqual(["plan", "question", "approval"]);
   });
 
   it("phase6 dock AC6 expands the two newest at phone width and collapses the rest to one line", () => {
@@ -403,9 +395,8 @@ describe("phase6 dock AC6: newest first, at most two expanded at phone width", (
     });
     expect(PHONE_DOCK_EXPANDED_LIMIT).toBe(2);
     expect(layout.map((entry) => [entry.item.kind, entry.expanded])).toEqual([
-      ["agent-signal", true],
       ["plan", true],
-      ["question", false],
+      ["question", true],
       ["approval", false],
     ]);
   });
@@ -449,12 +440,10 @@ describe("phase6 dock AC7: every X is labelled with the item it closes", () => {
           createdAt: "2026-10-24T10:03:00.000Z",
           title: "Ship the dock",
         },
-        agentSignal: signal("2026-10-24T10:04:00.000Z"),
       }),
     );
     const labels = Object.fromEntries(items.map((item) => [item.kind, item.closeLabel]));
     expect(labels).toEqual({
-      "agent-signal": expect.stringMatching(/^Dismiss .*agent/i),
       "plan-follow-up": expect.stringMatching(/^Dismiss .*Ship the dock/),
       plan: "Unpin plan: Plan: the Software Factory inside Mesura Code",
       question: expect.stringMatching(/^Dismiss .*Which scope should the agent take\?/),

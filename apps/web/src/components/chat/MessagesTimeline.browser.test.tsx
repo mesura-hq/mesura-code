@@ -17,6 +17,7 @@ import "~/index.css";
 
 import { act, render } from "../../../test/render";
 import { MessagesTimeline } from "./MessagesTimeline";
+import { ThreadAgentSignalEnd, type ThreadAgentSignalEntry } from "./ThreadAgentSignalEnd";
 import { makeStreamingTimelineFixture } from "../../test-fixtures";
 import { deriveTimelineEntriesFromVisibleTurnItems } from "../../session-logic";
 import { remarkThoughtPreview } from "./TimelineWorkEntryRow.logic";
@@ -850,4 +851,136 @@ it("renders automatic compaction as one live divider that finishes with its reas
     .toBeVisible();
   expect(container.querySelectorAll('[role="separator"]')).toHaveLength(1);
   expect(container.textContent).not.toContain("Compacting before");
+});
+
+it.each(["needs_input", "ready_to_close"] as const)(
+  "keeps the %s signal after messages, work rows and other footer content",
+  async (kind) => {
+    setup();
+    const props = baseProps();
+    const onDismiss = vi.fn();
+    const onSettle = vi.fn();
+    const entry: ThreadAgentSignalEntry = {
+      signal: { kind, note: "Pick the migration order", runId: null, setAt: CREATED_AT },
+      settleSupported: true,
+      actionsDisabled: false,
+      onDismiss,
+      onSettle,
+    };
+    const timeline = (entries: Entry[], signalEntry = entry) => (
+      <MessagesTimeline
+        {...props}
+        timelineEntries={entries}
+        footer={
+          <>
+            <div>Pending guest message</div>
+            <ThreadAgentSignalEnd entry={signalEntry} />
+          </>
+        }
+      />
+    );
+    const entries = [message("First message")];
+    await using screen = await renderElement(timeline(entries));
+    const signal = () => screen.container.querySelector<HTMLElement>("[data-thread-agent-signal]")!;
+    const expectLast = () => {
+      const end = signal();
+      expect(end).not.toBeNull();
+      expect(
+        [...end.parentElement!.children]
+          .filter((child) => !child.hasAttribute("aria-hidden"))
+          .at(-1),
+      ).toBe(end);
+      expect(end.previousElementSibling?.textContent).toBe("Pending guest message");
+      const rows = screen.container.querySelectorAll("[data-timeline-root]");
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+      }
+    };
+    await vi.waitFor(expectLast);
+    await screen.rerender(
+      timeline([
+        ...entries,
+        {
+          kind: "work",
+          id: "work",
+          createdAt: CREATED_AT,
+          entry: {
+            id: "work",
+            runId: null,
+            createdAt: CREATED_AT,
+            label: "Read source",
+            tone: "tool",
+            detail: "Read the module",
+          },
+        },
+        message("Last message", {}, "last"),
+      ]),
+    );
+    await vi.waitFor(() => expect(screen.text()).toContain("Last message"));
+    expectLast();
+    await click(screen.button("Dismiss the agent's signal"));
+    expect(onDismiss).toHaveBeenCalledOnce();
+    if (kind === "ready_to_close") {
+      expect(signal().textContent).toContain("The agent thinks this thread is ready to close.");
+      await click(screen.button("Settle"));
+      expect(onSettle).toHaveBeenCalledOnce();
+    } else {
+      expect(signal().textContent).toContain("Agent needs your input: Pick the migration order");
+      expect(screen.buttons("Settle")).toHaveLength(0);
+    }
+    await screen.rerender(timeline(entries, { ...entry, actionsDisabled: true }));
+    expect(screen.button("Dismiss the agent's signal")).toHaveProperty("disabled", true);
+    if (kind === "ready_to_close") expect(screen.button("Settle")).toHaveProperty("disabled", true);
+    await screen.rerender(
+      timeline(entries, {
+        ...entry,
+        settleSupported: false,
+        signal: { ...entry.signal, note: null },
+      }),
+    );
+    expect(screen.buttons("Settle")).toHaveLength(0);
+    if (kind === "needs_input") expect(signal().textContent).toContain("Agent needs your input");
+  },
+);
+
+it("updates the signal footer without rendering the timeline rows again", async () => {
+  setup();
+  const props = baseProps();
+  const entries: Entry[] = Array.from({ length: 3 }, (_, index) => ({
+    id: `html-${index}`,
+    kind: "html-render",
+    createdAt: CREATED_AT,
+    runId: null,
+    htmlRender: { attachmentId: `html-${index}`, title: `Preview ${index}`, height: 80 },
+  }));
+  const renderHtmlRender = vi.fn((row: { id: string }) => <div>{row.id}</div>);
+  const entry: ThreadAgentSignalEntry = {
+    signal: { kind: "needs_input", note: "Which scope?", runId: null, setAt: CREATED_AT },
+    settleSupported: true,
+    actionsDisabled: false,
+    onDismiss: vi.fn(),
+    onSettle: vi.fn(),
+  };
+  const timeline = (signalEntry: ThreadAgentSignalEntry | null) => (
+    <MessagesTimeline
+      {...props}
+      timelineEntries={entries}
+      renderHtmlRender={renderHtmlRender}
+      footer={signalEntry ? <ThreadAgentSignalEnd entry={signalEntry} /> : null}
+    />
+  );
+  await using screen = await renderElement(timeline(null));
+  await vi.waitFor(() => expect(screen.text()).toContain("html-2"));
+  const initialRenders = renderHtmlRender.mock.calls.length;
+  await screen.rerender(timeline(entry));
+  await expect.element(screen.getByText("Agent needs your input: Which scope?")).toBeVisible();
+  expect(renderHtmlRender).toHaveBeenCalledTimes(initialRenders);
+  await screen.rerender(
+    timeline({ ...entry, signal: { ...entry.signal, kind: "ready_to_close" } }),
+  );
+  await expect
+    .element(screen.getByText("The agent thinks this thread is ready to close."))
+    .toBeVisible();
+  expect(renderHtmlRender).toHaveBeenCalledTimes(initialRenders);
 });

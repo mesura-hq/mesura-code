@@ -5,10 +5,8 @@ import type {
   ProviderApprovalDecision,
   RuntimeRequestId,
   ScopedThreadRef,
-  ThreadAgentSignal,
 } from "@t3tools/contracts";
 import {
-  CircleCheckIcon,
   ClipboardListIcon,
   FileTextIcon,
   Maximize2Icon,
@@ -39,22 +37,12 @@ import {
 } from "./pinnedActionDock.logic";
 import { usePinnedActionDockStore } from "./pinnedActionDockStore";
 
-/** The agent's signal with the thread actions it offers, as `useThreadLifecycle` provides them. */
-export interface AgentSignalDockEntry {
-  readonly signal: ThreadAgentSignal;
-  readonly settleSupported: boolean;
-  readonly actionsDisabled: boolean;
-  readonly onDismiss: () => void;
-  readonly onSettle: () => void;
-}
-
 /** What `ChatView` owns and the dock reads: everything else comes from the composer. */
 export interface PinnedActionDockSources {
   readonly factoryItems: ReadonlyArray<FactoryTimelineItem>;
   readonly messages: ReadonlyArray<{ readonly role: string; readonly text: string }>;
   /** The inline question cards' shared state; questions are answered there (ADR-007). */
   readonly pendingUserInput: InlinePendingUserInputContext | null;
-  readonly agentSignal: AgentSignalDockEntry | null;
   readonly onOpenFactoryPlan: ((planId: string) => void) | null;
 }
 
@@ -93,7 +81,6 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
     factoryPlans: sources.factoryItems.filter((item) => item.kind === "plan"),
     messages: sources.messages,
     planFollowUp: props.planFollowUp,
-    agentSignal: sources.agentSignal?.signal ?? null,
     unpins,
   });
   // The pinned plan's routes and send state outlive its body, which collapsing unmounts.
@@ -116,8 +103,6 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
         return !props.canOperate || isResponding(item.approval.requestId);
       case "question":
         return (questions?.unavailable ?? true) || isResponding(item.request.requestId);
-      case "agent-signal":
-        return sources.agentSignal?.actionsDisabled ?? true;
       default:
         return false;
     }
@@ -140,9 +125,6 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
         return;
       case "dismiss-plan-follow-up":
         usePinnedActionDockStore.getState().dismissFollowUp(threadKey, action.planId);
-        return;
-      case "clear-agent-signal":
-        sources.agentSignal?.onDismiss();
         return;
     }
   };
@@ -210,12 +192,6 @@ function itemIcon(item: PinnedActionDockItem): ReactNode {
       return <ClipboardListIcon />;
     case "plan-follow-up":
       return <FileTextIcon />;
-    case "agent-signal":
-      return item.signal.kind === "needs_input" ? (
-        <MessageCircleQuestionIcon className="text-needs-input" />
-      ) : (
-        <CircleCheckIcon className="text-success" />
-      );
   }
 }
 
@@ -329,29 +305,6 @@ function DockItemBody(props: {
           <ComposerBanner.Actions>{close}</ComposerBanner.Actions>
         </>
       );
-    case "agent-signal": {
-      const entry = dock.sources.agentSignal;
-      return (
-        <>
-          <ComposerBanner.Content>
-            <span className="line-clamp-2 min-w-0 flex-1 text-muted-foreground">{item.title}</span>
-          </ComposerBanner.Content>
-          <ComposerBanner.Actions>
-            {entry && item.signal.kind === "ready_to_close" && entry.settleSupported ? (
-              <Button
-                variant="ghost"
-                size="xs"
-                disabled={entry.actionsDisabled}
-                onClick={entry.onSettle}
-              >
-                Settle
-              </Button>
-            ) : null}
-            {close}
-          </ComposerBanner.Actions>
-        </>
-      );
-    }
   }
 }
 

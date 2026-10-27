@@ -1,6 +1,6 @@
-import { act, render as renderBrowser, type Screen } from "../test/render";
-// AppRoot with the real ChatView, whose `useThreadLifecycle` picks the status line above the
-// composer. Every `useAtomCommand` call records its command and input, so a click proves which
+import { render as renderBrowser } from "../test/render";
+// AppRoot with the real ChatView, whose `useThreadLifecycle` picks the signal in the
+// timeline footer. Every `useAtomCommand` call records its command and input, so a click proves which
 // orchestration command ran. Phone width is Playwright's Pixel 7 viewport (412 × 915).
 
 import {
@@ -17,6 +17,7 @@ import {
   RunId,
   ThreadId,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ThreadShell,
   type ThreadAgentSignal,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -96,8 +97,6 @@ const environmentId = EnvironmentId.make(FENCE_ENVIRONMENT_ID);
 const threadId = ThreadId.make("agent-signal-status-line-thread");
 const now = "2026-10-24T12:00:00.000Z";
 const PIXEL_7 = { width: 412, height: 915 };
-let root: Screen | undefined;
-let container: HTMLDivElement;
 
 const signalOf = (kind: ThreadAgentSignal["kind"], note: string | null): ThreadAgentSignal => ({
   kind,
@@ -108,7 +107,7 @@ const signalOf = (kind: ThreadAgentSignal["kind"], note: string | null): ThreadA
 
 async function setupStatusLineFixture(
   signal: ThreadAgentSignal | null,
-  overrides: Partial<OrchestrationV2ThreadProjection["thread"]> = {},
+  overrides: Partial<OrchestrationV2ThreadShell> = {},
   viewport = PIXEL_7,
 ) {
   fixture.dispatched.length = 0;
@@ -131,13 +130,12 @@ async function setupStatusLineFixture(
     overrides: { agentSignal: signal, ...overrides },
   });
   fixture.projection = makeFenceThreadProjection(shell);
-  container = document.createElement("div");
+  const container = document.createElement("div");
   document.body.append(container);
 
   return {
+    container,
     async [Symbol.asyncDispose]() {
-      await act(async () => root?.[Symbol.asyncDispose]());
-      root = undefined;
       container.remove();
       appRootFence.threads.clear();
       appRootFence.threadStates.clear();
@@ -148,7 +146,7 @@ async function setupStatusLineFixture(
   };
 }
 
-async function mountApp() {
+async function mountApp(container: HTMLDivElement) {
   publishFenceThreadProjection(fixture.projection!, environmentId);
   const route = createRootRoute({
     component: () => (
@@ -163,24 +161,22 @@ async function mountApp() {
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
-  await act(async () => {
-    root = await renderBrowser(null, { container: container, router: false });
-    await root.rerender(<AppRoot router={router as unknown as AppRouter} />);
+  // AppRoot supplies the fixture router.
+  return renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {
+    container,
+    router: false,
   });
 }
 
-// Phase 6 moves the agent's signal into the pinned action dock above the composer; the Woke
-// line stays a chat status line. Either is the line these specs read.
-function statusLine() {
-  const line = container.querySelector<HTMLElement>(
-    '[data-chat-thread-status-line="true"], [data-pinned-action-dock-item="agent-signal"]',
+function statusLine(scope: HTMLElement) {
+  const line = scope.querySelector<HTMLElement>(
+    '[data-chat-thread-status-line="true"], [data-thread-agent-signal]',
   );
-  expect(line, `Expected a chat status line; rendered: ${container.textContent}`).not.toBeNull();
+  expect(line, `Expected a chat status line; rendered: ${scope.textContent}`).not.toBeNull();
   return line!;
 }
 
 function statusLineButton(line: HTMLElement, text: string) {
-  // The dock's close control is an X whose accessible name starts with the action.
   const match = [...line.querySelectorAll("button")].find(
     (entry) =>
       entry.textContent?.trim().startsWith(text) ||
@@ -210,8 +206,8 @@ it("AppRoot agent signal AC6: a needs_input signal shows its note and a touch-si
   await using _fixture = await setupStatusLineFixture(
     signalOf("needs_input", "Which database should the migration target?"),
   );
-  await mountApp();
-  const line = statusLine();
+  await using screen = await mountApp(_fixture.container);
+  const line = statusLine(screen.container);
   expect(line.textContent).toContain("Agent needs your input");
   expect(line.textContent).toContain("Which database should the migration target?");
   const dismiss = statusLineButton(line, "Dismiss");
@@ -227,9 +223,9 @@ it("AppRoot agent signal AC6: a needs_input signal shows its note and a touch-si
 
 it("AppRoot agent signal AC6: a ready_to_close signal offers Settle through the settle action and Dismiss", async () => {
   await using _fixture = await setupStatusLineFixture(signalOf("ready_to_close", null));
-  await mountApp();
-  const line = statusLine();
-  expect(line.textContent).toContain("Agent says this thread is ready to close");
+  await using screen = await mountApp(_fixture.container);
+  const line = statusLine(screen.container);
+  expect(line.textContent).toContain("The agent thinks this thread is ready to close.");
   const settle = statusLineButton(line, "Settle");
   const dismiss = statusLineButton(line, "Dismiss");
   expectTouchTarget(settle);
@@ -244,9 +240,9 @@ it("AppRoot agent signal AC6: a ready_to_close signal offers Settle through the 
 
 it("AppRoot agent signal guard: a thread without a signal shows no chat status line", async () => {
   await using _fixture = await setupStatusLineFixture(null);
-  await mountApp();
-  expect(container.textContent).toContain("Send a message to start the conversation");
-  expect(container.querySelector('[data-chat-thread-status-line="true"]')).toBeNull();
+  await using screen = await mountApp(_fixture.container);
+  expect(screen.container.textContent).toContain("Send a message to start the conversation");
+  expect(screen.container.querySelector('[data-chat-thread-status-line="true"]')).toBeNull();
 });
 
 it("AppRoot agent signal guard: a thread woken from snooze keeps its Woke line and Dismiss", async () => {
@@ -256,8 +252,8 @@ it("AppRoot agent signal guard: a thread woken from snooze keeps its Woke line a
     snoozedUntil: DateTime.makeUnsafe(snoozedUntil),
     lastVisitedAt: null,
   });
-  await mountApp();
-  const line = statusLine();
+  await using screen = await mountApp(_fixture.container);
+  const line = statusLine(screen.container);
   expect(line.textContent).toContain("Woke from snooze");
   await userEvent.click(statusLineButton(line, "Dismiss"));
   expect(fixture.acknowledgeWoke).toHaveBeenCalledExactlyOnceWith(
@@ -266,3 +262,19 @@ it("AppRoot agent signal guard: a thread woken from snooze keeps its Woke line a
   );
   expect(clearDispatches()).toEqual([]);
 });
+
+it.each(["needs_input", "ready_to_close"] as const)(
+  "hides a stale %s signal while the thread works",
+  async (kind) => {
+    const runId = RunId.make("working-signal-run");
+    await using _fixture = await setupStatusLineFixture(signalOf(kind, "Stale signal"), {
+      status: "running",
+      latestRunId: runId,
+      activeRunId: runId,
+      latestRunRequestedAt: DateTime.makeUnsafe(now),
+      latestRunStartedAt: DateTime.makeUnsafe(now),
+    });
+    await using screen = await mountApp(_fixture.container);
+    expect(screen.container.querySelector("[data-thread-agent-signal]")).toBeNull();
+  },
+);

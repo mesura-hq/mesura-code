@@ -838,7 +838,7 @@ it("phase6 dock browser AC4 the X on an approval declines it", async () => {
   });
 });
 
-it("phase6 dock browser AC5 the agent signal sits in the dock and its X clears it", async () => {
+it("the agent signal stays outside the pinned dock and its timeline X clears it", async () => {
   await using _fixture = await setupDockFixture(DESKTOP, {
     agentSignal: {
       kind: "needs_input",
@@ -848,17 +848,26 @@ it("phase6 dock browser AC5 the agent signal sits in the dock and its X clears i
     },
   });
   await using screen = await mountApp();
-  await scrollTimeline(screen.container, "top");
-  const item = await vi.waitFor(() => {
-    const match = dockItems(screen.container).find(
-      (entry) => entry.dataset.pinnedActionDockItem === "agent-signal",
-    );
-    expect(match, "Expected the agent signal in the dock").toBeDefined();
-    return match!;
-  });
-  expect(inViewport(item)).toBe(true);
+  const item = screen.container.querySelector<HTMLElement>("[data-thread-agent-signal]")!;
+  expect(item).not.toBeNull();
   expect(item.textContent).toContain("Pick the migration order");
-  await act(async () => dockCloseButton(screen.container, "Dismiss", "agent").click());
+  await scrollTimeline(screen.container, "top");
+  const scroller = timelineScroller(screen.container);
+  expect(scroller.contains(item)).toBe(true);
+  await vi.waitFor(() =>
+    expect(item.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+      scroller.getBoundingClientRect().bottom,
+    ),
+  );
+  await scrollTimeline(screen.container, "end");
+  expect(
+    dockItems(screen.container).map((entry) => entry.dataset.pinnedActionDockItem),
+  ).not.toContain("agent-signal");
+  await act(async () =>
+    item
+      .querySelector<HTMLButtonElement>('button[aria-label="Dismiss the agent\'s signal"]')!
+      .click(),
+  );
   await vi.waitFor(() => expect(fixture.clearAgentSignal).toHaveBeenCalledOnce());
   expect(fixture.clearAgentSignal.mock.calls[0]![0]).toMatchObject({ input: { threadId } });
 });

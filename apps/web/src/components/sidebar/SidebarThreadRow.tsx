@@ -92,7 +92,6 @@ import {
   resolveSidebarThreadAttention,
   sidebarThreadAttentionLook,
   sidebarThreadAttentionSweeps,
-  threadHasOpenPullRequest,
 } from "../sidebarThreadAttention";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import { WorkingSweepText } from "./workingSweep";
@@ -728,7 +727,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     isWoke,
     agentSignal: thread.agentSignal,
     factoryRun: thread.factoryRun,
-    hasOpenPullRequest: pr?.state === "open" || threadHasOpenPullRequest(thread.pullRequests),
     goalActive: thread.goal?.status === "active",
   });
   const shouldRecede = shouldRecedeSidebarThread({
