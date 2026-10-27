@@ -303,6 +303,28 @@ it("notifies a new needs_input agent signal as Input needed, once", async () => 
   expect(TestNotification.sent).toHaveLength(2);
 });
 
+it("a ready_to_close signal adds no notification and preserves the normal completion", async () => {
+  await using app = setup();
+  app.start();
+  using _timers = fakeTimers();
+  const agentSignal = {
+    kind: "ready_to_close" as const,
+    note: null,
+    runId: "turn",
+    setAt: "2026-09-13T07:00:30.000Z",
+  };
+  state.shells.set("one", shell({ agentSignal }));
+  expect(TestNotification.sent).toHaveLength(0);
+  const completed = {
+    latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:01:00.000Z" },
+  };
+  state.shells.set("one", shell({ ...completed, agentSignal }));
+  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Thread completed"]);
+  state.shells.set("one", shell({ ...completed, agentSignal: null }));
+  expect(TestNotification.sent).toHaveLength(1);
+});
+
 // regression: phase 3 review P1-1 — the run's completion replaced the agent's Input needed.
 it("keeps Input needed when the run that signalled needs_input completes", async () => {
   await using app = setup();

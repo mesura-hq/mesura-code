@@ -13,7 +13,6 @@ import type {
   PlanId,
   ProviderRequestKind,
   RuntimeRequestId,
-  ThreadAgentSignal,
 } from "@t3tools/contracts";
 
 /**
@@ -73,11 +72,6 @@ export type PinnedActionDockItem =
       readonly kind: "plan-follow-up";
       readonly planId: PlanId;
       readonly title: string | null;
-    })
-  | (DockItemBase & {
-      readonly kind: "agent-signal";
-      readonly signal: ThreadAgentSignal;
-      readonly title: string;
     });
 
 export type PinnedActionDockCloseAction =
@@ -89,8 +83,7 @@ export type PinnedActionDockCloseAction =
       readonly answers: Readonly<Record<string, string>>;
     }
   | { readonly type: "unpin-plan"; readonly digest: string }
-  | { readonly type: "dismiss-plan-follow-up"; readonly planId: PlanId }
-  | { readonly type: "clear-agent-signal" };
+  | { readonly type: "dismiss-plan-follow-up"; readonly planId: PlanId };
 
 interface ThreadDockUnpinsRecord {
   readonly planDigests: ReadonlyArray<string>;
@@ -108,7 +101,6 @@ export interface PinnedActionDockInput {
   /** The thread's messages, where plan approvals are read from. */
   readonly messages: ReadonlyArray<{ readonly role: string; readonly text: string }>;
   readonly planFollowUp: PinnedActionDockFollowUp | null;
-  readonly agentSignal: ThreadAgentSignal | null;
   readonly unpins: PinnedActionDockUnpins;
 }
 
@@ -122,15 +114,6 @@ const APPROVAL_LABELS: Readonly<Record<ProviderRequestKind, string>> = {
 
 export function approvalLabel(kind: ProviderRequestKind): string {
   return APPROVAL_LABELS[kind] ?? "Approval";
-}
-
-export function agentSignalLabel(signal: ThreadAgentSignal): string {
-  if (signal.kind === "needs_input") {
-    return signal.note ? `Agent needs your input: ${signal.note}` : "Agent needs your input";
-  }
-  return signal.note
-    ? `Agent says this thread is ready to close: ${signal.note}`
-    : "Agent says this thread is ready to close";
 }
 
 const EMPTY_THREAD_UNPINS: ThreadDockUnpinsRecord = { planDigests: [], followUpPlanIds: [] };
@@ -281,16 +264,6 @@ export function derivePinnedActionDockItems(
       title: followUp.title,
     });
   }
-  if (input.agentSignal !== null) {
-    items.push({
-      kind: "agent-signal",
-      key: "agent-signal",
-      createdAt: input.agentSignal.setAt,
-      closeLabel: "Dismiss the agent's signal",
-      signal: input.agentSignal,
-      title: agentSignalLabel(input.agentSignal),
-    });
-  }
   // Stable for equal times, so items created together keep the order above.
   return items.sort((left, right) => time(right.createdAt) - time(left.createdAt));
 }
@@ -335,7 +308,5 @@ export function pinnedActionDockCloseAction(
       return { type: "unpin-plan", digest: item.digest };
     case "plan-follow-up":
       return { type: "dismiss-plan-follow-up", planId: item.planId };
-    case "agent-signal":
-      return { type: "clear-agent-signal" };
   }
 }

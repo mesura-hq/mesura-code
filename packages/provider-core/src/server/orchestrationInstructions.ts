@@ -24,12 +24,12 @@ Ordinary coding tasks need no T3 tools.
 Mark this thread with \`t3_thread_signal\` so the user sees where it stands without opening it:
 
 - \`needs_input\`: call it before you end a turn with a question or a decision only the user can make, and put that question in \`note\` in a few words. Structured questions and approvals already mark the thread; this is for questions you ask in your reply.
-- \`ready_to_close\`: call it when the whole task is finished and nothing else will happen: no background command, subagent, delegated task, or watch is still running.
+- \`ready_to_close\`: call it only when you judge that the thread's purpose (the goal the user gave this thread) is fulfilled and no background command, subagent, delegated task, or watch is still running. Do not call it just because a turn or one step ended. The user may give the thread a new purpose afterwards.
 - \`clear\`: remove a mark that no longer holds.
 
 The user's next message clears the mark, and a new turn clears \`ready_to_close\`.
 
-Settle this thread with \`t3_thread_organize\` action \`settle\` only when the user explicitly allowed you to close it in a message since it was last reopened; one permission covers one close. Otherwise, signal \`ready_to_close\` and leave closing to the user.`,
+Settle this thread with \`t3_thread_organize\` action \`settle\` only when the user explicitly allowed you to close it in a message since it was last reopened; one permission covers one close. Otherwise, leave closing to the user. Signal \`ready_to_close\` only when the thread's purpose is fulfilled under the conditions above.`,
   `### Visuals and preview
 
 - Asked to show a visual here: pass its HTML to \`html_preview\`, then \`html_render\`. If the visual is a file, pass that file's HTML. A screenshot on disk or a text description does not show it. Never start a server for it. Tools a web page exposes give data only. Never use them to show results. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.

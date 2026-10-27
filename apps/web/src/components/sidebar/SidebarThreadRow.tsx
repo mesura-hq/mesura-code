@@ -92,7 +92,6 @@ import {
   resolveSidebarThreadAttention,
   sidebarThreadAttentionLook,
   sidebarThreadAttentionSweeps,
-  threadHasOpenPullRequest,
 } from "../sidebarThreadAttention";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import { WorkingSweepText } from "./workingSweep";
@@ -728,7 +727,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     isWoke,
     agentSignal: thread.agentSignal,
     factoryRun: thread.factoryRun,
-    hasOpenPullRequest: pr?.state === "open" || threadHasOpenPullRequest(thread.pullRequests),
     goalActive: thread.goal?.status === "active",
   });
   const shouldRecede = shouldRecedeSidebarThread({
@@ -1362,11 +1360,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           />
                           <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
                         </Tooltip>
+                      ) : topStatus.kind === "input" ? (
+                        // Needs input reads as its icon beside the row's time (developer, 2026-10-27).
+                        <span className="inline-flex items-center gap-1">
+                          <MessageCircleQuestionIcon
+                            aria-hidden
+                            className="size-4 shrink-0 text-needs-input"
+                          />
+                          <span className="sr-only">{topStatus.label}</span>
+                          <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
+                        </span>
                       ) : (
                         <span className={cn("inline-flex items-center gap-1", topStatus.className)}>
-                          {topStatus.icon === "input" ? (
-                            <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "request" ? (
+                          {topStatus.icon === "request" ? (
                             <UserRoundIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "approval" ? (
                             <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />

@@ -2555,7 +2555,7 @@ export default function ChatView(props: ChatViewProps) {
   const {
     acknowledgeActiveThreadWoke,
     activeBranchMismatchKey,
-    agentSignalDockEntry,
+    agentSignalEnd,
     backgroundWorkBanner,
     childInputBanner,
     goalBanner,
@@ -3153,27 +3153,37 @@ export default function ChatView(props: ChatViewProps) {
     ) ?? [];
   const pendingGuestMessageCount = pendingGuestMessageIds.length;
   const pendingGuestMessageKey = pendingGuestMessageIds.join(",");
-  const previousPendingGuestMessagesRef = useRef({
+  const agentSignalEndKey = agentSignalEnd ? (activeThreadShell?.agentSignal?.setAt ?? "") : "";
+  const previousTimelineFooterRef = useRef({
     threadKey: routeThreadKey,
     key: pendingGuestMessageKey,
+    signalKey: agentSignalEndKey,
   });
   useEffect(() => {
-    const previous = previousPendingGuestMessagesRef.current;
-    previousPendingGuestMessagesRef.current = {
+    const previous = previousTimelineFooterRef.current;
+    previousTimelineFooterRef.current = {
       threadKey: routeThreadKey,
       key: pendingGuestMessageKey,
+      signalKey: agentSignalEndKey,
     };
     // Opening another thread is not a new message; its own scroll position wins.
     if (previous.threadKey !== routeThreadKey) return;
-    // Pending guest messages sit in the list footer, which the list does not follow on its own.
+    // Footer content needs explicit following because LegendList disables footerLayout maintenance.
     // The follow flag reflects the owner's position before the footer grew; a live measure may not.
     // Any new id counts, even when another one was resolved in the same update.
     const previousIds = new Set(previous.key.split(","));
     const hasNewMessage = pendingGuestMessageKey
       .split(",")
       .some((id) => id !== "" && !previousIds.has(id));
-    if (hasNewMessage && timelineLiveFollowEnabled) scrollToEnd(true);
-  }, [routeThreadKey, pendingGuestMessageKey, timelineLiveFollowEnabled, scrollToEnd]);
+    const hasNewSignal = agentSignalEndKey !== "" && previous.signalKey !== agentSignalEndKey;
+    if ((hasNewMessage || hasNewSignal) && timelineLiveFollowEnabled) scrollToEnd(true);
+  }, [
+    routeThreadKey,
+    pendingGuestMessageKey,
+    agentSignalEndKey,
+    timelineLiveFollowEnabled,
+    scrollToEnd,
+  ]);
   const queuedRunsControl =
     isServerThread && activeThread ? (
       <>
@@ -3543,7 +3553,8 @@ export default function ChatView(props: ChatViewProps) {
                   paintOnlyDisplayedTimeline ||
                   (pendingHandoff === null &&
                     pendingGuestMessageCount === 0 &&
-                    threadStatusLine === null) ? null : (
+                    threadStatusLine === null &&
+                    agentSignalEnd === null) ? null : (
                     <>
                       {pendingHandoff === null ? null : (
                         <div className="chat-content-lane">
@@ -3563,6 +3574,7 @@ export default function ChatView(props: ChatViewProps) {
                         />
                       ) : null}
                       {threadStatusLine}
+                      {agentSignalEnd}
                     </>
                   )
                 }
@@ -3810,7 +3822,6 @@ export default function ChatView(props: ChatViewProps) {
                                 factoryItems,
                                 messages: serverProjection?.messages ?? EMPTY_MESSAGES,
                                 pendingUserInput: inlinePendingUserInput,
-                                agentSignal: agentSignalDockEntry,
                                 onOpenFactoryPlan: openFactoryPlan,
                               }}
                               resumeCompactionTokens={resumeCompactionTokens}

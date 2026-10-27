@@ -17,12 +17,12 @@ const SIGNAL_SECTION_SNAPSHOT = `### Signal the user, and close only with permis
 Mark this thread with \`t3_thread_signal\` so the user sees where it stands without opening it:
 
 - \`needs_input\`: call it before you end a turn with a question or a decision only the user can make, and put that question in \`note\` in a few words. Structured questions and approvals already mark the thread; this is for questions you ask in your reply.
-- \`ready_to_close\`: call it when the whole task is finished and nothing else will happen: no background command, subagent, delegated task, or watch is still running.
+- \`ready_to_close\`: call it only when you judge that the thread's purpose (the goal the user gave this thread) is fulfilled and no background command, subagent, delegated task, or watch is still running. Do not call it just because a turn or one step ended. The user may give the thread a new purpose afterwards.
 - \`clear\`: remove a mark that no longer holds.
 
 The user's next message clears the mark, and a new turn clears \`ready_to_close\`.
 
-Settle this thread with \`t3_thread_organize\` action \`settle\` only when the user explicitly allowed you to close it in a message since it was last reopened; one permission covers one close. Otherwise, signal \`ready_to_close\` and leave closing to the user.`;
+Settle this thread with \`t3_thread_organize\` action \`settle\` only when the user explicitly allowed you to close it in a message since it was last reopened; one permission covers one close. Otherwise, leave closing to the user. Signal \`ready_to_close\` only when the thread's purpose is fulfilled under the conditions above.`;
 
 describe("orchestration instructions: thread signal", () => {
   it("signal instructions spec: one section describes both signal states", () => {
@@ -39,8 +39,9 @@ describe("orchestration instructions: thread signal", () => {
     expect(section).toMatch(/settle/);
     expect(section).toMatch(/explicit/i);
     expect(section).toMatch(/message/i);
-    // Without that permission the agent marks the thread instead of closing it.
-    expect(section).toMatch(/otherwise[^.]*ready_to_close/i);
+    expect(section).toContain("Otherwise, leave closing to the user.");
+    expect(section).toContain("Do not call it just because a turn or one step ended.");
+    expect(section).toContain("The user may give the thread a new purpose afterwards.");
   });
 
   it("signal instructions snapshot: the signal section's exact wording", () => {

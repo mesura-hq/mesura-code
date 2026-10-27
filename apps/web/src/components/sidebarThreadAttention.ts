@@ -1,16 +1,5 @@
-/**
- * Mesura: the one label the current sidebar's top status slot shows, and the in-tab
- * notifications read. It joins the resolved status with what the status does not carry: the
- * agent's signal, the Software Factory run, and whether a pull request is still open. The legacy
- * sidebar keeps `resolveThreadStatusPill` and never reaches this module.
- */
 import { factoryRunShortLabel } from "@t3tools/client-runtime/factory/run-presentation";
-import type {
-  FactoryRunShellSummary,
-  ThreadAgentSignal,
-  ThreadPullRequestLink,
-} from "@t3tools/contracts";
-import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
+import type { FactoryRunShellSummary, ThreadAgentSignal } from "@t3tools/contracts";
 
 import type { SidebarThreadStatus } from "./Sidebar.logic";
 
@@ -24,7 +13,6 @@ export type SidebarThreadAttentionKind =
   | "working"
   | "waiting"
   | "woke"
-  | "ready_to_close"
   | "done";
 
 /**
@@ -45,7 +33,6 @@ export interface SidebarThreadAttentionInput {
   readonly isWoke: boolean;
   readonly agentSignal: ThreadAgentSignal | null | undefined;
   readonly factoryRun: FactoryRunShellSummary | null | undefined;
-  readonly hasOpenPullRequest: boolean;
   /** A provider goal in progress reads `Goal` instead of `Working`. */
   readonly goalActive?: boolean;
 }
@@ -55,18 +42,8 @@ const NEEDS_INPUT: SidebarThreadAttention = {
   text: "Needs input",
   emphasis: "loud",
 };
-const READY_TO_CLOSE: SidebarThreadAttention = {
-  kind: "ready_to_close",
-  text: "Ready to close",
-  emphasis: "calm",
-};
-
 // A run that stopped on a question or was stopped waits on the developer.
 const FACTORY_NEEDS_INPUT_STATUSES: ReadonlySet<string> = new Set(["waiting", "stopped"]);
-// A run that finished degraded is still finished: its degraded phases live in the run's report,
-// not in a row label that never clears (developer, 2026-10-24).
-const FACTORY_FINISHED_STATUSES: ReadonlySet<string> = new Set(["done", "degraded"]);
-
 /** Precedence follows the prototype's `statusAfter`: what needs the developer first, then busy work, then finished. */
 export function resolveSidebarThreadAttention(
   input: SidebarThreadAttentionInput,
@@ -91,22 +68,7 @@ export function resolveSidebarThreadAttention(
   }
   if (status === "waiting") return { kind: "waiting", text: "Waiting", emphasis: "quiet" };
   if (input.isWoke) return { kind: "woke", text: "Woke", emphasis: "calm" };
-  if (
-    agentSignal?.kind === "ready_to_close" ||
-    (factoryRun != null &&
-      FACTORY_FINISHED_STATUSES.has(factoryRun.status) &&
-      !input.hasOpenPullRequest)
-  ) {
-    return READY_TO_CLOSE;
-  }
   return input.isUnread ? { kind: "done", text: "Done", emphasis: "calm" } : null;
-}
-
-/** A link whose state is not yet known counts as open, as it does for the current pull request. */
-export function threadHasOpenPullRequest(links: ReadonlyArray<ThreadPullRequestLink>): boolean {
-  return visibleThreadPullRequests(links).some(
-    (link) => link.snapshot === null || link.snapshot.state === "open",
-  );
 }
 
 export type SidebarThreadAttentionIcon =
@@ -167,7 +129,6 @@ const LOOK_BY_KIND: Readonly<Record<SidebarThreadAttentionKind, SidebarThreadAtt
   working: WORKING_LOOK,
   waiting: QUIET_LOOK,
   woke: { className: "font-medium text-warning", icon: "woke", rowEdgeClassName: "" },
-  ready_to_close: { className: "font-normal text-success/70", icon: null, rowEdgeClassName: "" },
   done: { className: "font-medium text-success", icon: "done", rowEdgeClassName: "" },
 };
 

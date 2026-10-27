@@ -264,7 +264,6 @@ export function startThreadNotifications(
           isWoke: false,
           agentSignal: thread.agentSignal,
           factoryRun: thread.factoryRun,
-          hasOpenPullRequest: false,
         })?.kind ?? null;
       const loudKind: LoudKind | null =
         status === "request"
