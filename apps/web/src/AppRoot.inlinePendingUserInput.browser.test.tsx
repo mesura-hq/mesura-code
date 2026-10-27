@@ -1,4 +1,4 @@
-import { act, render as renderBrowser, type Screen } from "../test/render";
+import { act, fakeTimers, render as renderBrowser, type Screen } from "../test/render";
 /**
  * Entry point: AppRoot with its memory router, real ChatView, MessagesTimeline,
  * and ChatComposer. Environment reads and RPC commands use the phase fixture.
@@ -13,7 +13,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import {
   EnvironmentId,
   ThreadId,
@@ -147,8 +147,6 @@ const environmentId = EnvironmentId.make(FENCE_ENVIRONMENT_ID);
 const threadId = ThreadId.make("phase-two-thread");
 const requestId = "phase-two-request";
 const now = "2026-09-22T12:00:00.000Z";
-let root: Screen | undefined;
-let container: HTMLDivElement;
 
 async function setupBrowserFixture0() {
   fixture.pendingRowsVisible = true;
@@ -186,13 +184,100 @@ async function setupBrowserFixture0() {
     runtimeRequests: [request],
     turnItems: [item],
   });
-  container = document.createElement("div");
+  const container = document.createElement("div");
   document.body.append(container);
 
+  async function mountApp({ discardMountTimers = false } = {}) {
+    publishFenceThreadProjection(fixture.projection!, environmentId);
+    const route = createRootRoute({
+      component: () => (
+        <SidebarProvider>
+          <ChatView environmentId={environmentId} threadId={threadId} routeKind="server" />
+        </SidebarProvider>
+      ),
+    });
+    const index = createRoute({ getParentRoute: () => route, path: "/" });
+    const router = createRouter({
+      routeTree: route.addChildren([index]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    await router.load();
+    await using resources = new AsyncDisposableStack();
+    if (discardMountTimers) {
+      const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+      resources.defer(() => page.viewport(previousViewport.width, previousViewport.height));
+      await page.viewport(412, 915);
+    }
+    const screen = resources.use(await renderAppRoot());
+
+    async function renderAppRoot() {
+      // Discard every timer and frame scheduled during mount, including
+      // ChatView's autofocus, so the phone composer starts collapsed.
+      // Pending fake timers never run. Picker interactions use real timers.
+      using _timers = discardMountTimers ? fakeTimers() : undefined;
+      // AppRoot owns this fixture's memory router.
+      return await renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {
+        container,
+        router: false,
+      });
+    }
+    if (discardMountTimers) {
+      expect(
+        container
+          .querySelector("[data-chat-composer-mobile-collapsed]")
+          ?.getAttribute("data-chat-composer-mobile-collapsed"),
+      ).toBe("true");
+    }
+    const lifetime = resources.move();
+    return { ...screen, [Symbol.asyncDispose]: () => lifetime.disposeAsync() };
+  }
+
+  async function expandNormalComposer(screen: Screen) {
+    // ChatView schedules autofocus in requestAnimationFrame. At phone width the
+    // footer does not mount until expansion, so querying it after render races
+    // that frame. Expand through the visible control before querying the footer.
+    const expand = screen.container.querySelector<HTMLButtonElement>(
+      '[data-normal-composer] button[aria-label="Expand composer"]',
+    );
+    if (expand) await act(async () => expand.click());
+    await expect
+      .element(screen.getByRole("button", { name: "Attach files", exact: true }))
+      .toBeVisible();
+  }
+
+  function button(text: string) {
+    const match = [...container.querySelectorAll("button")].find((entry) =>
+      entry.textContent?.includes(text),
+    );
+    expect(match, `Expected button ${text}; rendered: ${container.textContent}`).toBeDefined();
+    return match!;
+  }
+
+  function questionField(questionId: string) {
+    return container.querySelector<HTMLTextAreaElement>(
+      `[data-question-id="${questionId}"] textarea`,
+    );
+  }
+
+  async function typeQuestion(questionId: string, text: string) {
+    const field = questionField(questionId)!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        field,
+        text,
+      );
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
   return {
+    container,
+    mountApp,
+    expandNormalComposer,
+    button,
+    questionField,
+    typeQuestion,
     async [Symbol.asyncDispose]() {
-      await act(async () => root?.[Symbol.asyncDispose]());
-      root = undefined;
       container.remove();
       appRootFence.threads.clear();
       appRootFence.threadStates.clear();
@@ -206,47 +291,13 @@ async function setupBrowserFixture0() {
   };
 }
 
-async function mountApp() {
-  publishFenceThreadProjection(fixture.projection!, environmentId);
-  const route = createRootRoute({
-    component: () => (
-      <SidebarProvider>
-        <ChatView environmentId={environmentId} threadId={threadId} routeKind="server" />
-      </SidebarProvider>
-    ),
-  });
-  const index = createRoute({ getParentRoute: () => route, path: "/" });
-  const router = createRouter({
-    routeTree: route.addChildren([index]),
-    history: createMemoryHistory({ initialEntries: ["/"] }),
-  });
-  await router.load();
-  await act(async () => {
-    root = await renderBrowser(null, { container: container, router: false });
-    await root.rerender(<AppRoot router={router as unknown as AppRouter} />);
-  });
-}
-
 const questionItem = () => readFenceUserInputItem(fixture.projection!);
-
-function button(text: string) {
-  const match = [...container.querySelectorAll("button")].find((entry) =>
-    entry.textContent?.includes(text),
-  );
-  expect(match, `Expected button ${text}; rendered: ${container.textContent}`).toBeDefined();
-  return match!;
-}
-
-function questionField(questionId: string) {
-  return container.querySelector<HTMLTextAreaElement>(
-    `[data-question-id="${questionId}"] textarea`,
-  );
-}
 
 it("phase two inline card shows every pending question in one conversation row", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, questionField } = _browserFixture0;
 
-  await mountApp();
+  await using _screen = await mountApp();
   const cards = container.querySelectorAll(
     '[data-pending-user-input-request-id="phase-two-request"]',
   );
@@ -261,8 +312,9 @@ it("phase two inline card shows every pending question in one conversation row",
 
 it("phase two incomplete inline request focuses its missing question and retains both drafts", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, button, questionField } = _browserFixture0;
 
-  await mountApp();
+  await using _screen = await mountApp();
   await act(async () => button("Workspace").click());
   await act(async () => button("Submit").click());
   expect(fixture.respond).not.toHaveBeenCalled();
@@ -273,8 +325,9 @@ it("phase two incomplete inline request focuses its missing question and retains
 
 it("phase two pending row survives a thread refresh and remains outside collapsed work", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp } = _browserFixture0;
 
-  await mountApp();
+  await using _screen = await mountApp();
   await act(async () => {
     fixture.projection = {
       ...fixture.projection!,
@@ -290,10 +343,12 @@ it("phase two pending row survives a thread refresh and remains outside collapse
 
 it("phase two normal composer keeps its own message draft during a pending request", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, expandNormalComposer, questionField } = _browserFixture0;
 
   const target = scopeThreadRef(environmentId, threadId);
   useComposerDraftStore.getState().setPrompt(target, "A separate normal message");
-  await mountApp();
+  await using _screen = await mountApp();
+  await expandNormalComposer(_screen);
   expect(questionField("scope")).not.toBeNull();
   expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
     "A separate normal message",
@@ -319,6 +374,7 @@ it("phase two normal composer keeps its own message draft during a pending reque
 
 it("phase two per-question upload state appears beside its own text field", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, questionField } = _browserFixture0;
 
   const key = questionAttachmentDraftId(
     environmentId,
@@ -327,7 +383,7 @@ it("phase two per-question upload state appears beside its own text field", asyn
     "timing",
   );
   useQuestionAttachmentPreparation.setState({ counts: { [key]: 1 } });
-  await mountApp();
+  await using _screen = await mountApp();
   const field = questionField("timing");
   expect(field).not.toBeNull();
   expect(field?.parentElement?.textContent).toMatch(/upload|prepar/i);
@@ -335,9 +391,10 @@ it("phase two per-question upload state appears beside its own text field", asyn
 
 it("phase two failed answer retains an inline retry and resolved request keeps history", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, button } = _browserFixture0;
 
   fixture.respond.mockRejectedValue(new Error("Provider refused"));
-  await mountApp();
+  await using _screen = await mountApp();
   await act(async () => button("Workspace").click());
   await act(async () => button("Now").click());
   await act(async () => button("Submit").click());
@@ -377,10 +434,11 @@ it("phase two failed answer retains an inline retry and resolved request keeps h
 
 it("phase two guard keeps a normal message draft while an option is selected", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, button } = _browserFixture0;
 
   const target = scopeThreadRef(environmentId, threadId);
   useComposerDraftStore.getState().setPrompt(target, "Keep the normal message");
-  await mountApp();
+  await using _screen = await mountApp();
   await act(async () => button("Workspace").click());
   expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
     "Keep the normal message",
@@ -411,18 +469,11 @@ it("phase two guard keeps attachment drafts separate by question", async () => {
   useComposerDraftStore.getState().clearComposerContent(second);
 });
 
-async function typeQuestion(questionId: string, text: string) {
-  const field = questionField(questionId)!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, text);
-    field.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-}
-
 it("phase two inline keyboard choices and multiline text submit one complete request", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, button, questionField, typeQuestion } = _browserFixture0;
 
-  await mountApp();
+  await using _screen = await mountApp();
   await act(async () => {
     const option = button("Workspace");
     option.focus();
@@ -448,12 +499,12 @@ it("phase two inline keyboard choices and multiline text submit one complete req
 
 it("phase two inline drafts survive app remount without entering the normal composer", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, questionField, typeQuestion } = _browserFixture0;
 
-  await mountApp();
+  await using _screen = await mountApp();
   await typeQuestion("scope", "Keep this answer");
-  await act(async () => root!.unmount());
-  root = undefined;
-  await mountApp();
+  await _screen.unmount();
+  await using _remountedScreen = await mountApp();
   expect(questionField("scope")?.value).toBe("Keep this answer");
   expect(container.querySelector("[data-normal-composer]")?.textContent).not.toContain(
     "Keep this answer",
@@ -462,6 +513,7 @@ it("phase two inline drafts survive app remount without entering the normal comp
 
 it("phase two independent requests keep their own submit and dismissal boundaries", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp } = _browserFixture0;
 
   const item = questionItem();
   const secondRequest = makeFenceUserInput({
@@ -477,7 +529,7 @@ it("phase two independent requests keep their own submit and dismissal boundarie
     runtimeRequests: [...fixture.projection!.runtimeRequests, secondRequest.request],
     turnItems: [item, secondRequest.item],
   };
-  await mountApp();
+  await using _screen = await mountApp();
   expect(container.querySelectorAll("[data-pending-user-input-request-id]")).toHaveLength(2);
   const second = container.querySelector('[data-pending-user-input-request-id="second-request"]')!;
   const dismiss = second.querySelector<HTMLButtonElement>(
@@ -520,6 +572,7 @@ it("phase two independent requests keep their own submit and dismissal boundarie
 
 it("phase two question upload failure stays beside its field and blocks request submission", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, button, questionField } = _browserFixture0;
 
   vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
   const key = questionAttachmentDraftId(
@@ -547,7 +600,7 @@ it("phase two question upload failure stays beside its field and blocks request 
       "inline-failed-file": { status: "failed", environmentId, reason: "Connection lost" },
     },
   });
-  await mountApp();
+  await using _screen = await mountApp();
   expect(questionField("timing")?.parentElement?.textContent).toContain("Connection lost");
   expect(questionField("scope")?.parentElement?.textContent).not.toContain("notes.txt");
   expect(button("Submit").disabled).toBe(true);
@@ -563,9 +616,10 @@ it("phase two question upload failure stays beside its field and blocks request 
 
 it("phase two remote reconnect keeps editable answers and resumes the same request", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, button, questionField, typeQuestion } = _browserFixture0;
 
   appRootFence.environments[0]!.connection.phase = "reconnecting";
-  await mountApp();
+  await using _screen = await mountApp();
   await typeQuestion("scope", "Remote draft");
   expect(questionField("scope")?.disabled).toBe(false);
   expect(button("Submit").disabled).toBe(true);
@@ -586,9 +640,10 @@ it("phase two remote reconnect keeps editable answers and resumes the same reque
 
 it("phase two picked question file uses the shared upload draft and request attachment map", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, button, questionField } = _browserFixture0;
 
   const upload = vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
-  await mountApp();
+  await using _screen = await mountApp();
   const input = container.querySelector<HTMLInputElement>(
     '[data-question-id="timing"] input[type="file"]',
   )!;
@@ -638,8 +693,9 @@ it("phase two picked question file uses the shared upload draft and request atta
 
 it("phase two rework clears missing-answer feedback as soon as a choice answers it", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, button, questionField } = _browserFixture0;
 
-  await mountApp();
+  await using _screen = await mountApp();
   await act(async () => button("Submit").click());
   expect(questionField("scope")?.getAttribute("aria-invalid")).toBe("true");
   await act(async () => button("Workspace").click());
@@ -651,8 +707,9 @@ it("phase two rework clears missing-answer feedback as soon as a choice answers 
 
 it("phase two rework question shortcut focuses the first unanswered inline field", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, button, questionField } = _browserFixture0;
 
-  await mountApp();
+  await using _screen = await mountApp();
   await act(async () => button("Workspace").click());
   await act(async () => dispatchPickerAction("question"));
   expect(document.activeElement).toBe(questionField("timing"));
@@ -660,12 +717,13 @@ it("phase two rework question shortcut focuses the first unanswered inline field
 
 it("phase two rework unrelated v2 detail update leaves existing Markdown rows unrendered", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp } = _browserFixture0;
 
   addFenceThread(threadId, "Question fence", [
     makeMessage("stable-assistant", "assistant", "Stable **answer**"),
   ]);
   fixture.projection = Option.getOrThrow(appRootFence.threadStates.get(threadId)!.data);
-  await mountApp();
+  await using _screen = await mountApp();
   const before = fixture.markdownRenders;
   expect(before).toBeGreaterThan(0);
   await act(async () => {
@@ -682,6 +740,7 @@ it("phase two rework unrelated v2 detail update leaves existing Markdown rows un
 
 it("phase two regression long request keeps answers across virtual scrolling", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, questionField, typeQuestion } = _browserFixture0;
 
   const item = questionItem();
   const questions = Array.from({ length: 12 }, (_, index) => ({
@@ -692,7 +751,7 @@ it("phase two regression long request keeps answers across virtual scrolling", a
     multiSelect: false,
   }));
   fixture.projection = { ...fixture.projection!, turnItems: [{ ...item, questions }] };
-  await mountApp();
+  await using _screen = await mountApp();
   expect(container.querySelectorAll("[data-question-id] textarea")).toHaveLength(12);
   await typeQuestion("long-11", "Last answer\nWith more detail");
   await act(async () => {
@@ -714,9 +773,11 @@ it("phase two regression long request keeps answers across virtual scrolling", a
 
 it("phase two regression both file pickers preserve normal and question attachment ownership", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, expandNormalComposer, questionField } = _browserFixture0;
 
   vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
-  await mountApp();
+  await using _screen = await mountApp({ discardMountTimers: true });
+  await expandNormalComposer(_screen);
   const normalInput = container.querySelector<HTMLInputElement>(
     '[data-normal-composer] input[type="file"]',
   )!;
@@ -821,9 +882,12 @@ it.each([
   "a touch device opens the media picker first from $scope, and its photos attach like Files",
   async ({ scope, trigger, draftTarget }) => {
     await using _browserFixture0 = await setupBrowserFixture0();
+    const { container, mountApp, expandNormalComposer } = _browserFixture0;
     vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
     emulateTouchPointer();
-    await mountApp();
+    expect(window.matchMedia("(pointer: coarse)").matches).toBe(true);
+    await using _screen = await mountApp({ discardMountTimers: true });
+    await expandNormalComposer(_screen);
 
     const triggerButton = container.querySelector<HTMLButtonElement>(`${scope} ${trigger}`)!;
     expect(triggerButton).not.toBeNull();
@@ -881,7 +945,9 @@ it.each([
 
 it("a fine pointer keeps one tap from the attach button to the file dialog", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
-  await mountApp();
+  const { container, mountApp, expandNormalComposer } = _browserFixture0;
+  await using _screen = await mountApp({ discardMountTimers: true });
+  await expandNormalComposer(_screen);
   expect(container.querySelector("input[data-attachment-media-input]")).toBeNull();
   const triggerButton = container.querySelector<HTMLButtonElement>(
     '[data-normal-composer] button[aria-label="Attach files"]',
