@@ -17,26 +17,36 @@ import { frameSurface, installFrameReader, pageQuote } from "./frameReader";
 const engineListeners = createWindowListenerFixture(installKeyEngine);
 const readerListeners = createWindowListenerFixture(installFrameReader);
 
-/** A page that reports its own keydowns, and tells the test once its reader has started. */
+/**
+ * Reports the page's own keydowns, tells the test each time its reader starts, and on request
+ * loses and regains window focus, as switching to another app and back does.
+ */
+const PAGE_HARNESS = `<script>
+  window.addEventListener("keydown", (event) => parent.postMessage({ test: "page-key", key: event.key }, "*"));
+  window.addEventListener("message", (event) => {
+    if (event.data && event.data.method === "t3/reader/mode" && event.data.params.mode === "read") {
+      setTimeout(() => parent.postMessage({ test: "reader-started" }, "*"));
+    }
+    if (event.data && event.data.test === "switch-away-and-back") {
+      window.dispatchEvent(new Event("blur"));
+      window.dispatchEvent(new Event("focus"));
+    }
+  });
+  parent.postMessage({ test: "loaded" }, "*");
+</script>`;
+
 const PAGE = `<body>
 <script>${EMBEDDED_DOCUMENT_AGENT_SCRIPT}</script>
 <h1>Quarterly report</h1>
 <p>Alpha   beta <b>gamma</b>.</p>
 <p style="display:none">Hidden text.</p>
 <table><tr><td>North</td><td>12</td></tr></table>
+<details><summary>More</summary>Closed text<p>Closed block</p></details>
 <p><input aria-label="Name"></p>
-<script>
-  window.addEventListener("keydown", (event) => parent.postMessage({ test: "page-key", key: event.key }, "*"));
-  window.addEventListener("message", (event) => {
-    if (event.data && event.data.method === "t3/reader/mode" && event.data.params.mode === "read") {
-      setTimeout(() => parent.postMessage({ test: "reader-started" }, "*"));
-    }
-  });
-  parent.postMessage({ test: "loaded" }, "*");
-</script>
+${PAGE_HARNESS}
 </body>`;
 
-async function mountReader() {
+async function mountReader(page = PAGE) {
   await using stack = new AsyncDisposableStack();
   const messages: Array<Record<string, unknown>> = [];
   const receive = (event: MessageEvent) => {
@@ -68,7 +78,7 @@ async function mountReader() {
         data-mesura-chat-object-entry=""
         title="Report"
         sandbox="allow-scripts allow-forms"
-        srcDoc={PAGE}
+        srcDoc={page}
       />,
     ),
   );
@@ -83,6 +93,7 @@ async function mountReader() {
     messages,
     quotes,
     pageKeys: () => messages.filter((message) => message.test === "page-key").map((m) => m.key),
+    starts: () => messages.filter((message) => message.test === "reader-started").length,
   };
 }
 
@@ -100,12 +111,43 @@ describe("the Vim reader in an embedded page", () => {
     expect(reader.pageKeys(), "the page never saw a reader key").toEqual([]);
   });
 
-  it("yanks a whole line, skipping hidden text and joining table cells with a tab", async () => {
+  it("yanks the visible text: hidden and closed text skipped, table cells joined by a tab", async () => {
     await using reader = await mountReader();
     using writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
-    await userEvent.keyboard("jjyy");
-    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("North\t12\n"));
+    await userEvent.keyboard("yG");
+    await vi.waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        "Quarterly report\nAlpha beta gamma.\nNorth\t12\nMore\n",
+      ),
+    );
     expect(reader.pageKeys()).toEqual([]);
+  });
+
+  it("takes a mouse selection that ends the page as the visual selection", async () => {
+    await using reader = await mountReader(
+      `<body><script>${EMBEDDED_DOCUMENT_AGENT_SCRIPT}</script><p>Alpha beta.</p>${PAGE_HARNESS}</body>`,
+    );
+    using writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    await userEvent.tripleClick(reader.frame, { position: { x: 20, y: 16 } });
+    await vi.waitFor(() => expect(readKeyEngineSnapshot().mode).toBe("VISUAL"));
+    await userEvent.keyboard("y");
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("Alpha beta."));
+  });
+
+  it("reads again after the window loses and regains focus, in the mode it was in", async () => {
+    await using reader = await mountReader();
+    reader.frame.contentWindow!.postMessage({ test: "switch-away-and-back" }, "*");
+    await vi.waitFor(() => expect(reader.starts()).toBe(2));
+    await userEvent.keyboard("vE{Space}c");
+    await vi.waitFor(() => expect(reader.quotes).toEqual([pageQuote("Report", "Quarterly")]));
+
+    await userEvent.keyboard("i");
+    await vi.waitFor(() => expect(readKeyEngineSnapshot().mode).toBe("INSERT"));
+    reader.frame.contentWindow!.postMessage({ test: "switch-away-and-back" }, "*");
+    await vi.waitFor(() => expect(reader.starts()).toBe(3));
+    await vi.waitFor(() => expect(readKeyEngineSnapshot().mode).toBe("INSERT"));
+    await userEvent.keyboard("x");
+    await vi.waitFor(() => expect(reader.pageKeys()).toEqual(["x"]));
   });
 
   it("hands the keys to the page on i, takes them back on Escape, and exits on the next", async () => {

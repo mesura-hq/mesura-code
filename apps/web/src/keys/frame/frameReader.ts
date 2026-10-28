@@ -15,7 +15,11 @@ import { appendBlockToComposer } from "../composer/composerSurface";
 import { DEFAULT_KEYMAP } from "../defaultKeymap";
 import { FRAME_READER_ATTRIBUTE } from "../focusScope";
 import { refreshModeIndicator, type KeySurface } from "../keyEngine";
-import { updateKeyEngineSnapshot, type EngineModeLabel } from "../keyEngineStore";
+import {
+  readKeyEngineSnapshot,
+  updateKeyEngineSnapshot,
+  type EngineModeLabel,
+} from "../keyEngineStore";
 import {
   isVisualContext,
   stepReadOnlyVim,
@@ -103,6 +107,24 @@ export function startFrameReader(frame: HTMLIFrameElement): void {
   post(frame, embeddedReaderModeMessage("read", visibleTopOf(frame)));
 }
 
+/**
+ * The page in the focused frame has focus with no reader: a reloaded page, the browser window
+ * back from another app, or focus moved from another frame, which the app's window never sees.
+ * A start still waiting for the page's first text is that start's own echo.
+ */
+function resumeFrameReader(frame: HTMLIFrameElement): void {
+  if (!readKeyEngineSnapshot().enabled) return;
+  const previous = session?.frame === frame ? session : null;
+  if (previous?.revision === 0) return;
+  endFrameReader();
+  startFrameReader(frame);
+  if (previous?.mode === "interact" && session) {
+    setMode(session, "interact");
+    post(frame, embeddedReaderModeMessage("interact"));
+  }
+  refreshModeIndicator();
+}
+
 /** Lets go of the page's keys; the page keeps its own once it has focus again. */
 export function endFrameReader(): void {
   const current = session;
@@ -129,11 +151,7 @@ function onMessage(event: MessageEvent): void {
   const message = readEmbeddedReaderMessage(event.data);
   if (!message) return;
   if (message.kind === "ready") {
-    // A focused frame reloaded its page, which starts with no reader.
-    if (current?.frame === frame) {
-      endFrameReader();
-      startFrameReader(frame);
-    }
+    resumeFrameReader(frame);
     return;
   }
   if (current?.frame !== frame) return;

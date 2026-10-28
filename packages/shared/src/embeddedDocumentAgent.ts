@@ -115,8 +115,11 @@ export function embeddedDocumentAgent(
       }
     };
     const walk = (element: Element) => {
+      // A closed details element shows its summary only, its bare text included.
+      const closed = element instanceof HTMLDetailsElement && !element.open;
       for (const child of element.childNodes) {
         if (chars.length >= maxText) return;
+        if (closed && !(child instanceof Element && child.localName === "summary")) continue;
         if (child instanceof Text) {
           addText(child, element);
           continue;
@@ -128,13 +131,6 @@ export function embeddedDocumentAgent(
         }
         const style = styleOf(child);
         if (style.display === "none" || style.contentVisibility === "hidden") continue;
-        if (
-          element instanceof HTMLDetailsElement &&
-          !element.open &&
-          child.localName !== "summary"
-        ) {
-          continue;
-        }
         const display = style.display;
         const block = !display.startsWith("inline") && display !== "contents";
         if (display === "table-cell") separate("\t");
@@ -181,8 +177,8 @@ export function embeddedDocumentAgent(
     }
   }
 
-  /** The offset of a DOM point: the first character at or after it. */
-  function offsetOf(node: Node, offset: number): number | null {
+  /** The offset of a DOM point: the first character at or after it, or the text's end. */
+  function offsetOf(node: Node, offset: number): number {
     let target: Node | null = node;
     let at = offset;
     if (!(node instanceof Text)) {
@@ -210,7 +206,8 @@ export function embeddedDocumentAgent(
       target = walker.nextNode();
       at = 0;
     }
-    return null;
+    // A point after the last character, as a selection that ends the page has.
+    return text.length;
   }
 
   function firstVisibleOffset(visibleTop: number): number {
@@ -340,6 +337,10 @@ export function embeddedDocumentAgent(
     else if (data.method === methods.readerActivate) activate(params);
   });
   window.addEventListener("blur", () => setMode("off"));
+  // Focus back with the reader off (a window switch, a move from another frame): the app decides.
+  window.addEventListener("focus", () => {
+    if (mode === "off") post(methods.readerReady);
+  });
   window.addEventListener(
     "pointerup",
     (event) => {
@@ -351,8 +352,7 @@ export function embeddedDocumentAgent(
       const anchor = offsetOf(selection.anchorNode, selection.anchorOffset);
       const focus = selection.focusNode
         ? offsetOf(selection.focusNode, selection.focusOffset)
-        : null;
-      if (anchor === null || focus === null) return;
+        : anchor;
       post(methods.readerSelect, { revision, anchor, focus });
     },
     true,
