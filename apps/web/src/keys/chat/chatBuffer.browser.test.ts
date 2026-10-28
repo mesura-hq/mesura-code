@@ -1,13 +1,16 @@
 // The markup mirrors what the timeline renders: one `[data-timeline-row-id]` per
 // row, a screen-reader-only author heading, and an assistant row whose prose
 // sits in `[data-assistant-citation-source]`. Chromium supplies real layout.
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
+import { readAssistantText, captureAssistantTextSelection } from "~/lib/assistantTextSelection";
 import { mountKeyDom } from "~/test/keyBrowserFixtures";
 
 import {
   SEPARATOR_OFFSET,
   buildChatBuffer,
+  domPointToRowPosition,
+  isSupportedChatSelection,
   fromRowPosition,
   rangeBetween,
   toRowPosition,
@@ -279,4 +282,161 @@ describe("chat buffer soft breaks", () => {
     const range = rangeBetween(buffer, { line: 1, col: 0 }, { line: 1, col: 1 });
     expect(range!.toString()).toBe("s");
   });
+});
+
+it("keeps blank code lines mapped to their original DOM offsets", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="code"><p>Before</p><pre><code>\nalpha\n\n  \nbeta\n</code></pre><p>After</p></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  expect(buffer.lines).toEqual(["Before", "", "alpha", "", "  ", "beta", "", "After"]);
+  expect(rangeBetween(buffer, { line: 1, col: 0 }, { line: 6, col: 0 })?.toString()).toBe(
+    "\nalpha\n\n  \nbeta\n",
+  );
+  expect(fromRowPosition(buffer, toRowPosition(buffer, { line: 3, col: 0 })!)).toEqual({
+    line: 3,
+    col: 0,
+  });
+});
+
+it("projects rendered objects as one stop per line without their internal text", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="rich"><p>Before <span data-mesura-chat-object="math" data-markdown-math="inline" data-markdown-copy="x^2">x²</span> after</p><div data-mesura-chat-object="html-render"><iframe data-mesura-chat-object-entry></iframe></div><img data-mesura-chat-object="image" alt="Plot"><div data-mesura-chat-object="diagram" data-markdown-copy="diagram source"><svg><text>Node</text></svg></div><div data-mesura-chat-object="mcp-app"><button>Action</button></div></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  expect(buffer.lines).toEqual([
+    "Before ",
+    "\ufffc",
+    "after",
+    "\ufffc",
+    "\ufffc",
+    "\ufffc",
+    "\ufffc",
+  ]);
+  const range = rangeBetween(buffer, { line: 1, col: 0 }, { line: 1, col: 1 })!;
+  expect(range.cloneContents().querySelector('[data-mesura-chat-object="math"]')).not.toBeNull();
+});
+
+it("reads only marked expanded output beneath activation wrappers", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="work"><div role="button"><span>Tool label</span><div data-mesura-readable><p>Expanded reasoning</p><pre>output\n\nend</pre><button>Copy output</button><textarea>Private input</textarea></div></div></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  expect(buffer.lines).toEqual(["Expanded reasoning", "output", "", "end"]);
+  expect(readAssistantText(timeline.viewport).text).toBe("");
+});
+
+it("skips closed details, CSS-hidden content and unselectable chrome", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="visibility"><details><summary>Summary</summary>Hidden direct text<p>Hidden body</p></details><p style="display:none">Display hidden</p><p style="visibility:hidden">Visibility hidden</p><span data-mesura-chat-object="math" aria-hidden="true">Hidden formula</span><div style="opacity:0">Transparent</div><div style="user-select:none"><span>Code header</span></div><p>Visible body</p></div>',
+  );
+  const sourceText = readAssistantText(timeline.viewport).text;
+  expect(sourceText).toContain("Hidden body");
+  expect(sourceText).toContain("Code header");
+  expect(buildChatBuffer(timeline.viewport).lines).toEqual(["Summary", "Visible body"]);
+  timeline.container.querySelector("details")!.open = true;
+  expect(buildChatBuffer(timeline.viewport).lines).toContain("Hidden body");
+});
+
+it.each(["flex", "grid"])(
+  "separates adjacent status labels in %s layout without changing citation text",
+  (display) => {
+    using timeline = mountTimeline(
+      `<div data-timeline-row-id="status"><div style="display:${display};gap:8px"><span>Factory run</span><span>degraded</span></div></div>`,
+    );
+    expect(readAssistantText(timeline.viewport).text).toBe("Factory rundegraded");
+    const buffer = buildChatBuffer(timeline.viewport);
+    expect(buffer.lines).toEqual(["Factory run degraded"]);
+    expect(rangeBetween(buffer, { line: 0, col: 12 }, { line: 0, col: 20 })?.toString()).toBe(
+      "degraded",
+    );
+  },
+);
+
+it("reads each element style once during a rebuild", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="cached"><p><span>first\nsecond</span></p><pre><code>alpha\n\nbeta</code></pre></div>',
+  );
+  using styles = vi.spyOn(window, "getComputedStyle");
+  buildChatBuffer(timeline.viewport);
+  const elements = styles.mock.calls.map(([element]) => element);
+  expect(new Set(elements).size).toBe(elements.length);
+});
+
+it("projects table rows with tabs while ranges retain citation chunk boundaries", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="table"><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Mode</td><td>Normal</td></tr></tbody></table></div>',
+  );
+  expect(readAssistantText(timeline.viewport).text).toBe("Metric\nValue\nMode\nNormal");
+  const buffer = buildChatBuffer(timeline.viewport);
+  expect(buffer.lines).toEqual(["Metric\tValue", "Mode\tNormal"]);
+  expect(rangeBetween(buffer, { line: 1, col: 5 }, { line: 1, col: 11 })?.toString()).toBe(
+    "Normal",
+  );
+});
+
+it("maps DOM points to the same row coordinates used by motions", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="points"><p>alpha <strong>beta</strong></p><button>Control</button></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  const bold = timeline.container.querySelector("strong")!;
+  expect(domPointToRowPosition(buffer, bold.firstChild!, 2)).toEqual({
+    rowId: "points",
+    offset: 8,
+  });
+  expect(domPointToRowPosition(buffer, bold, 1)).toEqual({ rowId: "points", offset: 10 });
+  expect(
+    domPointToRowPosition(buffer, timeline.container.querySelector("button")!.firstChild!, 1),
+  ).toBeNull();
+});
+
+it("rejects selections spanning controls, object stops or unprojected content", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="unsupported"><p>Before</p><button>Control</button><iframe></iframe><p>After</p></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  const paragraphs = timeline.container.querySelectorAll("p");
+  const range = document.createRange();
+  range.setStart(paragraphs[0]!.firstChild!, 0);
+  range.setEnd(paragraphs[1]!.firstChild!, 5);
+  expect(isSupportedChatSelection(buffer, range)).toBe(false);
+  range.setEnd(paragraphs[0]!.firstChild!, 5);
+  expect(isSupportedChatSelection(buffer, range)).toBe(true);
+});
+
+it("keeps table and formula citations in the original reader coordinate space", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="citations"><div data-assistant-citation-source="citations"><table><tr><td>Metric</td><td>Value</td></tr><tr><td>Mode</td><td>Normal</td></tr></table><span data-mesura-chat-object="math" data-markdown-math="inline" data-markdown-copy="x^2">x²</span></div></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(rangeBetween(buffer, { line: 1, col: 5 }, { line: 1, col: 11 })!);
+  const table = captureAssistantTextSelection(timeline.viewport, selection)!;
+  expect(table.selector).toMatchObject({ text: "Normal", start: 18, end: 24 });
+  selection.removeAllRanges();
+  selection.addRange(rangeBetween(buffer, { line: 2, col: 0 }, { line: 2, col: 1 })!);
+  const math = captureAssistantTextSelection(timeline.viewport, selection)!;
+  expect(math.selector.text).toBe("x^2");
+});
+
+it("keeps a completely empty code block as one preformatted line", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="empty-code"><pre><code></code></pre></div>',
+  );
+  expect(buildChatBuffer(timeline.viewport).lines).toEqual([""]);
+});
+
+it("keeps formulas atomic inside table cells", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="table-math"><table><tr><td>Metric</td><td><span data-mesura-chat-object="math" data-markdown-math="inline" data-markdown-copy="x^2">x²</span></td><td>Value</td></tr></table></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  expect(buffer.lines).toEqual(["Metric\t", "\ufffc", "\tValue"]);
+  expect(
+    rangeBetween(buffer, { line: 1, col: 0 }, { line: 1, col: 1 })
+      ?.cloneContents()
+      .querySelector('[data-mesura-chat-object="math"]'),
+  ).not.toBeNull();
 });

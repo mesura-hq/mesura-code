@@ -8,7 +8,7 @@ import {
 
 import type { KeySurface } from "../keyEngine";
 import { updateKeyEngineSnapshot, type EngineModeLabel } from "../keyEngineStore";
-import { paintBlockCursor } from "../blockCursor";
+import { paintBlockCursor, paintEmptyRangeCursor, paintObjectCursor } from "../blockCursor";
 import { copyToClipboard } from "../clipboard";
 import {
   findOccurrences,
@@ -30,12 +30,18 @@ import {
   chatScroller,
   chatViewport,
   fromRowPosition,
+  domPointToRowPosition,
+  isSupportedChatSelection,
   isRangeUnobscured,
   lineAtOrBelow,
+  objectAt,
+  objectYankText,
   readingBounds,
   rangeBetween,
   sentenceSpans,
   toRowPosition,
+  tableAt,
+  tableMotionColumn,
   type BufferPosition,
   type ChatBuffer,
   type RowPosition,
@@ -70,6 +76,9 @@ const SCROLL_SETTLE_TIMEOUT_MS = 800;
 
 let context: VimContext = createInitialContext({ line: 0, col: 0 });
 let cursor: RowPosition | null = null;
+let visualAnchor: RowPosition | null = null;
+let chatPointerId: number | null = null;
+let writingSelection = false;
 /**
  * Whether the last sync put the Vim cursor on the first visible line because
  * `cursor` did not resolve (a fresh thread, or a remembered row not mounted).
@@ -162,13 +171,19 @@ function syncBuffer(): { buffer: ChatBuffer; text: TextBuffer } | null {
   const viewport = chatViewport();
   if (viewport === null) return null;
   const buffer = buildChatBuffer(viewport);
-  if (buffer.lines.length === 0) return null;
+  if (buffer.lines.length === 0) {
+    if (isVisual()) cancelUnmountedVisualSelection();
+    paintBlockCursor("mesura-chat-cursor", null, null);
+    return null;
+  }
   const remembered = cursor && fromRowPosition(buffer, cursor);
   cursorIsFallback = !remembered;
   const position = remembered ?? firstVisiblePosition(buffer);
   context = { ...context, cursor: clampPosition(buffer, position) };
-  if (context.visualAnchor) {
-    context = { ...context, visualAnchor: clampPosition(buffer, context.visualAnchor) };
+  if (isVisual()) {
+    const anchor = visualAnchor && fromRowPosition(buffer, visualAnchor);
+    if (anchor && remembered) context = { ...context, visualAnchor: clampPosition(buffer, anchor) };
+    else cancelUnmountedVisualSelection();
   }
   return { buffer, text: new TextBuffer(buffer.lines.join("\n")) };
 }
@@ -199,9 +214,19 @@ function cursorRange(buffer: ChatBuffer): Range | null {
 
 function paint(buffer: ChatBuffer, reveal: boolean): void {
   const range = cursorRange(buffer);
+  const object = objectAt(buffer, context.cursor);
   // Reveal first: a widened cursor is measured where the glyph ends up.
   if (reveal && range) revealRange(range);
   paintBlockCursor("mesura-chat-cursor", range, range ? timelineRowOf(range) : null);
+  if (object) {
+    const row = object.closest<HTMLElement>("[data-timeline-row-id]");
+    if (row) paintObjectCursor("mesura-chat-cursor", object, row);
+  }
+  if (!range && buffer.lineRow[context.cursor.line] !== -1) {
+    const empty = rangeBetween(buffer, context.cursor, context.cursor);
+    const row = empty && timelineRowOf(empty);
+    if (empty && row) paintEmptyRangeCursor("mesura-chat-cursor", empty, row);
+  }
   paintVisualSelection(buffer);
 }
 
@@ -225,16 +250,64 @@ function paintVisualSelection(buffer: ChatBuffer): void {
   const selection = window.getSelection();
   const range = visualRange(buffer);
   if (!selection || range === null) return;
-  selection.removeAllRanges();
-  selection.addRange(range);
+  writingSelection = true;
+  try {
+    const anchor = context.visualAnchor!;
+    const head = context.cursor;
+    const forward =
+      anchor.line < head.line || (anchor.line === head.line && anchor.col <= head.col);
+    if (forward)
+      selection.setBaseAndExtent(
+        range.startContainer,
+        range.startOffset,
+        range.endContainer,
+        range.endOffset,
+      );
+    else
+      selection.setBaseAndExtent(
+        range.endContainer,
+        range.endOffset,
+        range.startContainer,
+        range.startOffset,
+      );
+  } finally {
+    writingSelection = false;
+  }
 }
 
 function clearVisualSelection(): void {
+  visualAnchor = null;
   window.getSelection()?.removeAllRanges();
+}
+
+function cancelUnmountedVisualSelection(): void {
+  clearVisualSelection();
+  context = createInitialContext(context.cursor);
+  updateKeyEngineSnapshot({ notice: "visual selection is no longer mounted" });
 }
 
 /** Keeps the cursor on screen with a margin, the way `scrolloff` does. */
 function revealRange(range: Range): void {
+  const holder =
+    range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  const cell = holder?.closest("td, th");
+  if (cell) {
+    for (let parent = cell.parentElement; parent; parent = parent.parentElement) {
+      const overflow = getComputedStyle(parent).overflowX;
+      if (
+        (overflow === "auto" || overflow === "scroll") &&
+        parent.scrollWidth > parent.clientWidth
+      ) {
+        const target = range.getBoundingClientRect();
+        const bounds = parent.getBoundingClientRect();
+        if (target.left < bounds.left) parent.scrollLeft -= bounds.left - target.left;
+        else if (target.right > bounds.right) parent.scrollLeft += target.right - bounds.right;
+        break;
+      }
+    }
+  }
   const scroller = currentScroller();
   if (!scroller) return;
   const rect = range.getBoundingClientRect();
@@ -429,7 +502,7 @@ function citableSentences(buffer: ChatBuffer): CitableSentence[] {
   const sentences: CitableSentence[] = [];
   buffer.lines.forEach((line, lineIndex) => {
     const row = buffer.lineRow[lineIndex] ?? -1;
-    if (row < 0) return;
+    if (row < 0 || objectAt(buffer, { line: lineIndex, col: 0 })) return;
     if (!buffer.rows[row]?.element.querySelector("[data-assistant-citation-source]")) return;
     for (const span of sentenceSpans(line)) {
       sentences.push({
@@ -546,6 +619,7 @@ function chatFlashProvider(): FlashProvider {
       const cursorRect = cursorRange(synced.buffer)?.getBoundingClientRect();
       const targets: FlashTarget[] = [];
       synced.buffer.lines.forEach((line, lineIndex) => {
+        if (objectAt(synced.buffer, { line: lineIndex, col: 0 })) return;
         for (const col of findOccurrences(line, pattern, caseSensitive)) {
           const range = rangeBetween(
             synced.buffer,
@@ -573,10 +647,85 @@ function chatFlashProvider(): FlashProvider {
   };
 }
 
+function previousCharacter(buffer: ChatBuffer, position: BufferPosition): BufferPosition {
+  if (position.col > 0) return { ...position, col: position.col - 1 };
+  const line = Math.max(0, position.line - 1);
+  return { line, col: Math.max(0, (buffer.lines[line]?.length ?? 0) - 1) };
+}
+
+function adoptChatPointer(event: PointerEvent): void {
+  if (chatPointerId !== event.pointerId || writingSelection) return;
+  chatPointerId = null;
+  const viewport = chatViewport();
+  const selection = window.getSelection();
+  if (!viewport || !selection || selection.rangeCount !== 1) return;
+  const buffer = buildChatBuffer(viewport);
+  if (selection.isCollapsed) {
+    const point = document.caretPositionFromPoint?.(event.clientX, event.clientY);
+    const range = !point ? document.caretRangeFromPoint?.(event.clientX, event.clientY) : null;
+    const node = point?.offsetNode ?? range?.startContainer;
+    const offset = point?.offset ?? range?.startOffset;
+    const stored =
+      node && offset !== undefined ? domPointToRowPosition(buffer, node, offset) : null;
+    const at = stored && fromRowPosition(buffer, stored);
+    if (!at) return;
+    if (isVisual()) clearVisualSelection();
+    context = createInitialContext(clampPosition(buffer, at));
+    setCursor(buffer, at);
+  } else {
+    const range = selection.getRangeAt(0);
+    if (!isSupportedChatSelection(buffer, range)) return;
+    const start = domPointToRowPosition(buffer, range.startContainer, range.startOffset);
+    const end = domPointToRowPosition(buffer, range.endContainer, range.endOffset);
+    const from = start && fromRowPosition(buffer, start);
+    const to = end && fromRowPosition(buffer, end);
+    if (!from || !to) return;
+    const last = previousCharacter(buffer, to);
+    const backward =
+      selection.anchorNode === range.endContainer && selection.anchorOffset === range.endOffset;
+    const anchor = backward ? last : from;
+    const head = backward ? from : last;
+    context = { ...createInitialContext(head), mode: "visual", visualAnchor: anchor };
+    visualAnchor = toRowPosition(buffer, anchor);
+    storeCursor(toRowPosition(buffer, head));
+  }
+  paint(buffer, false);
+}
+
 // ── Surface ────────────────────────────────────────────────────────────────
 
 export const chatSurface: KeySurface = {
   scope: "chat",
+  pointerDown(event) {
+    chatPointerId = null;
+    const target = event.target;
+    if (event.button !== 0 || !(target instanceof Element) || !chatViewport()?.contains(target))
+      return;
+    if (
+      target.closest(
+        "button, input, textarea, select, [contenteditable], iframe, [data-mesura-chat-object]",
+      )
+    )
+      return;
+    chatPointerId = event.pointerId;
+  },
+  pointerUp: adoptChatPointer,
+  focusIn(target) {
+    if (!(target instanceof HTMLIFrameElement)) return;
+    const object = target.closest<HTMLElement>("[data-mesura-chat-object]");
+    const viewport = chatViewport();
+    if (!object || !viewport?.contains(object)) return;
+    const buffer = buildChatBuffer(viewport);
+    const row = buffer.rows.find((candidate) => candidate.element.contains(object));
+    const chunk = row?.chunks.find((candidate) => candidate.node === object);
+    const position =
+      row && chunk && fromRowPosition(buffer, { rowId: row.id, offset: chunk.start });
+    if (!position) return;
+    if (isVisual()) clearVisualSelection();
+    context = createInitialContext(position);
+    setCursor(buffer, position);
+    paint(buffer, false);
+  },
   mode: () => (isVisual() ? "visual" : "normal"),
   label(): EngineModeLabel {
     if (isFlashActive("chat")) return "FLASH";
@@ -596,24 +745,73 @@ export const chatSurface: KeySurface = {
       pending ||
       MOTION_KEYS.has(token) ||
       (isVisual() && VISUAL_EXTRA_KEYS.has(token)) ||
-      (token === "y" && !isVisual());
+      (token === "y" && !isVisual()) ||
+      token === "<CR>";
     if (!accepted) return false;
 
     const synced = syncBuffer();
     if (!synced) return false;
+    const object = objectAt(synced.buffer, context.cursor);
+    if (token === "<CR>" && !object) return false;
+    if (object && !isVisual() && context.phase === "idle") {
+      if (token === "<CR>") {
+        const entry = object.querySelector<HTMLElement>("[data-mesura-chat-object-entry]");
+        const toggle =
+          object
+            .closest('.chat-markdown-codeblock, [data-language="mermaid"]')
+            ?.querySelector<HTMLElement>("[data-mesura-chat-object-toggle]") ??
+          object.parentElement?.querySelector<HTMLElement>("[data-mesura-chat-object-toggle]");
+        if (entry) entry.focus();
+        else if (object.dataset.mesuraChatObject === "diagram" && toggle) toggle.click();
+        else updateKeyEngineSnapshot({ notice: "this object has no keyboard entry" });
+        return true;
+      }
+      if (token === "y") {
+        const text = objectYankText(object);
+        copyToClipboard(text);
+        updateKeyEngineSnapshot({ notice: `yanked ${text.length} characters` });
+        return true;
+      }
+    }
     const previousPhase = context.phase;
     const { key, ctrl } = vimKey(token);
     const wasVisual = isVisual();
     const before = context.cursor;
+    const selectionStartLine = Math.min(
+      context.cursor.line,
+      context.visualAnchor?.line ?? context.cursor.line,
+    );
     const result = processKeystroke(key, context, synced.text, ctrl, true);
     context = result.newCtx;
+    if (
+      (key === "j" || key === "k") &&
+      tableAt(synced.buffer, before.line) &&
+      tableAt(synced.buffer, before.line) === tableAt(synced.buffer, context.cursor.line)
+    ) {
+      context = {
+        ...context,
+        cursor: {
+          ...context.cursor,
+          col: tableMotionColumn(
+            synced.buffer.lines[before.line]!,
+            synced.buffer.lines[context.cursor.line]!,
+            before.col,
+          ),
+        },
+      };
+    }
     // Read-only: a key that would enter insert mode never leaves normal.
     if (context.mode === "insert" || context.mode === "command-line") {
       context = processKeystroke("Escape", context, synced.text, false, true).newCtx;
     }
-    applyActions(result.actions);
+    applyActions(result.actions, synced.buffer, Math.min(selectionStartLine, context.cursor.line));
     const moved = context.cursor.line !== before.line || context.cursor.col !== before.col;
-    if (moved || !cursorIsFallback) storeCursor(toRowPosition(synced.buffer, context.cursor));
+    if (moved || !cursorIsFallback || isVisual())
+      storeCursor(toRowPosition(synced.buffer, context.cursor));
+    visualAnchor =
+      isVisual() && context.visualAnchor
+        ? toRowPosition(synced.buffer, context.visualAnchor)
+        : null;
     if (wasVisual && !isVisual()) clearVisualSelection();
     paint(synced.buffer, true);
 
@@ -654,17 +852,24 @@ export const chatSurface: KeySurface = {
     }
   },
   reset() {
+    chatPointerId = null;
     if (isVisual()) clearVisualSelection();
     context = createInitialContext(context.cursor);
     stopFlash();
   },
 };
 
-function applyActions(actions: readonly VimAction[]): void {
+function applyActions(actions: readonly VimAction[], buffer: ChatBuffer, startLine: number): void {
   for (const action of actions) {
     if (action.type === "yank") {
-      copyToClipboard(action.text);
-      updateKeyEngineSnapshot({ notice: `yanked ${action.text.length} characters` });
+      const objects = buffer.lines.slice(startLine).flatMap((_, index) => {
+        const object = objectAt(buffer, { line: startLine + index, col: 0 });
+        return object ? [objectYankText(object)] : [];
+      });
+      let index = 0;
+      const text = action.text.replaceAll("\ufffc", () => objects[index++] ?? "");
+      copyToClipboard(text);
+      updateKeyEngineSnapshot({ notice: `yanked ${text.length} characters` });
     }
   }
 }

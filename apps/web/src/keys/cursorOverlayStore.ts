@@ -28,6 +28,7 @@ export interface CursorOverlay {
   readonly height: number;
   readonly width?: number;
   readonly glyph?: CursorGlyph;
+  readonly outline?: boolean;
   readonly container?: HTMLElement;
   readonly clip?: string;
 }

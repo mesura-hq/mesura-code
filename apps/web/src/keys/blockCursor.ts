@@ -101,7 +101,9 @@ function widenedOverlay(range: Range, container: HTMLElement): CursorOverlay | n
 }
 
 interface FollowedCursor {
-  readonly range: Range;
+  readonly range: Range | null;
+  readonly element?: HTMLElement;
+  readonly empty?: boolean;
   readonly container: HTMLElement;
 }
 
@@ -111,7 +113,12 @@ let stopFollowing: (() => void) | null = null;
 const containerResizeSubscriptions = new Map<HTMLElement, () => void>();
 
 function follow(): void {
-  for (const [name, cursor] of followed) paintBlockCursor(name, cursor.range, cursor.container);
+  for (const [name, cursor] of followed) {
+    if (cursor.element) paintObjectCursor(name, cursor.element, cursor.container);
+    else if (cursor.empty && cursor.range)
+      paintEmptyRangeCursor(name, cursor.range, cursor.container);
+    else paintBlockCursor(name, cursor.range, cursor.container);
+  }
 }
 
 function startFollowing(): () => void {
@@ -170,4 +177,87 @@ export function paintEmptyLineCursor(name: CursorHighlightName, box: CursorOverl
   paintHighlight(name, []);
   setCursorOverlay(name, box);
   setFollowed(name, null);
+}
+
+/** An atomic chat object uses the same clipped, event-followed overlay as a narrow glyph. */
+export function paintObjectCursor(
+  name: CursorHighlightName,
+  element: HTMLElement,
+  container: HTMLElement,
+): void {
+  paintHighlight(name, []);
+  const box = element.getBoundingClientRect();
+  const clip = clipInset(box, element, container);
+  setCursorOverlay(
+    name,
+    element.isConnected && box.height > 0 && clip !== null
+      ? {
+          left: box.left,
+          top: box.top,
+          width: box.width,
+          height: box.height,
+          container,
+          outline: true,
+          ...(clip ? { clip } : {}),
+        }
+      : null,
+  );
+  setFollowed(name, element.isConnected ? { range: null, element, container } : null);
+}
+
+/** A preformatted empty line can end after a newline with no native caret rectangle. */
+export function paintEmptyRangeCursor(
+  name: CursorHighlightName,
+  range: Range,
+  container: HTMLElement,
+): void {
+  const node = range.startContainer;
+  const holder = node instanceof Element ? node : node.parentElement;
+  if (!holder?.isConnected) {
+    paintBlockCursor(name, null, null);
+    return;
+  }
+  const style = getComputedStyle(holder);
+  let rect = range.getBoundingClientRect();
+  if (!rect.height && node instanceof Text) {
+    const adjacent = range.cloneRange();
+    if (range.startOffset < node.length) {
+      adjacent.setEnd(node, range.startOffset + 1);
+      rect = adjacent.getBoundingClientRect();
+    } else if (range.startOffset > 0) {
+      adjacent.setStart(node, range.startOffset - 1);
+      const previous = adjacent.getBoundingClientRect();
+      const pre = holder.closest("pre") ?? holder;
+      const preStyle = getComputedStyle(pre);
+      rect = new DOMRect(
+        pre.getBoundingClientRect().left + (Number.parseFloat(preStyle.paddingLeft) || 0),
+        previous.top + (Number.parseFloat(style.lineHeight) || previous.height),
+        0,
+        previous.height,
+      );
+    }
+  }
+  if (!rect.height && node instanceof Element) {
+    const pre = holder.closest("pre") ?? holder;
+    const bounds = pre.getBoundingClientRect();
+    rect = new DOMRect(
+      bounds.left,
+      bounds.top,
+      0,
+      Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.2,
+    );
+  }
+  const box = {
+    left: rect.left,
+    top: rect.top,
+    height: rect.height,
+    width: Number.parseFloat(style.fontSize) * MIN_CURSOR_WIDTH_EM,
+  };
+  const clip = clipInset(box, holder, container);
+  paintHighlight(name, []);
+  setCursorOverlay(
+    name,
+    rect.height > 0 && clip !== null ? { ...box, container, ...(clip ? { clip } : {}) } : null,
+  );
+  setFollowed(name, { range, container, empty: true });
 }

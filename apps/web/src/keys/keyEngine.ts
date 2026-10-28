@@ -53,6 +53,9 @@ export interface KeySurface {
   /** Returns true when the surface consumed the key. */
   handleKey(token: string, event: KeyboardEvent): boolean;
   runCommand?(command: string, count: number | null): boolean;
+  focusIn?(target: EventTarget | null): void;
+  pointerDown?(event: PointerEvent): void;
+  pointerUp?(event: PointerEvent): void;
   reset(): void;
 }
 
@@ -98,6 +101,29 @@ export function installKeyEngine(): void {
   installed = true;
   window.addEventListener("keydown", onKeyDown, true);
   window.addEventListener("keydown", onControlEscape);
+  window.addEventListener(
+    "focusin",
+    (event) => {
+      if (enabled) surfaces.get("chat")?.focusIn?.(event.target);
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (enabled) surfaces.get("chat")?.pointerDown?.(event);
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointerup",
+    (event) => {
+      if (!enabled) return;
+      surfaces.get("chat")?.pointerUp?.(event);
+      refreshModeIndicator();
+    },
+    true,
+  );
   // The indicator follows focus, not just keys: clicking into the composer
   // is entering insert mode. Read after the surfaces' own focus listeners,
   // which run later and may change their mode.

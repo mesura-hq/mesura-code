@@ -231,7 +231,7 @@ function FlashLabels() {
 function BlockCursor() {
   const overlays = useCursorOverlays();
   return [...overlays].map(([owner, overlay]) =>
-    overlay.glyph && overlay.container ? (
+    overlay.container ? (
       createPortal(
         <WidenedCursor overlay={overlay} glyph={overlay.glyph} />,
         overlay.container,
@@ -254,7 +254,13 @@ function BlockCursor() {
  * the container's, whatever positioned ancestor the anchor resolves against.
  * Placed in the commit, before paint.
  */
-function WidenedCursor({ overlay, glyph }: { overlay: CursorOverlay; glyph: CursorGlyph }) {
+function WidenedCursor({
+  overlay,
+  glyph,
+}: {
+  overlay: CursorOverlay;
+  glyph?: CursorGlyph | undefined;
+}) {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the anchor's DOM box in the commit, before paint
@@ -269,7 +275,7 @@ function WidenedCursor({ overlay, glyph }: { overlay: CursorOverlay; glyph: Curs
     <span ref={anchorRef} aria-hidden className="pointer-events-none absolute">
       <span
         ref={cursorRef}
-        data-mesura-block-cursor="glyph"
+        data-mesura-block-cursor={overlay.outline ? "object" : "glyph"}
         className="pointer-events-none absolute select-none overflow-hidden whitespace-pre text-center"
         style={{
           width: overlay.width,
@@ -277,14 +283,16 @@ function WidenedCursor({ overlay, glyph }: { overlay: CursorOverlay; glyph: Curs
           // The glyph's box is its font's content area: a line exactly that
           // high puts the redrawn glyph where the original one is.
           lineHeight: `${overlay.height}px`,
-          fontFamily: glyph.fontFamily,
-          fontSize: glyph.fontSize,
-          fontWeight: glyph.fontWeight,
-          fontStyle: glyph.fontStyle,
+          outline: overlay.outline ? "2px solid var(--color-key-normal)" : undefined,
+          outlineOffset: overlay.outline ? -2 : undefined,
+          fontFamily: glyph?.fontFamily,
+          fontSize: glyph?.fontSize,
+          fontWeight: glyph?.fontWeight,
+          fontStyle: glyph?.fontStyle,
           clipPath: overlay.clip,
         }}
       >
-        {glyph.text}
+        {glyph?.text}
       </span>
     </span>
   );

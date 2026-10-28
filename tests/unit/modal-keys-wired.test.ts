@@ -1308,3 +1308,31 @@ it("modal keys seam guard: question options and the minimap retain key ownership
     "the minimap strip no longer owns navigation input",
   );
 });
+
+it("modal keys seam guard: rich chat content retains atomic object markers", () => {
+  const seams: ReadonlyArray<readonly [string, string, number]> = [
+    ["TimelineAssistantRows.tsx", 'data-mesura-chat-object="html-render"', 2],
+    ["TimelineAssistantRows.tsx", 'data-mesura-chat-object="mcp-app"', 1],
+    ["MermaidDiagram.tsx", 'data-mesura-chat-object="diagram"', 1],
+    ["MarkdownMermaidCodeBlock.tsx", "data-mesura-chat-object-toggle", 1],
+    ["ChatMarkdownMedia.tsx", 'data-mesura-chat-object="image"', 1],
+    ["MarkdownMath.tsx", 'data-mesura-chat-object="math"', 1],
+  ];
+  for (const [name, marker, count] of seams) {
+    assert.equal(
+      countOf(read(`apps/web/src/components/chat/${name}`), marker),
+      count,
+      `${name} lost ${marker}`,
+    );
+  }
+});
+
+it("modal keys seam guard: expanded work output retains readable regions", () => {
+  for (const name of ["WorkLog.tsx", "TimelineWorkEntryRow.tsx"]) {
+    assert.include(
+      read(`apps/web/src/components/chat/${name}`),
+      tokens("data-mesura-readable"),
+      `${name} lost its readable region`,
+    );
+  }
+});

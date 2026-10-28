@@ -202,6 +202,7 @@ export function ChatMarkdownImage(props: {
           ref={markLoadedIfComplete}
           src={src}
           alt={props.alt}
+          data-mesura-chat-object="image"
           data-markdown-copy={props.copyMarkdown}
           decoding="async"
           loading="lazy"

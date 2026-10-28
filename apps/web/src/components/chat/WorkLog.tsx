@@ -147,6 +147,7 @@ export function WorkLogDetails({
   });
   return (
     <div
+      data-mesura-readable
       ref={scrollerRef}
       onScroll={(event) => {
         const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
