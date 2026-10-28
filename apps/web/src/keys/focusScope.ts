@@ -96,6 +96,11 @@ export function resolveKeyScope(active: Element | null = deepActiveElement()): K
   if (active instanceof HTMLIFrameElement) return "passthrough";
   if (isCommandPaletteOpen()) return "passthrough";
   if (active?.closest("[data-mesura-owns-keys]") && !isTextEditable(active)) return "control";
+  // A control in the composer's non-editable chrome (a code block's language picker) is not the
+  // prompt: normal mode's letters would edit the prompt instead of reaching it.
+  if (active?.closest('[contenteditable="false"]') && active.closest(COMPOSER_EDITOR_SELECTOR)) {
+    return "control";
+  }
   if (active?.closest(COMPOSER_EDITOR_SELECTOR)) return "composer";
   if (active?.closest(PASSTHROUGH_SELECTOR)) return "passthrough";
   if (isTextEditable(active)) return "insert";

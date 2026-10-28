@@ -17,7 +17,7 @@ const LAYOUT = `
   </div>
   <div data-chat-column-maximized-away="false">
     <div data-testid="chat-focus" tabindex="0">chat</div>
-    <div data-testid="composer-editor" contenteditable="true"><span data-testid="composer-inner">hi</span></div>
+    <div data-testid="composer-editor" contenteditable="true"><span data-testid="composer-inner">hi</span><div contenteditable="false"><button data-testid="composer-chrome-button">TypeScript</button></div></div>
     <div data-terminal-owner="drawer"><textarea data-testid="terminal-input"></textarea></div>
   </div>
   <div data-preview-panel-mode="inline">
@@ -57,6 +57,11 @@ describe("resolveKeyScope by focused element", () => {
     using _fixture = mountKeyDom(LAYOUT);
     expect(scopeAfterFocusing("composer-editor")).toBe("composer");
     expect(resolveKeyScope(byTestId("composer-inner"))).toBe("composer");
+  });
+
+  it("gives a control in the composer's non-editable chrome its own keys, not the prompt's", () => {
+    using _fixture = mountKeyDom(LAYOUT);
+    expect(scopeAfterFocusing("composer-chrome-button")).toBe("control");
   });
 
   it("reads the insert scope in a text input outside the composer", () => {
