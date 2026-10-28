@@ -2,7 +2,6 @@ import { assignFlashLabels, assignJumpLabels } from "@mesura/keys/flash";
 
 import { setFlashSnapshot, type FlashLabel } from "./flashStore";
 import { paintHighlight } from "./highlights";
-import { updateKeyEngineSnapshot } from "./keyEngineStore";
 
 /**
  * Two kinds share the overlay and the keys: a search (`s`), where the surface supplies targets per
@@ -134,7 +133,14 @@ function refresh(flash: FlashState): void {
     "mesura-flash-match",
     flash.targets.map((target) => target.range),
   );
-  setFlashSnapshot({ pattern: flash.pattern, labels, active: true });
+  setFlashSnapshot({
+    pattern: flash.pattern,
+    labels,
+    active: true,
+    ...(flash.pattern.length > 0 && flash.targets.length === 0
+      ? { hint: `flash: no match for “${flash.pattern}”` }
+      : {}),
+  });
 }
 
 function refreshPick(pick: PickState): void {
@@ -216,10 +222,6 @@ export function handleFlashKey(token: string): boolean {
   }
   flash.pattern += token;
   refresh(flash);
-  if (flash.targets.length === 0) {
-    updateKeyEngineSnapshot({ notice: `flash: no match for “${flash.pattern}”` });
-    stopFlash();
-  }
   return true;
 }
 

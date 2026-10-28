@@ -16,7 +16,6 @@ import {
 } from "./flashSession";
 import type { FlashPick, FlashProvider, FlashTarget } from "./flashSession";
 import { useFlashSnapshot, type FlashSnapshot } from "./flashStore";
-import { readKeyEngineSnapshot } from "./keyEngineStore";
 
 /** The cursor sits on the `X`, so the nearest match is not the first one. */
 const TEXT = "cat cab Xcot cam";
@@ -165,11 +164,21 @@ describe("flash session keys", () => {
     expect(isFlashActive()).toBe(false);
   });
 
-  it("ends flash with a notice when the pattern matches nothing", async () => {
+  it("keeps a failed pattern in flash until Backspace repairs it or Escape cancels", async () => {
     await using fixture = await setup();
     await fixture.type("c", "q");
+    expect(isFlashActive()).toBe(true);
+    expect(fixture.flash.labels).toEqual([]);
+    expect(fixture.flash.hint).toBe("flash: no match for “cq”");
+    await fixture.type("i", "x");
+    expect(fixture.flash.pattern).toBe("cqix");
+    expect(fixture.flash.hint).toBe("flash: no match for “cqix”");
+    await fixture.type("<BS>", "<BS>", "<BS>");
+    expect(fixture.flash.pattern).toBe("c");
+    expect(fixture.flash.labels).toHaveLength(4);
+    expect(fixture.flash.hint).toBeUndefined();
+    await fixture.type("<Esc>");
     expect(isFlashActive()).toBe(false);
-    expect(readKeyEngineSnapshot().notice).toBe("flash: no match for “cq”");
   });
 });
 
