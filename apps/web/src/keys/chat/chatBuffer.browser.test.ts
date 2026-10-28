@@ -9,6 +9,8 @@ import { mountKeyDom } from "~/test/keyBrowserFixtures";
 import {
   SEPARATOR_OFFSET,
   buildChatBuffer,
+  domPointToRowPosition,
+  isSupportedChatSelection,
   fromRowPosition,
   rangeBetween,
   toRowPosition,
@@ -371,4 +373,34 @@ it("projects table rows with tabs while ranges retain citation chunk boundaries"
   expect(rangeBetween(buffer, { line: 1, col: 5 }, { line: 1, col: 11 })?.toString()).toBe(
     "Normal",
   );
+});
+
+it("maps DOM points to the same row coordinates used by motions", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="points"><p>alpha <strong>beta</strong></p><button>Control</button></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  const bold = timeline.container.querySelector("strong")!;
+  expect(domPointToRowPosition(buffer, bold.firstChild!, 2)).toEqual({
+    rowId: "points",
+    offset: 8,
+  });
+  expect(domPointToRowPosition(buffer, bold, 1)).toEqual({ rowId: "points", offset: 10 });
+  expect(
+    domPointToRowPosition(buffer, timeline.container.querySelector("button")!.firstChild!, 1),
+  ).toBeNull();
+});
+
+it("rejects selections spanning controls, object stops or unprojected content", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="unsupported"><p>Before</p><button>Control</button><iframe></iframe><p>After</p></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  const paragraphs = timeline.container.querySelectorAll("p");
+  const range = document.createRange();
+  range.setStart(paragraphs[0]!.firstChild!, 0);
+  range.setEnd(paragraphs[1]!.firstChild!, 5);
+  expect(isSupportedChatSelection(buffer, range)).toBe(false);
+  range.setEnd(paragraphs[0]!.firstChild!, 5);
+  expect(isSupportedChatSelection(buffer, range)).toBe(true);
 });

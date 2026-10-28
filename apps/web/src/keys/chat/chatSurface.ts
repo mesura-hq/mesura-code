@@ -30,6 +30,8 @@ import {
   chatScroller,
   chatViewport,
   fromRowPosition,
+  domPointToRowPosition,
+  isSupportedChatSelection,
   isRangeUnobscured,
   lineAtOrBelow,
   objectAt,
@@ -75,6 +77,8 @@ const SCROLL_SETTLE_TIMEOUT_MS = 800;
 let context: VimContext = createInitialContext({ line: 0, col: 0 });
 let cursor: RowPosition | null = null;
 let visualAnchor: RowPosition | null = null;
+let chatPointerId: number | null = null;
+let writingSelection = false;
 /**
  * Whether the last sync put the Vim cursor on the first visible line because
  * `cursor` did not resolve (a fresh thread, or a remembered row not mounted).
@@ -260,8 +264,29 @@ function paintVisualSelection(buffer: ChatBuffer): void {
   const selection = window.getSelection();
   const range = visualRange(buffer);
   if (!selection || range === null) return;
-  selection.removeAllRanges();
-  selection.addRange(range);
+  writingSelection = true;
+  try {
+    const anchor = context.visualAnchor!;
+    const head = context.cursor;
+    const forward =
+      anchor.line < head.line || (anchor.line === head.line && anchor.col <= head.col);
+    if (forward)
+      selection.setBaseAndExtent(
+        range.startContainer,
+        range.startOffset,
+        range.endContainer,
+        range.endOffset,
+      );
+    else
+      selection.setBaseAndExtent(
+        range.endContainer,
+        range.endOffset,
+        range.startContainer,
+        range.startOffset,
+      );
+  } finally {
+    writingSelection = false;
+  }
 }
 
 function clearVisualSelection(): void {
@@ -630,10 +655,69 @@ function chatFlashProvider(): FlashProvider {
   };
 }
 
+function previousCharacter(buffer: ChatBuffer, position: BufferPosition): BufferPosition {
+  if (position.col > 0) return { ...position, col: position.col - 1 };
+  const line = Math.max(0, position.line - 1);
+  return { line, col: Math.max(0, (buffer.lines[line]?.length ?? 0) - 1) };
+}
+
+function adoptChatPointer(event: PointerEvent): void {
+  if (chatPointerId !== event.pointerId || writingSelection) return;
+  chatPointerId = null;
+  const viewport = chatViewport();
+  const selection = window.getSelection();
+  if (!viewport || !selection || selection.rangeCount !== 1) return;
+  const buffer = buildChatBuffer(viewport);
+  if (selection.isCollapsed) {
+    const point = document.caretPositionFromPoint?.(event.clientX, event.clientY);
+    const range = !point ? document.caretRangeFromPoint?.(event.clientX, event.clientY) : null;
+    const node = point?.offsetNode ?? range?.startContainer;
+    const offset = point?.offset ?? range?.startOffset;
+    const stored =
+      node && offset !== undefined ? domPointToRowPosition(buffer, node, offset) : null;
+    const at = stored && fromRowPosition(buffer, stored);
+    if (!at) return;
+    if (isVisual()) clearVisualSelection();
+    context = createInitialContext(clampPosition(buffer, at));
+    setCursor(buffer, at);
+  } else {
+    const range = selection.getRangeAt(0);
+    if (!isSupportedChatSelection(buffer, range)) return;
+    const start = domPointToRowPosition(buffer, range.startContainer, range.startOffset);
+    const end = domPointToRowPosition(buffer, range.endContainer, range.endOffset);
+    const from = start && fromRowPosition(buffer, start);
+    const to = end && fromRowPosition(buffer, end);
+    if (!from || !to) return;
+    const last = previousCharacter(buffer, to);
+    const backward =
+      selection.anchorNode === range.endContainer && selection.anchorOffset === range.endOffset;
+    const anchor = backward ? last : from;
+    const head = backward ? from : last;
+    context = { ...createInitialContext(head), mode: "visual", visualAnchor: anchor };
+    visualAnchor = toRowPosition(buffer, anchor);
+    storeCursor(toRowPosition(buffer, head));
+  }
+  paint(buffer, false);
+}
+
 // ── Surface ────────────────────────────────────────────────────────────────
 
 export const chatSurface: KeySurface = {
   scope: "chat",
+  pointerDown(event) {
+    chatPointerId = null;
+    const target = event.target;
+    if (event.button !== 0 || !(target instanceof Element) || !chatViewport()?.contains(target))
+      return;
+    if (
+      target.closest(
+        "button, input, textarea, select, [contenteditable], iframe, [data-mesura-chat-object]",
+      )
+    )
+      return;
+    chatPointerId = event.pointerId;
+  },
+  pointerUp: adoptChatPointer,
   focusIn(target) {
     if (!(target instanceof HTMLIFrameElement)) return;
     const object = target.closest<HTMLElement>("[data-mesura-chat-object]");
@@ -775,6 +859,7 @@ export const chatSurface: KeySurface = {
     }
   },
   reset() {
+    chatPointerId = null;
     if (isVisual()) clearVisualSelection();
     context = createInitialContext(context.cursor);
     stopFlash();

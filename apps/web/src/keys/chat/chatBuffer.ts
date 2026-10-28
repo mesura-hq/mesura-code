@@ -276,6 +276,53 @@ export function fromRowPosition(buffer: ChatBuffer, position: RowPosition): Buff
   };
 }
 
+export function domPointToRowPosition(
+  buffer: ChatBuffer,
+  node: Node,
+  offset: number,
+): RowPosition | null {
+  if (node.nodeType !== Node.TEXT_NODE) {
+    const after = node.childNodes[offset];
+    const before = node.childNodes[offset - 1];
+    const chunks = buffer.rows
+      .flatMap((row) => row.chunks)
+      .filter((chunk) => chunk.node.nodeType === Node.TEXT_NODE);
+    const next = after && chunks.find((chunk) => after.contains(chunk.node));
+    if (next) return domPointToRowPosition(buffer, next.node, 0);
+    const previous = before && chunks.findLast((chunk) => before.contains(chunk.node));
+    return previous
+      ? domPointToRowPosition(buffer, previous.node, previous.end - previous.start)
+      : null;
+  }
+  for (const row of buffer.rows) {
+    const chunk = row.chunks.find((chunk) => chunk.node === node);
+    if (!chunk || offset < 0 || offset > chunk.end - chunk.start) continue;
+    const position = { rowId: row.id, offset: chunk.start + offset };
+    const at = fromRowPosition(buffer, position);
+    if (at && at.col >= 0 && at.col <= (buffer.lines[at.line]?.length ?? 0)) return position;
+  }
+  return null;
+}
+
+export function isSupportedChatSelection(buffer: ChatBuffer, range: Range): boolean {
+  const root = range.commonAncestorContainer;
+  const nodes = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  const supported = new Set(buffer.rows.flatMap((row) => row.chunks.map((chunk) => chunk.node)));
+  for (let node: Node | null = root; node; node = nodes.nextNode()) {
+    if (!range.intersectsNode(node)) continue;
+    if (
+      node instanceof Element &&
+      node.matches("[data-mesura-chat-object], iframe, input, textarea, select, [contenteditable]")
+    )
+      return false;
+    if (node.nodeType !== Node.TEXT_NODE) continue;
+    const start = node === range.startContainer ? range.startOffset : 0;
+    const end = node === range.endContainer ? range.endOffset : node.textContent!.length;
+    if (node.textContent!.slice(start, end).trim() && !supported.has(node as Text)) return false;
+  }
+  return true;
+}
+
 function rowAt(buffer: ChatBuffer, line: number): BufferRow | null {
   const index = buffer.lineRow[line];
   return index === undefined || index === -1 ? null : buffer.rows[index]!;

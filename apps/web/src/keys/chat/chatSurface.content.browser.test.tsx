@@ -6,7 +6,10 @@ import { createWindowListenerFixture } from "~/test/keyBrowserFixtures";
 import { configureKeyEngine, installKeyEngine, registerKeySurface } from "../keyEngine";
 import { readKeyEngineSnapshot } from "../keyEngineStore";
 import { useCursorOverlays } from "../cursorOverlayStore";
+import { requestChatCite } from "./chatCiteBus";
 import { chatSurface, clearChatSurfacePaint, setChatThreadKey } from "./chatSurface";
+
+vi.mock("./chatCiteBus", () => ({ requestChatCite: vi.fn() }));
 
 const engineListeners = createWindowListenerFixture(installKeyEngine);
 
@@ -46,6 +49,22 @@ async function setup(content: string) {
   chat.focus();
   const owned = lifetime.move();
   return { screen, chat, [Symbol.asyncDispose]: () => owned[Symbol.asyncDispose]() };
+}
+
+async function dragProse(fixture: Awaited<ReturnType<typeof setup>>, start: number, end: number) {
+  const prose = fixture.chat.querySelector("p")!;
+  const range = document.createRange();
+  range.setStart(prose.firstChild!, Math.min(start, end));
+  range.setEnd(prose.firstChild!, Math.max(start, end));
+  const box = range.getBoundingClientRect();
+  const parent = prose.getBoundingClientRect();
+  const y = box.top - parent.top + box.height / 2;
+  const left = box.left - parent.left + 1;
+  const right = box.right - parent.left - 1;
+  await userEvent.dragAndDrop(prose, prose, {
+    sourcePosition: { x: start < end ? left : right, y },
+    targetPosition: { x: start < end ? right : left, y },
+  });
 }
 
 describe("chat content navigation", () => {
@@ -161,4 +180,75 @@ it("cancels a visual selection if one endpoint unmounts", async () => {
   expect(chatSurface.mode()).toBe("normal");
   expect(window.getSelection()?.isCollapsed).toBe(true);
   expect(readKeyEngineSnapshot().notice).toBe("visual selection is no longer mounted");
+});
+
+it("places the Vim cursor on a clicked prose character", async () => {
+  await using fixture = await setup(
+    '<p data-testid="prose" style="font:20px monospace">alpha beta gamma</p>',
+  );
+  const prose = fixture.chat.querySelector("p")!;
+  const text = prose.firstChild!;
+  const range = document.createRange();
+  range.setStart(text, 7);
+  range.setEnd(text, 8);
+  const box = range.getBoundingClientRect();
+  const parent = prose.getBoundingClientRect();
+  await userEvent.click(fixture.screen.getByTestId("prose"), {
+    position: { x: box.left - parent.left + 1, y: box.top - parent.top + box.height / 2 },
+  });
+  expect(chatSurface.mode()).toBe("normal");
+  await userEvent.keyboard("v");
+  expect(window.getSelection()?.toString()).toBe("e");
+});
+
+it("adopts a real mouse drag as a Vim visual selection and yanks it", async () => {
+  await using fixture = await setup(
+    '<p data-testid="drag-prose" style="font:20px monospace">alpha beta gamma</p>',
+  );
+  using clipboard = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  await dragProse(fixture, 6, 10);
+  expect(window.getSelection()?.toString()).toBe("beta");
+  expect(chatSurface.mode()).toBe("visual");
+  await userEvent.keyboard("y");
+  expect(clipboard).toHaveBeenCalledWith("beta");
+});
+
+it("keeps a backward mouse selection direction through o, motions and Escape", async () => {
+  await using fixture = await setup('<p style="font:20px monospace">alpha beta gamma delta</p>');
+  await dragProse(fixture, 10, 6);
+  expect(window.getSelection()?.anchorOffset).toBe(10);
+  expect(window.getSelection()?.focusOffset).toBe(6);
+  await userEvent.keyboard("o");
+  expect(window.getSelection()?.anchorOffset).toBe(6);
+  expect(window.getSelection()?.focusOffset).toBe(10);
+  await userEvent.keyboard("h");
+  expect(window.getSelection()?.toString()).toBe("bet");
+  await userEvent.keyboard("{Escape}");
+  expect(chatSurface.mode()).toBe("normal");
+  expect(window.getSelection()?.isCollapsed).toBe(true);
+});
+
+it("cites an adopted mouse selection through the existing cite request", async () => {
+  await using fixture = await setup('<p style="font:20px monospace">first beta gamma</p>');
+  const cites: string[] = [];
+  vi.mocked(requestChatCite).mockImplementation(() => {
+    cites.push(window.getSelection()?.toString() ?? "");
+    return true;
+  });
+  using cleanup = { [Symbol.dispose]: () => vi.mocked(requestChatCite).mockReset() };
+  await dragProse(fixture, 6, 10);
+  await userEvent.keyboard(" c");
+  expect(cites).toEqual(["beta"]);
+  expect(chatSurface.mode()).toBe("normal");
+});
+
+it("does not adopt a mouse selection in a control", async () => {
+  await using fixture = await setup(
+    '<p>Chat prose</p><textarea data-testid="control">private input</textarea>',
+  );
+  const control = fixture.chat.querySelector("textarea")!;
+  await userEvent.click(fixture.screen.getByTestId("control"));
+  control.select();
+  expect(chatSurface.mode()).toBe("normal");
+  expect(document.activeElement).toBe(control);
 });

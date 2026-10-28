@@ -47,6 +47,8 @@ export interface KeySurface {
   handleKey(token: string, event: KeyboardEvent): boolean;
   runCommand?(command: string, count: number | null): boolean;
   focusIn?(target: EventTarget | null): void;
+  pointerDown?(event: PointerEvent): void;
+  pointerUp?(event: PointerEvent): void;
   reset(): void;
 }
 
@@ -95,6 +97,22 @@ export function installKeyEngine(): void {
     "focusin",
     (event) => {
       if (enabled) surfaces.get("chat")?.focusIn?.(event.target);
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (enabled) surfaces.get("chat")?.pointerDown?.(event);
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointerup",
+    (event) => {
+      if (!enabled) return;
+      surfaces.get("chat")?.pointerUp?.(event);
+      refreshModeIndicator();
     },
     true,
   );
