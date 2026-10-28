@@ -8,28 +8,18 @@ import { describe, expect, it } from "vite-plus/test";
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
 
-import { mountKeyDom, registerTestComposerAdapter } from "~/test/keyBrowserFixtures";
+import { mountPlainComposer, registerTestComposerAdapter } from "~/test/keyBrowserFixtures";
 
 import { splitPromptIntoComposerSegments } from "~/composer-editor-mentions";
 import { formatTerminalContextReference } from "~/lib/terminalContext";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { composerTargetKey, useComposerDraftStore } from "~/composerDraftStore";
 import { consumeDirectedComposerDraft } from "~/dictation/directedComposerSubmission";
-import { projectPrompt } from "./composerProjection";
 import {
   composerNormalOffset,
   composerSurface,
   resumeComposerNormalOnFocus,
 } from "./composerSurface";
-
-interface FakeDraft {
-  /** The draft the adapter reports: the thread the composer is open on. */
-  draftKey: string;
-  prompt: string;
-  /** The collapsed cursor: one character per inline token. */
-  cursor: number;
-  readonly writes: Array<{ readonly prompt: string; readonly cursor: number }>;
-}
 
 /** A draft key no other test uses: the undo history is module state. */
 function freshDraftKey(label: string): string {
@@ -37,42 +27,50 @@ function freshDraftKey(label: string): string {
 }
 
 function setup() {
-  const dom = mountKeyDom(`
-    <div data-chat-composer-main-surface="true">
-      <div data-testid="composer-editor" contenteditable="true"></div>
-    </div>`);
-  const editor = dom.byTestId("composer-editor");
-  const draft: FakeDraft = { draftKey: "", prompt: "", cursor: 0, writes: [] };
+  let composer: ReturnType<typeof mountPlainComposer> | null = null;
+  const writes: Array<{ prompt: string; cursor: number }> = [];
   let disposeAdapter = () => {};
+  const current = () => {
+    if (!composer) throw new Error("open a draft first");
+    return composer;
+  };
+  /** The composer's draft: its key is the thread the composer is open on. */
+  const draft = {
+    draftKey: "",
+    writes,
+    get prompt() {
+      return current().prompt();
+    },
+  };
 
-  /** Registers a stand-in composer on a draft holding `prompt`, caret at its end. */
+  /** Opens a composer on a draft holding `prompt`, caret at its end. */
   function openDraft(prompt: string, label = "draft"): void {
-    const cursor = projectPrompt(prompt).text.length;
     disposeAdapter();
-    Object.assign(draft, { draftKey: freshDraftKey(label), prompt, cursor, writes: [] });
-    const state = draft;
-    const adapter = {
-      draftKey: () => state.draftKey,
-      read: () => ({ prompt: state.prompt, cursor: state.cursor }),
-      write: (prompt: string, cursor: number) => {
-        state.prompt = prompt;
-        state.cursor = cursor;
-        state.writes.push({ prompt, cursor });
-      },
-      setCursor: (cursor: number) => {
-        state.cursor = cursor;
-      },
-    };
-    const registration = registerTestComposerAdapter(adapter);
+    composer?.[Symbol.dispose]();
+    composer = mountPlainComposer(prompt);
+    draft.draftKey = freshDraftKey(label);
+    writes.length = 0;
+    const registration = registerTestComposerAdapter(
+      composer.adapter(() => draft.draftKey, writes),
+    );
     disposeAdapter = () => registration.dispose();
   }
 
+  /** Replaces the draft's text from outside the Vim layer, with the collapsed cursor. */
+  function replace(prompt: string, cursor: number): void {
+    current().replace(prompt, cursor);
+  }
+
   function focusComposer(): void {
-    editor.dispatchEvent(new FocusEvent("focusin", { bubbles: true, relatedTarget: null }));
+    current().element.dispatchEvent(
+      new FocusEvent("focusin", { bubbles: true, relatedTarget: null }),
+    );
   }
 
   function blurComposer(): void {
-    editor.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
+    current().element.dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+    );
   }
 
   /** Hands the surface one token as the key engine does, with its keydown event. */
@@ -89,17 +87,12 @@ function setup() {
     for (const token of tokens) press(token);
   }
 
-  /**
-   * Types plain text at the caret in insert mode: the engine sees each key and
-   * passes it on, and the editor inserts it. Only for prompts without tokens,
-   * where the collapsed cursor is a plain offset.
-   */
+  /** Types text at the caret in insert mode: the engine passes each key on, the editor inserts it. */
   function type(text: string): void {
     expect(composerSurface.mode(), "typing happens in insert mode").toBe("insert");
     for (const char of text) {
       expect(press(char), `insert mode passes "${char}" to the editor`).toBe(false);
-      draft.prompt = draft.prompt.slice(0, draft.cursor) + char + draft.prompt.slice(draft.cursor);
-      draft.cursor += 1;
+      current().type(char);
     }
   }
 
@@ -114,6 +107,8 @@ function setup() {
   return {
     draft,
     openDraft,
+    replace,
+    setCursor: (cursor: number) => current().setCursor(cursor),
     focusComposer,
     blurComposer,
     press,
@@ -123,7 +118,7 @@ function setup() {
     [Symbol.dispose]() {
       composerSurface.reset();
       disposeAdapter();
-      dom[Symbol.dispose]();
+      composer?.[Symbol.dispose]();
     },
   };
 }
@@ -214,7 +209,7 @@ describe("composer undo fence: one history per draft", () => {
     using fixture = setup();
     const { draft, openDraft, focusComposer, press, type } = fixture;
     openDraft("alpha gamma");
-    draft.cursor = "alpha ".length;
+    fixture.setCursor("alpha ".length);
     focusComposer();
     type("beta ");
     press("<Esc>");
@@ -264,8 +259,7 @@ describe("composer undo fence: one history per draft", () => {
     // B's draft, and focus comes back to the composer.
     blurComposer();
     draft.draftKey = freshDraftKey("thread-b");
-    draft.prompt = "";
-    draft.cursor = 0;
+    fixture.replace("", 0);
     focusComposer();
     type("beta");
     press("<Esc>");
@@ -289,16 +283,14 @@ describe("composer undo fence: one history per draft", () => {
 
     blurComposer();
     draft.draftKey = freshDraftKey("thread-b");
-    draft.prompt = "";
-    draft.cursor = 0;
+    fixture.replace("", 0);
     focusComposer();
     type("beta");
     press("<Esc>");
 
     blurComposer();
     draft.draftKey = threadA;
-    draft.prompt = "alph";
-    draft.cursor = 4;
+    fixture.replace("alph", 4);
     focusComposer();
     press("<Esc>");
 
@@ -320,13 +312,11 @@ describe("composer undo fence: one history per draft", () => {
 
     // Another surface changed thread A's draft while the composer was away.
     draft.draftKey = freshDraftKey("thread-b");
-    draft.prompt = "";
-    draft.cursor = 0;
+    fixture.replace("", 0);
     focusComposer();
     blurComposer();
     draft.draftKey = threadA;
-    draft.prompt = "alpha beta";
-    draft.cursor = 10;
+    fixture.replace("alpha beta", 10);
     focusComposer();
     press("<Esc>");
 
@@ -412,8 +402,7 @@ describe("composer undo fence: inline tokens", () => {
     openDraft(prompt);
     focusComposer();
     // Text typed after the two tokens: the collapsed cursor counts each as one.
-    draft.prompt = `${prompt} and $review`;
-    draft.cursor = 2 + " and $review".length;
+    fixture.replace(`${prompt} and $review`, 2 + " and $review".length);
     press("<Esc>");
 
     press("u");
@@ -472,8 +461,7 @@ describe("composer undo fence: review regressions", () => {
     useComposerDraftStore.getState().setPrompt(target, draft.prompt);
 
     useComposerDraftStore.getState().clearComposerContent(target);
-    draft.prompt = "";
-    draft.cursor = 0;
+    fixture.replace("", 0);
     press("i");
     type("next");
     press("<Esc>");
@@ -495,8 +483,7 @@ describe("composer undo fence: review regressions", () => {
     useComposerDraftStore.getState().setPrompt(target, draft.prompt);
 
     consumeDirectedComposerDraft(target, null);
-    draft.prompt = "";
-    draft.cursor = 0;
+    fixture.replace("", 0);
     press("i");
     type("typed");
     press("<Esc>");

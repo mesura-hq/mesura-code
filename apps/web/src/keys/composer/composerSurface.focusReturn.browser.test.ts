@@ -3,28 +3,19 @@ import { freshTestId } from "~/test/freshTestId";
 // file-manager layer. AppRoot.fileManagerFocusReturn.fence.browser.test.tsx exercises
 // the actual composer reveal, editor, mode, undo and modal lifecycle.
 import { describe, expect, it } from "vite-plus/test";
-import { mountKeyDom, registerTestComposerAdapter } from "~/test/keyBrowserFixtures";
+import { mountPlainComposer, registerTestComposerAdapter } from "~/test/keyBrowserFixtures";
 
 import { captureComposerFocusReturn, composerSurface } from "./composerSurface";
 
 function setup() {
   using stack = new DisposableStack();
-  const dom = stack.use(
-    mountKeyDom(
-      '<div data-testid="composer-editor" contenteditable="true">hello world</div><button></button>',
-    ),
-  );
-  const editor = dom.byTestId("composer-editor");
-  const otherOwner = dom.container.querySelector("button")!;
-  const draft = { key: freshTestId("composer-draft"), prompt: "hello world" };
-  stack.use(
-    registerTestComposerAdapter({
-      read: () => ({ prompt: draft.prompt, cursor: 2 }),
-      write: () => {},
-      setCursor: () => editor.focus(),
-      draftKey: () => draft.key,
-    }),
-  );
+  const composer = stack.use(mountPlainComposer("hello world"));
+  const editor = composer.element;
+  const otherOwner = composer.surface.appendChild(document.createElement("button"));
+  const draft = { key: freshTestId("composer-draft") };
+  const adapter = composer.adapter(() => draft.key);
+  stack.use(registerTestComposerAdapter({ ...adapter, setCursor: () => editor.focus() }));
+  composer.setCursor(2);
   editor.focus();
   composerSurface.handleKey("<Esc>", new KeyboardEvent("keydown", { key: "Escape" }));
   expect(composerSurface.label()).toBe("NORMAL");
@@ -33,6 +24,7 @@ function setup() {
     editor,
     otherOwner,
     draft,
+    composer,
     [Symbol.dispose]: () => lifetime.dispose(),
   };
 }
@@ -42,12 +34,12 @@ describe("composer modal-return snapshot identity", () => {
     "composer return cancellation: changed %s retains the next owner without a NORMAL receipt",
     (change) => {
       using fixture = setup();
-      const { editor, otherOwner, draft } = fixture;
+      const { editor, otherOwner, draft, composer } = fixture;
       const restore = captureComposerFocusReturn(editor, () => editor.focus());
       expect(restore).not.toBeNull();
       otherOwner.focus();
       if (change === "draft identity") draft.key = "second-draft";
-      else if (change === "draft content") draft.prompt = "changed draft";
+      else if (change === "draft content") composer.replace("changed draft");
       else {
         const replacement = editor.cloneNode(true);
         editor.replaceWith(replacement);

@@ -4,35 +4,22 @@ import { freshTestId } from "~/test/freshTestId";
 // attribute `mesura.css` draws the composer's Vim ring from.
 import { describe, expect, it } from "vite-plus/test";
 
-import { mountKeyDom, registerTestComposerAdapter } from "~/test/keyBrowserFixtures";
+import { mountPlainComposer, registerTestComposerAdapter } from "~/test/keyBrowserFixtures";
 
 import { composerSurface } from "./composerSurface";
 
-const PROMPT = "hello world";
-
 function mountComposer() {
   using stack = new DisposableStack();
-  const dom = stack.use(
-    mountKeyDom(`
-    <div data-chat-composer-main-surface="true">
-      <div data-testid="composer-editor" contenteditable="true">${PROMPT}</div>
-    </div>`),
-  );
+  const composer = stack.use(mountPlainComposer("hello world"));
   const draftKey = freshTestId("composer-draft");
-  const adapter = stack.use(
-    registerTestComposerAdapter({
-      draftKey: () => draftKey,
-      read: () => ({ prompt: PROMPT, cursor: 5 }),
-      write: () => {},
-      setCursor: () => {},
-    }),
-  );
+  const adapter = stack.use(registerTestComposerAdapter(composer.adapter(() => draftKey)));
+  composer.setCursor(5);
   const lifetime = stack.move();
   return {
     [Symbol.dispose]: () => lifetime.dispose(),
     disposeAdapter: () => adapter.dispose(),
-    surface: dom.container.querySelector<HTMLElement>("[data-chat-composer-main-surface]")!,
-    editor: dom.byTestId("composer-editor"),
+    surface: composer.surface,
+    editor: composer.element,
   };
 }
 

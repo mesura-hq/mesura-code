@@ -326,8 +326,29 @@ it("modal keys seam guard: the composer registers its Vim adapter", () => {
   assertCallCarries(
     "apps/web/src/components/chat/useMesuraComposerInput.ts",
     "registerComposerVimAdapter",
-    ["read:", "write:", "setCursor:", "draftKey:"],
+    ["read:", "write:", "setCursor:", "draftKey:", "editor:"],
   );
+  // Normal mode reads and edits the editor's document; without the handle's editor it has none.
+  const editorFile = "apps/web/src/components/ComposerPromptEditorTiptap.tsx";
+  assert.include(
+    read(editorFile),
+    tokens("editor: () => TiptapEditor | null;"),
+    "the composer editor handle no longer declares its editor",
+  );
+  assert.include(
+    read(editorFile),
+    tokens("editor: () => editor ?? null,"),
+    "the composer editor handle no longer returns its editor",
+  );
+});
+
+it("modal keys seam guard: the patched Vim grammar is applied to @vimee/core", () => {
+  const workspace = NodeFS.readFileSync(
+    NodePath.join(repositoryRoot, "pnpm-workspace.yaml"),
+    "utf8",
+  );
+  assert.include(workspace, '"@vimee/core@0.3.0": patches/@vimee__core@0.3.0.patch');
+  assert.include(workspace, '"@vimee/core": 0.3.0', "the patched version is not pinned");
 });
 
 it("modal keys seam guard: a cite in Vim mode lands at the prompt's end and focuses the composer", () => {

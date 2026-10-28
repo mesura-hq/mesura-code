@@ -9,7 +9,6 @@ import { act, type Screen } from "../test/render";
 import indexStylesheet from "./index.css?raw";
 import mesuraStylesheet from "./mesura.css?raw";
 
-import type { Editor } from "@tiptap/core";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { ThreadId } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -67,7 +66,6 @@ import { composerEditorElement } from "./keys/focusScope";
 import { installKeyEngine } from "./keys/keyEngine";
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
 import { readAssistantText } from "./lib/assistantTextSelection";
-import { caretRectAt, domPointAt } from "./keys/composer/composerProjection";
 
 import {
   addFenceThread,
@@ -1114,34 +1112,6 @@ describe("narrow glyph cursor fence: the composer", () => {
   });
 });
 
-// Tiptap can leave an empty Text child before the trailing placeholder break.
-// The caret fallback must use the paragraph's box rather than calling an Element API on Text.
-// Two empty paragraphs project to "\n": offset zero is the first paragraph,
-// and offset one is the second. The old offset-zero assertion pinned the wrong line.
-it("narrow glyph cursor fence regression: an empty Tiptap paragraph uses its box when the caret precedes an empty Text child", async () => {
-  await using _browserFixture0 = await setupBrowserFixture0();
-
-  await mountApp(addGlyphThread("empty-text-child"));
-  const editor = (composer() as HTMLElement & { editor: Editor }).editor;
-  await act(async () => {
-    editor.commands.setContent({
-      type: "doc",
-      content: [{ type: "paragraph" }, { type: "paragraph" }],
-    });
-  });
-  const paragraphs = stubComposerParagraphBoxes();
-  const first = paragraphs[0]!;
-  const paragraph = paragraphs[1]!;
-  expect(paragraph, "the real Tiptap editor renders an empty paragraph").not.toBeNull();
-  paragraph.prepend(document.createTextNode(""));
-  expect(domPointAt(composer(), 0)).toEqual({ node: first, offset: 0 });
-  expect(caretRectAt(composer(), 0)).toMatchObject({ left: 51, top: 72, width: 0 });
-  expect(domPointAt(composer(), 1)).toEqual({ node: paragraph, offset: 0 });
-  const caret = caretRectAt(composer(), 1);
-  expect(caret).toMatchObject({ left: 51, top: 96, width: 0 });
-  expect(caret!.height).toBeGreaterThan(0);
-});
-
 /** Supply only layout measurements; Tiptap owns the paragraph and placeholder DOM. */
 function stubComposerParagraphBoxes() {
   fixture.editorBox = { left: 51, top: 72, width: 100, height: 200 };
@@ -1195,53 +1165,4 @@ it("narrow glyph cursor fence regression: NORMAL cursor and gutter remain visibl
   expect(stubComposerParagraphBoxes()).toHaveLength(1);
   await press(key("h"));
   await expectEmptyCursorAndGutter(72, [72]);
-});
-
-it("narrow glyph cursor fence guard: collapsed DOM offsets preserve text, inline tokens, hard breaks and paragraph separators", async () => {
-  await using _browserFixture0 = await setupBrowserFixture0();
-
-  await mountApp(addGlyphThread("collapsed-dom-offsets"));
-  const editor = (composer() as HTMLElement & { editor: Editor }).editor;
-  await act(async () => {
-    editor.commands.setContent(
-      {
-        type: "doc",
-        content: [
-          {
-            type: "paragraph",
-            content: [
-              { type: "text", text: "A" },
-              { type: "composer-mention", attrs: { path: "AGENTS.md", source: "@AGENTS.md" } },
-              { type: "hardBreak" },
-              { type: "text", text: "B" },
-            ],
-          },
-          { type: "paragraph" },
-          { type: "paragraph", content: [{ type: "text", text: "C" }] },
-        ],
-      },
-      { emitUpdate: false },
-    );
-  });
-  const [first, empty, last] = [...composer().querySelectorAll("p")];
-  const chip = first!.querySelector('[contenteditable="false"]')!;
-  const hardBreak = first!.querySelector("br")!;
-  expect(chip).not.toBeNull();
-  expect(hardBreak.classList.contains("ProseMirror-trailingBreak")).toBe(false);
-  // The collapsed text is A + token + hard break + B + separator + separator + C.
-  const points = [
-    { node: first!.firstChild!, offset: 0 },
-    { node: first!.firstChild!, offset: 1 },
-    { node: first!, offset: [...first!.childNodes].indexOf(hardBreak) },
-    { node: hardBreak.nextSibling!, offset: 0 },
-    { node: hardBreak.nextSibling!, offset: 1 },
-    { node: empty!, offset: 0 },
-    { node: last!.firstChild!, offset: 0 },
-    { node: last!.firstChild!, offset: 1 },
-  ];
-  for (const [offset, point] of points.entries()) {
-    const actual = domPointAt(composer(), offset);
-    expect(actual?.node, `collapsed offset ${offset} keeps its DOM node`).toBe(point.node);
-    expect(actual?.offset, `collapsed offset ${offset} keeps its DOM offset`).toBe(point.offset);
-  }
 });

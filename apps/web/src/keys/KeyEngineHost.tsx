@@ -10,7 +10,7 @@ import { cn } from "~/lib/utils";
 import { clearChatSurfacePaint, chatSurface, setChatThreadKey } from "./chat/chatSurface";
 import {
   composerCursorLine,
-  composerProjectedText,
+  composerGutterLines,
   composerSurface,
 } from "./composer/composerSurface";
 import {
@@ -18,7 +18,6 @@ import {
   subscribeComposerLayout,
   useComposerExpanded,
 } from "./composer/composerExpanded";
-import { caretRectAt } from "./composer/composerProjection";
 import { useCursorOverlays, type CursorGlyph, type CursorOverlay } from "./cursorOverlayStore";
 import { composerEditorElement } from "./focusScope";
 import { configureKeyEngine, registerKeySurface } from "./keyEngine";
@@ -308,21 +307,18 @@ function ComposerLineNumbers() {
     if (!editor || !host) return;
     let frame = 0;
     const measure = () => {
-      const text = composerProjectedText();
-      if (text === null) return;
+      const starts = composerGutterLines();
+      if (starts === null) return;
       const hostBox = host.getBoundingClientRect();
       const editorBox = editor.getBoundingClientRect();
       const cursorLine = composerCursorLine();
       const lines: GutterLine[] = [];
-      let offset = 0;
-      text.split("\n").forEach((line, index) => {
-        const rect = caretRectAt(editor, offset);
-        offset += line.length + 1;
-        if (!rect || rect.bottom < editorBox.top || rect.top > editorBox.bottom) return;
+      for (const { index, top } of starts) {
+        if (top < editorBox.top || top > editorBox.bottom) continue;
         const number =
           cursorLine === null || index === cursorLine ? index + 1 : Math.abs(index - cursorLine);
-        lines.push({ number, top: rect.top - hostBox.top, current: index === cursorLine });
-      });
+        lines.push({ number, top: top - hostBox.top, current: index === cursorLine });
+      }
       setGutter({ host, lines });
     };
     // The prompt reaches the composer's state after the input event, so the
