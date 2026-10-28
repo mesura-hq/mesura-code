@@ -119,3 +119,16 @@ it("moves only through visible content and treats separated status labels as wor
   await userEvent.keyboard("jwv");
   expect(window.getSelection()?.toString()).toBe("d");
 });
+
+it("moves vertically in the same table cell and yanks a tab-separated row", async () => {
+  await using fixture = await setup(
+    '<div style="width:160px;overflow-x:auto" data-testid="table-scroll"><table style="width:700px;table-layout:fixed"><tr><th>Metric</th><th>Value</th></tr><tr><td>Mode</td><td>Normal</td></tr></table></div>',
+  );
+  using clipboard = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  await userEvent.keyboard("wjv");
+  expect(window.getSelection()?.toString()).toBe("N");
+  const scroller = fixture.chat.querySelector<HTMLElement>('[data-testid="table-scroll"]')!;
+  expect(scroller.scrollLeft).toBeGreaterThan(0);
+  await userEvent.keyboard("{Escape}Vy");
+  expect(clipboard).toHaveBeenCalledWith("Mode\tNormal\n");
+});

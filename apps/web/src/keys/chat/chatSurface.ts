@@ -38,6 +38,8 @@ import {
   rangeBetween,
   sentenceSpans,
   toRowPosition,
+  tableAt,
+  tableMotionColumn,
   type BufferPosition,
   type ChatBuffer,
   type RowPosition,
@@ -261,6 +263,26 @@ function clearVisualSelection(): void {
 
 /** Keeps the cursor on screen with a margin, the way `scrolloff` does. */
 function revealRange(range: Range): void {
+  const holder =
+    range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  const cell = holder?.closest("td, th");
+  if (cell) {
+    for (let parent = cell.parentElement; parent; parent = parent.parentElement) {
+      const overflow = getComputedStyle(parent).overflowX;
+      if (
+        (overflow === "auto" || overflow === "scroll") &&
+        parent.scrollWidth > parent.clientWidth
+      ) {
+        const target = range.getBoundingClientRect();
+        const bounds = parent.getBoundingClientRect();
+        if (target.left < bounds.left) parent.scrollLeft -= bounds.left - target.left;
+        else if (target.right > bounds.right) parent.scrollLeft += target.right - bounds.right;
+        break;
+      }
+    }
+  }
   const scroller = currentScroller();
   if (!scroller) return;
   const rect = range.getBoundingClientRect();
@@ -676,6 +698,23 @@ export const chatSurface: KeySurface = {
     );
     const result = processKeystroke(key, context, synced.text, ctrl, true);
     context = result.newCtx;
+    if (
+      (key === "j" || key === "k") &&
+      tableAt(synced.buffer, before.line) &&
+      tableAt(synced.buffer, before.line) === tableAt(synced.buffer, context.cursor.line)
+    ) {
+      context = {
+        ...context,
+        cursor: {
+          ...context.cursor,
+          col: tableMotionColumn(
+            synced.buffer.lines[before.line]!,
+            synced.buffer.lines[context.cursor.line]!,
+            before.col,
+          ),
+        },
+      };
+    }
     // Read-only: a key that would enter insert mode never leaves normal.
     if (context.mode === "insert" || context.mode === "command-line") {
       context = processKeystroke("Escape", context, synced.text, false, true).newCtx;

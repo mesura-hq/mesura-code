@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { projectBufferLines, sentenceSpans } from "./chatBuffer";
+import { projectBufferLines, sentenceSpans, tableMotionColumn } from "./chatBuffer";
 
 describe("chat buffer sentences", () => {
   const sentences = (line: string) =>
@@ -52,5 +52,13 @@ describe("chat line projection", () => {
       { text: "first", start: 0 },
       { text: "last", start: 9 },
     ]);
+  });
+});
+
+describe("table motion columns", () => {
+  it("keeps the cell and character column across uneven table rows", () => {
+    expect(tableMotionColumn("Long header\tValue\tStatus", "x\t42\tok", 14)).toBe(3);
+    expect(tableMotionColumn("Long header\tValue\tStatus", "x\t4\tok", 15)).toBe(2);
+    expect(tableMotionColumn("a\tb\tc", "only", 4)).toBe(0);
   });
 });

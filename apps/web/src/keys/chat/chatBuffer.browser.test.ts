@@ -360,3 +360,15 @@ it("reads each element style once during a rebuild", () => {
   const elements = styles.mock.calls.map(([element]) => element);
   expect(new Set(elements).size).toBe(elements.length);
 });
+
+it("projects table rows with tabs while ranges retain citation chunk boundaries", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="table"><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Mode</td><td>Normal</td></tr></tbody></table></div>',
+  );
+  expect(readAssistantText(timeline.viewport).text).toBe("Metric\nValue\nMode\nNormal");
+  const buffer = buildChatBuffer(timeline.viewport);
+  expect(buffer.lines).toEqual(["Metric\tValue", "Mode\tNormal"]);
+  expect(rangeBetween(buffer, { line: 1, col: 5 }, { line: 1, col: 11 })?.toString()).toBe(
+    "Normal",
+  );
+});

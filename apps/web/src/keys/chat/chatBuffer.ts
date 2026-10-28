@@ -97,6 +97,7 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     const { text: rawText, chunks } = readAssistantText(source, {
       objectStops: true,
       readableRegions: true,
+      tableRows: true,
       includeElement: (element) => !inClosedDetails(element) && isDisplayed(element),
       includeText: (node) =>
         !inClosedDetails(node) &&
@@ -278,6 +279,27 @@ export function fromRowPosition(buffer: ChatBuffer, position: RowPosition): Buff
 function rowAt(buffer: ChatBuffer, line: number): BufferRow | null {
   const index = buffer.lineRow[line];
   return index === undefined || index === -1 ? null : buffer.rows[index]!;
+}
+
+export function tableMotionColumn(from: string, to: string, column: number): number {
+  const cells = from.slice(0, column).split("\t");
+  const cellIndex = cells.length - 1;
+  const inCell = cells.at(-1)!.length;
+  const targetCells = to.split("\t");
+  const targetIndex = Math.min(cellIndex, targetCells.length - 1);
+  const prefix = targetCells
+    .slice(0, targetIndex)
+    .reduce((length, cell) => length + cell.length + 1, 0);
+  return prefix + Math.min(inCell, Math.max(0, targetCells[targetIndex]!.length - 1));
+}
+
+export function tableAt(buffer: ChatBuffer, line: number): Element | null {
+  const row = rowAt(buffer, line);
+  if (!row) return null;
+  const start = row.lineStarts[line - row.firstLine]!;
+  const chunk = row.chunks.find((chunk) => chunk.start >= start);
+  const element = chunk?.node instanceof Element ? chunk.node : chunk?.node.parentElement;
+  return element?.closest("tr")?.closest("table") ?? null;
 }
 
 export function objectAt(buffer: ChatBuffer, position: BufferPosition): HTMLElement | null {

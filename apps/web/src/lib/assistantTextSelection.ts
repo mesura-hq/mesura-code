@@ -132,6 +132,7 @@ export function readAssistantText(
   options: {
     objectStops?: boolean;
     readableRegions?: boolean;
+    tableRows?: boolean;
     includeElement?: (element: Element) => boolean;
     includeText?: (text: Text) => boolean;
     inlineChildren?: (element: Element) => boolean;
@@ -181,6 +182,27 @@ export function readAssistantText(
           if (!parentRegion || !element.contains(parentRegion)) visit(region);
         }
       }
+      return;
+    }
+    if (options.tableRows && element.tagName === "TR") {
+      if (length > 0) {
+        parts.push("\n");
+        length += 1;
+      }
+      separator = false;
+      const cells = [...element.children].filter((child) => child.matches("th, td"));
+      cells.forEach((cell, index) => {
+        if (index > 0) {
+          parts.push("\t");
+          length += 1;
+        }
+        const stream = readAssistantText(cell as HTMLElement, options);
+        for (const chunk of stream.chunks)
+          chunks.push({ ...chunk, start: chunk.start + length, end: chunk.end + length });
+        parts.push(stream.text.replaceAll("\n", " "));
+        length += stream.text.length;
+      });
+      separator = true;
       return;
     }
     const block =
