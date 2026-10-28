@@ -436,16 +436,13 @@ describe("cursor memory fence: vertical motion across rows", () => {
     // The separator between rows has no character, so nothing is painted.
     await press(key("k"));
     expect(paintedCursor()).toBeNull();
-    await press(key("k"));
-    // The user row's last line: the time it was sent.
-    expect(paintedCursor()?.rowId).toContain("-user");
+    // The user row's send time shows only on hover, so the buffer skips it: its last line is the text.
     await press(key("k"));
     const question = paintedCursor();
+    expect(question?.rowId).toContain("-user");
     expect(question?.text).toBe("Question for R");
     // The start of that line, after the row's screen-reader author heading.
     expect(question?.offset).toBe(readAssistantRowText(question!.rowId).indexOf("Question for R"));
-    await press(key("j"));
-    expect(paintedCursor()?.rowId).toContain("-user");
 
     await press(key("j"));
     expect(paintedCursor()).toBeNull();
