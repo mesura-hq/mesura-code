@@ -60,6 +60,17 @@ describe("resolveKeyScope by focused element", () => {
     expect(scopeAfterFocusing("monaco-input")).toBe("passthrough");
   });
 
+  it("gives marked controls their own scope while their text fields stay insert", () => {
+    using fixture = mountKeyDom(LAYOUT);
+    fixture.container.insertAdjacentHTML(
+      "beforeend",
+      '<div data-mesura-owns-keys><button data-testid="owned">Options</button><textarea data-testid="answer"></textarea></div>',
+    );
+    expect(scopeAfterFocusing("owned")).toBe("control");
+    expect(scopeAfterFocusing("answer")).toBe("insert");
+    expect(scopeAfterFocusing("chat-focus")).toBe("chat");
+  });
+
   it("reads the tree scope in a tree, which leaves the leader to the keymap", () => {
     using _fixture = mountKeyDom(LAYOUT);
     expect(scopeAfterFocusing("file-tree")).toBe("tree");

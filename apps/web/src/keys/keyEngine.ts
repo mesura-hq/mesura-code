@@ -97,6 +97,7 @@ export function installKeyEngine(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
   window.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("keydown", onControlEscape);
   // The indicator follows focus, not just keys: clicking into the composer
   // is entering insert mode. Read after the surfaces' own focus listeners,
   // which run later and may change their mode.
@@ -235,6 +236,16 @@ function consume(event: KeyboardEvent): void {
   event.stopImmediatePropagation();
 }
 
+function onControlEscape(event: KeyboardEvent): void {
+  if (!enabled || event.defaultPrevented || event.isComposing || event.key !== "Escape") return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (resolveKeyScope(target) !== "control") return;
+  resetEngine();
+  focusPane("chat");
+  consume(event);
+  settleOnInput();
+}
+
 function onKeyDown(event: KeyboardEvent): void {
   if (!enabled) return;
   // Any key ends a composer resume the palette armed, before a command can
@@ -269,7 +280,7 @@ function handleKey(scope: KeyScope, token: string, event: KeyboardEvent): boolea
     if (sequence !== IDLE_SEQUENCE) resetEngine();
     return false;
   }
-  if (scope === "insert") {
+  if (scope === "insert" || scope === "control") {
     if (isPaneModeActive()) stopPaneMode();
     return false;
   }

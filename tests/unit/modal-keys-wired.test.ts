@@ -1243,3 +1243,18 @@ it("modal keys seam guard round 2: the panel commands and the Ctrl+Q defaults st
     assert.include(added, tokens(`id: "${id}"`), `ADDED_KEYBINDING_DEFAULTS lost ${id}`);
   }
 });
+
+it("modal keys seam guard: question options and the minimap retain key ownership", () => {
+  const question = "apps/web/src/components/chat/InlinePendingUserInputCard.tsx";
+  assert.include(
+    region(read(question), 'className="space-y-1.5"', "{question.options.map", question),
+    tokens("data-mesura-owns-keys"),
+    "the question option area no longer owns numeric input",
+  );
+  const minimap = "apps/web/src/components/chat/TimelineMinimap.tsx";
+  assert.include(
+    region(read(minimap), "<button", "onBlur=", minimap),
+    tokens("data-mesura-owns-keys"),
+    "the minimap strip no longer owns navigation input",
+  );
+});

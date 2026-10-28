@@ -80,6 +80,7 @@ const TREE_SELECTOR = '[role="tree"]';
 
 export type KeyScope =
   | "composer"
+  | "control"
   | "insert"
   | "passthrough"
   | "tree"
@@ -93,6 +94,7 @@ export function resolveKeyScope(active: Element | null = deepActiveElement()): K
   // left the terminal recorded and `Esc Esc` handed every key to its passthrough.
   const focusedPane = getFocusedPane();
   if (isCommandPaletteOpen()) return "passthrough";
+  if (active?.closest("[data-mesura-owns-keys]") && !isTextEditable(active)) return "control";
   if (active?.closest(COMPOSER_EDITOR_SELECTOR)) return "composer";
   if (active?.closest(PASSTHROUGH_SELECTOR)) return "passthrough";
   if (isTextEditable(active)) return "insert";
