@@ -361,6 +361,7 @@ import {
   shouldRefocusComposerOnWindowFocus,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { chatBufferHoldsKeys } from "~/keys/keyEngine";
 import { useComposerHandleContext } from "../composerHandleContext";
 import { clampFileAttachmentUploadBytes } from "@t3tools/client-runtime/state/attachments";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -2162,7 +2163,8 @@ export default function ChatView(props: ChatViewProps) {
         frame = window.requestAnimationFrame(() => {
           frame = null;
           if (document.querySelector("[data-mcp-app-fullscreen]") !== null) return;
-          if (shouldRefocusComposerOnWindowFocus(document.activeElement)) focusComposerStable();
+          if (shouldRefocusComposerOnWindowFocus(document.activeElement) && !chatBufferHoldsKeys())
+            focusComposerStable();
         });
       });
     };

@@ -1294,6 +1294,20 @@ it("modal keys seam guard round 2: the panel commands and the Ctrl+Q defaults st
   }
 });
 
+it("modal keys seam guard: a window regaining focus leaves the chat buffer its keys", () => {
+  const file = "apps/web/src/components/ChatView.tsx";
+  assert.include(
+    region(
+      read(file),
+      "const onWindowFocus = () => {",
+      'window.addEventListener("focus", onWindowFocus);',
+      file,
+    ),
+    tokens("!chatBufferHoldsKeys()"),
+    "window focus moves the chat buffer's keys into the composer again",
+  );
+});
+
 it("modal keys seam guard: question options and the minimap retain key ownership", () => {
   const question = "apps/web/src/components/chat/InlinePendingUserInputCard.tsx";
   assert.include(

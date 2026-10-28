@@ -143,8 +143,14 @@ export function installKeyEngine(): void {
     },
     true,
   );
+  // A click into a frame moves focus with no `focusin` here: the window's blur is the one signal.
   window.addEventListener("blur", () => {
-    if (document.activeElement instanceof HTMLIFrameElement) stopFlash();
+    const frame = document.activeElement;
+    if (!(frame instanceof HTMLIFrameElement)) return;
+    stopFlash();
+    if (!enabled) return;
+    surfaces.get("chat")?.focusIn?.(frame);
+    refreshModeIndicator();
   });
   window.addEventListener("focusout", () => queueMicrotask(refreshModeIndicator), true);
   // A click on a pane's text moves the keys there without focusing anything.
@@ -187,6 +193,14 @@ function showWhichKey(node: KeyNode, title: string, immediately: boolean): void 
   };
   if (immediately || readKeyEngineSnapshot().whichKey !== null) open();
   else whichKeyTimer = window.setTimeout(open, WHICH_KEY_DELAY_MS);
+}
+
+/**
+ * Whether Vim mode's chat buffer holds the keys. Focus then rests on <body> on purpose, so a
+ * window regaining focus (an app switch, a frame's exit) must not move it into the composer.
+ */
+export function chatBufferHoldsKeys(): boolean {
+  return refreshModeIndicator() === "chat";
 }
 
 /** Shows where the keys go and in which mode; returns that scope, or null while off. */

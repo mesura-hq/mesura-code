@@ -7,6 +7,7 @@ import type { KeyMode } from "@mesura/keys/keymap";
 import { fakeTimers } from "../../test/render";
 import { createWindowListenerFixture, mountKeyDom } from "~/test/keyBrowserFixtures";
 import {
+  chatBufferHoldsKeys,
   configureKeyEngine,
   installKeyEngine,
   registerKeySurface,
@@ -314,6 +315,24 @@ describe("key engine chat pane mark", () => {
     byTestId("sidebar-row").focus();
     await settle();
     expect(chatKeysMarked()).toBe(false);
+  });
+
+  it("reports the chat buffer holding the keys only while it does, so window focus leaves them there", async () => {
+    using _fixture = setup();
+    byTestId("chat-focus").focus();
+    (document.activeElement as HTMLElement).blur();
+    await settle();
+    expect(chatBufferHoldsKeys()).toBe(true);
+
+    byTestId("composer-editor").focus();
+    await settle();
+    expect(chatBufferHoldsKeys()).toBe(false);
+
+    configureKeyEngine({ enabled: false });
+    (document.activeElement as HTMLElement).blur();
+    expect(chatBufferHoldsKeys(), "with Vim mode off, <body> is no place the keys live").toBe(
+      false,
+    );
   });
 
   it("hands the keys and the mark to the chat on a press on its text, from the sidebar", async () => {
