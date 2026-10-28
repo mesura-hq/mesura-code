@@ -146,5 +146,9 @@ export function isComposerMenuOpen(): boolean {
 }
 
 export function hasOpenKeyLayer(): boolean {
-  return isCommandPaletteOpen() || document.querySelector(OPEN_LAYER_SELECTOR) !== null;
+  return (
+    isCommandPaletteOpen() ||
+    isComposerMenuOpen() ||
+    document.querySelector(OPEN_LAYER_SELECTOR) !== null
+  );
 }

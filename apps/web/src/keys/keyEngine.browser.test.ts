@@ -416,16 +416,19 @@ describe("flash ownership", () => {
     expect(isFlashActive()).toBe(false);
   });
 
-  it.each(['role="dialog"', 'role="menu"', 'data-slot="menu-popup"'])(
-    "cancels when a layer opens with focus left behind: %s",
-    async (attributes) => {
-      using fixture = setup();
-      byTestId("chat-focus").focus();
-      startTestFlash();
-      fixture.container.insertAdjacentHTML("beforeend", `<div ${attributes}></div>`);
-      await vi.waitFor(() => expect(isFlashActive()).toBe(false));
-    },
-  );
+  it.each([
+    'role="dialog"',
+    'role="menu"',
+    'data-slot="menu-popup"',
+    "data-composer-command-drawer",
+    "data-command-palette",
+  ])("cancels when a layer opens with focus left behind: %s", async (attributes) => {
+    using fixture = setup();
+    byTestId("chat-focus").focus();
+    startTestFlash();
+    fixture.container.insertAdjacentHTML("beforeend", `<div ${attributes}></div>`);
+    await vi.waitFor(() => expect(isFlashActive()).toBe(false));
+  });
 
   it("cancels on thread change and when the engine turns off", () => {
     using _fixture = setup();

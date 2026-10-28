@@ -116,7 +116,14 @@ function ownSession(scope: FlashProvider["scope"]): void {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ["role", "aria-modal", "data-open", "data-slot", "data-command-palette"],
+    attributeFilter: [
+      "role",
+      "aria-modal",
+      "data-open",
+      "data-slot",
+      "data-command-palette",
+      "data-composer-command-drawer",
+    ],
   });
   const elements = [
     ...new Set(
