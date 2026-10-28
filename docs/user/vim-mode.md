@@ -81,6 +81,23 @@ In NORMAL mode the chat works like a read-only Vim buffer with a block cursor:
 - `[u` and `]u` jump to your previous and next message.
 - `y` with a motion copies text, for example `yiw` for a word. In VISUAL mode, `y` copies the
   selection.
+- An HTML render, an app, a diagram, an image and a formula are one stop each, drawn with an
+  outline. `Enter` on a render or an app moves the keyboard into it, and `Enter` on a diagram shows
+  its code. `y` on a formula or a diagram copies its source.
+- In a table, `j` and `k` move by row and keep the column. `V` then `y` copies the row, its cells
+  separated by tabs.
+- Code keeps its blank lines. Text you cannot see, such as a label that shows only on hover or a
+  closed section, is skipped.
+- A click in the chat puts the cursor there, and a mouse selection becomes a VISUAL selection,
+  so `y`, `Space c` and the motions work on it.
+
+Inside an HTML render or an app, press `Escape` to return to the chat, or `Shift+Escape` when the
+page uses `Escape` itself. In full screen, either key closes it. Mouse selection inside a render
+works, but Vim keys and **Cite** do not reach its text yet.
+
+The number keys of a question's options and the arrows of the message minimap stay with them
+while they have focus. `Escape` there returns to the chat. Switching back to Mesura Code from
+another window keeps the chat in NORMAL mode.
 
 To cite part of an answer, press `Space c` in NORMAL mode. A label appears at the start of each
 sentence on screen: type the label where the cite starts. Labels then appear at the end of each
@@ -103,7 +120,9 @@ place.
 
 Press `s` in NORMAL or VISUAL mode, in the chat or in the composer. Type the first characters
 of the place you want. Each match gets a label; type the label to move the cursor there.
-`Backspace` on an empty search and `Escape` leave flash.
+A capital letter makes the search match case exactly. A search with no match stays open, so
+`Backspace` can fix it. `Backspace` on an empty search and `Escape` leave flash, and so does a
+click, a scroll or a focus change.
 
 ## Edit in the composer
 

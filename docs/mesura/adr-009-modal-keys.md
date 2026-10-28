@@ -384,6 +384,55 @@ the lines Vim moves by, not Markdown lines, so a fence gets no number;
 `ComposerLineNumbers` measures each line start and re-measures only on input,
 the editor's scroll, or a Vim key.
 
+### Rich chat content and embedded documents
+
+Added 2026-10-28, after upstream's inline HTML renders, MCP apps, Mermaid,
+math and expandable tool output made parts of the chat unreachable by keys.
+
+- **Object stops.** An element marked `data-mesura-chat-object` (`html-render`,
+  `mcp-app`, `diagram`, `image`, `math`) is one buffer line of one placeholder
+  character, painted as an outline (`blockCursor.ts`), so `j`/`k` and `gg`/`G`
+  never skip it. `Enter` focuses its `data-mesura-chat-object-entry` (the
+  iframe of a render or an app) or runs its `data-mesura-chat-object-toggle`
+  (a diagram's Show code). `y` copies a formula's TeX or a diagram's source.
+  Rejected: projecting frame text into the parent buffer; ranges cannot cross
+  documents and the sandbox (no `allow-same-origin`) stays.
+- **What the buffer reads.** Blank lines inside preformatted text are kept;
+  incidental blank lines between blocks are not. Text that is not visible
+  (`display: none`, `visibility: hidden`, `opacity: 0`, `user-select: none`
+  chrome, a closed `<details>`) is skipped, so a hover-only timestamp is no
+  stop. Readable output under an activation wrapper (`role="button"` work
+  rows) is marked `data-mesura-readable`. A table row is one line with cells
+  joined by a tab. `readAssistantText`'s normalization is unchanged, because
+  stored citations hold offsets into it.
+- **Embedded documents.** The frame bootstrap
+  (`packages/shared/src/embeddedDocument.ts`) posts one payload-free exit
+  notification on `Shift+Escape`, or on `Escape` the page did not handle. The
+  host accepts it only from the focused frame and returns to the chat pane
+  entry; the full-screen dialog closes instead. The bootstrap is versioned and
+  added at serve time to HTML renders published before it
+  (`apps/server/src/htmlRender/htmlRenderAssetResponse.ts`), without rewriting
+  stored files. MCP apps get it through the host's existing theme script. A
+  focused iframe is the `passthrough` scope. A click into a frame fires no
+  `focusin` in the parent, so the window's `blur` updates the indicator and
+  moves the chat cursor onto the frame's object stop.
+- **Window focus.** Upstream refocuses the composer when the window regains
+  focus with `<body>` active. In Vim mode `<body>` is where the chat buffer
+  holds the keys, so `ChatView` skips that refocus while
+  `chatBufferHoldsKeys()` is true (an app switch, a frame's exit).
+- **Focused controls.** Focus inside `data-mesura-owns-keys` (a question's
+  options, the message minimap) passes every key to the control except an
+  unhandled `Escape`, which returns to the chat. Plain buttons are not marked:
+  `Enter` activates them and `Space` stays the leader.
+- **Flash lifecycle.** A flash session belongs to the surface that started it
+  and ends on a focus or pointer move outside it, a frame taking focus, a
+  layer opening, a route change, a scroll, a wheel or a resize: labels are
+  fixed overlays and would detach. A search with no match stays in flash. A
+  label sits on the match's last line fragment, not its union box.
+- **Mouse and Vim.** A click on chat text places the cursor; a drag selection
+  inside the buffer becomes Vim's visual selection, both endpoints stored as
+  `{ rowId, offset }` so they survive a rebuild of the virtualized list.
+
 ### Navigation by message
 
 `[u` / `]u` jump to the developer's previous or next message, from any scope
@@ -557,6 +606,9 @@ Each item has its own issue on `mesura-hq/mesura-code`, tracked by #86:
   the command has no default chord.
 - #87: refactor(keys): one command list for the palette, the chords and the
   modal keys — the chord listeners and the palette rows reading the registry.
+- Not filed yet: Vim motions, visual selection and cite inside an HTML render
+  or an MCP app. It needs a reader running in the frame and a citation source
+  that is not an assistant message (`packages/contracts/src/assistantCitations.ts`).
 
 Known limits of round 2, with no issue of their own:
 
