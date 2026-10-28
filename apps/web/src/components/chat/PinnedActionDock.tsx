@@ -4,17 +4,14 @@ import type {
   RuntimeRequestId,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { FileTextIcon, MessageCircleQuestionIcon, ShieldIcon } from "lucide-react";
+import { FileTextIcon, ShieldIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { dispatchQuestionFocus } from "../../lib/pickerActionBus";
 import type { PendingApproval } from "../../session-logic";
-import { Button } from "../ui/button";
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
-import type { InlinePendingUserInputContext } from "./InlinePendingUserInputCard";
 import {
   derivePinnedActionDockItems,
   layoutPinnedActionDock,
@@ -24,15 +21,8 @@ import {
 } from "./pinnedActionDock.logic";
 import { usePinnedActionDockStore } from "./pinnedActionDockStore";
 
-/** What `ChatView` owns and the dock reads: everything else comes from the composer. */
-export interface PinnedActionDockSources {
-  /** The inline question cards' shared state; questions are answered there (ADR-007). */
-  readonly pendingUserInput: InlinePendingUserInputContext | null;
-}
-
 interface PinnedActionDockProps {
   readonly threadRef: ScopedThreadRef;
-  readonly sources: PinnedActionDockSources;
   readonly approvals: ReadonlyArray<PendingApproval>;
   readonly respondingRequestIds: ReadonlyArray<RuntimeRequestId>;
   readonly canOperate: boolean;
@@ -43,24 +33,20 @@ interface PinnedActionDockProps {
   readonly planFollowUp: PinnedActionDockFollowUp | null;
 }
 
-const EMPTY_REQUESTS: InlinePendingUserInputContext["requests"] = [];
-
 /**
- * Pending approvals, questions and plan follow-ups stay visible above the composer input.
+ * Pending approvals and plan follow-ups stay visible above the composer input.
  * Each item closes with an X; `pinnedActionDock.logic.ts` decides what that X does.
  */
 export function PinnedActionDock(props: PinnedActionDockProps) {
-  const { sources, threadRef } = props;
+  const { threadRef } = props;
   const threadKey = scopedThreadKey(threadRef);
   const unpins = usePinnedActionDockStore((state) => state.unpins);
   const phoneWidth = useMediaQuery("max-sm");
   const [tappedKey, setTappedKey] = useState<string | null>(null);
-  const questions = sources.pendingUserInput;
 
   const items = derivePinnedActionDockItems({
     threadKey,
     approvals: props.approvals,
-    userInputs: questions?.requests ?? EMPTY_REQUESTS,
     planFollowUp: props.planFollowUp,
     unpins,
   });
@@ -71,14 +57,11 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
   });
 
   const isResponding = (requestId: RuntimeRequestId) =>
-    props.respondingRequestIds.includes(requestId) ||
-    (questions?.respondingRequestIds.includes(requestId) ?? false);
+    props.respondingRequestIds.includes(requestId);
   const closeDisabled = (item: PinnedActionDockItem) => {
     switch (item.kind) {
       case "approval":
         return !props.canOperate || isResponding(item.approval.requestId);
-      case "question":
-        return (questions?.unavailable ?? true) || isResponding(item.request.requestId);
       default:
         return false;
     }
@@ -89,12 +72,6 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
     switch (action.type) {
       case "respond-approval":
         void props.onRespondToApproval(action.requestId, action.decision);
-        return;
-      case "dismiss-question":
-        void questions?.onDismiss(action.requestId);
-        return;
-      case "respond-question":
-        void questions?.onDismissWithAnswer(action.requestId, action.answers);
         return;
       case "dismiss-plan-follow-up":
         usePinnedActionDockStore.getState().dismissFollowUp(threadKey, action.planId);
@@ -158,8 +135,6 @@ function itemIcon(item: PinnedActionDockItem): ReactNode {
   switch (item.kind) {
     case "approval":
       return <ShieldIcon />;
-    case "question":
-      return <MessageCircleQuestionIcon />;
     case "plan-follow-up":
       return <FileTextIcon />;
   }
@@ -222,27 +197,6 @@ function DockItemBody(props: {
               canRespond={item.approval.responseCapability === "live"}
               onRespondToApproval={dock.onRespondToApproval}
             />
-            {close}
-          </ComposerBanner.Actions>
-        </>
-      );
-    case "question":
-      return (
-        <>
-          <ComposerBanner.Content>
-            <span className="shrink-0 font-medium text-muted-foreground">
-              {item.request.questions[0]?.header ?? "Question"}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-foreground/85">{item.title}</span>
-          </ComposerBanner.Content>
-          <ComposerBanner.Actions>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => dispatchQuestionFocus(item.request.requestId)}
-            >
-              Answer
-            </Button>
             {close}
           </ComposerBanner.Actions>
         </>

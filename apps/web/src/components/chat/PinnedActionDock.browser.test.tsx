@@ -237,6 +237,10 @@ import {
   questionAttachmentDraftId,
 } from "../../questionAttachments";
 import { usePinnedActionDockStore } from "./pinnedActionDockStore";
+import { usePendingUserInputDraftStore } from "../../pendingUserInputDraftStore";
+import { dispatchPickerAction } from "../../lib/pickerActionBus";
+import { createDeferredPromise } from "../../test/threadLinkFixture";
+import { DISMISSED_QUESTION_ANSWER } from "../../pendingUserInput";
 import { focusTestWindow } from "../../test/windowFocus";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
@@ -456,6 +460,7 @@ async function setupDockFixture(
     spy.mockClear();
     fixture.commands.set(command, spy);
   }
+  usePendingUserInputDraftStore.setState({ requests: {} });
   fixture.projectionExtras = {};
   fixture.planMode = false;
   fixture.hiddenRows.clear();
@@ -617,6 +622,17 @@ function dockItem(container: HTMLElement, kind: string): HTMLElement {
   return match!;
 }
 
+function inlineQuestionCloseButton(container: HTMLElement, requestId: string) {
+  const card = container.querySelector<HTMLElement>(
+    `[data-pending-user-input-request-id="${requestId}"]`,
+  );
+  const close = card?.querySelector<HTMLButtonElement>(
+    'button[aria-label="Dismiss question without answering"]',
+  );
+  expect(close, `Expected the inline dismissal for ${requestId}`).toBeTruthy();
+  return close!;
+}
+
 function buttonNamed(scope: HTMLElement, name: string): HTMLButtonElement | undefined {
   return [...scope.querySelectorAll<HTMLButtonElement>("button")].find(
     (entry) => entry.textContent?.trim() === name || entry.getAttribute("aria-label") === name,
@@ -679,9 +695,9 @@ it.each(WIDTHS)(
     await vi.waitFor(() =>
       expect(pendingIds()).toEqual(["factory-plan", "pending-user-input", "pending-user-input"]),
     );
-    expect(
-      dockItems(screen.container).map((item) => item.dataset.pinnedActionDockItem),
-    ).not.toContain("plan");
+    expect(dockItems(screen.container).map((item) => item.dataset.pinnedActionDockItem)).toEqual([
+      "approval",
+    ]);
     expect(plan.textContent).toContain("The developer builds with the factory from a thread.");
     expect(plan.querySelector('input[aria-label="Implementer budget"]')).not.toBeNull();
     expect(plan.scrollWidth).toBeLessThanOrEqual(plan.clientWidth);
@@ -790,7 +806,7 @@ it.each(WIDTHS)(
   async ({ viewport }) => {
     await using _fixture = await setupDockFixture(viewport, { pending: true });
     await using screen = await mountApp();
-    await vi.waitFor(() => expect(dockItems(screen.container)).toHaveLength(3));
+    await vi.waitFor(() => expect(dockItems(screen.container)).toHaveLength(1));
     const region = dock(screen.container)!;
     const editor = composerEditor(screen.container);
     const editorRect = editor.getBoundingClientRect();
@@ -828,10 +844,12 @@ it("the full plan Open opens its Factory pane", async () => {
   expect(JSON.stringify(useRightPanelStore.getState())).not.toBe(initial);
 });
 
-it("phase6 dock browser AC3 the X on a question the provider does not mark dismissible answers it as dismissed", async () => {
+it("inline question AC3 the X on a question the provider does not mark dismissible answers it as dismissed", async () => {
   await using _fixture = await setupDockFixture(DESKTOP, { pending: true });
   await using screen = await mountApp();
-  const close = await vi.waitFor(() => dockCloseButton(screen.container, "Dismiss", LIVE_QUESTION));
+  const close = await vi.waitFor(() =>
+    inlineQuestionCloseButton(screen.container, "pinned-dock-live-question"),
+  );
   await act(async () => close.click());
   await vi.waitFor(() => expect(fixture.respondToUserInput).toHaveBeenCalledOnce());
   const sent = fixture.respondToUserInput.mock.calls[0]![0] as {
@@ -839,15 +857,16 @@ it("phase6 dock browser AC3 the X on a question the provider does not mark dismi
   };
   expect(sent.input.requestId).toBe("pinned-dock-live-question");
   expect(Object.keys(sent.input.answers).toSorted()).toEqual(["database", "order"]);
-  for (const answer of Object.values(sent.input.answers)) expect(answer).toMatch(/dismissed/i);
+  for (const answer of Object.values(sent.input.answers))
+    expect(answer).toBe(DISMISSED_QUESTION_ANSWER);
   expect(fixture.dismissUserInput).not.toHaveBeenCalled();
 });
 
-it("phase6 dock browser AC3 the X on a dismissible question goes through the existing dismiss", async () => {
+it("inline question AC3 the X on a dismissible question goes through the existing dismiss", async () => {
   await using _fixture = await setupDockFixture(DESKTOP, { pending: true });
   await using screen = await mountApp();
   const close = await vi.waitFor(() =>
-    dockCloseButton(screen.container, "Dismiss", MESSAGE_QUESTION),
+    inlineQuestionCloseButton(screen.container, "pinned-dock-message-question"),
   );
   await act(async () => close.click());
   await vi.waitFor(() => expect(fixture.dismissUserInput).toHaveBeenCalledOnce());
@@ -904,13 +923,15 @@ it("the ready-to-close line stays outside the pinned dock and its timeline X cle
 
 it("phase6 dock browser AC6 at Pixel 7 width the dock expands the two newest items and keeps the input on screen", async () => {
   await using _fixture = await setupDockFixture(PIXEL_7, { pending: true });
+  addApproval("newest-approval", "2026-10-24T10:05:00.000Z", "pnpm build");
+  addApproval("second-approval", "2026-10-24T10:04:00.000Z", "pnpm install");
   await using screen = await mountApp();
-  // Newest first: the message question, the live question, then the approval.
+  // Plan follow-ups wait for approvals to clear; three approvals exercise the phone collapse.
   await vi.waitFor(() => expect(dockItems(screen.container)).toHaveLength(3));
   const items = dockItems(screen.container);
   expect(items.map((entry) => entry.dataset.pinnedActionDockItem)).toEqual([
-    "question",
-    "question",
+    "approval",
+    "approval",
     "approval",
   ]);
   expect(items.map((entry) => entry.dataset.expanded)).toEqual(["true", "true", "false"]);
@@ -966,22 +987,19 @@ it("phase6 dock browser guard the inline question cards still show both pending 
   await vi.waitFor(() => expect(fixture.dismissUserInput).toHaveBeenCalledOnce());
 });
 
-it("phase6 dock browser AC3 a question's Answer scrolls its inline card into view and focuses it", async () => {
+it("the question shortcut still reveals and focuses the first inline card without a dock Answer button", async () => {
   await using _fixture = await setupDockFixture(DESKTOP, { pending: true });
   await using screen = await mountApp();
+  expect(dock(screen.container)?.textContent).not.toContain("Answer");
+  expect(dockItems(screen.container).map((entry) => entry.dataset.pinnedActionDockItem)).toEqual([
+    "approval",
+  ]);
   await scrollTimeline(screen.container, "top");
-  const entry = await vi.waitFor(() => {
-    const match = dockItems(screen.container).find((item) =>
-      item.textContent?.includes(LIVE_QUESTION),
-    );
-    expect(match, "Expected the live question's dock entry").toBeDefined();
-    return match!;
-  });
   const card = screen.container.querySelector<HTMLElement>(
     '[data-pending-user-input-request-id="pinned-dock-live-question"]',
   )!;
   expect(inViewport(card)).toBe(false);
-  await act(async () => buttonNamed(entry, "Answer")!.click());
+  await act(async () => dispatchPickerAction("question"));
   await vi.waitFor(() => {
     expect(card.contains(document.activeElement)).toBe(true);
     const rect = card.getBoundingClientRect();
@@ -1014,7 +1032,7 @@ it("retains route edits and the pending Approve state while the full card leaves
   expect(sentApproval().routes).toMatchObject({ implementer: { budgetUsd: 40 } });
 });
 
-it("phase6 dock browser P1-4 the X dismisses a question whose draft still prepares an attachment", async () => {
+it("inline question P1-4 the X dismisses a question whose draft still prepares an attachment", async () => {
   await using _fixture = await setupDockFixture(DESKTOP, { pending: true });
   const draftId = questionAttachmentDraftId(
     environmentId,
@@ -1027,7 +1045,9 @@ it("phase6 dock browser P1-4 the X dismisses a question whose draft still prepar
     [Symbol.asyncDispose]: async () => changeQuestionAttachmentPreparation(draftId, -1),
   };
   await using screen = await mountApp();
-  const close = await vi.waitFor(() => dockCloseButton(screen.container, "Dismiss", LIVE_QUESTION));
+  const close = await vi.waitFor(() =>
+    inlineQuestionCloseButton(screen.container, "pinned-dock-live-question"),
+  );
   await act(async () => close.click());
   await vi.waitFor(() => expect(fixture.respondToUserInput).toHaveBeenCalledOnce());
   const sent = fixture.respondToUserInput.mock.calls[0]![0] as {
@@ -1037,19 +1057,102 @@ it("phase6 dock browser P1-4 the X dismisses a question whose draft still prepar
   expect(sent.input).not.toHaveProperty("attachmentsByQuestionId");
 });
 
-it("phase6 dock browser P1-4 a dismissal the server refuses shows an error", async () => {
+it("inline question P1-4 a dismissal the server refuses shows an error", async () => {
   await using _fixture = await setupDockFixture(DESKTOP, { pending: true });
   fixture.respondToUserInput.mockImplementationOnce(
     async () => AsyncResult.failure(Cause.fail(new Error("the provider is gone"))) as never,
   );
   await using screen = await mountApp();
-  const close = await vi.waitFor(() => dockCloseButton(screen.container, "Dismiss", LIVE_QUESTION));
+  const close = await vi.waitFor(() =>
+    inlineQuestionCloseButton(screen.container, "pinned-dock-live-question"),
+  );
   await act(async () => close.click());
+  const card = close.closest("section")!;
   await vi.waitFor(() =>
-    expect(screen.container.textContent).toContain(
-      "Could not dismiss the question: the provider is gone",
+    expect(card.querySelector('[role="alert"]')?.textContent).toBe(
+      "Could not dismiss the request. Try again.",
     ),
   );
+  expect(close.disabled).toBe(false);
+  expect(screen.container.textContent).toContain(
+    "Could not dismiss the question: the provider is gone",
+  );
+});
+
+it("inline question P1-4 a refused dismissible request keeps its card and shows the dismissal error", async () => {
+  await using _fixture = await setupDockFixture(DESKTOP, { pending: true });
+  fixture.dismissUserInput.mockImplementationOnce(
+    async () => AsyncResult.failure(Cause.fail(new Error("dismissal refused"))) as never,
+  );
+  await using screen = await mountApp();
+  const close = inlineQuestionCloseButton(screen.container, "pinned-dock-message-question");
+  await act(async () => close.click());
+  await vi.waitFor(() =>
+    expect(close.closest("section")?.querySelector('[role="alert"]')?.textContent).toBe(
+      "Could not dismiss the request. Try again.",
+    ),
+  );
+  expect(close.disabled).toBe(false);
+  expect(fixture.respondToUserInput).not.toHaveBeenCalled();
+});
+
+it.each(["live", "message"] as const)(
+  "the inline %s question X stays disabled while its dismissal is in flight",
+  async (kind) => {
+    await using _fixture = await setupDockFixture(DESKTOP, { pending: true });
+    const result = createDeferredPromise<{ _tag: string; value: undefined }>();
+    const command = kind === "live" ? fixture.respondToUserInput : fixture.dismissUserInput;
+    command.mockImplementationOnce(() => result.promise);
+    await using screen = await mountApp();
+    const close = inlineQuestionCloseButton(screen.container, `pinned-dock-${kind}-question`);
+    try {
+      await act(async () => close.click());
+      await vi.waitFor(() => expect(command).toHaveBeenCalledOnce());
+      expect(close.disabled).toBe(true);
+      await act(async () => close.click());
+      expect(command).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => result.resolve({ _tag: "Success", value: undefined }));
+    }
+    await vi.waitFor(() => expect(close.disabled).toBe(false));
+  },
+);
+
+it("every inline question X stays disabled while the environment is unavailable", async () => {
+  await using _fixture = await setupDockFixture(DESKTOP, { pending: true });
+  const environment = fixture.environments[0]!;
+  environment.connection.phase = "reconnecting";
+  await using _connection = {
+    [Symbol.asyncDispose]: async () => {
+      environment.connection.phase = "connected";
+    },
+  };
+  await using screen = await mountApp();
+  for (const kind of ["live", "message"]) {
+    const close = inlineQuestionCloseButton(screen.container, `pinned-dock-${kind}-question`);
+    expect(close.disabled).toBe(true);
+    await act(async () => close.click());
+  }
+  expect(fixture.dismissUserInput).not.toHaveBeenCalled();
+  expect(fixture.respondToUserInput).not.toHaveBeenCalled();
+});
+
+it("the dock stays absent when only questions are pending", async () => {
+  await using _fixture = await setupDockFixture(DESKTOP, { pending: true });
+  fixture.projectionExtras = {
+    ...fixture.projectionExtras,
+    runtimeRequests: (fixture.projectionExtras.runtimeRequests ?? []).filter(
+      (request) => request.kind === "user_input",
+    ),
+  };
+  fixture.turnItems = fixture.turnItems.filter((item) => item.type !== "approval_request");
+  await using screen = await mountApp();
+  await vi.waitFor(() =>
+    expect(screen.container.querySelectorAll("[data-pending-user-input-request-id]")).toHaveLength(
+      2,
+    ),
+  );
+  expect(dock(screen.container)).toBeNull();
 });
 
 it("phase6 dock browser P1-5 guard the plan follow-up sits in the dock at desktop width", async () => {

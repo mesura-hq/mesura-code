@@ -1,7 +1,4 @@
-import type {
-  ThreadPendingApproval,
-  ThreadPendingUserInput,
-} from "@t3tools/client-runtime/state/thread-requests";
+import type { ThreadPendingApproval } from "@t3tools/client-runtime/state/thread-requests";
 import type { PlanId, ProviderRequestKind, RuntimeRequestId } from "@t3tools/contracts";
 
 /**
@@ -11,13 +8,6 @@ import type { PlanId, ProviderRequestKind, RuntimeRequestId } from "@t3tools/con
 
 /** At phone width at most this many items are expanded; the rest are one line each. */
 export const PHONE_DOCK_EXPANDED_LIMIT = 2;
-
-/**
- * What the X on a question sends when the provider cannot take a dismissal: an explicit answer
- * through the normal respond path, so the agent is told rather than left waiting.
- */
-export const DISMISSED_QUESTION_ANSWER =
-  "[dismissed] The developer dismissed this question without answering. Continue without this answer, or ask again in plain text.";
 
 // Keep only the newest follow-up dismissals that can still match.
 const MAX_FOLLOW_UP_DISMISSALS_PER_THREAD = 20;
@@ -43,11 +33,6 @@ export type PinnedActionDockItem =
       readonly title: string;
     })
   | (DockItemBase & {
-      readonly kind: "question";
-      readonly request: ThreadPendingUserInput;
-      readonly title: string;
-    })
-  | (DockItemBase & {
       readonly kind: "plan-follow-up";
       readonly planId: PlanId;
       readonly title: string | null;
@@ -55,12 +40,6 @@ export type PinnedActionDockItem =
 
 export type PinnedActionDockCloseAction =
   | { readonly type: "respond-approval"; readonly requestId: RuntimeRequestId; decision: "decline" }
-  | { readonly type: "dismiss-question"; readonly requestId: RuntimeRequestId }
-  | {
-      readonly type: "respond-question";
-      readonly requestId: RuntimeRequestId;
-      readonly answers: Readonly<Record<string, string>>;
-    }
   | { readonly type: "dismiss-plan-follow-up"; readonly planId: PlanId };
 
 interface ThreadDockUnpinsRecord {
@@ -73,7 +52,6 @@ export type PinnedActionDockUnpins = Readonly<Record<string, ThreadDockUnpinsRec
 export interface PinnedActionDockInput {
   readonly threadKey: string;
   readonly approvals: ReadonlyArray<ThreadPendingApproval>;
-  readonly userInputs: ReadonlyArray<ThreadPendingUserInput>;
   readonly planFollowUp: PinnedActionDockFollowUp | null;
   readonly unpins: PinnedActionDockUnpins;
 }
@@ -141,13 +119,6 @@ const time = (iso: string) => {
   return Number.isNaN(parsed) ? 0 : parsed;
 };
 
-function questionTitle(request: ThreadPendingUserInput): string {
-  const first = request.questions[0];
-  if (first === undefined) return "Question from the agent";
-  const line = first.question.split(/\r?\n/, 1)[0]!.trim();
-  return request.questions.length > 1 ? `${line} (+${request.questions.length - 1} more)` : line;
-}
-
 /** Pending dock actions in one thread, newest first. */
 export function derivePinnedActionDockItems(
   input: PinnedActionDockInput,
@@ -162,17 +133,6 @@ export function derivePinnedActionDockItems(
       createdAt: approval.createdAt,
       closeLabel: `Decline ${title.toLowerCase()}${approval.detail ? `: ${approval.detail}` : ""}`,
       approval,
-      title,
-    });
-  }
-  for (const request of input.userInputs) {
-    const title = questionTitle(request);
-    items.push({
-      kind: "question",
-      key: `question:${request.requestId}`,
-      createdAt: request.createdAt,
-      closeLabel: `Dismiss question: ${title}`,
-      request,
       title,
     });
   }
@@ -219,16 +179,6 @@ export function pinnedActionDockCloseAction(
   switch (item.kind) {
     case "approval":
       return { type: "respond-approval", requestId: item.approval.requestId, decision: "decline" };
-    case "question":
-      return item.request.dismissible
-        ? { type: "dismiss-question", requestId: item.request.requestId }
-        : {
-            type: "respond-question",
-            requestId: item.request.requestId,
-            answers: Object.fromEntries(
-              item.request.questions.map((question) => [question.id, DISMISSED_QUESTION_ANSWER]),
-            ),
-          };
     case "plan-follow-up":
       return { type: "dismiss-plan-follow-up", planId: item.planId };
   }
