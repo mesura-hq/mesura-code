@@ -29,6 +29,7 @@ import {
 } from "../flashSession";
 import { bumpComposerLayout } from "./composerExpanded";
 import {
+  atomCharacterEpoch,
   inlineNodesFor,
   isObjectCharacter,
   lineIndexAt,
@@ -224,6 +225,16 @@ function contextAt(position: { line: number; col: number }): VimContext {
     register: context.register,
     registers: context.registers,
   };
+}
+
+/** The atom table epoch the registers were filled under. */
+let registersEpoch = atomCharacterEpoch();
+
+/** Drops registers whose chip characters the atom table has since reassigned. */
+function forgetStaleRegisters(): void {
+  if (registersEpoch === atomCharacterEpoch()) return;
+  registersEpoch = atomCharacterEpoch();
+  context = { ...context, register: "", registers: {} };
 }
 
 function enterInsert(): void {
@@ -492,6 +503,7 @@ function handleNormalKey(token: string): boolean {
   const beforeOffset = offsetOf(before, context.cursor.line, context.cursor.col);
   const selectionStart = visualSelectionStart(before);
   const linewise = deletesWholeLines(token);
+  forgetStaleRegisters();
   const result = processKeystroke(key.key, context, current.buffer, key.ctrl, false);
   context = result.newCtx;
   const text = current.buffer.getContent();
@@ -505,7 +517,12 @@ function handleNormalKey(token: string): boolean {
     applyingEdit = true;
     let snapshot: ComposerDocSnapshot;
     try {
-      snapshot = applyComposerTextChange(editor, current.snapshot, text, linewise);
+      const start = Math.min(beforeOffset, selectionStart ?? beforeOffset);
+      snapshot = applyComposerTextChange(editor, current.snapshot, text, {
+        start: linewise ? before.lastIndexOf("\n", start - 1) + 1 : start,
+        cursorAfter: offset,
+        linewise,
+      });
     } finally {
       applyingEdit = false;
     }

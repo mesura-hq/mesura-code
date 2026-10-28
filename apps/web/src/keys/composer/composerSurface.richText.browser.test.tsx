@@ -135,6 +135,19 @@ describe("composer Vim over rich text", () => {
     expect(chips()).toBe(2);
   });
 
+  it("dd on a heading deletes the heading, even when the line below reads the same", async () => {
+    await using fixture = await mountVimComposer("# same\nsame");
+    expect(fixture.blocks()).toEqual(["heading", "paragraph"]);
+    await fixture.keys("<Esc>", "g", "g", "d", "d");
+    expect(fixture.blocks()).toEqual(["paragraph"]);
+  });
+
+  it("x deletes the character under the cursor, not an equal one beside it", async () => {
+    await using fixture = await mountVimComposer("**a**a");
+    await fixture.keys("<Esc>", "0", "x");
+    expect(fixture.prompt()).toBe("a");
+  });
+
   it("a yank survives an empty insert session", async () => {
     await using fixture = await mountVimComposer("Read alpha beta.");
     await fixture.keys("<Esc>", "0", "y", "w", "i", "<Esc>", "p");

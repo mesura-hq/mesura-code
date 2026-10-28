@@ -14,15 +14,41 @@ import {
 /**
  * Applies a Vim edit (buffer text before and after) as editor transactions on the one differing
  * span. A deleted line break joins blocks as Backspace does and an inserted one splits them as
- * Enter does, so list items stay items and code stays code. `linewise` deletes whole blocks.
+ * Enter does, so list items stay items and code stays code. A linewise delete removes whole blocks.
  */
 export function applyComposerTextChange(
   editor: Editor,
   snapshot: ComposerDocSnapshot,
   after: string,
-  linewise: boolean,
+  edit: ComposerEditAnchor,
 ): ComposerDocSnapshot {
-  const before = snapshot.text;
+  const { from, to, inserted } = locateChange(snapshot.text, after, edit);
+  if (edit.linewise && inserted.length === 0 && deleteWholeLines(editor, snapshot, from, to)) {
+    return snapshotComposerDoc(editor.state.doc);
+  }
+  replaceSpan(editor, snapshot, from, to, inserted);
+  return snapshotComposerDoc(editor.state.doc);
+}
+
+/** Where the Vim operation acted, which picks among equal-looking edits in repeated text. */
+export interface ComposerEditAnchor {
+  /** Where a deletion starts: the leftmost of the cursor and the selection (a line start when linewise). */
+  readonly start: number;
+  /** The cursor after the edit, which a paste leaves inside the text it inserted. */
+  readonly cursorAfter: number;
+  readonly linewise: boolean;
+}
+
+/**
+ * The span `before` → `after` replaced. A pure insertion or deletion inside repeated text can sit
+ * at several offsets with the same resulting text (`same\nsame` minus one line); those are
+ * different edits once blocks or marks differ, so the operation's anchor chooses the offset.
+ */
+export function locateChange(
+  before: string,
+  after: string,
+  edit: ComposerEditAnchor,
+): { from: number; to: number; inserted: string } {
   let prefix = 0;
   const shorter = Math.min(before.length, after.length);
   while (prefix < shorter && before[prefix] === after[prefix]) prefix += 1;
@@ -33,15 +59,27 @@ export function applyComposerTextChange(
   ) {
     suffix += 1;
   }
-  const from = prefix;
-  const to = before.length - suffix;
-  const inserted = after.slice(prefix, after.length - suffix);
-
-  if (linewise && inserted.length === 0 && deleteWholeLines(editor, snapshot, from, to)) {
-    return snapshotComposerDoc(editor.state.doc);
+  const removed = before.length - suffix - prefix;
+  const added = after.length - suffix - prefix;
+  if (removed > 0 && added > 0) {
+    return {
+      from: prefix,
+      to: before.length - suffix,
+      inserted: after.slice(prefix, after.length - suffix),
+    };
   }
-  replaceSpan(editor, snapshot, from, to, inserted);
-  return snapshotComposerDoc(editor.state.doc);
+  // The same text inserted or removed at `start` gives the same result for every start in
+  // [earliest, prefix]: each shift left moves one equal character from before the span to after it.
+  const longer = removed > 0 ? before : after;
+  const length = removed + added;
+  let earliest = prefix;
+  while (earliest > 0 && longer[earliest - 1] === longer[earliest - 1 + length]) earliest -= 1;
+  // A paste leaves the cursor on the last character it inserted.
+  const wanted = removed > 0 ? edit.start : edit.cursorAfter - length + 1;
+  const start = Math.max(earliest, Math.min(prefix, wanted));
+  return removed > 0
+    ? { from: start, to: start + length, inserted: "" }
+    : { from: start, to: start, inserted: after.slice(start, start + length) };
 }
 
 function replaceSpan(

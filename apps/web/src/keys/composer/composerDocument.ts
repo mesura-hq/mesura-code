@@ -31,21 +31,35 @@ const ATOM_LAST = 0xf8ff;
 
 /**
  * Each inline atom (mention, skill, citation, context reference) is one private-use character,
- * the same one for as long as the page lives. Registers and undo text keep their meaning after the
- * document that produced them is gone, so a paste after undo/redo restores the real node.
+ * the same one until the table resets (`atomCharacterEpoch`), so a register keeps its meaning
+ * after the document that produced it is gone: a paste after undo/redo restores the real node.
  */
 const atomCharacterByKey = new Map<string, string>();
 const atomJsonByCharacter = new Map<string, unknown>();
+/** Room kept free so one document never runs the table out while it is being read. */
+const ATOM_HEADROOM = 512;
+let atomEpoch = 0;
+
+/**
+ * Bumped when the character table is reset. A character saved under an older epoch (a register)
+ * may name another node now, so its holder must drop it rather than paste it.
+ */
+export function atomCharacterEpoch(): number {
+  return atomEpoch;
+}
+
+function resetAtomCharactersIfFull(): void {
+  if (atomCharacterByKey.size <= ATOM_LAST - ATOM_FIRST - ATOM_HEADROOM) return;
+  atomCharacterByKey.clear();
+  atomJsonByCharacter.clear();
+  atomEpoch += 1;
+}
 
 function atomCharacter(node: ProseMirrorNode): string {
   const json = node.toJSON() as unknown;
   const key = JSON.stringify(json);
   let character = atomCharacterByKey.get(key);
   if (character === undefined) {
-    if (atomCharacterByKey.size > ATOM_LAST - ATOM_FIRST) {
-      atomCharacterByKey.clear();
-      atomJsonByCharacter.clear();
-    }
     character = String.fromCharCode(ATOM_FIRST + atomCharacterByKey.size);
     atomCharacterByKey.set(key, character);
     atomJsonByCharacter.set(character, json);
@@ -58,6 +72,7 @@ export function isObjectCharacter(character: string): boolean {
 }
 
 export function snapshotComposerDoc(doc: ProseMirrorNode): ComposerDocSnapshot {
+  resetAtomCharactersIfFull();
   const lines: ComposerDocLine[] = [];
   let text = "";
   const pushLine = (
