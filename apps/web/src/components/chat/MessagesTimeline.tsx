@@ -1,5 +1,7 @@
+import { useHoldFactoryPlanCardSession } from "../../factory/factoryPlanCardSession";
+import { factoryPlanRoutesKey } from "../../factory/useFactoryPlanApproval";
 import { TIMELINE_FIND_VISIBLE_CONTENT_POSITION } from "./timelineFindScrollPolicy";
-import { subscribePickerAction, subscribeQuestionFocus } from "../../lib/pickerActionBus";
+import { subscribePickerAction } from "../../lib/pickerActionBus";
 import { subscribeTurnJumpRequest } from "~/keys/chat/chatTurnBus";
 import {
   InlinePendingUserInputCard,
@@ -727,27 +729,17 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const listOpenedOn = nextOpening.mounted ? nextOpening.identity : null;
   const viewportRef = useRef<TimelineViewport | null>(null);
   const navigateTimeline = () => viewportRef.current?.navigate({ releasesFollow: true });
-  // Mesura: the question keybinding scrolls to the first pending question and focuses it; the
-  // pinned action dock's Answer does the same for one request.
+  // Mesura: the question keybinding scrolls to the first pending question and focuses it.
   useEffect(() => {
-    const revealQuestion = (requestId?: string) => {
-      const index = rows.findIndex(
-        (row) =>
-          row.kind === "pending-user-input" &&
-          (requestId === undefined || row.request.requestId === requestId),
-      );
+    const revealQuestion = () => {
+      const index = rows.findIndex((row) => row.kind === "pending-user-input");
       if (index < 0) return;
       navigateTimeline();
       const row = rows[index];
       if (row?.kind === "pending-user-input") setFocusRequestId(row.request.requestId);
       void listRef.current?.scrollToIndex({ index, animated: false, viewOffset: 24 });
     };
-    const stopShortcut = subscribePickerAction("question", () => revealQuestion());
-    const stopDock = subscribeQuestionFocus(revealQuestion);
-    return () => {
-      stopShortcut();
-      stopDock();
-    };
+    return subscribePickerAction("question", revealQuestion);
   }, [rows, listRef, navigateTimeline]);
   const restoreReady = restoringThreadPosition && rows.length > 0;
   // Z: syncs LegendList's scroll position with which thread it shows. The list
@@ -1338,6 +1330,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   return (
     <>
+      {citationThreadRef
+        ? rows
+            .filter((row) => row.kind === "factory-plan")
+            .map((row) => (
+              <FactoryPlanSessionHolder
+                key={`${listIdentityKey}:${row.id}`}
+                planKey={factoryPlanRoutesKey(citationThreadRef, row.factoryPlan.plan.digest)}
+              />
+            ))
+        : null}
       {activityAnnouncer}
       <MarkdownFindContext value={findActive}>
         <TimelineRowActivityCtx value={activityState}>
@@ -1730,4 +1732,10 @@ function FactoryReportTimelineRow({
       />
     </div>
   );
+}
+
+function FactoryPlanSessionHolder({ planKey }: { readonly planKey: string }) {
+  // A card can leave the virtualized viewport when its chronological anchor becomes visible again.
+  useHoldFactoryPlanCardSession(planKey);
+  return null;
 }

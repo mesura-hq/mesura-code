@@ -1,7 +1,7 @@
 /**
  * Entry point: ChatView's v2 derivation chain, from projected turn items through
  * deriveTimelineEntriesFromVisibleTurnItemsWithState to MessagesTimeline rows.
- * Factory cards stay visible outside run folds. The server owns item positions.
+ * Factory cards stay outside run folds. Pending plans move after the chronological rows.
  */
 import { type FactoryThreadCard, type OrchestrationV2TurnItem } from "@t3tools/contracts";
 import { deriveFactoryTimelineItemsFromTurnItems } from "@t3tools/client-runtime/factory/plan-activities";
@@ -67,15 +67,21 @@ const reportRows = (rows: ReturnType<typeof project>["rows"]) =>
   rows.flatMap((row) => (row.kind === "factory-report" ? [row] : []));
 
 describe("Factory v2 plan timeline port", () => {
-  it("Factory v2 plan appears once at its server position without a work row", () => {
+  it("Factory v2 pending plan appears once at the end without a work row", () => {
     const payload = makeFactoryPlanPayload({ presentedAt: time(5) });
-    const { rows } = project([
+    const { rows, timeline } = project([
       message("user-1", "user", 0),
       plan(5, payload),
       message("assistant-1", "assistant", 10),
       message("user-2", "user", 20),
     ]);
-    expect(rows.map((row) => row.kind)).toEqual(["message", "factory-plan", "message", "message"]);
+    expect(timeline.entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "factory-plan",
+      "message",
+      "message",
+    ]);
+    expect(rows.map((row) => row.kind)).toEqual(["message", "message", "message", "factory-plan"]);
     expect(planRows(rows)[0]?.factoryPlan.plan).toEqual(payload);
     expect(rows.some((row) => row.kind === "work")).toBe(false);
   });
@@ -92,8 +98,8 @@ describe("Factory v2 plan timeline port", () => {
     expect(project(items).rows.map((row) => row.kind)).toEqual([
       "message",
       "turn-fold",
-      "factory-plan",
       "message",
+      "factory-plan",
     ]);
     expect(planRows(project(items).rows)[0]?.factoryPlan.plan).toEqual(payload);
     expect(project(items, null, true).rows.map((row) => row.kind)).toEqual([
@@ -101,8 +107,8 @@ describe("Factory v2 plan timeline port", () => {
       "turn-fold",
       "message",
       "work",
-      "factory-plan",
       "message",
+      "factory-plan",
     ]);
   });
 
@@ -148,6 +154,7 @@ describe("Factory v2 plan timeline port", () => {
     }
     const other = makeFactoryPlanPayload({
       title: "Plan: another change",
+      presentedAt: time(45),
       planPath: "/plans/other/plan.md",
     });
     expect(
@@ -199,7 +206,7 @@ describe("Factory v2 plan timeline port", () => {
 });
 
 describe("Factory v2 report timeline port", () => {
-  it("Factory v2 report appears once after its plan at the server position", () => {
+  it("Factory v2 report keeps its chronological position while a pending plan moves last", () => {
     const payload = makeFactoryReportPayload({ writtenAt: time(15) });
     const { rows } = project([
       message("user-1", "user", 0),
@@ -210,10 +217,10 @@ describe("Factory v2 report timeline port", () => {
     ]);
     expect(rows.map((row) => row.kind)).toEqual([
       "message",
-      "factory-plan",
       "message",
       "factory-report",
       "message",
+      "factory-plan",
     ]);
     expect(reportRows(rows)[0]?.factoryReport.report).toEqual(payload);
     expect(reportRows(rows)[0]?.id).toBe("factory-report:factory-thread:invoice-csv-export");

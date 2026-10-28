@@ -1,33 +1,17 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { FactoryTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
 import type {
-  FactoryPlanActivityPayload,
   ProviderApprovalDecision,
   RuntimeRequestId,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import {
-  ClipboardListIcon,
-  FileTextIcon,
-  Maximize2Icon,
-  MessageCircleQuestionIcon,
-  ShieldIcon,
-} from "lucide-react";
+import { FileTextIcon, ShieldIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { summarizeFactoryRoutes } from "../../factory/FactoryRoutePicker";
-import { useHoldFactoryPlanCardSession } from "../../factory/factoryPlanCardSession";
-import { factoryPlanRoutesKey, useFactoryPlanApproval } from "../../factory/useFactoryPlanApproval";
-import { useFactoryPlanRoutes } from "../../factory/useFactoryPlanRoutes";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { dispatchQuestionFocus } from "../../lib/pickerActionBus";
 import type { PendingApproval } from "../../session-logic";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
-import type { InlinePendingUserInputContext } from "./InlinePendingUserInputCard";
 import {
   derivePinnedActionDockItems,
   layoutPinnedActionDock,
@@ -37,18 +21,8 @@ import {
 } from "./pinnedActionDock.logic";
 import { usePinnedActionDockStore } from "./pinnedActionDockStore";
 
-/** What `ChatView` owns and the dock reads: everything else comes from the composer. */
-export interface PinnedActionDockSources {
-  readonly factoryItems: ReadonlyArray<FactoryTimelineItem>;
-  readonly messages: ReadonlyArray<{ readonly role: string; readonly text: string }>;
-  /** The inline question cards' shared state; questions are answered there (ADR-007). */
-  readonly pendingUserInput: InlinePendingUserInputContext | null;
-  readonly onOpenFactoryPlan: ((planId: string) => void) | null;
-}
-
 interface PinnedActionDockProps {
   readonly threadRef: ScopedThreadRef;
-  readonly sources: PinnedActionDockSources;
   readonly approvals: ReadonlyArray<PendingApproval>;
   readonly respondingRequestIds: ReadonlyArray<RuntimeRequestId>;
   readonly canOperate: boolean;
@@ -59,35 +33,23 @@ interface PinnedActionDockProps {
   readonly planFollowUp: PinnedActionDockFollowUp | null;
 }
 
-const EMPTY_REQUESTS: InlinePendingUserInputContext["requests"] = [];
-
 /**
- * Mesura: every card that waits on the developer, pinned above the composer input in the slot
- * the composer's top drawer used, so it stays on screen whatever the timeline's scroll position.
+ * Pending approvals and plan follow-ups stay visible above the composer input.
  * Each item closes with an X; `pinnedActionDock.logic.ts` decides what that X does.
  */
 export function PinnedActionDock(props: PinnedActionDockProps) {
-  const { sources, threadRef } = props;
+  const { threadRef } = props;
   const threadKey = scopedThreadKey(threadRef);
   const unpins = usePinnedActionDockStore((state) => state.unpins);
   const phoneWidth = useMediaQuery("max-sm");
   const [tappedKey, setTappedKey] = useState<string | null>(null);
-  const questions = sources.pendingUserInput;
 
   const items = derivePinnedActionDockItems({
     threadKey,
     approvals: props.approvals,
-    userInputs: questions?.requests ?? EMPTY_REQUESTS,
-    factoryPlans: sources.factoryItems.filter((item) => item.kind === "plan"),
-    messages: sources.messages,
     planFollowUp: props.planFollowUp,
     unpins,
   });
-  // The pinned plan's routes and send state outlive its body, which collapsing unmounts.
-  const pinnedPlan = items.find((item) => item.kind === "plan");
-  useHoldFactoryPlanCardSession(
-    pinnedPlan ? factoryPlanRoutesKey(threadRef, pinnedPlan.digest) : null,
-  );
   if (items.length === 0) return null;
   const layout = layoutPinnedActionDock(items, {
     phoneWidth,
@@ -95,14 +57,11 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
   });
 
   const isResponding = (requestId: RuntimeRequestId) =>
-    props.respondingRequestIds.includes(requestId) ||
-    (questions?.respondingRequestIds.includes(requestId) ?? false);
+    props.respondingRequestIds.includes(requestId);
   const closeDisabled = (item: PinnedActionDockItem) => {
     switch (item.kind) {
       case "approval":
         return !props.canOperate || isResponding(item.approval.requestId);
-      case "question":
-        return (questions?.unavailable ?? true) || isResponding(item.request.requestId);
       default:
         return false;
     }
@@ -113,15 +72,6 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
     switch (action.type) {
       case "respond-approval":
         void props.onRespondToApproval(action.requestId, action.decision);
-        return;
-      case "dismiss-question":
-        void questions?.onDismiss(action.requestId);
-        return;
-      case "respond-question":
-        void questions?.onDismissWithAnswer(action.requestId, action.answers);
-        return;
-      case "unpin-plan":
-        usePinnedActionDockStore.getState().unpinPlan(threadKey, action.digest);
         return;
       case "dismiss-plan-follow-up":
         usePinnedActionDockStore.getState().dismissFollowUp(threadKey, action.planId);
@@ -161,7 +111,6 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
                   <ComposerBanner.Icon>{itemIcon(item)}</ComposerBanner.Icon>
                   <DockItemBody
                     item={item}
-                    threadRef={threadRef}
                     dock={props}
                     responding={item.kind === "approval" && isResponding(item.approval.requestId)}
                     close={closeButton(item)}
@@ -186,10 +135,6 @@ function itemIcon(item: PinnedActionDockItem): ReactNode {
   switch (item.kind) {
     case "approval":
       return <ShieldIcon />;
-    case "question":
-      return <MessageCircleQuestionIcon />;
-    case "plan":
-      return <ClipboardListIcon />;
     case "plan-follow-up":
       return <FileTextIcon />;
   }
@@ -197,8 +142,6 @@ function itemIcon(item: PinnedActionDockItem): ReactNode {
 
 function collapsedTitle(item: PinnedActionDockItem): string {
   switch (item.kind) {
-    case "plan":
-      return `${item.title} · ${item.phaseCountLabel}`;
     case "plan-follow-up":
       return item.title ? `Plan ready: ${item.title}` : "Plan ready";
     default:
@@ -233,7 +176,6 @@ function CollapsedDockRow(props: {
 
 function DockItemBody(props: {
   readonly item: PinnedActionDockItem;
-  readonly threadRef: ScopedThreadRef;
   readonly dock: PinnedActionDockProps;
   readonly responding: boolean;
   readonly close: ReactNode;
@@ -259,40 +201,6 @@ function DockItemBody(props: {
           </ComposerBanner.Actions>
         </>
       );
-    case "question":
-      return (
-        <>
-          <ComposerBanner.Content>
-            <span className="shrink-0 font-medium text-muted-foreground">
-              {item.request.questions[0]?.header ?? "Question"}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-foreground/85">{item.title}</span>
-          </ComposerBanner.Content>
-          <ComposerBanner.Actions>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => dispatchQuestionFocus(item.request.requestId)}
-            >
-              Answer
-            </Button>
-            {close}
-          </ComposerBanner.Actions>
-        </>
-      );
-    case "plan": {
-      const open = dock.sources.onOpenFactoryPlan;
-      return (
-        <PinnedPlanBody
-          threadRef={props.threadRef}
-          plan={item.plan}
-          title={item.title}
-          phaseCountLabel={item.phaseCountLabel}
-          onOpen={open ? () => open(item.planId) : null}
-          close={close}
-        />
-      );
-    }
     case "plan-follow-up":
       return (
         <>
@@ -306,65 +214,4 @@ function DockItemBody(props: {
         </>
       );
   }
-}
-
-/**
- * The compact plan card: title, phase count and routes, with Open and the same Approve as the
- * timeline card, routes included. The full card stays in the timeline as the record.
- */
-function PinnedPlanBody(props: {
-  readonly threadRef: ScopedThreadRef;
-  readonly plan: FactoryPlanActivityPayload;
-  readonly title: string;
-  readonly phaseCountLabel: string;
-  readonly onOpen: (() => void) | null;
-  readonly close: ReactNode;
-}) {
-  const { state, providers, approve, canApprove, sending } = useFactoryPlanApproval(
-    props.threadRef,
-    props.plan,
-  );
-  const { routes, violations } = useFactoryPlanRoutes(
-    factoryPlanRoutesKey(props.threadRef, props.plan.digest),
-    providers,
-  );
-  return (
-    <>
-      <ComposerBanner.Content className="flex-col items-start">
-        <span className="flex w-full min-w-0 items-center gap-2">
-          <Badge variant="secondary">Factory plan</Badge>
-          <span className="min-w-0 truncate font-medium text-foreground">{props.title}</span>
-          <span className="shrink-0 text-muted-foreground">{props.phaseCountLabel}</span>
-        </span>
-        <span className="w-full min-w-0 truncate text-muted-foreground">
-          {routes === null
-            ? "A role has no model yet: open the plan to choose one."
-            : summarizeFactoryRoutes(providers, routes)}
-        </span>
-        {violations[0] ? (
-          <span className="text-destructive">{violations[0]}</span>
-        ) : state.kind === "changed" ? (
-          <span className="text-muted-foreground">Changed since approval</span>
-        ) : null}
-      </ComposerBanner.Content>
-      <ComposerBanner.Actions>
-        {props.onOpen ? (
-          <Button size="xs" variant="outline" onClick={props.onOpen}>
-            <Maximize2Icon aria-hidden="true" />
-            Open
-          </Button>
-        ) : null}
-        <Button
-          size="xs"
-          disabled={!canApprove || routes === null || sending}
-          onClick={() => {
-            if (routes !== null) void approve(routes);
-          }}
-        >
-          Approve
-        </Button>
-        {props.close}
-      </ComposerBanner.Actions>
-    </>
-  );
 }

@@ -220,7 +220,7 @@ import { ComposerFooterPrimaryActions } from "./ComposerFooterControls";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
-import { PinnedActionDock, type PinnedActionDockSources } from "./PinnedActionDock";
+import { PinnedActionDock } from "./PinnedActionDock";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
 import { getComposerPromptInjectionState, getComposerReasoningStep } from "./composerProviderState";
@@ -426,7 +426,7 @@ export interface ChatComposerProps {
   isCompacting: boolean;
   bannerItems: readonly ComposerBannerStackItem[];
   /** Mesura: when set, the pinned action dock replaces the top drawer above the input. */
-  pinnedActions?: PinnedActionDockSources;
+  pinnedActions?: boolean;
   resumeCompactionTokens: number | null;
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
@@ -3650,7 +3650,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           {props.pinnedActions ? (
             <PinnedActionDock
               threadRef={routeThreadRef}
-              sources={props.pinnedActions}
               approvals={shownPendingApprovals}
               respondingRequestIds={respondingRequestIds}
               canOperate={canOperateThread}

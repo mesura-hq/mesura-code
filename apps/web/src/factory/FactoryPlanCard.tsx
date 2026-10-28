@@ -57,7 +57,7 @@ function FactoryPlanContext({
 
 /**
  * The card's foot: the route per role and Approve, or the routes an approval
- * of these bytes carried. The rows are shared with the pinned card in the composer dock.
+ * of these bytes carried. The timeline retains route edits across virtualized mounts.
  */
 function FactoryPlanApprovalSection({
   threadRef,
