@@ -74,7 +74,8 @@ In the right panel:
 
 In NORMAL mode the chat works like a read-only Vim buffer with a block cursor:
 
-- Move with `h` `j` `k` `l`, words with `w` `b` `e`, lines with `0` and `$`.
+- Move with `h` `j` `k` `l`, words with `w` `b` `e`, lines with `0` and `$`. `W` `B` `E` move
+  by words separated only by spaces.
 - `gg` and `G` go to the start and the end of the thread. `Ctrl+D`, `Ctrl+U`, `Ctrl+F` and
   `Ctrl+B` scroll by half a page or a page.
 - `[u` and `]u` jump to your previous and next message.
@@ -111,6 +112,10 @@ of the place you want. Each match gets a label; type the label to move the curso
 - `Escape` switches the composer to NORMAL mode. A ring around the composer shows the mode.
   Vim motions, operators, counts and VISUAL mode work on your prompt. Mentions, citations and
   skills count as one character each.
+- In a list, a task list, a quote or a code block, NORMAL mode works on the text you see. The
+  numbers, bullets, checkboxes and code fences are not characters: `0` goes to an item's first
+  letter, `v$` selects the item's text, `dd` deletes the whole item, and `o` and `O` open a new
+  item below or above.
 - `u` undoes and `Ctrl+R` redoes. Each typing session and each NORMAL-mode change is one step,
   and the history goes back across sessions until you send the prompt.
 - A second `Escape` leaves the composer for the chat.

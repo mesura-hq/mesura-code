@@ -254,7 +254,9 @@ painting.**
   position.
 - Motions run in **`@vimee/core` 0.3.0** (MIT, a pure
   `processKeystroke(key, ctx, buffer)` over a `TextBuffer`), read-only: a key
-  that would enter insert mode is answered with an Escape.
+  that would enter insert mode is answered with an Escape. 0.3.0 is the latest
+  release and lacks `E` and Vim's `cw` range; `patches/@vimee__core@0.3.0.patch`
+  adds both (`keys/vimGrammar.test.ts` pins them against Neovim).
 - The cursor is a CSS highlight (`mesura-chat-cursor`). A visual selection is
   the native selection, so copy and the cite pipeline work on it unchanged.
   The letter under the cursor takes the page background, as a terminal block
@@ -313,14 +315,39 @@ the workaround and the fork's `focusEditor` option on `insertComposerText`.
 
 ### The composer
 
-Insert mode is upstream's composer, untouched. Escape enters normal mode: the
-prompt is projected with each inline token (mention, citation, skill, context
-reference) as one private-use character, run through `@vimee/core`, and written
-back through `applyPromptReplacement`. One character per token is the
-composer's own collapsed-cursor model, and one code point per token keeps a
-token's identity when an earlier one is deleted. A second Escape leaves for the
-chat. Rejected: a Neovim-backed composer (tailnet latency, no token model),
-and replacing Lexical with CodeMirror (a rewrite of the composer).
+Insert mode is upstream's composer, untouched. Escape enters normal mode, which
+runs `@vimee/core` over the text the editor shows, read from its ProseMirror
+document (`composer/composerDocument.ts`): one line per textblock line (a
+paragraph, a list item, a heading, a code line), and each inline atom (mention,
+citation, skill, context reference) as one private-use character. List markers,
+quote prefixes, fences, checkboxes and code headers are structure, not
+characters. An atom keeps its character for the life of the page, so a register
+or an undo state still names the real node after the document that made it is
+gone. A second Escape leaves for the chat.
+
+Each edit is applied as editor transactions on the one span that changed
+(`composer/composerEdits.ts`): a deleted line break joins blocks as Backspace
+does, an inserted one splits them as Enter does (`splitOrLiftListItem` in a
+list, a newline in code), and a linewise delete removes whole blocks with
+`deleteRange`, so `dd` on the last item removes its list. The caret moves in
+the same transaction, so a key typed right after `cw` or `o` lands there. The
+editor handle exposes its editor (`editor()`, a fork line in an upstream file)
+for this. Offsets crossing `composerSurface.ts`'s API stay the composer's
+collapsed cursor, converted through the editor's own Markdown maps, so the
+palette return, focus return and undo keep one cursor model.
+
+Rejected, with the reason:
+
+- **The Markdown prompt as the buffer.** The first build did this, for the old
+  flat editor. Once upstream made the composer rich text, `1. `, `> ` and
+  fences became characters Vim moved over and deleted but nobody could see,
+  and the offset map, which counted DOM children, put the cursor, the
+  selection and flash on the wrong text. Stripping markers by pattern cannot
+  express nested items, code, or structural edits.
+- **Rewriting the whole prompt after each edit.** It reparsed every node and
+  raced insert mode: the caret moved a frame after the write.
+- A Neovim-backed composer (tailnet latency, no token model), and replacing
+  the editor with CodeMirror (a rewrite of the composer).
 
 Undo is the composer's own, not vimee's (`composer/composerUndo.ts`; the
 vimee buffer records no snapshots):
@@ -345,15 +372,17 @@ its card (`[data-chat-composer-main-surface]`, anchored on the
 of a line) is drawn as an element (`cursorOverlayStore.ts`), because a
 highlight needs a character to paint; it keeps its own look
 (`bg-sky-500/80`). A cursor on a narrow glyph is widened as in the chat,
-drawn in the editor's host because Lexical owns the editable content; the
-editor's scrolling clips it through a `clip-path`.
+drawn in the editor's host because the editor owns the editable content; the
+editor's scrolling clips it through a `clip-path`. Paint is rebuilt on every
+editor transaction while normal mode is on, because a selection change alone
+redraws the editor's mark decorations and detaches the painted ranges.
 
 `<leader>e` toggles the expanded composer: half the window high, with a
 gutter of hybrid line numbers (the cursor's line absolute, the others
-relative in normal mode, as Neovim's `number` + `relativenumber`). The
-composer is one Lexical paragraph whose lines are `<br>` elements, so CSS
-counters cannot number it; `ComposerLineNumbers` measures each line start and
-re-measures only on input, the editor's scroll, or a Vim key.
+relative in normal mode, as Neovim's `number` + `relativenumber`). It numbers
+the lines Vim moves by, not Markdown lines, so a fence gets no number;
+`ComposerLineNumbers` measures each line start and re-measures only on input,
+the editor's scroll, or a Vim key.
 
 ### Navigation by message
 
@@ -471,10 +500,11 @@ the size it is about to change.
 Each of these cost a debugging round and still shapes the code. Read the
 entry before changing the code it names.
 
-- **Moving the composer caret in the same tick as a write reverts the write.**
-  `focusAt` reports the editor's stale text as a change. The adapter's
-  `write` places the caret itself, on the next frame, after the editor has
-  the new prompt.
+- **Moving the composer caret in the same tick as a controlled write reverts
+  the write.** `focusAt` reports the editor's stale text as a change. Only
+  undo and redo still write the prompt through the adapter, so they set
+  `pendingWrite` and place the cursor when the editor's transaction for that
+  prompt arrives.
 - **vimee does not report every edit** (`ciw`, a visual `d`) as a
   `content-change`. The composer compares text before and after instead.
 - **Live-follow only learns about reading from wheel, touch and pointer
@@ -487,9 +517,9 @@ entry before changing the code it names.
 - **Screen-reader-only text is in the projection**: each message starts with
   an `sr-only` author heading ("You", "T3 Code"). The buffer drops lines made
   only of such text, or the cursor would land somewhere invisible.
-- **Lexical's `<br>` carries no marker**, and a paragraph ending in an empty
-  line has one extra placeholder `<br>`. The composer's offset map counts
-  every `<br>` except that trailing placeholder.
+- **Place the composer caret before painting.** Moving the editor's
+  selection redraws its mark decorations, which splits text nodes; ranges
+  built before the move are detached.
 - **`resolveKeyScope` must read the focused pane before any early return.**
   The prototype returned early for the composer, so the pane remembered for a
   later blur stayed stale: after `Esc Esc` from the composer, focus was on
