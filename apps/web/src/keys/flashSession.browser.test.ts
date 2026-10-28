@@ -1,9 +1,9 @@
 // Driven the way the chat and composer surfaces drive a flash, with labels read
 // through `useFlashSnapshot` as the overlay reads them.
 import { createElement, useLayoutEffect } from "react";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
-import { act, render, fakeTimers } from "../../test/render";
+import { act, render } from "../../test/render";
 import { mountKeyDom } from "~/test/keyBrowserFixtures";
 
 import {
@@ -15,15 +15,20 @@ import {
   stopFlash,
 } from "./flashSession";
 import type { FlashPick, FlashProvider, FlashTarget } from "./flashSession";
+import { bumpComposerLayout } from "./composer/composerExpanded";
 import { useFlashSnapshot, type FlashSnapshot } from "./flashStore";
 
 /** The cursor sits on the `X`, so the nearest match is not the first one. */
 const TEXT = "cat cab Xcot cam";
 const CURSOR = TEXT.indexOf("X");
 
-async function setup() {
+async function setup(text = TEXT, style = "") {
   await using stack = new AsyncDisposableStack();
-  const dom = stack.use(mountKeyDom(`<p>${TEXT}</p>`));
+  const dom = stack.use(
+    mountKeyDom(
+      `<div data-chat-column-maximized-away="false"><p style="${style}">${text}</p></div>`,
+    ),
+  );
   const textNode = dom.container.querySelector("p")!.firstChild as Text;
   const jumps: string[] = [];
   const picked: string[] = [];
@@ -42,14 +47,14 @@ async function setup() {
       scope: "chat",
       backdrop: () => [],
       collect: (pattern, caseSensitive) =>
-        findOccurrences(TEXT, pattern, caseSensitive).map((at): FlashTarget => {
+        findOccurrences(text, pattern, caseSensitive).map((at): FlashTarget => {
           const range = document.createRange();
           range.setStart(textNode, at);
           range.setEnd(textNode, at + pattern.length);
           return {
             id: `at-${at}`,
             range,
-            nextChar: TEXT[at + pattern.length],
+            nextChar: text[at + pattern.length],
             distance: Math.abs(at - CURSOR),
           };
         }),
@@ -66,7 +71,6 @@ async function setup() {
   const labelOf = (id: string) => flash.labels.find((label) => label.id === id)?.label;
 
   stack.use(await render(createElement(FlashProbe)));
-  stack.use(fakeTimers());
   stack.defer(() => act(() => stopFlash()));
   await act(() => startFlash(provider()));
   const lifetime = stack.move();
@@ -281,4 +285,93 @@ describe("flash label pick", () => {
     expect(isFlashActive()).toBe(false);
     expect(fixture.flash.active).toBe(false);
   });
+});
+
+describe("flash layout lifecycle", () => {
+  it.each(["scroll", "wheel", "resize"])("cancels the session on %s", async (eventName) => {
+    await using fixture = await setup();
+    await fixture.type("c");
+    await act(() => {
+      fixture.textNode.parentElement!.dispatchEvent(new Event(eventName, { bubbles: true }));
+    });
+    expect(isFlashActive()).toBe(false);
+    expect(fixture.flash.active).toBe(false);
+    expect(fixture.flash.labels).toEqual([]);
+  });
+
+  it("cancels before scrolling can reuse a virtualized target index", async () => {
+    await using fixture = await setup();
+    await fixture.type("c");
+    await act(() => {
+      fixture.textNode.parentElement!.remove();
+      document.dispatchEvent(new Event("scroll"));
+    });
+    expect(handleFlashKey("a")).toBe(false);
+    expect(fixture.jumps).toEqual([]);
+    expect(fixture.flash.labels).toEqual([]);
+  });
+
+  it("cancels on composer reflow", async () => {
+    await using fixture = await setup();
+    await fixture.type("c");
+    await act(() => bumpComposerLayout());
+    expect(isFlashActive()).toBe(false);
+    expect(fixture.flash.labels).toEqual([]);
+  });
+
+  it("cancels when its pane resizes", async () => {
+    await using fixture = await setup();
+    await fixture.type("c");
+    fixture.textNode.parentElement!.parentElement!.style.width = "240px";
+    await vi.waitFor(() => expect(isFlashActive()).toBe(false));
+    expect(fixture.flash.labels).toEqual([]);
+  });
+
+  it("anchors a wrapped search label to the last nonempty fragment", async () => {
+    const text = "WrappedTargetThatCrossesSeveralLines";
+    await using fixture = await setup(
+      text,
+      "width: 70px; word-break: break-all; font: 16px monospace",
+    );
+    await fixture.type(...text);
+    const range = document.createRange();
+    range.selectNodeContents(fixture.textNode);
+    const fragments = [...range.getClientRects()].filter(
+      (rect) => rect.width > 0 && rect.height > 0,
+    );
+    expect(fragments.length).toBeGreaterThan(1);
+    const last = fragments.at(-1)!;
+    expect(fixture.flash.labels[0]).toMatchObject({ left: last.right, top: last.top });
+  });
+
+  it.each(["over", "after"] as const)(
+    "anchors a wrapped %s pick to its end fragment",
+    async (placement) => {
+      await using fixture = await setup(
+        "WrappedTargetThatCrossesSeveralLines",
+        "width: 70px; word-break: break-all; font: 16px monospace",
+      );
+      const range = document.createRange();
+      range.selectNodeContents(fixture.textNode);
+      await act(() =>
+        startFlashPick({
+          scope: "chat",
+          hint: "pick",
+          placement,
+          backdrop: [],
+          targets: [{ id: "wrapped", range }],
+          pick: () => {},
+        }),
+      );
+      const fragments = [...range.getClientRects()].filter(
+        (rect) => rect.width > 0 && rect.height > 0,
+      );
+      expect(fragments.length).toBeGreaterThan(1);
+      const anchor = placement === "over" ? fragments[0]! : fragments.at(-1)!;
+      expect(fixture.flash.labels[0]).toMatchObject({
+        left: placement === "over" ? anchor.left : anchor.right,
+        top: anchor.top,
+      });
+    },
+  );
 });

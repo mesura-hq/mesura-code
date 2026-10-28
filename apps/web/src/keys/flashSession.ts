@@ -2,6 +2,13 @@ import { assignFlashLabels, assignJumpLabels } from "@mesura/keys/flash";
 
 import { setFlashSnapshot, type FlashLabel } from "./flashStore";
 import { paintHighlight } from "./highlights";
+import { observeResize } from "~/lib/observeResize";
+import { subscribeComposerLayout } from "./composer/composerExpanded";
+import {
+  readKeyEngineSnapshot,
+  updateKeyEngineSnapshot,
+  type EngineModeLabel,
+} from "./keyEngineStore";
 import { composerEditorElement, hasOpenKeyLayer, resolveKeyScope } from "./focusScope";
 
 /**
@@ -67,7 +74,11 @@ interface PickState {
 }
 
 let state: FlashState | PickState | null = null;
-let owner: { scope: FlashProvider["scope"]; element: HTMLElement | null } | null = null;
+let owner: {
+  scope: FlashProvider["scope"];
+  element: HTMLElement | null;
+  returnMode: EngineModeLabel;
+} | null = null;
 let disposeLifecycle: (() => void) | null = null;
 
 export function isFlashActive(scope?: string): boolean {
@@ -92,6 +103,7 @@ function ownSession(scope: FlashProvider["scope"]): void {
   disposeLifecycle?.();
   owner = {
     scope,
+    returnMode: readKeyEngineSnapshot().mode === "FLASH" ? "NORMAL" : readKeyEngineSnapshot().mode,
     element:
       scope === "composer"
         ? composerEditorElement()
@@ -106,16 +118,48 @@ function ownSession(scope: FlashProvider["scope"]): void {
     attributes: true,
     attributeFilter: ["role", "aria-modal", "data-open", "data-slot", "data-command-palette"],
   });
-  disposeLifecycle = () => observer.disconnect();
+  const elements = [
+    ...new Set(
+      [
+        owner.element,
+        document.querySelector<HTMLElement>("[data-assistant-citation-viewport]"),
+        composerEditorElement(),
+        document.querySelector<HTMLElement>("[data-chat-composer-main-surface]"),
+      ].filter((element): element is HTMLElement => element !== null),
+    ),
+  ];
+  const sizes = new Map(elements.map((element) => [element, element.getBoundingClientRect()]));
+  const unobserveResize = observeResize(elements, (entries) => {
+    for (const { target } of entries) {
+      const previous = sizes.get(target as HTMLElement);
+      const current = target.getBoundingClientRect();
+      if (previous && (current.width !== previous.width || current.height !== previous.height)) {
+        stopFlash();
+        return;
+      }
+    }
+  });
+  const unsubscribeComposer = subscribeComposerLayout(stopFlash);
+  for (const event of ["scroll", "wheel", "resize"]) {
+    window.addEventListener(event, stopFlash, { capture: true, passive: true });
+  }
+  disposeLifecycle = () => {
+    observer.disconnect();
+    unobserveResize();
+    unsubscribeComposer();
+    for (const event of ["scroll", "wheel", "resize"]) {
+      window.removeEventListener(event, stopFlash, true);
+    }
+  };
 }
 
 export function startFlash(provider: FlashProvider): void {
   stopFlash();
-  ownSession(provider.scope);
   state = { kind: "search", provider, pattern: "", targets: [], labels: new Map() };
   // The italic is set before any target is measured, so labels are placed on
   // the text as it is drawn during flash.
   document.documentElement.dataset.mesuraFlash = provider.scope;
+  ownSession(provider.scope);
   paintHighlight("mesura-flash-backdrop", provider.backdrop());
   setFlashSnapshot({ pattern: "", labels: [], active: true });
 }
@@ -132,13 +176,13 @@ export function startFlashPick(pick: FlashPick): boolean {
     return false;
   }
   stopFlash();
-  ownSession(pick.scope);
   const labels = new Map<string, FlashPickTarget>();
   assignJumpLabels(pick.targets.length).forEach((label, index) => {
     labels.set(label, pick.targets[index]!);
   });
   state = { kind: "pick", pick, labels, typed: "" };
   document.documentElement.dataset.mesuraFlash = pick.scope;
+  ownSession(pick.scope);
   paintHighlight("mesura-flash-backdrop", pick.backdrop);
   paintHighlight("mesura-flash-match", pick.marked ?? []);
   refreshPick(state);
@@ -153,12 +197,20 @@ export function applyFlashLook(scope: "chat" | "composer"): void {
 export function stopFlash(): void {
   disposeLifecycle?.();
   disposeLifecycle = null;
+  if (owner && readKeyEngineSnapshot().mode === "FLASH") {
+    updateKeyEngineSnapshot({ mode: owner.returnMode });
+  }
   owner = null;
   state = null;
   delete document.documentElement.dataset.mesuraFlash;
   setFlashSnapshot(null);
   paintHighlight("mesura-flash-match", []);
   paintHighlight("mesura-flash-backdrop", []);
+}
+
+function labelRect(range: Range, placement: FlashPick["placement"]): DOMRect | undefined {
+  const fragments = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0);
+  return placement === "over" ? fragments[0] : fragments.at(-1);
 }
 
 function refresh(flash: FlashState): void {
@@ -171,7 +223,8 @@ function refresh(flash: FlashState): void {
   for (const target of flash.targets) {
     const label = flash.labels.get(target.id);
     if (!label) continue;
-    const rect = target.range.getBoundingClientRect();
+    const rect = labelRect(target.range, "after");
+    if (!rect) continue;
     labels.push({ id: target.id, label, left: rect.right, top: rect.top });
   }
   paintHighlight(
@@ -192,7 +245,8 @@ function refreshPick(pick: PickState): void {
   const labels: FlashLabel[] = [];
   for (const [label, target] of pick.labels) {
     if (!label.startsWith(pick.typed)) continue;
-    const rect = target.range.getBoundingClientRect();
+    const rect = labelRect(target.range, pick.pick.placement);
+    if (!rect) continue;
     labels.push({
       id: target.id,
       label: label.slice(pick.typed.length),
