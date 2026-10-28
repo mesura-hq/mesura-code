@@ -74,7 +74,7 @@ export function SidebarDictationWaveform({ recording }: { readonly recording: bo
   }, [recording]);
 
   return (
-    <span aria-hidden data-dictation-waveform="" ref={waveformRef}>
+    <span aria-hidden data-sidebar-dictation-waveform="" ref={waveformRef}>
       {BAR_POSITIONS.map((position) => (
         <span key={position} style={{ transform: `scaleY(${0.7 - Math.abs(position) * 0.2})` }} />
       ))}

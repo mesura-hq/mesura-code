@@ -1115,7 +1115,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(
                   rowSurfaceClassName,
-                  "flex h-9 items-center gap-2.5 px-2.5 pointer-coarse:has-[[data-dictation-waveform]]:h-11",
+                  "flex h-9 items-center gap-2.5 px-2.5 pointer-coarse:has-[[data-sidebar-dictation-waveform]]:h-11",
                 )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
@@ -1300,7 +1300,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           {accessibleTitle}
           <div
             className={cn(
-              "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset) pointer-coarse:has-[[data-dictation-waveform]]:h-auto",
+              "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset) pointer-coarse:has-[[data-sidebar-dictation-waveform]]:h-auto",
               metaLineEmpty && "redesign:h-auto",
             )}
           >

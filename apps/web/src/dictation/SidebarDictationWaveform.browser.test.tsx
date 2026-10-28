@@ -42,7 +42,9 @@ function setLevel(level: number) {
 }
 
 function bars(container: HTMLElement) {
-  return Array.from(container.querySelectorAll<HTMLElement>("[data-dictation-waveform] > span"));
+  return Array.from(
+    container.querySelectorAll<HTMLElement>("[data-sidebar-dictation-waveform] > span"),
+  );
 }
 
 const transforms = (container: HTMLElement) => bars(container).map((bar) => bar.style.transform);
@@ -135,4 +137,15 @@ describe("the sidebar waveform", () => {
       expect(vi.getTimerCount()).toBe(1);
     },
   );
+});
+
+it("leaves the composer's center-out waveform unstyled", async () => {
+  await using screen = await render(
+    <>
+      <SidebarDictationWaveform recording />
+      <div data-dictation-waveform="center-out" />
+    </>,
+  );
+  const composerWaveform = screen.container.querySelector("div[data-dictation-waveform]")!;
+  expect(getComputedStyle(composerWaveform).height).toBe("0px");
 });

@@ -1,4 +1,4 @@
-[data-dictation-waveform] {
+[data-sidebar-dictation-waveform] {
   display: inline-flex;
   width: 16px;
   height: 14px;
@@ -6,21 +6,21 @@
   justify-content: space-between;
 }
 
-[data-dictation-waveform] > span {
+[data-sidebar-dictation-waveform] > span {
   width: 2px;
   height: 14px;
   border-radius: 1px;
   background: currentColor;
 }
 
-[data-dictation-waveform][data-active="true"] > span {
+[data-sidebar-dictation-waveform][data-active="true"] > span {
   transition:
     transform 100ms linear,
     opacity 100ms linear;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-dictation-waveform] > span {
+  [data-sidebar-dictation-waveform] > span {
     transform: scaleY(0.45) !important;
     opacity: 1 !important;
     transition: none !important;
