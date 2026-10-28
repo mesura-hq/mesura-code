@@ -427,8 +427,11 @@ math and expandable tool output made parts of the chat unreachable by keys.
 - **Flash lifecycle.** A flash session belongs to the surface that started it
   and ends on a focus or pointer move outside it, a frame taking focus, a
   layer opening, a route change, a scroll, a wheel or a resize: labels are
-  fixed overlays and would detach. A search with no match stays in flash. A
-  label sits on the match's last line fragment, not its union box.
+  fixed overlays and would detach. Content changing under the targets
+  (streaming, an expanded row) does not end it: targets are live ranges, so
+  labels are measured again and a jump resolves the range, never a stored
+  line number. A search with no match stays in flash. A label sits on the
+  match's last line fragment, not its union box.
 - **Mouse and Vim.** A click on chat text places the cursor; a drag selection
   inside the buffer becomes Vim's visual selection, both endpoints stored as
   `{ rowId, offset }` so they survive a rebuild of the virtualized list.
