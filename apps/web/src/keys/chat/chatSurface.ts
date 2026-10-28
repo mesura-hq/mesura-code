@@ -491,6 +491,18 @@ function distanceFromCursor(rect: DOMRect, cursorRect: DOMRect | undefined): num
     : rect.top;
 }
 
+const STALE_TARGET_NOTICE = "flash: that text changed before the jump";
+
+/**
+ * Where a flash target's live range starts now. Target ids name buffer lines, which a content
+ * change above the target shifts; the range moves with its text, and is collapsed once it is gone.
+ */
+function livePosition(buffer: ChatBuffer, range: Range): BufferPosition | null {
+  if (range.collapsed) return null;
+  const stored = domPointToRowPosition(buffer, range.startContainer, range.startOffset);
+  return stored && fromRowPosition(buffer, stored);
+}
+
 interface CitableSentence {
   readonly row: number;
   readonly start: BufferPosition;
@@ -534,13 +546,11 @@ function startCitePick(buffer: ChatBuffer): void {
   applyFlashLook("chat");
   const bounds = readingBounds(scroller);
   const cursorRect = cursorRange(buffer)?.getBoundingClientRect();
-  const starts = new Map<string, CitableSentence>();
   const targets: (FlashPickTarget & { distance: number })[] = [];
   for (const sentence of citableSentences(buffer)) {
     const range = characterAt(buffer, sentence.start);
     if (range === null || !isOnScreen(range, bounds)) continue;
     const id = `${sentence.start.line}:${sentence.start.col}`;
-    starts.set(id, sentence);
     targets.push({
       id,
       range,
@@ -554,8 +564,15 @@ function startCitePick(buffer: ChatBuffer): void {
     backdrop: chatBackdrop(buffer),
     targets: targets.toSorted((left, right) => left.distance - right.distance),
     pick: (target) => {
-      const start = starts.get(target.id);
+      const current = syncBuffer();
+      const at = current && livePosition(current.buffer, target.range);
+      const start =
+        at &&
+        citableSentences(current.buffer).find(
+          (sentence) => sentence.start.line === at.line && sentence.start.col === at.col,
+        );
       if (start) pickCiteEnd(start);
+      else updateKeyEngineSnapshot({ notice: STALE_TARGET_NOTICE });
     },
   });
   if (!started) updateKeyEngineSnapshot({ notice: NOTHING_TO_CITE_NOTICE });
@@ -568,7 +585,6 @@ function pickCiteEnd(start: CitableSentence): void {
   const { buffer } = synced;
   applyFlashLook("chat");
   const bounds = readingBounds(scroller);
-  const ends = new Map<string, CitableSentence>();
   const targets: FlashPickTarget[] = [];
   for (const sentence of citableSentences(buffer)) {
     const after =
@@ -578,7 +594,6 @@ function pickCiteEnd(start: CitableSentence): void {
     const range = characterAt(buffer, sentence.end);
     if (range === null || !isOnScreen(range, bounds)) continue;
     const id = `${sentence.end.line}:${sentence.end.col}`;
-    ends.set(id, sentence);
     targets.push({ id, range });
   }
   const startRange = characterAt(buffer, start.start);
@@ -590,14 +605,16 @@ function pickCiteEnd(start: CitableSentence): void {
     targets,
     marked: startRange ? [startRange] : [],
     pick: (target) => {
-      const end = ends.get(target.id);
       const current = syncBuffer();
-      if (!end || !current) return;
-      setCursor(current.buffer, start.start);
+      const from = current && startRange && livePosition(current.buffer, startRange);
+      const to = current && livePosition(current.buffer, target.range);
+      if (!current || !from || !to) {
+        updateKeyEngineSnapshot({ notice: STALE_TARGET_NOTICE });
+        return;
+      }
+      setCursor(current.buffer, from);
       paint(current.buffer, false);
-      citeRange(
-        rangeBetween(current.buffer, start.start, { line: end.end.line, col: end.end.col + 1 }),
-      );
+      citeRange(rangeBetween(current.buffer, from, { line: to.line, col: to.col + 1 }));
     },
   });
   if (!started) updateKeyEngineSnapshot({ notice: "that sentence ends off screen" });
@@ -640,8 +657,12 @@ function chatFlashProvider(): FlashProvider {
     jump(target) {
       const synced = syncBuffer();
       if (!synced) return;
-      const [line, col] = target.id.split(":").map(Number);
-      setCursor(synced.buffer, { line: line!, col: col! });
+      const at = livePosition(synced.buffer, target.range);
+      if (!at) {
+        updateKeyEngineSnapshot({ notice: STALE_TARGET_NOTICE });
+        return;
+      }
+      setCursor(synced.buffer, at);
       paint(synced.buffer, true);
     },
   };

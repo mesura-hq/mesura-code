@@ -146,12 +146,27 @@ function ownSession(scope: FlashProvider["scope"]): void {
       }
     }
   });
+  // Targets are live ranges: content changing under them (streaming, an expanded row) moves the
+  // text, so the labels are measured again; a target whose text is gone loses its label.
+  let remeasureQueued = false;
+  const content = new MutationObserver(() => {
+    if (remeasureQueued) return;
+    remeasureQueued = true;
+    queueMicrotask(() => {
+      remeasureQueued = false;
+      remeasure();
+    });
+  });
+  if (owner.element) {
+    content.observe(owner.element, { childList: true, characterData: true, subtree: true });
+  }
   const unsubscribeComposer = subscribeComposerLayout(stopFlash);
   for (const event of ["scroll", "wheel", "resize"]) {
     window.addEventListener(event, stopFlash, { capture: true, passive: true });
   }
   disposeLifecycle = () => {
     observer.disconnect();
+    content.disconnect();
     unobserveResize();
     unsubscribeComposer();
     for (const event of ["scroll", "wheel", "resize"]) {
@@ -201,6 +216,16 @@ export function applyFlashLook(scope: "chat" | "composer"): void {
   document.documentElement.dataset.mesuraFlash = scope;
 }
 
+/** The labels last shown, so a re-measure that moved nothing renders nothing. */
+let shownLabels = "";
+
+function showFlash(snapshot: Parameters<typeof setFlashSnapshot>[0]): void {
+  const key = JSON.stringify(snapshot);
+  if (key === shownLabels) return;
+  shownLabels = key;
+  setFlashSnapshot(snapshot);
+}
+
 export function stopFlash(): void {
   disposeLifecycle?.();
   disposeLifecycle = null;
@@ -210,6 +235,7 @@ export function stopFlash(): void {
   owner = null;
   state = null;
   delete document.documentElement.dataset.mesuraFlash;
+  shownLabels = "";
   setFlashSnapshot(null);
   paintHighlight("mesura-flash-match", []);
   paintHighlight("mesura-flash-backdrop", []);
@@ -226,6 +252,20 @@ function refresh(flash: FlashState): void {
       ? []
       : flash.provider.collect(flash.pattern, flash.pattern !== flash.pattern.toLowerCase());
   flash.labels = assignFlashLabels(flash.targets, flash.labels);
+  renderSearch(flash);
+}
+
+/** Places the current labels on their targets as the text lies now. */
+function remeasure(): void {
+  if (state?.kind === "search") {
+    state.targets = state.targets.filter((target) => !target.range.collapsed);
+    renderSearch(state);
+  } else if (state?.kind === "pick") {
+    refreshPick(state);
+  }
+}
+
+function renderSearch(flash: FlashState): void {
   const labels: FlashLabel[] = [];
   for (const target of flash.targets) {
     const label = flash.labels.get(target.id);
@@ -238,7 +278,7 @@ function refresh(flash: FlashState): void {
     "mesura-flash-match",
     flash.targets.map((target) => target.range),
   );
-  setFlashSnapshot({
+  showFlash({
     pattern: flash.pattern,
     labels,
     active: true,
@@ -261,7 +301,7 @@ function refreshPick(pick: PickState): void {
       top: rect.top,
     });
   }
-  setFlashSnapshot({ pattern: pick.typed, labels, active: true, hint: pick.pick.hint });
+  showFlash({ pattern: pick.typed, labels, active: true, hint: pick.pick.hint });
 }
 
 function handlePickKey(pick: PickState, token: string): boolean {

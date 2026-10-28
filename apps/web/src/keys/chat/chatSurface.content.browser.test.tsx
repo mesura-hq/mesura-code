@@ -6,6 +6,7 @@ import { createWindowListenerFixture } from "~/test/keyBrowserFixtures";
 import { configureKeyEngine, installKeyEngine, registerKeySurface } from "../keyEngine";
 import { readKeyEngineSnapshot } from "../keyEngineStore";
 import { useCursorOverlays } from "../cursorOverlayStore";
+import { useFlashSnapshot } from "../flashStore";
 import { requestChatCite } from "./chatCiteBus";
 import { chatSurface, clearChatSurfacePaint, setChatThreadKey } from "./chatSurface";
 
@@ -273,4 +274,61 @@ it("cancels visual mode when the entire mounted buffer disappears", async () => 
   expect(chatSurface.mode()).toBe("normal");
   expect(window.getSelection()?.isCollapsed).toBe(true);
   expect(readKeyEngineSnapshot().notice).toBe("visual selection is no longer mounted");
+});
+
+function FlashProbe() {
+  const flash = useFlashSnapshot();
+  return <output data-testid="flash">{flash.labels.map((label) => label.label).join(",")}</output>;
+}
+
+it("a flash jump lands on its match after content above it changed", async () => {
+  await using lifetime = new AsyncDisposableStack();
+  const screen = lifetime.use(
+    await render(
+      <>
+        <div data-chat-column-maximized-away="false">
+          {/* Flash reads its targets inside the chat's scroll container. */}
+          <div
+            data-assistant-citation-viewport
+            tabIndex={0}
+            style={{ height: 160, overflowY: "auto" }}
+          >
+            <div data-timeline-row-id="flash-row">
+              <p>Before here</p>
+              <p data-testid="target">Target line</p>
+              <div style={{ height: 400 }} />
+            </div>
+          </div>
+        </div>
+        <FlashProbe />
+      </>,
+    ),
+  );
+  lifetime.use(engineListeners());
+  lifetime.defer(registerKeySurface(chatSurface));
+  configureKeyEngine({ enabled: true });
+  lifetime.defer(() => configureKeyEngine({ enabled: false }));
+  clearChatSurfacePaint();
+  setChatThreadKey("flash-row");
+  chatSurface.reset();
+  lifetime.defer(() => {
+    chatSurface.reset();
+    clearChatSurfacePaint();
+  });
+  screen.container.querySelector<HTMLElement>("[data-assistant-citation-viewport]")!.focus();
+
+  await userEvent.keyboard("sT");
+  const label = await vi.waitFor(() => {
+    const text = screen.getByTestId("flash").element().textContent ?? "";
+    expect(text).toMatch(/^[a-z]+$/);
+    return text;
+  });
+  // A line inserted above the match moves it down without a scroll or a resize.
+  const inserted = document.createElement("p");
+  inserted.textContent = "Inserted line";
+  screen.getByTestId("target").element().before(inserted);
+  await userEvent.keyboard(label);
+
+  const cursor = [...(CSS.highlights.get("mesura-chat-cursor") ?? [])].map(String);
+  expect(cursor).toEqual(["T"]);
 });
