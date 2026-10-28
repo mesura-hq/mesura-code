@@ -439,12 +439,19 @@ math and expandable tool output made parts of the chat unreachable by keys.
   (`AssistantCitationChip.tsx` alone moved 18 times upstream in three
   months), and a reveal protocol into the page; a quote carries the same text
   to the agent. Revisit if page quotes need the jump back to their source.
-- **The agent is a TypeScript function serialized with `toString()`**
-  (`EMBEDDED_DOCUMENT_AGENT_SCRIPT`), so it is type-checked and linted. It
-  reads nothing from its module's scope; constants arrive as arguments, and a
-  transform that injects helpers or counters into it (code coverage) breaks
-  it in the page. Bump `HTML_RENDER_BOOTSTRAP_VERSION` when it changes, or
-  renders published earlier keep the old agent.
+- **The agent is typed TypeScript, shipped as generated JavaScript.**
+  `packages/shared/src/embeddedDocumentAgent.ts` is checked against the DOM,
+  which `apps/server`'s program has no types for, and the server injects the
+  bootstrap. So the server imports only the generated string
+  (`embeddedDocumentAgentSource.ts`, from
+  `scripts/generate-embedded-document-agent.ts`), and
+  `tests/unit/embedded-document-agent.test.ts` fails when the two differ.
+  Rejected: `Function.prototype.toString()` of an imported function, which
+  pulls the DOM-typed code into the server's program; a hand-written string,
+  which no type check or lint reads. The agent reads nothing outside its
+  function; constants arrive as arguments. Bump
+  `HTML_RENDER_BOOTSTRAP_VERSION` when it changes, or renders published
+  earlier keep the old agent.
 - **Window focus.** Upstream refocuses the composer when the window regains
   focus with `<body>` active. In Vim mode `<body>` is where the chat buffer
   holds the keys, so `ChatView` skips that refocus while

@@ -25,11 +25,9 @@ import {
 } from "../readOnlyVim";
 
 /**
- * A read-only Vim over the text of the page in a focused frame (an HTML render, an MCP app). The
- * page's agent (`EMBEDDED_DOCUMENT_AGENT_SCRIPT`) reports its text and posts its keys; Vim runs
- * here, and the page paints the cursor and the selection it is told. The page is untrusted code
- * that can post any message, so a message counts only from the focused frame, a key only with
- * the user's activation, and no key reaches the app's keymap: the page's leader cites, nothing else.
+ * A read-only Vim over the text of the page in a focused frame; the page's agent reports the text
+ * and paints what it is told. The page can post anything: a message counts only from the focused
+ * frame, a key only with user activation, and no key reaches the app's keymap (ADR-009).
  */
 
 /** Frames that run the agent: the chat's HTML renders and MCP apps, also full screen. */
