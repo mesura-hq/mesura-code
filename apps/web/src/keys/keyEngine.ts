@@ -150,6 +150,7 @@ export function installKeyEngine(): void {
     stopFlash();
     if (!enabled) return;
     surfaces.get("chat")?.focusIn?.(frame);
+    surfaces.get("frame")?.focusIn?.(frame);
     refreshModeIndicator();
   });
   window.addEventListener("focusout", () => queueMicrotask(refreshModeIndicator), true);
@@ -315,7 +316,8 @@ function onKeyDown(event: KeyboardEvent): void {
 function handleKey(scope: KeyScope, token: string, event: KeyboardEvent): boolean {
   cancelFlashOutsideScope(scope);
   if (isFlashActive(scope)) return handleFlashKey(token);
-  if (scope === "passthrough") {
+  // A frame's page posts its keys to its reader; the few that reach here are the page's own.
+  if (scope === "passthrough" || scope === "frame") {
     if (isPaneModeActive()) stopPaneMode();
     if (sequence !== IDLE_SEQUENCE) resetEngine();
     return false;

@@ -413,9 +413,38 @@ math and expandable tool output made parts of the chat unreachable by keys.
   added at serve time to HTML renders published before it
   (`apps/server/src/htmlRender/htmlRenderAssetResponse.ts`), without rewriting
   stored files. MCP apps get it through the host's existing theme script. A
-  focused iframe is the `passthrough` scope. A click into a frame fires no
-  `focusin` in the parent, so the window's `blur` updates the indicator and
-  moves the chat cursor onto the frame's object stop.
+  focused iframe is the `passthrough` scope, or `frame` while its reader runs.
+  A click into a frame fires no `focusin` in the parent, so the window's
+  `blur` updates the indicator, moves the chat cursor onto the frame's object
+  stop and starts the frame's reader.
+- **The frame reader** (`keys/frame/frameReader.ts`). The page's agent, in
+  the same bootstrap, owns the text and the painting: it projects the page's
+  visible text, posts its keys while it reads, and paints the cursor and the
+  visual span with CSS highlights it is given as offsets. Vim runs in the app
+  on that text, with the chat's grammar (`readOnlyVim.ts`). The page is
+  untrusted code that can post any message, so the host takes a message only
+  from the focused frame, a key only while `navigator.userActivation` is
+  active (a key in the frame activates its ancestors), and lets the page
+  reach nothing but its reader: the leader sequence of `chat.cite`, `y`, and
+  the exit. A text field keeps its keys; `i` hands every key to the page
+  until an unhandled `Escape`. Rejected: a reader written inside the page,
+  which would be a second Vim to keep in step with vimee and the patch;
+  projecting into the parent buffer, for the sandbox reason above.
+- **Page quotes.** `Space c` appends the selection as a Markdown block quote
+  under the page's title through the composer's own `insertTextAtEnd`, not as
+  an assistant citation. `AssistantCitation` requires an assistant
+  `messageId`, and its chip reveals the source by offsets in that message.
+  A page citation would need a second source kind across the contract, the
+  href format, the chip, the source reveal and the navigation
+  (`AssistantCitationChip.tsx` alone moved 18 times upstream in three
+  months), and a reveal protocol into the page; a quote carries the same text
+  to the agent. Revisit if page quotes need the jump back to their source.
+- **The agent is a TypeScript function serialized with `toString()`**
+  (`EMBEDDED_DOCUMENT_AGENT_SCRIPT`), so it is type-checked and linted. It
+  reads nothing from its module's scope; constants arrive as arguments, and a
+  transform that injects helpers or counters into it (code coverage) breaks
+  it in the page. Bump `HTML_RENDER_BOOTSTRAP_VERSION` when it changes, or
+  renders published earlier keep the old agent.
 - **Window focus.** Upstream refocuses the composer when the window regains
   focus with `<body>` active. In Vim mode `<body>` is where the chat buffer
   holds the keys, so `ChatView` skips that refocus while
@@ -609,9 +638,9 @@ Each item has its own issue on `mesura-hq/mesura-code`, tracked by #86:
   the command has no default chord.
 - #87: refactor(keys): one command list for the palette, the chords and the
   modal keys — the chord listeners and the palette rows reading the registry.
-- Not filed yet: Vim motions, visual selection and cite inside an HTML render
-  or an MCP app. It needs a reader running in the frame and a citation source
-  that is not an assistant message (`packages/contracts/src/assistantCitations.ts`).
+- Not filed yet: flash (`s`) and the scroll keys (`Ctrl+D` and the rest)
+  inside a frame's reader. Flash labels are drawn in the app's document over
+  ranges of that document, and a frame's ranges are in another one.
 
 Known limits of round 2, with no issue of their own:
 

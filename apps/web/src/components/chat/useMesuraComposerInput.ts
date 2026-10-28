@@ -60,6 +60,7 @@ export function useMesuraComposerInput(input: {
         setCursor: (cursor) => composerRef.current?.focusAt(cursor),
         draftKey: () => composerDraftTargetKeyRef.current,
         editor: () => composerEditorRef.current?.editor() ?? null,
+        insertAtEnd: (markdown) => composerRef.current?.insertTextAtEnd(markdown) ?? false,
       }),
     [applyPromptReplacement, composerDraftTargetKeyRef, composerEditorRef, composerRef, promptRef],
   );

@@ -91,9 +91,15 @@ In NORMAL mode the chat works like a read-only Vim buffer with a block cursor:
 - A click in the chat puts the cursor there, and a mouse selection becomes a VISUAL selection,
   so `y`, `Space c` and the motions work on it.
 
-Inside an HTML render or an app, press `Escape` to return to the chat, or `Shift+Escape` when the
-page uses `Escape` itself. In full screen, either key closes it. Mouse selection inside a render
-works, but Vim keys and **Cite** do not reach its text yet.
+Inside an HTML render or an app, the same read-only Vim reads the page's text:
+
+- Enter it with `Enter` on its stop, or click into it. The indicator shows `frame`.
+- The motions, `v`, `V` and `y` work as in the chat, and a mouse selection becomes a VISUAL
+  selection. `Space c` quotes the selection into the composer under the page's title.
+- `Enter` focuses the link, button or field under the cursor, and `i` hands every key to the page.
+  A text field always keeps its keys. `Escape` gives the keys back to the reader.
+- `Escape` in the reader returns to the chat. `Shift+Escape` leaves from anywhere in the page, also
+  when the page uses `Escape` itself. In full screen, either key closes it.
 
 The number keys of a question's options and the arrows of the message minimap stay with them
 while they have focus. `Escape` there returns to the chat. Switching back to Mesura Code from

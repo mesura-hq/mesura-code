@@ -7,6 +7,7 @@ import {
 } from "@vimee/core";
 
 import type { KeySurface } from "../keyEngine";
+import { isVisualContext, stepReadOnlyVim, visualBounds, vimModeLabel } from "../readOnlyVim";
 import { updateKeyEngineSnapshot, type EngineModeLabel } from "../keyEngineStore";
 import { paintBlockCursor, paintEmptyRangeCursor, paintObjectCursor } from "../blockCursor";
 import { copyToClipboard } from "../clipboard";
@@ -63,12 +64,6 @@ const MOTION_KEYS = new Set([
 ]);
 const VISUAL_EXTRA_KEYS = new Set(["i", "a", "o", "y", "<Esc>"]);
 const SCROLL_KEYS = new Set(["<C-d>", "<C-u>", "<C-e>", "<C-y>", "<C-f>", "<C-b>"]);
-const ARROW_TO_VIM: Readonly<Record<string, string>> = {
-  "<Left>": "h",
-  "<Right>": "l",
-  "<Up>": "k",
-  "<Down>": "j",
-};
 /** How many threads keep a remembered cursor; the least recently used goes first. */
 const REMEMBERED_THREADS = 50;
 /** A smooth scroll that never reports `scrollend` must not hold the cursor forever. */
@@ -147,18 +142,8 @@ function paintRememberedCursor(): boolean {
   return true;
 }
 
-function vimKey(token: string): { key: string; ctrl: boolean } {
-  if (ARROW_TO_VIM[token]) return { key: ARROW_TO_VIM[token]!, ctrl: false };
-  if (token === "<Esc>") return { key: "Escape", ctrl: false };
-  if (token === "<CR>") return { key: "Enter", ctrl: false };
-  if (token === "<BS>") return { key: "Backspace", ctrl: false };
-  const ctrl = /^<C-(.)>$/.exec(token);
-  if (ctrl) return { key: ctrl[1]!, ctrl: true };
-  return { key: token, ctrl: false };
-}
-
 function isVisual(): boolean {
-  return context.mode === "visual" || context.mode === "visual-line";
+  return isVisualContext(context);
 }
 
 function currentScroller(): HTMLElement | null {
@@ -232,18 +217,8 @@ function paint(buffer: ChatBuffer, reveal: boolean): void {
 
 /** The text the visual selection covers, or null outside visual mode. */
 function visualRange(buffer: ChatBuffer): Range | null {
-  if (!isVisual() || context.visualAnchor === null) return null;
-  const anchor = context.visualAnchor;
-  const head = context.cursor;
-  const forward = anchor.line < head.line || (anchor.line === head.line && anchor.col <= head.col);
-  const [from, to] = forward ? [anchor, head] : [head, anchor];
-  return context.mode === "visual-line"
-    ? rangeBetween(
-        buffer,
-        { line: from.line, col: 0 },
-        { line: to.line, col: buffer.lines[to.line]?.length ?? 0 },
-      )
-    : rangeBetween(buffer, from, { line: to.line, col: to.col + 1 });
+  const bounds = visualBounds(context, buffer.lines);
+  return bounds && rangeBetween(buffer, bounds.from, bounds.to);
 }
 
 function paintVisualSelection(buffer: ChatBuffer): void {
@@ -308,16 +283,21 @@ function revealRange(range: Range): void {
       }
     }
   }
+  const rect = range.getBoundingClientRect();
+  revealChatSpan(rect.top, rect.bottom);
+}
+
+/** Scrolls the chat so a span of the viewport, `top` to `bottom`, sits inside the reading area. */
+export function revealChatSpan(top: number, bottom: number): void {
   const scroller = currentScroller();
   if (!scroller) return;
-  const rect = range.getBoundingClientRect();
   const bounds = readingBounds(scroller);
   const margin = Math.min(96, bounds.height / 4);
-  if (rect.top < bounds.top + margin) {
+  if (top < bounds.top + margin) {
     breakLiveFollow(scroller, "up");
-    scroller.scrollTop -= bounds.top + margin - rect.top;
-  } else if (rect.bottom > bounds.bottom - margin) {
-    scroller.scrollTop += rect.bottom - (bounds.bottom - margin);
+    scroller.scrollTop -= bounds.top + margin - top;
+  } else if (bottom > bounds.bottom - margin) {
+    scroller.scrollTop += bottom - (bounds.bottom - margin);
   }
 }
 
@@ -749,10 +729,7 @@ export const chatSurface: KeySurface = {
   },
   mode: () => (isVisual() ? "visual" : "normal"),
   label(): EngineModeLabel {
-    if (isFlashActive("chat")) return "FLASH";
-    if (context.mode === "visual") return "VISUAL";
-    if (context.mode === "visual-line") return "V-LINE";
-    return "NORMAL";
+    return isFlashActive("chat") ? "FLASH" : vimModeLabel(context);
   },
   isPending: () => isFlashActive("chat") || context.phase !== "idle" || context.count > 0,
   handleKey(token) {
@@ -795,17 +772,16 @@ export const chatSurface: KeySurface = {
       }
     }
     const previousPhase = context.phase;
-    const { key, ctrl } = vimKey(token);
     const wasVisual = isVisual();
     const before = context.cursor;
     const selectionStartLine = Math.min(
       context.cursor.line,
       context.visualAnchor?.line ?? context.cursor.line,
     );
-    const result = processKeystroke(key, context, synced.text, ctrl, true);
-    context = result.newCtx;
+    const result = stepReadOnlyVim(token, context, synced.text);
+    context = result.context;
     if (
-      (key === "j" || key === "k") &&
+      (token === "j" || token === "k" || token === "<Down>" || token === "<Up>") &&
       tableAt(synced.buffer, before.line) &&
       tableAt(synced.buffer, before.line) === tableAt(synced.buffer, context.cursor.line)
     ) {
@@ -821,10 +797,6 @@ export const chatSurface: KeySurface = {
         },
       };
     }
-    // Read-only: a key that would enter insert mode never leaves normal.
-    if (context.mode === "insert" || context.mode === "command-line") {
-      context = processKeystroke("Escape", context, synced.text, false, true).newCtx;
-    }
     applyActions(result.actions, synced.buffer, Math.min(selectionStartLine, context.cursor.line));
     const moved = context.cursor.line !== before.line || context.cursor.col !== before.col;
     if (moved || !cursorIsFallback || isVisual())
@@ -836,7 +808,7 @@ export const chatSurface: KeySurface = {
     if (wasVisual && !isVisual()) clearVisualSelection();
     paint(synced.buffer, true);
 
-    if (previousPhase === "idle" && token === "G" && result.newCtx.count === 0) jumpToEdge("end");
+    if (previousPhase === "idle" && token === "G" && result.context.count === 0) jumpToEdge("end");
     if (previousPhase === "g-pending" && token === "g") jumpToEdge("start");
     return true;
   },

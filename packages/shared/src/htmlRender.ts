@@ -5,10 +5,10 @@ import {
   type ThemeColors,
 } from "./themePalettes.ts";
 import { EVENT_CODE_SHORTCUT_KEYS } from "./keybindings.ts";
-import { EMBEDDED_DOCUMENT_EXIT_SCRIPT } from "./embeddedDocument.ts";
+import { EMBEDDED_DOCUMENT_AGENT_SCRIPT } from "./embeddedDocument.ts";
 
 export const HTML_RENDER_TOOL_NAME = "html_render";
-export const HTML_RENDER_BOOTSTRAP_VERSION = "1";
+export const HTML_RENDER_BOOTSTRAP_VERSION = "2";
 export const HTML_RENDER_MIN_HEIGHT = 80;
 export const HTML_RENDER_MAX_HEIGHT = 2000;
 // A client fits the frame to the live page up to this height. It only stops a
@@ -375,7 +375,7 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("t3-theme"),
 const BOOTSTRAP_MARKER = `data-mesura-html-bootstrap="${HTML_RENDER_BOOTSTRAP_VERSION}"`;
 
 function bootstrapScriptMarkup(): string {
-  return `<script ${BOOTSTRAP_MARKER}>${EMBEDDED_DOCUMENT_EXIT_SCRIPT}${BOOTSTRAP_SCRIPT}</script>`;
+  return `<script ${BOOTSTRAP_MARKER}>${EMBEDDED_DOCUMENT_AGENT_SCRIPT}${BOOTSTRAP_SCRIPT}</script>`;
 }
 
 function bootstrapMarkup(markup: string): string {

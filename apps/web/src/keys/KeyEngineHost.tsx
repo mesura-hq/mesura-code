@@ -20,6 +20,7 @@ import {
 } from "./composer/composerExpanded";
 import { useCursorOverlays, type CursorGlyph, type CursorOverlay } from "./cursorOverlayStore";
 import { composerEditorElement } from "./focusScope";
+import { frameSurface } from "./frame/frameReader";
 import { configureKeyEngine, registerKeySurface } from "./keyEngine";
 import { useKeyEngineSnapshot } from "./keyEngineStore";
 import { useFlashSnapshot } from "./flashStore";
@@ -48,11 +49,12 @@ export function KeyEngineHost() {
     };
   }, [router, vimMode]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the chat and composer key surfaces for as long as vimMode is on
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the chat, composer and frame key surfaces for as long as vimMode is on
   useEffect(() => {
     if (!vimMode) return;
     const disposeChat = registerKeySurface(chatSurface);
     const disposeComposer = registerKeySurface(composerSurface);
+    const disposeFrame = registerKeySurface(frameSurface);
     // Entering the chat by a pane chord is entering the chat buffer in normal
     // mode, not the composer: the keyboard goes to <body>, and `focusPane`
     // records the chat as the last pane, which is where body focus resolves.
@@ -61,6 +63,7 @@ export function KeyEngineHost() {
     return () => {
       disposeChat();
       disposeComposer();
+      disposeFrame();
       disposeChatEntry();
       clearChatSurfacePaint();
       collapseComposer();

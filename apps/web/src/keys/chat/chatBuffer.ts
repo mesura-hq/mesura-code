@@ -1,5 +1,7 @@
 import { readAssistantText, type TextChunk } from "~/lib/assistantTextSelection";
 
+import type { BufferPosition } from "../readOnlyVim";
+
 /**
  * Every buffer position resolves to a `Range` on the rendered chat; one empty line between rows
  * lets `{`/`}` step by message. The timeline is virtualized, so only mounted rows are in it and the
@@ -28,10 +30,7 @@ export interface ChatBuffer {
   readonly lineRow: readonly number[];
 }
 
-export interface BufferPosition {
-  readonly line: number;
-  readonly col: number;
-}
+export type { BufferPosition };
 
 /**
  * A position that survives a rebuild: the row and an offset into its text.

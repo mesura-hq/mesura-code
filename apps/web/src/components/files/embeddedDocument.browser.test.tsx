@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EMBEDDED_DOCUMENT_EXIT_SCRIPT } from "@t3tools/shared/embeddedDocument";
+import { EMBEDDED_DOCUMENT_AGENT_SCRIPT } from "@t3tools/shared/embeddedDocument";
 import { injectHtmlRenderBootstrap } from "@t3tools/shared/htmlRender";
 import { injectMcpAppCsp, injectMcpAppThemeBootstrap } from "@t3tools/shared/mcpApp";
 import { render } from "../../../test/render";
@@ -53,7 +53,7 @@ describe("embedded document exit bootstrap", () => {
           title="Embedded test"
           sandbox="allow-scripts allow-forms"
           srcDoc={inject(
-            `<body><script>${EMBEDDED_DOCUMENT_EXIT_SCRIPT}</script>${exerciseKeys}</body>`,
+            `<body><script>${EMBEDDED_DOCUMENT_AGENT_SCRIPT}</script>${exerciseKeys}</body>`,
           )}
         />,
       );

@@ -12,6 +12,8 @@ import {
 } from "@t3tools/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
 import { MCP_APP_MAX_HTML_BYTES } from "@t3tools/shared/mcpApp";
+import { EMBEDDED_DOCUMENT_AGENT_SCRIPT } from "@t3tools/shared/embeddedDocument";
+import { HTML_RENDER_BOOTSTRAP_VERSION } from "@t3tools/shared/htmlRender";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -150,8 +152,8 @@ describe("AssetAccess", () => {
       if (asset?.kind !== "file") throw new Error("Expected HTML render attachment");
       const response = HttpServerResponse.toWeb(yield* assetFileResponse(asset));
       const displayed = yield* Effect.promise(() => response.text());
-      expect(displayed).toContain('data-mesura-html-bootstrap="1"');
-      expect(displayed).toContain('method: "t3/notifications/exit"');
+      expect(displayed).toContain(`data-mesura-html-bootstrap="${HTML_RENDER_BOOTSTRAP_VERSION}"`);
+      expect(displayed).toContain(EMBEDDED_DOCUMENT_AGENT_SCRIPT);
       const [payload, signature] = token.split(".");
       const claims = JSON.parse(Buffer.from(payload!, "base64url").toString("utf8"));
       claims.attachmentId = "another-render";

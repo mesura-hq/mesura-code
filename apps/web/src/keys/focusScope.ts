@@ -78,8 +78,12 @@ export function deepActiveElement(): Element | null {
  */
 const TREE_SELECTOR = '[role="tree"]';
 
+/** Set on a frame while its page's Vim reader holds the keys (`keys/frame/frameReader.ts`). */
+export const FRAME_READER_ATTRIBUTE = "data-mesura-reader";
+
 export type KeyScope =
   | "composer"
+  | "frame"
   | "control"
   | "insert"
   | "passthrough"
@@ -93,7 +97,9 @@ export function resolveKeyScope(active: Element | null = deepActiveElement()): K
   // to <body> falls back to. Skipped for the composer, a click from the terminal
   // left the terminal recorded and `Esc Esc` handed every key to its passthrough.
   const focusedPane = getFocusedPane();
-  if (active instanceof HTMLIFrameElement) return "passthrough";
+  if (active instanceof HTMLIFrameElement) {
+    return active.hasAttribute(FRAME_READER_ATTRIBUTE) ? "frame" : "passthrough";
+  }
   if (isCommandPaletteOpen()) return "passthrough";
   if (active?.closest("[data-mesura-owns-keys]") && !isTextEditable(active)) return "control";
   // A control in the composer's non-editable chrome (a code block's language picker) is not the

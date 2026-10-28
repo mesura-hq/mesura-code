@@ -68,6 +68,8 @@ export interface ComposerVimAdapter {
   draftKey?(): string;
   /** The live editor; without one the composer has no normal mode. */
   editor(): Editor | null;
+  /** Appends Markdown through the composer's own insert path, which focuses it; false when it is not ready. */
+  insertAtEnd?(markdown: string): boolean;
 }
 
 const OWNED_BY_KEYMAP = new Set(["s", "[", "]"]);
@@ -655,6 +657,17 @@ const composerFlashProvider: FlashProvider = {
  * Where each logical line starts on screen, for the expanded composer's
  * gutter: one entry per line Vim moves by, never a fence or a marker.
  */
+/**
+ * Appends Markdown blocks on a line of their own and leaves the composer focused in insert mode
+ * after them; false when no composer takes them. Each prompt line is one composer block.
+ */
+export function appendBlockToComposer(markdown: string): boolean {
+  if (!adapter?.insertAtEnd) return false;
+  const { prompt } = adapter.read();
+  const separator = prompt.length === 0 || prompt.endsWith("\n") ? "" : "\n";
+  return adapter.insertAtEnd(`${separator}${markdown}`);
+}
+
 export function composerGutterLines(): Array<{
   readonly index: number;
   readonly top: number;

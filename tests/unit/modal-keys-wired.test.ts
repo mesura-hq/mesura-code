@@ -23,16 +23,19 @@ it("modal keys seam guard: document frames retain keyboard entry and focused exi
   assert.include(mcp, tokens('focusPane("chat")'));
 });
 
-it("modal keys seam guard: served HTML renders and MCP apps receive the exit bootstrap", () => {
+it("modal keys seam guard: served HTML renders and MCP apps receive the page agent", () => {
   assert.lengthOf(
     callArguments(readCanonical("apps/server/src/http.ts"), "htmlRenderAssetResponse"),
     1,
   );
   assert.include(
     read("packages/shared/src/htmlRender.ts"),
-    tokens("${EMBEDDED_DOCUMENT_EXIT_SCRIPT}"),
+    tokens("${EMBEDDED_DOCUMENT_AGENT_SCRIPT}"),
   );
-  assert.include(read("packages/shared/src/mcpApp.ts"), tokens("${EMBEDDED_DOCUMENT_EXIT_SCRIPT}"));
+  assert.include(
+    read("packages/shared/src/mcpApp.ts"),
+    tokens("${EMBEDDED_DOCUMENT_AGENT_SCRIPT}"),
+  );
 });
 
 /**
@@ -355,7 +358,13 @@ it("modal keys seam guard: the composer registers its Vim adapter", () => {
   assertCallCarries(
     "apps/web/src/components/chat/useMesuraComposerInput.ts",
     "registerComposerVimAdapter",
-    ["read:", "write:", "setCursor:", "draftKey:", "editor:"],
+    ["read:", "write:", "setCursor:", "draftKey:", "editor:", "insertAtEnd:"],
+  );
+  // A page quote from the frame reader appends through the composer handle's own insert path.
+  assert.include(
+    read("apps/web/src/components/chat/ChatComposer.tsx"),
+    tokens("insertTextAtEnd: insertComposerTextAtEndStable,"),
+    "the composer handle no longer exposes insertTextAtEnd",
   );
   // Normal mode reads and edits the editor's document; without the handle's editor it has none.
   const editorFile = "apps/web/src/components/ComposerPromptEditorTiptap.tsx";

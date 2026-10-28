@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  HTML_RENDER_BOOTSTRAP_VERSION,
   injectHtmlRenderBootstrap,
   readHtmlRenderImageRequest,
   readHtmlRenderLinkRequest,
 } from "./htmlRender.ts";
 import { htmlRenderFromToolItem } from "./toolOutput.ts";
+
+const CURRENT_MARKER = `data-mesura-html-bootstrap="${HTML_RENDER_BOOTSTRAP_VERSION}"`;
 
 const reference = { attachmentId: "thread-abc-123.html", title: "Chart", height: 420 };
 
@@ -23,7 +26,7 @@ describe("injectHtmlRenderBootstrap", () => {
 
   it("versions the bootstrap and does not inject it twice", () => {
     const html = injectHtmlRenderBootstrap("<p>hello</p>");
-    expect(html).toContain('data-mesura-html-bootstrap="1"');
+    expect(html).toContain(CURRENT_MARKER);
     expect(injectHtmlRenderBootstrap(html)).toBe(html);
   });
 
@@ -34,24 +37,24 @@ describe("injectHtmlRenderBootstrap", () => {
       "</head><body><script>page()</script>☃</body>";
     const html = injectHtmlRenderBootstrap(old);
     expect(html).not.toContain("legacy()");
-    expect(html).toContain('data-mesura-html-bootstrap="1"');
+    expect(html).toContain(CURRENT_MARKER);
     expect(html.match(/<style id="t3-theme">/g)).toHaveLength(1);
     expect(html).toContain("<script>page()</script>☃");
     expect(injectHtmlRenderBootstrap(html)).toBe(html);
   });
 
   it("does not treat a bootstrap quoted in inert content as an installed bridge", () => {
-    const quoted = '<script data-mesura-html-bootstrap="1">quoted()</script>';
+    const quoted = `<script ${CURRENT_MARKER}>quoted()</script>`;
     const html = injectHtmlRenderBootstrap(
       `<!--${quoted}--><template>${quoted}</template><p>page</p>`,
     );
-    expect(html).toContain("window.__mesuraDocumentExit1");
+    expect(html).toContain("__mesuraDocumentAgent2");
     expect(html).toContain(`<!--${quoted}--><template>${quoted}</template>`);
   });
 
   it("replaces a previous version and removes duplicate installed bootstraps", () => {
     const current = injectHtmlRenderBootstrap("<p>page</p>");
-    const old = current.replace('data-mesura-html-bootstrap="1"', 'data-mesura-html-bootstrap="0"');
+    const old = current.replace(CURRENT_MARKER, 'data-mesura-html-bootstrap="0"');
     expect(injectHtmlRenderBootstrap(old)).toBe(current);
     const duplicate = current.replace(
       "</head>",
