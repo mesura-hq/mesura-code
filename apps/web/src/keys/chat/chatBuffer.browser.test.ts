@@ -280,3 +280,18 @@ describe("chat buffer soft breaks", () => {
     expect(range!.toString()).toBe("s");
   });
 });
+
+it("keeps blank code lines mapped to their original DOM offsets", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="code"><p>Before</p><pre><code>\nalpha\n\n  \nbeta\n</code></pre><p>After</p></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  expect(buffer.lines).toEqual(["Before", "", "alpha", "", "  ", "beta", "", "After"]);
+  expect(rangeBetween(buffer, { line: 1, col: 0 }, { line: 6, col: 0 })?.toString()).toBe(
+    "\nalpha\n\n  \nbeta\n",
+  );
+  expect(fromRowPosition(buffer, toRowPosition(buffer, { line: 3, col: 0 })!)).toEqual({
+    line: 3,
+    col: 0,
+  });
+});

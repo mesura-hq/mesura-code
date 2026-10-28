@@ -65,25 +65,26 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     const source =
       element.querySelector<HTMLElement>("[data-assistant-citation-source]") ?? element;
     const { text: rawText, chunks } = readAssistantText(source);
-    if (rawText.trim().length === 0) continue;
+    if (rawText.length === 0) continue;
     const collapses = collapseReader(chunks);
     const text = renderedText(rawText, chunks, collapses);
-    // Blank lines (whitespace between HTML blocks) and screen-reader-only lines
-    // (the "You" and "T3 Code" headings) are dropped: a cursor there paints
-    // nothing, and the blank line between rows already gives `{`/`}` their stops.
+    const projected = projectBufferLines(text, (offset) =>
+      chunks.some(
+        (chunk) =>
+          chunk.start <= offset &&
+          chunk.end >= offset &&
+          !!chunk.node.parentElement?.closest("pre"),
+      ),
+    );
     const rowLines: string[] = [];
     const lineStarts: number[] = [];
-    let offset = 0;
-    for (const line of text.split("\n")) {
-      // Collapsible whitespace at the start of a line renders as nothing,
-      // such as the newline remark-breaks puts after a `<br>`.
-      const start = offset + leadingCollapsedLength(line, offset, chunks, collapses);
-      const end = offset + line.length;
-      if (line.trim().length > 0 && !isScreenReaderOnly(chunks, start, end)) {
+    for (const line of projected) {
+      const start = line.start + leadingCollapsedLength(line.text, line.start, chunks, collapses);
+      const end = line.start + line.text.length;
+      if (!isScreenReaderOnly(chunks, start, end)) {
         rowLines.push(text.slice(start, end));
         lineStarts.push(start);
       }
-      offset = end + 1;
     }
     if (rowLines.length === 0) continue;
     if (lines.length > 0) {
@@ -104,6 +105,19 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     }
   }
   return { rows, lines, lineRow };
+}
+
+export function projectBufferLines(
+  text: string,
+  isPreformatted: (offset: number) => boolean,
+): { text: string; start: number }[] {
+  const lines: { text: string; start: number }[] = [];
+  let start = 0;
+  for (const line of text.split("\n")) {
+    if (line.trim().length > 0 || isPreformatted(start)) lines.push({ text: line, start });
+    start += line.length + 1;
+  }
+  return lines;
 }
 
 /**
@@ -224,7 +238,7 @@ function boundaryAt(
   offset: number,
   edge: "start" | "end",
 ): { node: Node; offset: number } | null {
-  const chunk = row.chunks.find((candidate) => offset < candidate.end) ?? row.chunks.at(-1);
+  const chunk = row.chunks.find((candidate) => offset <= candidate.end) ?? row.chunks.at(-1);
   if (!chunk) return null;
   if (chunk.node.nodeType === Node.TEXT_NODE) {
     return {

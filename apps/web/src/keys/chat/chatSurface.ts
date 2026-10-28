@@ -8,7 +8,7 @@ import {
 
 import type { KeySurface } from "../keyEngine";
 import { updateKeyEngineSnapshot, type EngineModeLabel } from "../keyEngineStore";
-import { paintBlockCursor } from "../blockCursor";
+import { paintBlockCursor, paintEmptyLineCursor } from "../blockCursor";
 import { copyToClipboard } from "../clipboard";
 import {
   findOccurrences,
@@ -202,6 +202,25 @@ function paint(buffer: ChatBuffer, reveal: boolean): void {
   // Reveal first: a widened cursor is measured where the glyph ends up.
   if (reveal && range) revealRange(range);
   paintBlockCursor("mesura-chat-cursor", range, range ? timelineRowOf(range) : null);
+  if (!range && buffer.lineRow[context.cursor.line] !== -1) {
+    const empty = rangeBetween(buffer, context.cursor, context.cursor);
+    const measured = empty?.getBoundingClientRect();
+    const rect = measured?.height
+      ? measured
+      : rangeBetween(buffer, context.cursor, {
+          ...context.cursor,
+          col: 1,
+        })?.getBoundingClientRect();
+    const holder = empty?.startContainer.parentElement;
+    if (rect && holder && rect.height > 0) {
+      paintEmptyLineCursor("mesura-chat-cursor", {
+        left: rect.left,
+        top: rect.top,
+        height: rect.height,
+        width: Number.parseFloat(getComputedStyle(holder).fontSize) * 0.5,
+      });
+    }
+  }
   paintVisualSelection(buffer);
 }
 
