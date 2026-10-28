@@ -1113,7 +1113,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 data-testid="sidebar-row-slim"
                 data-mesura-thread-key={threadKey}
                 aria-busy={isRegeneratingTitle || undefined}
-                className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+                className={cn(
+                  rowSurfaceClassName,
+                  "flex h-9 items-center gap-2.5 px-2.5 pointer-coarse:has-[[data-dictation-waveform]]:h-11",
+                )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
@@ -1132,8 +1135,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.project ? <ProjectFavicon project={props.project} className="size-4" /> : null}
             </span>
             {draftIndicator}
-            <SidebarDictationIndicator threadRef={threadRef} />
             {title}
+            <SidebarDictationIndicator threadRef={threadRef} />
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1297,7 +1300,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           {accessibleTitle}
           <div
             className={cn(
-              "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
+              "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset) pointer-coarse:has-[[data-dictation-waveform]]:h-auto",
               metaLineEmpty && "redesign:h-auto",
             )}
           >
@@ -1464,7 +1467,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.sweepAction !== null ? dragDestination : null}
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5">
-              <SidebarDictationIndicator threadRef={threadRef} />
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
@@ -1479,6 +1481,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   />
                 </span>
               ) : null}
+              <SidebarDictationIndicator threadRef={threadRef} />
             </div>
             <div
               className={cn(
