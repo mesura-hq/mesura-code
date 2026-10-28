@@ -1,4 +1,6 @@
 import type { EnvironmentId, ThreadId, TurnItemId } from "@t3tools/contracts";
+import { isEmbeddedDocumentExit } from "@t3tools/shared/embeddedDocument";
+import { focusPane } from "~/lib/paneFocus";
 import {
   makeMcpAppHost,
   McpAppHostRefusal,
@@ -380,7 +382,15 @@ export function McpAppFrame(props: {
     });
     hostRef.current = host;
     const receive = (event: MessageEvent) => {
-      if (event.source !== null && event.source === target()) host.receive(event.data);
+      if (event.source === null || event.source !== target()) return;
+      if (isEmbeddedDocumentExit(event.data)) {
+        if (document.activeElement !== frame) return;
+        frame.blur();
+        setDisplayMode("inline");
+        focusPane("chat");
+        return;
+      }
+      host.receive(event.data);
     };
     window.addEventListener("message", receive);
     return () => {
@@ -462,6 +472,7 @@ export function McpAppFrame(props: {
         ) : src !== null ? (
           <iframe
             ref={attachFrame}
+            data-mesura-chat-object-entry=""
             src={src}
             title={`${app.server} app`}
             // Omitting allow-same-origin isolates the app from the session.

@@ -65,8 +65,8 @@ describe("injectMcpAppThemeBootstrap", () => {
     NodeVM.runInNewContext(script, {
       window: {
         parent,
-        addEventListener: (_type: string, callback: typeof receive) => {
-          receive = callback;
+        addEventListener: (type: string, callback: typeof receive) => {
+          if (type === "message") receive = callback;
         },
       },
       document: { documentElement: { style } },

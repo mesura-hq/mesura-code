@@ -43,6 +43,16 @@ function scopeAfterBlurToBody() {
 }
 
 describe("resolveKeyScope by focused element", () => {
+  it("reports passthrough while a frame inside a shadow root owns focus", () => {
+    using fixture = mountKeyDom(LAYOUT);
+    const host = document.createElement("div");
+    fixture.container.querySelector("[data-chat-column-maximized-away]")!.append(host);
+    const frame = document.createElement("iframe");
+    host.attachShadow({ mode: "open" }).append(frame);
+    frame.focus();
+    expect(resolveKeyScope()).toBe("passthrough");
+  });
+
   it("reads the composer scope inside the composer editor", () => {
     using _fixture = mountKeyDom(LAYOUT);
     expect(scopeAfterFocusing("composer-editor")).toBe("composer");
