@@ -139,6 +139,10 @@
       "types": "./src/htmlRender.ts",
       "import": "./src/htmlRender.ts"
     },
+    "./embeddedDocument": {
+      "types": "./src/embeddedDocument.ts",
+      "import": "./src/embeddedDocument.ts"
+    },
     "./favicon": {
       "types": "./src/favicon.ts",
       "import": "./src/favicon.ts"

@@ -30,6 +30,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "./config.ts";
+import { htmlRenderAssetResponse } from "./htmlRender/htmlRenderAssetResponse.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { sourceControlMediaResponse } from "./assets/sourceControlMediaResponse.ts";
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
@@ -189,6 +190,8 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
       ? HttpServerResponse.empty({ status: 200, headers })
       : HttpServerResponse.uint8Array(body, { headers });
   }
+  const htmlRenderResponse = yield* htmlRenderAssetResponse(asset, headers, method);
+  if (htmlRenderResponse !== undefined) return htmlRenderResponse;
   const mediaFile = asset.file;
   const mediaInfo = mediaFile ? yield* statMediaFile(asset.path, mediaFile) : undefined;
   const isMedia = /^(?:audio|video)\//i.test(headers["Content-Type"] ?? "");

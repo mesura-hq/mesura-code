@@ -6,6 +6,35 @@ import { assert, it } from "vite-plus/test";
 
 import { repositoryRoot } from "./contractHarness.ts";
 
+it("modal keys seam guard: document frames retain keyboard entry and focused exit", () => {
+  const html = read("apps/web/src/components/files/BrowserDocumentFrame.tsx");
+  assert.include(html, tokens('data-mesura-chat-object-entry=""'));
+  assert.include(html, tokens("event.source === frame.contentWindow"));
+  assert.include(html, tokens("document.activeElement !== frame"));
+  assert.include(html, tokens("isEmbeddedDocumentExit(event.data)"));
+  assert.include(html, tokens('focusPane("chat")'));
+  assert.include(
+    read("apps/web/src/components/chat/HtmlRenderDialog.tsx"),
+    tokens("onExit={props.onClose}"),
+  );
+  const mcp = read("apps/web/src/components/chat/McpAppFrame.tsx");
+  assert.include(mcp, tokens('data-mesura-chat-object-entry=""'));
+  assert.include(mcp, tokens("isEmbeddedDocumentExit(event.data)"));
+  assert.include(mcp, tokens('focusPane("chat")'));
+});
+
+it("modal keys seam guard: served HTML renders and MCP apps receive the exit bootstrap", () => {
+  assert.lengthOf(
+    callArguments(readCanonical("apps/server/src/http.ts"), "htmlRenderAssetResponse"),
+    1,
+  );
+  assert.include(
+    read("packages/shared/src/htmlRender.ts"),
+    tokens("${EMBEDDED_DOCUMENT_EXIT_SCRIPT}"),
+  );
+  assert.include(read("packages/shared/src/mcpApp.ts"), tokens("${EMBEDDED_DOCUMENT_EXIT_SCRIPT}"));
+});
+
 /**
  * The modal key layer (docs/mesura/adr-009-modal-keys.md) reaches the app through small seams in
  * upstream files that a sync can drop while the fork's own tests pass, so each seam is asserted at

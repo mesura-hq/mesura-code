@@ -21,6 +21,45 @@ describe("injectHtmlRenderBootstrap", () => {
     expect(injected).toContain('name="viewport"');
   });
 
+  it("versions the bootstrap and does not inject it twice", () => {
+    const html = injectHtmlRenderBootstrap("<p>hello</p>");
+    expect(html).toContain('data-mesura-html-bootstrap="1"');
+    expect(injectHtmlRenderBootstrap(html)).toBe(html);
+  });
+
+  it("replaces an unversioned bootstrap without duplicating its theme or page scripts", () => {
+    const old =
+      '<!doctype html><head><style id="t3-theme">old theme</style>' +
+      '<script>(function(){var s=document.getElementById("t3-theme");legacy();})();</script>' +
+      "</head><body><script>page()</script>☃</body>";
+    const html = injectHtmlRenderBootstrap(old);
+    expect(html).not.toContain("legacy()");
+    expect(html).toContain('data-mesura-html-bootstrap="1"');
+    expect(html.match(/<style id="t3-theme">/g)).toHaveLength(1);
+    expect(html).toContain("<script>page()</script>☃");
+    expect(injectHtmlRenderBootstrap(html)).toBe(html);
+  });
+
+  it("does not treat a bootstrap quoted in inert content as an installed bridge", () => {
+    const quoted = '<script data-mesura-html-bootstrap="1">quoted()</script>';
+    const html = injectHtmlRenderBootstrap(
+      `<!--${quoted}--><template>${quoted}</template><p>page</p>`,
+    );
+    expect(html).toContain("window.__mesuraDocumentExit1");
+    expect(html).toContain(`<!--${quoted}--><template>${quoted}</template>`);
+  });
+
+  it("replaces a previous version and removes duplicate installed bootstraps", () => {
+    const current = injectHtmlRenderBootstrap("<p>page</p>");
+    const old = current.replace('data-mesura-html-bootstrap="1"', 'data-mesura-html-bootstrap="0"');
+    expect(injectHtmlRenderBootstrap(old)).toBe(current);
+    const duplicate = current.replace(
+      "</head>",
+      '<script>(function(){var s=document.getElementById("t3-theme");legacy();})();</script></head>',
+    );
+    expect(injectHtmlRenderBootstrap(duplicate)).toBe(current);
+  });
+
   it("wraps fragments without a head and keeps existing meta tags", () => {
     const fragment =
       '<meta charset="utf-8"><meta name="viewport" content="width=device-width"><p>hi</p>';

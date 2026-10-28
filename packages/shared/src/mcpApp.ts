@@ -1,4 +1,5 @@
 import * as Predicate from "effect/Predicate";
+import { EMBEDDED_DOCUMENT_EXIT_SCRIPT } from "./embeddedDocument.ts";
 
 export const MCP_APP_PROTOCOL_VERSION = "2026-01-26";
 export const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
@@ -197,6 +198,7 @@ export function injectMcpAppThemeBootstrap(html: string): string {
     }
   });
 })();
+${EMBEDDED_DOCUMENT_EXIT_SCRIPT}
 </script>`;
   const prefix =
     /^\uFEFF?\s*<!doctype[^>]*>\s*(?:<meta\s+http-equiv="Content-Security-Policy"[^>]*>)?/i.exec(

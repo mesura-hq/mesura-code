@@ -93,6 +93,7 @@ export function resolveKeyScope(active: Element | null = deepActiveElement()): K
   // to <body> falls back to. Skipped for the composer, a click from the terminal
   // left the terminal recorded and `Esc Esc` handed every key to its passthrough.
   const focusedPane = getFocusedPane();
+  if (active instanceof HTMLIFrameElement) return "passthrough";
   if (isCommandPaletteOpen()) return "passthrough";
   if (active?.closest("[data-mesura-owns-keys]") && !isTextEditable(active)) return "control";
   if (active?.closest(COMPOSER_EDITOR_SELECTOR)) return "composer";
