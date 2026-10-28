@@ -24,6 +24,7 @@ const exerciseKeys = `<script>
   const stop = (event) => event.stopPropagation();
   input.addEventListener("keydown", stop);
   press();
+  press({shiftKey: true});
   input.removeEventListener("keydown", stop);
   press();
   window.parent.postMessage({test: "document-keys-done", plain, shifted}, "*");
@@ -58,6 +59,7 @@ describe("embedded document exit bootstrap", () => {
       );
       await vi.waitFor(() =>
         expect(messages).toEqual([
+          { jsonrpc: "2.0", method: "t3/notifications/exit" },
           { jsonrpc: "2.0", method: "t3/notifications/exit" },
           { jsonrpc: "2.0", method: "t3/notifications/exit" },
           { jsonrpc: "2.0", method: "t3/notifications/exit" },

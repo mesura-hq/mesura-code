@@ -10,8 +10,8 @@ export function isEmbeddedDocumentExit(data: unknown): boolean {
   );
 }
 
-// Register at capture time so the bubble listener follows the page's window listeners.
-// Remove a stranded listener on the next key if the page stopped propagation.
+// Shift+Escape exits at capture time, before any page handler can stop it. Plain Escape waits
+// for the page's own handlers, which may use it; a stranded listener goes on the next key.
 export const EMBEDDED_DOCUMENT_EXIT_SCRIPT = `(() => {
   if (window.parent === window || window.__mesuraDocumentExit1) return;
   window.__mesuraDocumentExit1 = true;
@@ -20,13 +20,19 @@ export const EMBEDDED_DOCUMENT_EXIT_SCRIPT = `(() => {
     if (pending) window.removeEventListener("keydown", pending);
     pending = undefined;
     if (event.key !== "Escape") return;
-    if (!event.shiftKey && (event.ctrlKey || event.metaKey || event.altKey)) return;
+    const exit = () => window.parent.postMessage({ jsonrpc: "2.0", method: ${JSON.stringify(EXIT_METHOD)} }, "*");
+    if (event.shiftKey) {
+      event.preventDefault();
+      exit();
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
     const finish = (received) => {
       window.removeEventListener("keydown", finish);
       pending = undefined;
-      if (received !== event || (!event.shiftKey && event.defaultPrevented)) return;
+      if (received !== event || event.defaultPrevented) return;
       event.preventDefault();
-      window.parent.postMessage({ jsonrpc: "2.0", method: ${JSON.stringify(EXIT_METHOD)} }, "*");
+      exit();
     };
     pending = finish;
     window.addEventListener("keydown", finish);
