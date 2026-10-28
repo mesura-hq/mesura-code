@@ -1,7 +1,7 @@
 // The markup mirrors what the timeline renders: one `[data-timeline-row-id]` per
 // row, a screen-reader-only author heading, and an assistant row whose prose
 // sits in `[data-assistant-citation-source]`. Chromium supplies real layout.
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { readAssistantText } from "~/lib/assistantTextSelection";
 import { mountKeyDom } from "~/test/keyBrowserFixtures";
@@ -322,4 +322,41 @@ it("reads only marked expanded output beneath activation wrappers", () => {
   const buffer = buildChatBuffer(timeline.viewport);
   expect(buffer.lines).toEqual(["Expanded reasoning", "output", "", "end"]);
   expect(readAssistantText(timeline.viewport).text).toBe("");
+});
+
+it("skips closed details, CSS-hidden content and unselectable chrome", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="visibility"><details><summary>Summary</summary>Hidden direct text<p>Hidden body</p></details><p style="display:none">Display hidden</p><p style="visibility:hidden">Visibility hidden</p><div style="opacity:0">Transparent</div><div style="user-select:none"><span>Code header</span></div><p>Visible body</p></div>',
+  );
+  const sourceText = readAssistantText(timeline.viewport).text;
+  expect(sourceText).toContain("Hidden body");
+  expect(sourceText).toContain("Code header");
+  expect(buildChatBuffer(timeline.viewport).lines).toEqual(["Summary", "Visible body"]);
+  timeline.container.querySelector("details")!.open = true;
+  expect(buildChatBuffer(timeline.viewport).lines).toContain("Hidden body");
+});
+
+it.each(["flex", "grid"])(
+  "separates adjacent status labels in %s layout without changing citation text",
+  (display) => {
+    using timeline = mountTimeline(
+      `<div data-timeline-row-id="status"><div style="display:${display};gap:8px"><span>Factory run</span><span>degraded</span></div></div>`,
+    );
+    expect(readAssistantText(timeline.viewport).text).toBe("Factory rundegraded");
+    const buffer = buildChatBuffer(timeline.viewport);
+    expect(buffer.lines).toEqual(["Factory run degraded"]);
+    expect(rangeBetween(buffer, { line: 0, col: 12 }, { line: 0, col: 20 })?.toString()).toBe(
+      "degraded",
+    );
+  },
+);
+
+it("reads each element style once during a rebuild", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="cached"><p><span>first\nsecond</span></p><pre><code>alpha\n\nbeta</code></pre></div>',
+  );
+  using styles = vi.spyOn(window, "getComputedStyle");
+  buildChatBuffer(timeline.viewport);
+  const elements = styles.mock.calls.map(([element]) => element);
+  expect(new Set(elements).size).toBe(elements.length);
 });

@@ -129,7 +129,13 @@ export type TextChunk = { node: Text | Element; start: number; end: number };
  */
 export function readAssistantText(
   root: HTMLElement,
-  options: { objectStops?: boolean; readableRegions?: boolean } = {},
+  options: {
+    objectStops?: boolean;
+    readableRegions?: boolean;
+    includeElement?: (element: Element) => boolean;
+    includeText?: (text: Text) => boolean;
+    inlineChildren?: (element: Element) => boolean;
+  } = {},
 ) {
   const parts: string[] = [];
   const chunks: TextChunk[] = [];
@@ -150,11 +156,12 @@ export function readAssistantText(
   const visit = (node: Node) => {
     if (node.nodeType === 3) {
       const text = node as Text;
-      if (text.length > 0) append(text, text.data);
+      if (text.length > 0 && (options.includeText?.(text) ?? true)) append(text, text.data);
       return;
     }
     if (node.nodeType !== 1) return;
     const element = node as Element;
+    if (options.includeElement?.(element) === false) return;
     if (options.objectStops && element.matches("[data-mesura-chat-object]")) {
       separator = true;
       append(element, "\ufffc");
@@ -176,12 +183,33 @@ export function readAssistantText(
       }
       return;
     }
-    const block = element.matches(BLOCK_SELECTOR);
+    const block =
+      element.matches(BLOCK_SELECTOR) &&
+      !(element.parentElement && options.inlineChildren?.(element.parentElement));
     if (block || element.tagName === "BR") separator = true;
     if (element.matches("[data-markdown-math]")) {
       append(element, element.getAttribute("data-markdown-copy")?.trim() ?? "");
     } else {
-      for (const child of element.childNodes) visit(child);
+      const inline = options.inlineChildren?.(element) ?? false;
+      let previousContent = false;
+      for (const child of element.childNodes) {
+        const before = length;
+        const beforeParts = parts.length;
+        if (inline && previousContent && child.nodeType === Node.ELEMENT_NODE) {
+          separator = false;
+          if (!/\s$/.test(parts.at(-1) ?? "")) {
+            parts.push(" ");
+            length += 1;
+          }
+        }
+        const contentStart = length;
+        visit(child);
+        if (length > contentStart) previousContent = true;
+        else if (length > before) {
+          parts.splice(beforeParts);
+          length = before;
+        }
+      }
     }
     if (block) separator = true;
   };

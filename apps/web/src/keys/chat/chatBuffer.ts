@@ -55,6 +55,36 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     .map((element) => ({ element, top: element.getBoundingClientRect().top }))
     .toSorted((left, right) => left.top - right.top);
 
+  const styles = new Map<Element, CSSStyleDeclaration>();
+  const styleOf = (element: Element) => {
+    let style = styles.get(element);
+    if (!style) {
+      style = getComputedStyle(element);
+      styles.set(element, style);
+    }
+    return style;
+  };
+  const displayed = new Map<Element, boolean>();
+  const isDisplayed = (element: Element): boolean => {
+    const cached = displayed.get(element);
+    if (cached !== undefined) return cached;
+    const style = styleOf(element);
+    const visible =
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      style.visibility !== "collapse" &&
+      style.opacity !== "0" &&
+      (!element.parentElement || isDisplayed(element.parentElement));
+    displayed.set(element, visible);
+    return visible;
+  };
+  const inClosedDetails = (node: Node) => {
+    const element = node instanceof Element ? node : node.parentElement;
+    const details = element?.closest("details:not([open])");
+    return (
+      !!details && node !== details && !details.querySelector(":scope > summary")?.contains(node)
+    );
+  };
   const rows: BufferRow[] = [];
   const lines: string[] = [];
   const lineRow: number[] = [];
@@ -67,9 +97,20 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     const { text: rawText, chunks } = readAssistantText(source, {
       objectStops: true,
       readableRegions: true,
+      includeElement: (element) => !inClosedDetails(element) && isDisplayed(element),
+      includeText: (node) =>
+        !inClosedDetails(node) &&
+        (!node.parentElement || styleOf(node.parentElement).userSelect !== "none"),
+      inlineChildren: (element) => {
+        const style = styleOf(element);
+        return (
+          style.display.includes("grid") ||
+          (style.display.includes("flex") && !style.flexDirection.startsWith("column"))
+        );
+      },
     });
     if (rawText.length === 0) continue;
-    const collapses = collapseReader(chunks);
+    const collapses = collapseReader(chunks, styleOf);
     const text = renderedText(rawText, chunks, collapses);
     const projected = projectBufferLines(text, (offset) =>
       chunks.some(
@@ -138,14 +179,17 @@ const PRESERVED_NEWLINES = new Set(["pre", "pre-wrap", "pre-line", "break-spaces
  * whitespace matters, once per parent. An unstyled element in a DOM without a
  * user-agent stylesheet reports "", the initial `normal`.
  */
-function collapseReader(chunks: readonly TextChunk[]): (index: number) => boolean {
+function collapseReader(
+  chunks: readonly TextChunk[],
+  styleOf: (element: Element) => CSSStyleDeclaration,
+): (index: number) => boolean {
   const byParent = new Map<Element, boolean>();
   return (index) => {
     const parent = chunks[index]?.node.parentElement;
     if (!parent) return true;
     let collapses = byParent.get(parent);
     if (collapses === undefined) {
-      collapses = !PRESERVED_NEWLINES.has(getComputedStyle(parent).whiteSpace);
+      collapses = !PRESERVED_NEWLINES.has(styleOf(parent).whiteSpace);
       byParent.set(parent, collapses);
     }
     return collapses;

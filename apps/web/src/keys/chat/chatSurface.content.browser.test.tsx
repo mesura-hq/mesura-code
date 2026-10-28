@@ -111,3 +111,11 @@ it("selects expanded readable work output while controls stay excluded", async (
   await userEvent.keyboard("Vjjy");
   expect(clipboard).toHaveBeenCalledWith("alpha\n\nbeta\n");
 });
+
+it("moves only through visible content and treats separated status labels as words", async () => {
+  await using fixture = await setup(
+    '<details><summary>Summary</summary><p>Hidden</p></details><p style="display:none">Also hidden</p><div style="user-select:none">Chrome</div><div style="display:flex;gap:10px"><span>Factory</span><span>degraded</span></div>',
+  );
+  await userEvent.keyboard("jwv");
+  expect(window.getSelection()?.toString()).toBe("d");
+});
