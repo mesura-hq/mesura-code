@@ -62,3 +62,11 @@ describe("table motion columns", () => {
     expect(tableMotionColumn("a\tb\tc", "only", 4)).toBe(0);
   });
 });
+
+it("gives atomic tokens their own line even inside a tabular projection", () => {
+  expect(projectBufferLines("Metric\t\ufffc\tValue", () => false)).toEqual([
+    { text: "Metric\t", start: 0 },
+    { text: "\ufffc", start: 7 },
+    { text: "\tValue", start: 8 },
+  ]);
+});

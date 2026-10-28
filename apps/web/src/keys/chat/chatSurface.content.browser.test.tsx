@@ -124,7 +124,7 @@ it("returns from an iframe to the object focused with the mouse", async () => {
 });
 
 it("selects expanded readable work output while controls stay excluded", async () => {
-  await using fixture = await setup(
+  await using _fixture = await setup(
     '<div role="button"><span>Run command</span><div data-mesura-readable><pre>alpha\n\nbeta</pre><button>Copy</button></div></div>',
   );
   using clipboard = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
@@ -133,7 +133,7 @@ it("selects expanded readable work output while controls stay excluded", async (
 });
 
 it("moves only through visible content and treats separated status labels as words", async () => {
-  await using fixture = await setup(
+  await using _fixture = await setup(
     '<details><summary>Summary</summary><p>Hidden</p></details><p style="display:none">Also hidden</p><div style="user-select:none">Chrome</div><div style="display:flex;gap:10px"><span>Factory</span><span>degraded</span></div>',
   );
   await userEvent.keyboard("jwv");
@@ -235,7 +235,7 @@ it("cites an adopted mouse selection through the existing cite request", async (
     cites.push(window.getSelection()?.toString() ?? "");
     return true;
   });
-  using cleanup = { [Symbol.dispose]: () => vi.mocked(requestChatCite).mockReset() };
+  using _cleanup = { [Symbol.dispose]: () => vi.mocked(requestChatCite).mockReset() };
   await dragProse(fixture, 6, 10);
   await userEvent.keyboard(" c");
   expect(cites).toEqual(["beta"]);
@@ -251,4 +251,26 @@ it("does not adopt a mouse selection in a control", async () => {
   control.select();
   expect(chatSurface.mode()).toBe("normal");
   expect(document.activeElement).toBe(control);
+});
+
+it("paints the trailing empty code line after its terminal newline", async () => {
+  await using fixture = await setup("<pre><code>terminal\n</code></pre>");
+  await userEvent.keyboard("j");
+  await expect.element(fixture.screen.getByTestId("cursor")).not.toHaveTextContent("none");
+});
+
+it("paints a cursor in a completely empty code block", async () => {
+  await using fixture = await setup("<pre><code></code></pre>");
+  await userEvent.keyboard("v");
+  await expect.element(fixture.screen.getByTestId("cursor")).not.toHaveTextContent("none");
+});
+
+it("cancels visual mode when the entire mounted buffer disappears", async () => {
+  await using fixture = await setup("<p>Last mounted row</p>");
+  await userEvent.keyboard("v");
+  fixture.chat.querySelector('[data-timeline-row-id="content"]')!.remove();
+  await userEvent.keyboard("l");
+  expect(chatSurface.mode()).toBe("normal");
+  expect(window.getSelection()?.isCollapsed).toBe(true);
+  expect(readKeyEngineSnapshot().notice).toBe("visual selection is no longer mounted");
 });

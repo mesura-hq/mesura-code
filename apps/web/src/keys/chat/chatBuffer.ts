@@ -98,6 +98,7 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
       objectStops: true,
       readableRegions: true,
       tableRows: true,
+      emptyPreformatted: true,
       includeElement: (element) => !inClosedDetails(element) && isDisplayed(element),
       includeText: (node) =>
         !inClosedDetails(node) &&
@@ -110,7 +111,7 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
         );
       },
     });
-    if (rawText.length === 0) continue;
+    if (chunks.length === 0) continue;
     const collapses = collapseReader(chunks, styleOf);
     const text = renderedText(rawText, chunks, collapses);
     const projected = projectBufferLines(text, (offset) =>
@@ -118,7 +119,7 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
         (chunk) =>
           chunk.start <= offset &&
           chunk.end >= offset &&
-          !!chunk.node.parentElement?.closest("pre"),
+          !!(chunk.node instanceof Element ? chunk.node : chunk.node.parentElement)?.closest("pre"),
       ),
     );
     const rowLines: string[] = [];
@@ -159,7 +160,16 @@ export function projectBufferLines(
   const lines: { text: string; start: number }[] = [];
   let start = 0;
   for (const line of text.split("\n")) {
-    if (line.trim().length > 0 || isPreformatted(start)) lines.push({ text: line, start });
+    let segmentStart = start;
+    for (const segment of line.split(/(\ufffc)/)) {
+      if (
+        segment.trim().length > 0 ||
+        ((segment.length > 0 || line.length === 0) && isPreformatted(segmentStart))
+      ) {
+        lines.push({ text: segment, start: segmentStart });
+      }
+      segmentStart += segment.length;
+    }
     start += line.length + 1;
   }
   return lines;

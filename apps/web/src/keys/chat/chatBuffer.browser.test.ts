@@ -3,7 +3,7 @@
 // sits in `[data-assistant-citation-source]`. Chromium supplies real layout.
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { readAssistantText } from "~/lib/assistantTextSelection";
+import { readAssistantText, captureAssistantTextSelection } from "~/lib/assistantTextSelection";
 import { mountKeyDom } from "~/test/keyBrowserFixtures";
 
 import {
@@ -328,7 +328,7 @@ it("reads only marked expanded output beneath activation wrappers", () => {
 
 it("skips closed details, CSS-hidden content and unselectable chrome", () => {
   using timeline = mountTimeline(
-    '<div data-timeline-row-id="visibility"><details><summary>Summary</summary>Hidden direct text<p>Hidden body</p></details><p style="display:none">Display hidden</p><p style="visibility:hidden">Visibility hidden</p><div style="opacity:0">Transparent</div><div style="user-select:none"><span>Code header</span></div><p>Visible body</p></div>',
+    '<div data-timeline-row-id="visibility"><details><summary>Summary</summary>Hidden direct text<p>Hidden body</p></details><p style="display:none">Display hidden</p><p style="visibility:hidden">Visibility hidden</p><span data-mesura-chat-object="math" aria-hidden="true">Hidden formula</span><div style="opacity:0">Transparent</div><div style="user-select:none"><span>Code header</span></div><p>Visible body</p></div>',
   );
   const sourceText = readAssistantText(timeline.viewport).text;
   expect(sourceText).toContain("Hidden body");
@@ -403,4 +403,40 @@ it("rejects selections spanning controls, object stops or unprojected content", 
   expect(isSupportedChatSelection(buffer, range)).toBe(false);
   range.setEnd(paragraphs[0]!.firstChild!, 5);
   expect(isSupportedChatSelection(buffer, range)).toBe(true);
+});
+
+it("keeps table and formula citations in the original reader coordinate space", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="citations"><div data-assistant-citation-source="citations"><table><tr><td>Metric</td><td>Value</td></tr><tr><td>Mode</td><td>Normal</td></tr></table><span data-mesura-chat-object="math" data-markdown-math="inline" data-markdown-copy="x^2">x²</span></div></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(rangeBetween(buffer, { line: 1, col: 5 }, { line: 1, col: 11 })!);
+  const table = captureAssistantTextSelection(timeline.viewport, selection)!;
+  expect(table.selector).toMatchObject({ text: "Normal", start: 18, end: 24 });
+  selection.removeAllRanges();
+  selection.addRange(rangeBetween(buffer, { line: 2, col: 0 }, { line: 2, col: 1 })!);
+  const math = captureAssistantTextSelection(timeline.viewport, selection)!;
+  expect(math.selector.text).toBe("x^2");
+});
+
+it("keeps a completely empty code block as one preformatted line", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="empty-code"><pre><code></code></pre></div>',
+  );
+  expect(buildChatBuffer(timeline.viewport).lines).toEqual([""]);
+});
+
+it("keeps formulas atomic inside table cells", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="table-math"><table><tr><td>Metric</td><td><span data-mesura-chat-object="math" data-markdown-math="inline" data-markdown-copy="x^2">x²</span></td><td>Value</td></tr></table></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  expect(buffer.lines).toEqual(["Metric\t", "\ufffc", "\tValue"]);
+  expect(
+    rangeBetween(buffer, { line: 1, col: 0 }, { line: 1, col: 1 })
+      ?.cloneContents()
+      .querySelector('[data-mesura-chat-object="math"]'),
+  ).not.toBeNull();
 });

@@ -8,7 +8,7 @@ import {
 
 import type { KeySurface } from "../keyEngine";
 import { updateKeyEngineSnapshot, type EngineModeLabel } from "../keyEngineStore";
-import { paintBlockCursor, paintEmptyLineCursor, paintObjectCursor } from "../blockCursor";
+import { paintBlockCursor, paintEmptyRangeCursor, paintObjectCursor } from "../blockCursor";
 import { copyToClipboard } from "../clipboard";
 import {
   findOccurrences,
@@ -171,7 +171,11 @@ function syncBuffer(): { buffer: ChatBuffer; text: TextBuffer } | null {
   const viewport = chatViewport();
   if (viewport === null) return null;
   const buffer = buildChatBuffer(viewport);
-  if (buffer.lines.length === 0) return null;
+  if (buffer.lines.length === 0) {
+    if (isVisual()) cancelUnmountedVisualSelection();
+    paintBlockCursor("mesura-chat-cursor", null, null);
+    return null;
+  }
   const remembered = cursor && fromRowPosition(buffer, cursor);
   cursorIsFallback = !remembered;
   const position = remembered ?? firstVisiblePosition(buffer);
@@ -179,11 +183,7 @@ function syncBuffer(): { buffer: ChatBuffer; text: TextBuffer } | null {
   if (isVisual()) {
     const anchor = visualAnchor && fromRowPosition(buffer, visualAnchor);
     if (anchor && remembered) context = { ...context, visualAnchor: clampPosition(buffer, anchor) };
-    else {
-      clearVisualSelection();
-      context = createInitialContext(context.cursor);
-      updateKeyEngineSnapshot({ notice: "visual selection is no longer mounted" });
-    }
+    else cancelUnmountedVisualSelection();
   }
   return { buffer, text: new TextBuffer(buffer.lines.join("\n")) };
 }
@@ -224,22 +224,8 @@ function paint(buffer: ChatBuffer, reveal: boolean): void {
   }
   if (!range && buffer.lineRow[context.cursor.line] !== -1) {
     const empty = rangeBetween(buffer, context.cursor, context.cursor);
-    const measured = empty?.getBoundingClientRect();
-    const rect = measured?.height
-      ? measured
-      : rangeBetween(buffer, context.cursor, {
-          ...context.cursor,
-          col: 1,
-        })?.getBoundingClientRect();
-    const holder = empty?.startContainer.parentElement;
-    if (rect && holder && rect.height > 0) {
-      paintEmptyLineCursor("mesura-chat-cursor", {
-        left: rect.left,
-        top: rect.top,
-        height: rect.height,
-        width: Number.parseFloat(getComputedStyle(holder).fontSize) * 0.5,
-      });
-    }
+    const row = empty && timelineRowOf(empty);
+    if (empty && row) paintEmptyRangeCursor("mesura-chat-cursor", empty, row);
   }
   paintVisualSelection(buffer);
 }
@@ -292,6 +278,12 @@ function paintVisualSelection(buffer: ChatBuffer): void {
 function clearVisualSelection(): void {
   visualAnchor = null;
   window.getSelection()?.removeAllRanges();
+}
+
+function cancelUnmountedVisualSelection(): void {
+  clearVisualSelection();
+  context = createInitialContext(context.cursor);
+  updateKeyEngineSnapshot({ notice: "visual selection is no longer mounted" });
 }
 
 /** Keeps the cursor on screen with a margin, the way `scrolloff` does. */
@@ -760,6 +752,7 @@ export const chatSurface: KeySurface = {
     const synced = syncBuffer();
     if (!synced) return false;
     const object = objectAt(synced.buffer, context.cursor);
+    if (token === "<CR>" && !object) return false;
     if (object && !isVisual() && context.phase === "idle") {
       if (token === "<CR>") {
         const entry = object.querySelector<HTMLElement>("[data-mesura-chat-object-entry]");

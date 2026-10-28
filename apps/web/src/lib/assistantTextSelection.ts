@@ -133,6 +133,7 @@ export function readAssistantText(
     objectStops?: boolean;
     readableRegions?: boolean;
     tableRows?: boolean;
+    emptyPreformatted?: boolean;
     includeElement?: (element: Element) => boolean;
     includeText?: (text: Text) => boolean;
     inlineChildren?: (element: Element) => boolean;
@@ -164,6 +165,7 @@ export function readAssistantText(
     const element = node as Element;
     if (options.includeElement?.(element) === false) return;
     if (options.objectStops && element.matches("[data-mesura-chat-object]")) {
+      if (element.matches("[hidden], [aria-hidden=true]")) return;
       separator = true;
       append(element, "\ufffc");
       separator = true;
@@ -209,6 +211,7 @@ export function readAssistantText(
       element.matches(BLOCK_SELECTOR) &&
       !(element.parentElement && options.inlineChildren?.(element.parentElement));
     if (block || element.tagName === "BR") separator = true;
+    const beforeChunks = chunks.length;
     if (element.matches("[data-markdown-math]")) {
       append(element, element.getAttribute("data-markdown-copy")?.trim() ?? "");
     } else {
@@ -232,6 +235,9 @@ export function readAssistantText(
           length = before;
         }
       }
+    }
+    if (options.emptyPreformatted && element.tagName === "PRE" && chunks.length === beforeChunks) {
+      append(element.querySelector("code") ?? element, "");
     }
     if (block) separator = true;
   };
