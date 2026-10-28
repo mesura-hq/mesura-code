@@ -127,7 +127,7 @@ export type TextChunk = { node: Text | Element; start: number; end: number };
  * text, and hidden or aria-hidden subtrees and controls give none. No layout reads, generated
  * content or soft wraps enter the stream, so reflow cannot move it.
  */
-export function readAssistantText(root: HTMLElement) {
+export function readAssistantText(root: HTMLElement, options: { objectStops?: boolean } = {}) {
   const parts: string[] = [];
   const chunks: TextChunk[] = [];
   let length = 0;
@@ -152,6 +152,12 @@ export function readAssistantText(root: HTMLElement) {
     }
     if (node.nodeType !== 1) return;
     const element = node as Element;
+    if (options.objectStops && element.matches("[data-mesura-chat-object]")) {
+      separator = true;
+      append(element, "\ufffc");
+      separator = true;
+      return;
+    }
     if (element.matches(EXCLUDED_SELECTOR)) return;
     const block = element.matches(BLOCK_SELECTOR);
     if (block || element.tagName === "BR") separator = true;

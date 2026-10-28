@@ -252,10 +252,14 @@ export function HtmlRenderTimelineRow({
   const onFullscreenChange = (fullscreen: boolean) => onAppFullscreenChange(row.id, fullscreen);
 
   if (ctx.renderHtmlRender) {
-    return <div className="min-w-0 px-1">{ctx.renderHtmlRender(row)}</div>;
+    return (
+      <div data-mesura-chat-object="html-render" className="min-w-0 px-1">
+        {ctx.renderHtmlRender(row)}
+      </div>
+    );
   }
   return (
-    <div className="min-w-0 px-1">
+    <div data-mesura-chat-object="html-render" className="min-w-0 px-1">
       <HtmlRenderFrame
         key={row.htmlRender.attachmentId}
         environmentId={ctx.activeThreadEnvironmentId}
@@ -272,7 +276,7 @@ export function McpAppTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
   const { awaitingUser } = use(TimelineRowActivityCtx);
 
   return (
-    <div className="min-w-0 px-1">
+    <div data-mesura-chat-object="mcp-app" className="min-w-0 px-1">
       <McpAppFrame
         key={row.mcpApp.attachmentId}
         environmentId={ctx.activeThreadEnvironmentId}

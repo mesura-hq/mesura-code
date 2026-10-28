@@ -8,7 +8,7 @@ import {
 
 import type { KeySurface } from "../keyEngine";
 import { updateKeyEngineSnapshot, type EngineModeLabel } from "../keyEngineStore";
-import { paintBlockCursor, paintEmptyLineCursor } from "../blockCursor";
+import { paintBlockCursor, paintEmptyLineCursor, paintObjectCursor } from "../blockCursor";
 import { copyToClipboard } from "../clipboard";
 import {
   findOccurrences,
@@ -32,6 +32,8 @@ import {
   fromRowPosition,
   isRangeUnobscured,
   lineAtOrBelow,
+  objectAt,
+  objectYankText,
   readingBounds,
   rangeBetween,
   sentenceSpans,
@@ -199,9 +201,14 @@ function cursorRange(buffer: ChatBuffer): Range | null {
 
 function paint(buffer: ChatBuffer, reveal: boolean): void {
   const range = cursorRange(buffer);
+  const object = objectAt(buffer, context.cursor);
   // Reveal first: a widened cursor is measured where the glyph ends up.
   if (reveal && range) revealRange(range);
   paintBlockCursor("mesura-chat-cursor", range, range ? timelineRowOf(range) : null);
+  if (object) {
+    const row = object.closest<HTMLElement>("[data-timeline-row-id]");
+    if (row) paintObjectCursor("mesura-chat-cursor", object, row);
+  }
   if (!range && buffer.lineRow[context.cursor.line] !== -1) {
     const empty = rangeBetween(buffer, context.cursor, context.cursor);
     const measured = empty?.getBoundingClientRect();
@@ -448,7 +455,7 @@ function citableSentences(buffer: ChatBuffer): CitableSentence[] {
   const sentences: CitableSentence[] = [];
   buffer.lines.forEach((line, lineIndex) => {
     const row = buffer.lineRow[lineIndex] ?? -1;
-    if (row < 0) return;
+    if (row < 0 || objectAt(buffer, { line: lineIndex, col: 0 })) return;
     if (!buffer.rows[row]?.element.querySelector("[data-assistant-citation-source]")) return;
     for (const span of sentenceSpans(line)) {
       sentences.push({
@@ -565,6 +572,7 @@ function chatFlashProvider(): FlashProvider {
       const cursorRect = cursorRange(synced.buffer)?.getBoundingClientRect();
       const targets: FlashTarget[] = [];
       synced.buffer.lines.forEach((line, lineIndex) => {
+        if (objectAt(synced.buffer, { line: lineIndex, col: 0 })) return;
         for (const col of findOccurrences(line, pattern, caseSensitive)) {
           const range = rangeBetween(
             synced.buffer,
@@ -615,22 +623,48 @@ export const chatSurface: KeySurface = {
       pending ||
       MOTION_KEYS.has(token) ||
       (isVisual() && VISUAL_EXTRA_KEYS.has(token)) ||
-      (token === "y" && !isVisual());
+      (token === "y" && !isVisual()) ||
+      token === "<CR>";
     if (!accepted) return false;
 
     const synced = syncBuffer();
     if (!synced) return false;
+    const object = objectAt(synced.buffer, context.cursor);
+    if (object && !isVisual() && context.phase === "idle") {
+      if (token === "<CR>") {
+        const entry = object.querySelector<HTMLElement>("[data-mesura-chat-object-entry]");
+        const toggle =
+          object
+            .closest('.chat-markdown-codeblock, [data-language="mermaid"]')
+            ?.querySelector<HTMLElement>("[data-mesura-chat-object-toggle]") ??
+          object.parentElement?.querySelector<HTMLElement>("[data-mesura-chat-object-toggle]");
+        if (entry) entry.focus();
+        else if (object.dataset.mesuraChatObject === "diagram" && toggle) toggle.click();
+        else updateKeyEngineSnapshot({ notice: "this object has no keyboard entry" });
+        return true;
+      }
+      if (token === "y") {
+        const text = objectYankText(object);
+        copyToClipboard(text);
+        updateKeyEngineSnapshot({ notice: `yanked ${text.length} characters` });
+        return true;
+      }
+    }
     const previousPhase = context.phase;
     const { key, ctrl } = vimKey(token);
     const wasVisual = isVisual();
     const before = context.cursor;
+    const selectionStartLine = Math.min(
+      context.cursor.line,
+      context.visualAnchor?.line ?? context.cursor.line,
+    );
     const result = processKeystroke(key, context, synced.text, ctrl, true);
     context = result.newCtx;
     // Read-only: a key that would enter insert mode never leaves normal.
     if (context.mode === "insert" || context.mode === "command-line") {
       context = processKeystroke("Escape", context, synced.text, false, true).newCtx;
     }
-    applyActions(result.actions);
+    applyActions(result.actions, synced.buffer, Math.min(selectionStartLine, context.cursor.line));
     const moved = context.cursor.line !== before.line || context.cursor.col !== before.col;
     if (moved || !cursorIsFallback) storeCursor(toRowPosition(synced.buffer, context.cursor));
     if (wasVisual && !isVisual()) clearVisualSelection();
@@ -679,11 +713,17 @@ export const chatSurface: KeySurface = {
   },
 };
 
-function applyActions(actions: readonly VimAction[]): void {
+function applyActions(actions: readonly VimAction[], buffer: ChatBuffer, startLine: number): void {
   for (const action of actions) {
     if (action.type === "yank") {
-      copyToClipboard(action.text);
-      updateKeyEngineSnapshot({ notice: `yanked ${action.text.length} characters` });
+      const objects = buffer.lines.slice(startLine).flatMap((_, index) => {
+        const object = objectAt(buffer, { line: startLine + index, col: 0 });
+        return object ? [objectYankText(object)] : [];
+      });
+      let index = 0;
+      const text = action.text.replaceAll("\ufffc", () => objects[index++] ?? "");
+      copyToClipboard(text);
+      updateKeyEngineSnapshot({ notice: `yanked ${text.length} characters` });
     }
   }
 }

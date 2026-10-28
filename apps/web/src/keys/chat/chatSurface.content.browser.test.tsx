@@ -27,7 +27,7 @@ async function setup(content: string) {
     ),
   );
   clearChatSurfacePaint();
-  setChatThreadKey("content-test");
+  setChatThreadKey(content);
   chatSurface.reset();
   lifetime.defer(() => {
     chatSurface.reset();
@@ -36,7 +36,13 @@ async function setup(content: string) {
   const chat = screen.container.querySelector<HTMLElement>("[data-assistant-citation-viewport]")!;
   chat.focus();
   const listener = (event: KeyboardEvent) => {
-    if (chatSurface.handleKey(event.key === "Escape" ? "<Esc>" : event.key)) event.preventDefault();
+    if (
+      chatSurface.handleKey(
+        event.key === "Escape" ? "<Esc>" : event.key === "Enter" ? "<CR>" : event.key,
+        event,
+      )
+    )
+      event.preventDefault();
   };
   chat.addEventListener("keydown", listener);
   lifetime.defer(() => chat.removeEventListener("keydown", listener));
@@ -53,4 +59,35 @@ describe("chat content navigation", () => {
     await userEvent.keyboard("Vjy");
     expect(clipboard).toHaveBeenCalledWith("\nbeta\n");
   });
+});
+
+it("enters an iframe object and copies a math object as complete TeX", async () => {
+  await using fixture = await setup(
+    '<div data-mesura-chat-object="html-render" style="height:80px"><iframe data-mesura-chat-object-entry title="Document"></iframe></div><span data-mesura-chat-object="math" data-markdown-math="inline" data-markdown-copy="x^2">x²</span>',
+  );
+  using clipboard = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  await userEvent.keyboard("v");
+  expect(
+    window.getSelection()?.getRangeAt(0).cloneContents().querySelector("iframe"),
+  ).not.toBeNull();
+  await userEvent.keyboard("{Escape}{Enter}");
+  expect(document.activeElement).toBe(fixture.chat.querySelector("iframe"));
+  fixture.chat.focus();
+  await userEvent.keyboard("jy");
+  expect(clipboard).toHaveBeenCalledWith("x^2");
+  await expect.element(fixture.screen.getByTestId("cursor")).not.toHaveTextContent("none");
+});
+
+it("toggles diagram source through its existing control and yanks image alt text", async () => {
+  await using fixture = await setup(
+    '<div><button data-mesura-chat-object-toggle>Show code</button><div data-mesura-chat-object="diagram" data-markdown-copy="```mermaid\ngraph TD\n```" style="height:50px">Diagram</div></div><img data-mesura-chat-object="image" alt="A chart" style="width:50px;height:50px">',
+  );
+  const toggle = fixture.chat.querySelector("button")!;
+  using activate = vi.spyOn(toggle, "click");
+  using clipboard = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  await userEvent.keyboard("y{Enter}");
+  expect(clipboard).toHaveBeenCalledWith("```mermaid\ngraph TD\n```");
+  expect(activate).toHaveBeenCalledOnce();
+  await userEvent.keyboard("jy");
+  expect(clipboard).toHaveBeenLastCalledWith("A chart");
 });

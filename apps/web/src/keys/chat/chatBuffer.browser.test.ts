@@ -295,3 +295,21 @@ it("keeps blank code lines mapped to their original DOM offsets", () => {
     col: 0,
   });
 });
+
+it("projects rendered objects as one stop per line without their internal text", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="rich"><p>Before <span data-mesura-chat-object="math" data-markdown-math="inline" data-markdown-copy="x^2">x²</span> after</p><div data-mesura-chat-object="html-render"><iframe data-mesura-chat-object-entry></iframe></div><img data-mesura-chat-object="image" alt="Plot"><div data-mesura-chat-object="diagram" data-markdown-copy="diagram source"><svg><text>Node</text></svg></div><div data-mesura-chat-object="mcp-app"><button>Action</button></div></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  expect(buffer.lines).toEqual([
+    "Before ",
+    "\ufffc",
+    "after",
+    "\ufffc",
+    "\ufffc",
+    "\ufffc",
+    "\ufffc",
+  ]);
+  const range = rangeBetween(buffer, { line: 1, col: 0 }, { line: 1, col: 1 })!;
+  expect(range.cloneContents().querySelector('[data-mesura-chat-object="math"]')).not.toBeNull();
+});

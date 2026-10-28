@@ -101,7 +101,8 @@ function widenedOverlay(range: Range, container: HTMLElement): CursorOverlay | n
 }
 
 interface FollowedCursor {
-  readonly range: Range;
+  readonly range: Range | null;
+  readonly element?: HTMLElement;
   readonly container: HTMLElement;
 }
 
@@ -111,7 +112,10 @@ let stopFollowing: (() => void) | null = null;
 const containerResizeSubscriptions = new Map<HTMLElement, () => void>();
 
 function follow(): void {
-  for (const [name, cursor] of followed) paintBlockCursor(name, cursor.range, cursor.container);
+  for (const [name, cursor] of followed) {
+    if (cursor.element) paintObjectCursor(name, cursor.element, cursor.container);
+    else paintBlockCursor(name, cursor.range, cursor.container);
+  }
 }
 
 function startFollowing(): () => void {
@@ -170,4 +174,30 @@ export function paintEmptyLineCursor(name: CursorHighlightName, box: CursorOverl
   paintHighlight(name, []);
   setCursorOverlay(name, box);
   setFollowed(name, null);
+}
+
+/** An atomic chat object uses the same clipped, event-followed overlay as a narrow glyph. */
+export function paintObjectCursor(
+  name: CursorHighlightName,
+  element: HTMLElement,
+  container: HTMLElement,
+): void {
+  paintHighlight(name, []);
+  const box = element.getBoundingClientRect();
+  const clip = clipInset(box, element, container);
+  setCursorOverlay(
+    name,
+    element.isConnected && box.height > 0 && clip !== null
+      ? {
+          left: box.left,
+          top: box.top,
+          width: box.width,
+          height: box.height,
+          container,
+          outline: true,
+          ...(clip ? { clip } : {}),
+        }
+      : null,
+  );
+  setFollowed(name, { range: null, element, container });
 }

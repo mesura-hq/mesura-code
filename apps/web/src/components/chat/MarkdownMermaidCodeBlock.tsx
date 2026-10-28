@@ -48,6 +48,7 @@ export function MarkdownMermaidCodeBlock({
                   variant="ghost-muted"
                   size="icon-xs"
                   onClick={() => setShowCode((value) => !value)}
+                  data-mesura-chat-object-toggle
                   aria-label={toggleLabel}
                 />
               }

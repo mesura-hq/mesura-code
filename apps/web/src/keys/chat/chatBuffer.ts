@@ -64,7 +64,7 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     // a visual selection inside what the cite pipeline can capture.
     const source =
       element.querySelector<HTMLElement>("[data-assistant-citation-source]") ?? element;
-    const { text: rawText, chunks } = readAssistantText(source);
+    const { text: rawText, chunks } = readAssistantText(source, { objectStops: true });
     if (rawText.length === 0) continue;
     const collapses = collapseReader(chunks);
     const text = renderedText(rawText, chunks, collapses);
@@ -233,12 +233,29 @@ function rowAt(buffer: ChatBuffer, line: number): BufferRow | null {
   return index === undefined || index === -1 ? null : buffer.rows[index]!;
 }
 
+export function objectAt(buffer: ChatBuffer, position: BufferPosition): HTMLElement | null {
+  const row = rowAt(buffer, position.line);
+  if (!row) return null;
+  const offset = row.lineStarts[position.line - row.firstLine]! + position.col;
+  const node = row.chunks.find((chunk) => chunk.start === offset)?.node;
+  return node instanceof HTMLElement && node.hasAttribute("data-mesura-chat-object") ? node : null;
+}
+
+export function objectYankText(object: HTMLElement): string {
+  if (object.dataset.mesuraChatObject === "image") return object.getAttribute("alt") ?? "";
+  return object.getAttribute("data-markdown-copy")?.trimEnd() ?? "";
+}
+
 function boundaryAt(
   row: BufferRow,
   offset: number,
   edge: "start" | "end",
 ): { node: Node; offset: number } | null {
-  const chunk = row.chunks.find((candidate) => offset <= candidate.end) ?? row.chunks.at(-1);
+  const chunk =
+    row.chunks.find((candidate) => candidate.start <= offset && offset < candidate.end) ??
+    row.chunks.find((candidate) => candidate.end === offset) ??
+    row.chunks.find((candidate) => candidate.start > offset) ??
+    row.chunks.at(-1);
   if (!chunk) return null;
   if (chunk.node.nodeType === Node.TEXT_NODE) {
     return {
