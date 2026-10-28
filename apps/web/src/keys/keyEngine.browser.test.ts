@@ -14,6 +14,8 @@ import {
 } from "./keyEngine";
 import { readKeyEngineSnapshot, type EngineModeLabel } from "./keyEngineStore";
 import { isPaneModeActive } from "./paneMode";
+import { startFlash, isFlashActive, handleFlashKey } from "./flashSession";
+import { chatSurface, setChatThreadKey } from "./chat/chatSurface";
 
 const LAYOUT = `
   <div data-slot="sidebar" data-state="expanded">
@@ -358,5 +360,108 @@ describe("key engine chat pane mark", () => {
 
     configureKeyEngine({ enabled: false });
     expect(chatKeysMarked()).toBe(false);
+  });
+});
+
+function startTestFlash(scope: "chat" | "composer" = "chat") {
+  startFlash({ scope, backdrop: () => [], collect: () => [], jump: () => {} });
+}
+
+describe("flash ownership", () => {
+  it("keeps no-match search keys inside the session with the real engine", () => {
+    using fixture = setup();
+    byTestId("chat-focus").focus();
+    startTestFlash();
+    for (const key of ["Q", "i", "x", " "]) {
+      expect(fixture.press(key)).toEqual({ prevented: true, reachedLater: false });
+      expect(isFlashActive("chat")).toBe(true);
+    }
+    fixture.press("Escape");
+    expect(isFlashActive()).toBe(false);
+  });
+
+  it("cancels chat flash on composer focus, before the composer can consume it", () => {
+    using _fixture = setup();
+    byTestId("chat-focus").focus();
+    startTestFlash();
+    byTestId("composer-editor").focus();
+    expect(isFlashActive()).toBe(false);
+  });
+
+  it("cancels on a pointer press outside the owner even without a focus change", () => {
+    using _fixture = setup();
+    byTestId("chat-focus").focus();
+    startTestFlash();
+    byTestId("sidebar-row").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    expect(isFlashActive()).toBe(false);
+  });
+
+  it("preserves flash for focus and pointer presses inside its owner", () => {
+    using _fixture = setup();
+    byTestId("chat-focus").focus();
+    startTestFlash();
+    byTestId("chat-focus").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    byTestId("chat-focus").focus();
+    expect(isFlashActive("chat")).toBe(true);
+    expect(isFlashActive("composer")).toBe(false);
+  });
+
+  it("cancels when an iframe gains focus", () => {
+    using _fixture = setup();
+    const frame = document.createElement("iframe");
+    byTestId("chat-focus").append(frame);
+    byTestId("chat-focus").focus();
+    startTestFlash();
+    frame.focus();
+    expect(isFlashActive()).toBe(false);
+  });
+
+  it.each(['role="dialog"', 'role="menu"', 'data-slot="menu-popup"'])(
+    "cancels when a layer opens with focus left behind: %s",
+    async (attributes) => {
+      using fixture = setup();
+      byTestId("chat-focus").focus();
+      startTestFlash();
+      fixture.container.insertAdjacentHTML("beforeend", `<div ${attributes}></div>`);
+      await vi.waitFor(() => expect(isFlashActive()).toBe(false));
+    },
+  );
+
+  it("cancels on thread change and when the engine turns off", () => {
+    using _fixture = setup();
+    byTestId("chat-focus").focus();
+    startTestFlash();
+    setChatThreadKey("flash-owner-next-thread");
+    expect(isFlashActive()).toBe(false);
+    startTestFlash();
+    configureKeyEngine({ enabled: false });
+    expect(isFlashActive()).toBe(false);
+  });
+
+  it("never lets the chat consume a composer flash", () => {
+    using _fixture = setup();
+    byTestId("composer-editor").focus();
+    startTestFlash("composer");
+    expect(chatSurface.handleKey("q", new KeyboardEvent("keydown"))).toBe(false);
+    expect(isFlashActive("composer")).toBe(true);
+    expect(handleFlashKey("<Esc>")).toBe(true);
+  });
+
+  it("preserves a pending leader when focus stays in its owner", () => {
+    using fixture = setup();
+    byTestId("chat-focus").focus();
+    fixture.press(" ", "Space");
+    const button = document.createElement("button");
+    byTestId("chat-focus").append(button);
+    button.focus();
+    expect(readKeyEngineSnapshot().pending).toEqual(["<Space>"]);
+  });
+
+  it("clears pending leader state when focus changes owner", () => {
+    using fixture = setup();
+    byTestId("chat-focus").focus();
+    fixture.press(" ", "Space");
+    byTestId("composer-editor").focus();
+    expect(readKeyEngineSnapshot().pending).toEqual([]);
   });
 });

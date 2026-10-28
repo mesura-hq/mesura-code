@@ -507,7 +507,7 @@ export const composerSurface: KeySurface = {
       enterNormal();
       return true;
     }
-    if (isFlashActive()) return handleFlashKey(token);
+    if (isFlashActive("composer")) return handleFlashKey(token);
     return handleNormalKey(token);
   },
   runCommand(command) {

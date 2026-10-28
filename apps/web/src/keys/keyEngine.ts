@@ -19,6 +19,13 @@ import {
   updateKeyEngineSnapshot,
   type EngineModeLabel,
 } from "./keyEngineStore";
+import {
+  cancelFlashOutsideOwner,
+  cancelFlashOutsideScope,
+  handleFlashKey,
+  isFlashActive,
+  stopFlash,
+} from "./flashSession";
 import { toggleComposerExpanded } from "./composer/composerExpanded";
 import {
   cancelComposerNormalResume,
@@ -93,7 +100,25 @@ export function installKeyEngine(): void {
   // The indicator follows focus, not just keys: clicking into the composer
   // is entering insert mode. Read after the surfaces' own focus listeners,
   // which run later and may change their mode.
-  window.addEventListener("focusin", () => queueMicrotask(settleOnInput), true);
+  window.addEventListener(
+    "focusin",
+    (event) => {
+      cancelFlashOutsideOwner(event.target);
+      const scope = resolveKeyScope();
+      if (scope !== readKeyEngineSnapshot().scope) {
+        sequence = IDLE_SEQUENCE;
+        clearWhichKey();
+        for (const [ownerScope, surface] of surfaces) {
+          if (ownerScope !== scope) surface.reset();
+        }
+      }
+      queueMicrotask(settleOnInput);
+    },
+    true,
+  );
+  window.addEventListener("blur", () => {
+    if (document.activeElement instanceof HTMLIFrameElement) stopFlash();
+  });
   window.addEventListener("focusout", () => queueMicrotask(refreshModeIndicator), true);
   // A click on a pane's text moves the keys there without focusing anything.
   // Where an element holds focus, the press blurs it next and `focusout`
@@ -101,6 +126,7 @@ export function installKeyEngine(): void {
   window.addEventListener(
     "pointerdown",
     (event) => {
+      cancelFlashOutsideOwner(event.target);
       notePointerPane(event.target);
       const active = document.activeElement;
       if (active === null || active === document.body) queueMicrotask(refreshModeIndicator);
@@ -110,6 +136,7 @@ export function installKeyEngine(): void {
 }
 
 function resetEngine(): void {
+  stopFlash();
   sequence = IDLE_SEQUENCE;
   if (isPaneModeActive()) stopPaneMode();
   helpOpen = false;
@@ -142,6 +169,7 @@ export function refreshModeIndicator(): KeyScope | null {
     return null;
   }
   const scope = resolveKeyScope();
+  cancelFlashOutsideScope(scope);
   markChatBufferKeys(scope === "chat");
   const surface = surfaces.get(scope);
   const mode: EngineModeLabel = isPaneModeActive()
@@ -234,6 +262,8 @@ function onKeyDown(event: KeyboardEvent): void {
 }
 
 function handleKey(scope: KeyScope, token: string, event: KeyboardEvent): boolean {
+  cancelFlashOutsideScope(scope);
+  if (isFlashActive(scope)) return handleFlashKey(token);
   if (scope === "passthrough") {
     if (isPaneModeActive()) stopPaneMode();
     if (sequence !== IDLE_SEQUENCE) resetEngine();

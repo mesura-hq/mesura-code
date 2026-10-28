@@ -2,6 +2,7 @@ import { assignFlashLabels, assignJumpLabels } from "@mesura/keys/flash";
 
 import { setFlashSnapshot, type FlashLabel } from "./flashStore";
 import { paintHighlight } from "./highlights";
+import { composerEditorElement, hasOpenKeyLayer, resolveKeyScope } from "./focusScope";
 
 /**
  * Two kinds share the overlay and the keys: a search (`s`), where the surface supplies targets per
@@ -66,12 +67,51 @@ interface PickState {
 }
 
 let state: FlashState | PickState | null = null;
+let owner: { scope: FlashProvider["scope"]; element: HTMLElement | null } | null = null;
+let disposeLifecycle: (() => void) | null = null;
 
-export function isFlashActive(): boolean {
-  return state !== null;
+export function isFlashActive(scope?: string): boolean {
+  return state !== null && (scope === undefined || owner?.scope === scope);
+}
+
+export function cancelFlashOutsideOwner(target: EventTarget | null): void {
+  if (!owner || !(target instanceof Element)) return;
+  if (
+    target instanceof HTMLIFrameElement ||
+    (owner.element !== null && !owner.element.contains(target)) ||
+    resolveKeyScope(target) !== owner.scope
+  )
+    stopFlash();
+}
+
+export function cancelFlashOutsideScope(scope: string): void {
+  if (state !== null && !isFlashActive(scope)) stopFlash();
+}
+
+function ownSession(scope: FlashProvider["scope"]): void {
+  disposeLifecycle?.();
+  owner = {
+    scope,
+    element:
+      scope === "composer"
+        ? composerEditorElement()
+        : document.querySelector<HTMLElement>("[data-chat-column-maximized-away]"),
+  };
+  const observer = new MutationObserver(() => {
+    if (hasOpenKeyLayer() || owner?.element?.isConnected === false) stopFlash();
+  });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["role", "aria-modal", "data-open", "data-slot", "data-command-palette"],
+  });
+  disposeLifecycle = () => observer.disconnect();
 }
 
 export function startFlash(provider: FlashProvider): void {
+  stopFlash();
+  ownSession(provider.scope);
   state = { kind: "search", provider, pattern: "", targets: [], labels: new Map() };
   // The italic is set before any target is measured, so labels are placed on
   // the text as it is drawn during flash.
@@ -91,6 +131,8 @@ export function startFlashPick(pick: FlashPick): boolean {
     stopFlash();
     return false;
   }
+  stopFlash();
+  ownSession(pick.scope);
   const labels = new Map<string, FlashPickTarget>();
   assignJumpLabels(pick.targets.length).forEach((label, index) => {
     labels.set(label, pick.targets[index]!);
@@ -109,6 +151,9 @@ export function applyFlashLook(scope: "chat" | "composer"): void {
 }
 
 export function stopFlash(): void {
+  disposeLifecycle?.();
+  disposeLifecycle = null;
+  owner = null;
   state = null;
   delete document.documentElement.dataset.mesuraFlash;
   setFlashSnapshot(null);
