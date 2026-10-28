@@ -604,6 +604,22 @@ function chatFlashProvider(): FlashProvider {
 
 export const chatSurface: KeySurface = {
   scope: "chat",
+  focusIn(target) {
+    if (!(target instanceof HTMLIFrameElement)) return;
+    const object = target.closest<HTMLElement>("[data-mesura-chat-object]");
+    const viewport = chatViewport();
+    if (!object || !viewport?.contains(object)) return;
+    const buffer = buildChatBuffer(viewport);
+    const row = buffer.rows.find((candidate) => candidate.element.contains(object));
+    const chunk = row?.chunks.find((candidate) => candidate.node === object);
+    const position =
+      row && chunk && fromRowPosition(buffer, { rowId: row.id, offset: chunk.start });
+    if (!position) return;
+    if (isVisual()) clearVisualSelection();
+    context = createInitialContext(position);
+    setCursor(buffer, position);
+    paint(buffer, false);
+  },
   mode: () => (isVisual() ? "visual" : "normal"),
   label(): EngineModeLabel {
     if (isFlashActive()) return "FLASH";

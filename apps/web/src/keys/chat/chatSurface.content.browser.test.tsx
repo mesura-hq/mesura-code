@@ -2,8 +2,12 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
+import { createWindowListenerFixture } from "~/test/keyBrowserFixtures";
+import { configureKeyEngine, installKeyEngine, registerKeySurface } from "../keyEngine";
 import { useCursorOverlays } from "../cursorOverlayStore";
 import { chatSurface, clearChatSurfacePaint, setChatThreadKey } from "./chatSurface";
+
+const engineListeners = createWindowListenerFixture(installKeyEngine);
 
 function CursorProbe() {
   const cursor = useCursorOverlays().get("mesura-chat-cursor");
@@ -26,6 +30,10 @@ async function setup(content: string) {
       </>,
     ),
   );
+  lifetime.use(engineListeners());
+  lifetime.defer(registerKeySurface(chatSurface));
+  configureKeyEngine({ enabled: true });
+  lifetime.defer(() => configureKeyEngine({ enabled: false }));
   clearChatSurfacePaint();
   setChatThreadKey(content);
   chatSurface.reset();
@@ -35,17 +43,6 @@ async function setup(content: string) {
   });
   const chat = screen.container.querySelector<HTMLElement>("[data-assistant-citation-viewport]")!;
   chat.focus();
-  const listener = (event: KeyboardEvent) => {
-    if (
-      chatSurface.handleKey(
-        event.key === "Escape" ? "<Esc>" : event.key === "Enter" ? "<CR>" : event.key,
-        event,
-      )
-    )
-      event.preventDefault();
-  };
-  chat.addEventListener("keydown", listener);
-  lifetime.defer(() => chat.removeEventListener("keydown", listener));
   const owned = lifetime.move();
   return { screen, chat, [Symbol.asyncDispose]: () => owned[Symbol.asyncDispose]() };
 }
@@ -90,4 +87,18 @@ it("toggles diagram source through its existing control and yanks image alt text
   expect(activate).toHaveBeenCalledOnce();
   await userEvent.keyboard("jy");
   expect(clipboard).toHaveBeenLastCalledWith("A chart");
+});
+
+it("returns from an iframe to the object focused with the mouse", async () => {
+  await using fixture = await setup(
+    '<p>Earlier text</p><div data-mesura-chat-object="html-render" style="height:80px"><iframe data-mesura-chat-object-entry title="Mouse document"></iframe></div><p>Later text</p>',
+  );
+  await userEvent.keyboard("l");
+  const frame = fixture.chat.querySelector("iframe")!;
+  frame.focus();
+  fixture.chat.focus();
+  await userEvent.keyboard("v");
+  expect(
+    window.getSelection()?.getRangeAt(0).cloneContents().querySelector("iframe"),
+  ).not.toBeNull();
 });
