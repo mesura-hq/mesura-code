@@ -102,3 +102,12 @@ it("returns from an iframe to the object focused with the mouse", async () => {
     window.getSelection()?.getRangeAt(0).cloneContents().querySelector("iframe"),
   ).not.toBeNull();
 });
+
+it("selects expanded readable work output while controls stay excluded", async () => {
+  await using fixture = await setup(
+    '<div role="button"><span>Run command</span><div data-mesura-readable><pre>alpha\n\nbeta</pre><button>Copy</button></div></div>',
+  );
+  using clipboard = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  await userEvent.keyboard("Vjjy");
+  expect(clipboard).toHaveBeenCalledWith("alpha\n\nbeta\n");
+});

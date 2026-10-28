@@ -127,7 +127,10 @@ export type TextChunk = { node: Text | Element; start: number; end: number };
  * text, and hidden or aria-hidden subtrees and controls give none. No layout reads, generated
  * content or soft wraps enter the stream, so reflow cannot move it.
  */
-export function readAssistantText(root: HTMLElement, options: { objectStops?: boolean } = {}) {
+export function readAssistantText(
+  root: HTMLElement,
+  options: { objectStops?: boolean; readableRegions?: boolean } = {},
+) {
   const parts: string[] = [];
   const chunks: TextChunk[] = [];
   let length = 0;
@@ -158,7 +161,21 @@ export function readAssistantText(root: HTMLElement, options: { objectStops?: bo
       separator = true;
       return;
     }
-    if (element.matches(EXCLUDED_SELECTOR)) return;
+    if (element.matches(EXCLUDED_SELECTOR)) {
+      if (
+        options.readableRegions &&
+        element.matches('[role="button"]') &&
+        !element.matches(
+          "button, input, textarea, select, [contenteditable], [hidden], [aria-hidden=true]",
+        )
+      ) {
+        for (const region of element.querySelectorAll("[data-mesura-readable]")) {
+          const parentRegion = region.parentElement?.closest("[data-mesura-readable]");
+          if (!parentRegion || !element.contains(parentRegion)) visit(region);
+        }
+      }
+      return;
+    }
     const block = element.matches(BLOCK_SELECTOR);
     if (block || element.tagName === "BR") separator = true;
     if (element.matches("[data-markdown-math]")) {

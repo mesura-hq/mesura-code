@@ -64,7 +64,10 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     // a visual selection inside what the cite pipeline can capture.
     const source =
       element.querySelector<HTMLElement>("[data-assistant-citation-source]") ?? element;
-    const { text: rawText, chunks } = readAssistantText(source, { objectStops: true });
+    const { text: rawText, chunks } = readAssistantText(source, {
+      objectStops: true,
+      readableRegions: true,
+    });
     if (rawText.length === 0) continue;
     const collapses = collapseReader(chunks);
     const text = renderedText(rawText, chunks, collapses);

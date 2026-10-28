@@ -1261,3 +1261,13 @@ it("modal keys seam guard: rich chat content retains atomic object markers", () 
     );
   }
 });
+
+it("modal keys seam guard: expanded work output retains readable regions", () => {
+  for (const name of ["WorkLog.tsx", "TimelineWorkEntryRow.tsx"]) {
+    assert.include(
+      read(`apps/web/src/components/chat/${name}`),
+      tokens("data-mesura-readable"),
+      `${name} lost its readable region`,
+    );
+  }
+});

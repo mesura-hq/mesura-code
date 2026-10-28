@@ -3,6 +3,7 @@
 // sits in `[data-assistant-citation-source]`. Chromium supplies real layout.
 import { describe, expect, it } from "vite-plus/test";
 
+import { readAssistantText } from "~/lib/assistantTextSelection";
 import { mountKeyDom } from "~/test/keyBrowserFixtures";
 
 import {
@@ -312,4 +313,13 @@ it("projects rendered objects as one stop per line without their internal text",
   ]);
   const range = rangeBetween(buffer, { line: 1, col: 0 }, { line: 1, col: 1 })!;
   expect(range.cloneContents().querySelector('[data-mesura-chat-object="math"]')).not.toBeNull();
+});
+
+it("reads only marked expanded output beneath activation wrappers", () => {
+  using timeline = mountTimeline(
+    '<div data-timeline-row-id="work"><div role="button"><span>Tool label</span><div data-mesura-readable><p>Expanded reasoning</p><pre>output\n\nend</pre><button>Copy output</button><textarea>Private input</textarea></div></div></div>',
+  );
+  const buffer = buildChatBuffer(timeline.viewport);
+  expect(buffer.lines).toEqual(["Expanded reasoning", "output", "", "end"]);
+  expect(readAssistantText(timeline.viewport).text).toBe("");
 });
