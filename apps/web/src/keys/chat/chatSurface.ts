@@ -579,14 +579,14 @@ export const chatSurface: KeySurface = {
   scope: "chat",
   mode: () => (isVisual() ? "visual" : "normal"),
   label(): EngineModeLabel {
-    if (isFlashActive()) return "FLASH";
+    if (isFlashActive("chat")) return "FLASH";
     if (context.mode === "visual") return "VISUAL";
     if (context.mode === "visual-line") return "V-LINE";
     return "NORMAL";
   },
-  isPending: () => isFlashActive() || context.phase !== "idle" || context.count > 0,
+  isPending: () => isFlashActive("chat") || context.phase !== "idle" || context.count > 0,
   handleKey(token) {
-    if (isFlashActive()) return handleFlashKey(token);
+    if (isFlashActive("chat")) return handleFlashKey(token);
     if (SCROLL_KEYS.has(token) && context.phase === "idle") {
       scrollBy(token);
       return true;

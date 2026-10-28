@@ -26,7 +26,9 @@ const PASSTHROUGH_SELECTOR = [
 
 /** Layers that may be open while focus stays behind them. */
 const OPEN_LAYER_SELECTOR = [
-  '[role="dialog"][aria-modal="true"]',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[role="menu"]',
   '[data-slot="dialog-popup"]:is([data-open])',
   '[data-slot="sheet-popup"]:is([data-open])',
   '[data-slot="menu-popup"]',
@@ -78,6 +80,7 @@ const TREE_SELECTOR = '[role="tree"]';
 
 export type KeyScope =
   | "composer"
+  | "control"
   | "insert"
   | "passthrough"
   | "tree"
@@ -91,10 +94,11 @@ export function resolveKeyScope(active: Element | null = deepActiveElement()): K
   // left the terminal recorded and `Esc Esc` handed every key to its passthrough.
   const focusedPane = getFocusedPane();
   if (isCommandPaletteOpen()) return "passthrough";
+  if (active?.closest("[data-mesura-owns-keys]") && !isTextEditable(active)) return "control";
   if (active?.closest(COMPOSER_EDITOR_SELECTOR)) return "composer";
   if (active?.closest(PASSTHROUGH_SELECTOR)) return "passthrough";
   if (isTextEditable(active)) return "insert";
-  if (document.querySelector(OPEN_LAYER_SELECTOR)) return "passthrough";
+  if (hasOpenKeyLayer()) return "passthrough";
   if (active?.closest(TREE_SELECTOR)) return "tree";
   const pane = focusedPane ?? reachableLastPane();
   if (pane === "terminal") return "passthrough";
@@ -139,4 +143,12 @@ export function isComposerInDialog(active: Element | null = deepActiveElement())
 
 export function isComposerMenuOpen(): boolean {
   return document.querySelector("[data-composer-command-drawer]") !== null;
+}
+
+export function hasOpenKeyLayer(): boolean {
+  return (
+    isCommandPaletteOpen() ||
+    isComposerMenuOpen() ||
+    document.querySelector(OPEN_LAYER_SELECTOR) !== null
+  );
 }

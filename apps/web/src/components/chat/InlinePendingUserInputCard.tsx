@@ -471,7 +471,12 @@ function QuestionField({
           </h3>
         </div>
       </div>
-      <div className="space-y-1.5" role="group" aria-labelledby={`${id}-question`}>
+      <div
+        className="space-y-1.5"
+        data-mesura-owns-keys
+        role="group"
+        aria-labelledby={`${id}-question`}
+      >
         {question.options.map((option, index) => {
           const value = option.value ?? option.label;
           const selected = answer?.selectedOptionValues?.includes(value) ?? false;

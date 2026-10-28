@@ -23,6 +23,7 @@ import { composerEditorElement } from "./focusScope";
 import { configureKeyEngine, registerKeySurface } from "./keyEngine";
 import { useKeyEngineSnapshot } from "./keyEngineStore";
 import { useFlashSnapshot } from "./flashStore";
+import { stopFlash } from "./flashSession";
 
 /**
  * Turns the modal key engine on from the `vimMode` setting and draws what it
@@ -32,6 +33,7 @@ import { useFlashSnapshot } from "./flashStore";
  */
 export function KeyEngineHost() {
   const vimMode = useClientSettings((settings) => settings.vimMode);
+  const router = useRouter();
 
   // The engine is global and installed once, but only the chat layout mounts
   // this host: leaving it (Settings, the pull requests page) turns the engine
@@ -39,8 +41,12 @@ export function KeyEngineHost() {
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: turns the global key engine on with the vimMode setting and off when the chat layout unmounts
   useEffect(() => {
     configureKeyEngine({ enabled: vimMode });
-    return () => configureKeyEngine({ enabled: false });
-  }, [vimMode]);
+    const unsubscribe = router.subscribe("onBeforeNavigate", stopFlash);
+    return () => {
+      unsubscribe();
+      configureKeyEngine({ enabled: false });
+    };
+  }, [router, vimMode]);
 
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the chat and composer key surfaces for as long as vimMode is on
   useEffect(() => {
