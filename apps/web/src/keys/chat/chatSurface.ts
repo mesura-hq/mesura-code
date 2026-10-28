@@ -74,6 +74,7 @@ const SCROLL_SETTLE_TIMEOUT_MS = 800;
 
 let context: VimContext = createInitialContext({ line: 0, col: 0 });
 let cursor: RowPosition | null = null;
+let visualAnchor: RowPosition | null = null;
 /**
  * Whether the last sync put the Vim cursor on the first visible line because
  * `cursor` did not resolve (a fresh thread, or a remembered row not mounted).
@@ -171,8 +172,14 @@ function syncBuffer(): { buffer: ChatBuffer; text: TextBuffer } | null {
   cursorIsFallback = !remembered;
   const position = remembered ?? firstVisiblePosition(buffer);
   context = { ...context, cursor: clampPosition(buffer, position) };
-  if (context.visualAnchor) {
-    context = { ...context, visualAnchor: clampPosition(buffer, context.visualAnchor) };
+  if (isVisual()) {
+    const anchor = visualAnchor && fromRowPosition(buffer, visualAnchor);
+    if (anchor && remembered) context = { ...context, visualAnchor: clampPosition(buffer, anchor) };
+    else {
+      clearVisualSelection();
+      context = createInitialContext(context.cursor);
+      updateKeyEngineSnapshot({ notice: "visual selection is no longer mounted" });
+    }
   }
   return { buffer, text: new TextBuffer(buffer.lines.join("\n")) };
 }
@@ -258,6 +265,7 @@ function paintVisualSelection(buffer: ChatBuffer): void {
 }
 
 function clearVisualSelection(): void {
+  visualAnchor = null;
   window.getSelection()?.removeAllRanges();
 }
 
@@ -721,7 +729,12 @@ export const chatSurface: KeySurface = {
     }
     applyActions(result.actions, synced.buffer, Math.min(selectionStartLine, context.cursor.line));
     const moved = context.cursor.line !== before.line || context.cursor.col !== before.col;
-    if (moved || !cursorIsFallback) storeCursor(toRowPosition(synced.buffer, context.cursor));
+    if (moved || !cursorIsFallback || isVisual())
+      storeCursor(toRowPosition(synced.buffer, context.cursor));
+    visualAnchor =
+      isVisual() && context.visualAnchor
+        ? toRowPosition(synced.buffer, context.visualAnchor)
+        : null;
     if (wasVisual && !isVisual()) clearVisualSelection();
     paint(synced.buffer, true);
 

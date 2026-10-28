@@ -4,6 +4,7 @@ import { userEvent } from "vite-plus/test/browser";
 import { render } from "../../../test/render";
 import { createWindowListenerFixture } from "~/test/keyBrowserFixtures";
 import { configureKeyEngine, installKeyEngine, registerKeySurface } from "../keyEngine";
+import { readKeyEngineSnapshot } from "../keyEngineStore";
 import { useCursorOverlays } from "../cursorOverlayStore";
 import { chatSurface, clearChatSurfacePaint, setChatThreadKey } from "./chatSurface";
 
@@ -131,4 +132,33 @@ it("moves vertically in the same table cell and yanks a tab-separated row", asyn
   expect(scroller.scrollLeft).toBeGreaterThan(0);
   await userEvent.keyboard("{Escape}Vy");
   expect(clipboard).toHaveBeenCalledWith("Mode\tNormal\n");
+});
+
+it("keeps both visual endpoints when earlier rows mount and unmount", async () => {
+  await using fixture = await setup("<p>one two three</p>");
+  using clipboard = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  await userEvent.keyboard("wv");
+  const earlier = document.createElement("div");
+  earlier.dataset.timelineRowId = "earlier";
+  earlier.innerHTML = "<p>Earlier row</p>";
+  fixture.chat.prepend(earlier);
+  await userEvent.keyboard("e");
+  expect(window.getSelection()?.toString()).toBe("two");
+  earlier.remove();
+  await userEvent.keyboard("y");
+  expect(clipboard).toHaveBeenCalledWith("two");
+});
+
+it("cancels a visual selection if one endpoint unmounts", async () => {
+  await using fixture = await setup("<p>selected source</p>");
+  const other = document.createElement("div");
+  other.dataset.timelineRowId = "other";
+  other.innerHTML = "<p>Other source</p>";
+  fixture.chat.append(other);
+  await userEvent.keyboard("vjj");
+  fixture.chat.querySelector('[data-timeline-row-id="content"]')!.remove();
+  await userEvent.keyboard("l");
+  expect(chatSurface.mode()).toBe("normal");
+  expect(window.getSelection()?.isCollapsed).toBe(true);
+  expect(readKeyEngineSnapshot().notice).toBe("visual selection is no longer mounted");
 });
