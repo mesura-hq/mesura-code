@@ -202,23 +202,15 @@ const clearDispatches = () =>
       entry.command === (threadEnvironment as Record<string, unknown>).clearAgentSignal,
   );
 
-it("AppRoot agent signal AC6: a needs_input signal shows its note and a touch-sized Dismiss that clears it", async () => {
+it("does not show a needs_input signal card in ChatView", async () => {
   await using _fixture = await setupStatusLineFixture(
     signalOf("needs_input", "Which database should the migration target?"),
   );
   await using screen = await mountApp(_fixture.container);
-  const line = statusLine(screen.container);
-  expect(line.textContent).toContain("Agent needs your input");
-  expect(line.textContent).toContain("Which database should the migration target?");
-  const dismiss = statusLineButton(line, "Dismiss");
-  expectTouchTarget(dismiss);
-  await userEvent.click(dismiss);
-  expect(clearDispatches()).toEqual([
-    {
-      command: (threadEnvironment as Record<string, unknown>).clearAgentSignal,
-      value: { environmentId, input: { threadId } },
-    },
-  ]);
+  expect(screen.container.querySelector("[data-thread-agent-signal]")).toBeNull();
+  expect(screen.container.textContent).not.toContain("Agent needs your input");
+  expect(screen.container.textContent).toContain("Send a message to start the conversation");
+  expect(clearDispatches()).toEqual([]);
 });
 
 it("AppRoot agent signal AC6: a ready_to_close signal offers Settle through the settle action and Dismiss", async () => {

@@ -1,3 +1,5 @@
+import { useHoldFactoryPlanCardSession } from "../../factory/factoryPlanCardSession";
+import { factoryPlanRoutesKey } from "../../factory/useFactoryPlanApproval";
 import { TIMELINE_FIND_VISIBLE_CONTENT_POSITION } from "./timelineFindScrollPolicy";
 import { subscribePickerAction, subscribeQuestionFocus } from "../../lib/pickerActionBus";
 import { subscribeTurnJumpRequest } from "~/keys/chat/chatTurnBus";
@@ -1338,6 +1340,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   return (
     <>
+      {citationThreadRef
+        ? rows
+            .filter((row) => row.kind === "factory-plan")
+            .map((row) => (
+              <FactoryPlanSessionHolder
+                key={`${listIdentityKey}:${row.id}`}
+                planKey={factoryPlanRoutesKey(citationThreadRef, row.factoryPlan.plan.digest)}
+              />
+            ))
+        : null}
       {activityAnnouncer}
       <MarkdownFindContext value={findActive}>
         <TimelineRowActivityCtx value={activityState}>
@@ -1730,4 +1742,10 @@ function FactoryReportTimelineRow({
       />
     </div>
   );
+}
+
+function FactoryPlanSessionHolder({ planKey }: { readonly planKey: string }) {
+  // A card can leave the virtualized viewport when its chronological anchor becomes visible again.
+  useHoldFactoryPlanCardSession(planKey);
+  return null;
 }

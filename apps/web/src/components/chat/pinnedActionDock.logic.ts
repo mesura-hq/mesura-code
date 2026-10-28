@@ -1,24 +1,12 @@
-import type { FactoryPlanTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
-import {
-  findPlanApprovals,
-  resolvePlanApprovalState,
-} from "@t3tools/client-runtime/factory/plan-approval";
-import { summarizeFactoryPlanCard } from "@t3tools/client-runtime/factory/plan-model";
 import type {
   ThreadPendingApproval,
   ThreadPendingUserInput,
 } from "@t3tools/client-runtime/state/thread-requests";
-import type {
-  FactoryPlanActivityPayload,
-  PlanId,
-  ProviderRequestKind,
-  RuntimeRequestId,
-} from "@t3tools/contracts";
+import type { PlanId, ProviderRequestKind, RuntimeRequestId } from "@t3tools/contracts";
 
 /**
  * Mesura: what the pinned action dock above the composer shows, in which order, which items
- * are expanded, and what each item's X does. Everything that waits on the developer sits here,
- * so it stays visible whatever the timeline's scroll position.
+ * are expanded, and what each item's X does.
  */
 
 /** At phone width at most this many items are expanded; the rest are one line each. */
@@ -31,9 +19,8 @@ export const PHONE_DOCK_EXPANDED_LIMIT = 2;
 export const DISMISSED_QUESTION_ANSWER =
   "[dismissed] The developer dismissed this question without answering. Continue without this answer, or ask again in plain text.";
 
-// Unpins of plan files that keep presenting new digests, and of follow-ups, would grow without
-// bound; the newest ones per thread are all that can still match.
-const MAX_UNPINS_PER_THREAD = 20;
+// Keep only the newest follow-up dismissals that can still match.
+const MAX_FOLLOW_UP_DISMISSALS_PER_THREAD = 20;
 
 export interface PinnedActionDockFollowUp {
   readonly id: PlanId;
@@ -61,14 +48,6 @@ export type PinnedActionDockItem =
       readonly title: string;
     })
   | (DockItemBase & {
-      readonly kind: "plan";
-      readonly digest: string;
-      readonly planId: string;
-      readonly plan: FactoryPlanActivityPayload;
-      readonly title: string;
-      readonly phaseCountLabel: string;
-    })
-  | (DockItemBase & {
       readonly kind: "plan-follow-up";
       readonly planId: PlanId;
       readonly title: string | null;
@@ -82,24 +61,19 @@ export type PinnedActionDockCloseAction =
       readonly requestId: RuntimeRequestId;
       readonly answers: Readonly<Record<string, string>>;
     }
-  | { readonly type: "unpin-plan"; readonly digest: string }
   | { readonly type: "dismiss-plan-follow-up"; readonly planId: PlanId };
 
 interface ThreadDockUnpinsRecord {
-  readonly planDigests: ReadonlyArray<string>;
   readonly followUpPlanIds: ReadonlyArray<string>;
 }
 
-/** Per scoped thread key: the plan digests unpinned and the plan follow-ups dismissed. */
+/** Dismissed plan follow-ups per scoped thread key. */
 export type PinnedActionDockUnpins = Readonly<Record<string, ThreadDockUnpinsRecord>>;
 
 export interface PinnedActionDockInput {
   readonly threadKey: string;
   readonly approvals: ReadonlyArray<ThreadPendingApproval>;
   readonly userInputs: ReadonlyArray<ThreadPendingUserInput>;
-  readonly factoryPlans: ReadonlyArray<FactoryPlanTimelineItem>;
-  /** The thread's messages, where plan approvals are read from. */
-  readonly messages: ReadonlyArray<{ readonly role: string; readonly text: string }>;
   readonly planFollowUp: PinnedActionDockFollowUp | null;
   readonly unpins: PinnedActionDockUnpins;
 }
@@ -116,39 +90,16 @@ export function approvalLabel(kind: ProviderRequestKind): string {
   return APPROVAL_LABELS[kind] ?? "Approval";
 }
 
-const EMPTY_THREAD_UNPINS: ThreadDockUnpinsRecord = { planDigests: [], followUpPlanIds: [] };
+const EMPTY_THREAD_UNPINS: ThreadDockUnpinsRecord = { followUpPlanIds: [] };
 
 export function readThreadDockUnpins(
   unpins: PinnedActionDockUnpins,
   threadKey: string,
-): { readonly planDigests: ReadonlySet<string>; readonly followUpPlanIds: ReadonlySet<string> } {
+): { readonly followUpPlanIds: ReadonlySet<string> } {
   const record = unpins[threadKey] ?? EMPTY_THREAD_UNPINS;
   return {
-    planDigests: new Set(record.planDigests),
     followUpPlanIds: new Set(record.followUpPlanIds),
   };
-}
-
-function addUnpin(
-  unpins: PinnedActionDockUnpins,
-  threadKey: string,
-  field: keyof ThreadDockUnpinsRecord,
-  value: string,
-): PinnedActionDockUnpins {
-  const record = unpins[threadKey] ?? EMPTY_THREAD_UNPINS;
-  if (record[field].includes(value)) return unpins;
-  return {
-    ...unpins,
-    [threadKey]: { ...record, [field]: [...record[field], value].slice(-MAX_UNPINS_PER_THREAD) },
-  };
-}
-
-export function unpinFactoryPlan(
-  unpins: PinnedActionDockUnpins,
-  threadKey: string,
-  digest: string,
-): PinnedActionDockUnpins {
-  return addUnpin(unpins, threadKey, "planDigests", digest);
 }
 
 export function dismissPlanFollowUp(
@@ -156,7 +107,16 @@ export function dismissPlanFollowUp(
   threadKey: string,
   planId: PlanId,
 ): PinnedActionDockUnpins {
-  return addUnpin(unpins, threadKey, "followUpPlanIds", planId);
+  const record = unpins[threadKey] ?? EMPTY_THREAD_UNPINS;
+  if (record.followUpPlanIds.includes(planId)) return unpins;
+  return {
+    ...unpins,
+    [threadKey]: {
+      followUpPlanIds: [...record.followUpPlanIds, planId].slice(
+        -MAX_FOLLOW_UP_DISMISSALS_PER_THREAD,
+      ),
+    },
+  };
 }
 
 const stringsOf = (value: unknown): string[] =>
@@ -168,9 +128,8 @@ export function parsePinnedActionDockUnpins(value: unknown): PinnedActionDockUnp
   const unpins: Record<string, ThreadDockUnpinsRecord> = {};
   for (const [threadKey, record] of Object.entries(value)) {
     if (record === null || typeof record !== "object") continue;
-    const { planDigests, followUpPlanIds } = record as Record<string, unknown>;
+    const { followUpPlanIds } = record as Record<string, unknown>;
     unpins[threadKey] = {
-      planDigests: stringsOf(planDigests),
       followUpPlanIds: stringsOf(followUpPlanIds),
     };
   }
@@ -182,38 +141,6 @@ const time = (iso: string) => {
   return Number.isNaN(parsed) ? 0 : parsed;
 };
 
-// A plan file keeps one card, anchored where it was first presented; a revision moves only its
-// presentation time. So "newest" reads the presentation, and the anchor breaks ties.
-const presentedLater = (left: FactoryPlanTimelineItem, right: FactoryPlanTimelineItem) =>
-  time(left.plan.presentedAt) - time(right.plan.presentedAt) ||
-  time(left.createdAt) - time(right.createdAt);
-
-/** The newest plan presentation pins, and only while it is unapproved and not unpinned. */
-function pinnedPlanItem(
-  input: PinnedActionDockInput,
-  unpinnedDigests: ReadonlySet<string>,
-): PinnedActionDockItem | null {
-  let newest: FactoryPlanTimelineItem | null = null;
-  for (const item of input.factoryPlans) {
-    if (newest === null || presentedLater(item, newest) >= 0) newest = item;
-  }
-  if (newest === null || unpinnedDigests.has(newest.plan.digest)) return null;
-  const approval = resolvePlanApprovalState(findPlanApprovals(input.messages), newest.plan);
-  if (approval.kind === "approved") return null;
-  const summary = summarizeFactoryPlanCard(newest.plan);
-  return {
-    kind: "plan",
-    key: `plan:${newest.id}`,
-    createdAt: newest.plan.presentedAt,
-    closeLabel: `Unpin plan: ${summary.title}`,
-    digest: newest.plan.digest,
-    planId: newest.id,
-    plan: newest.plan,
-    title: summary.title,
-    phaseCountLabel: summary.phaseCountLabel,
-  };
-}
-
 function questionTitle(request: ThreadPendingUserInput): string {
   const first = request.questions[0];
   if (first === undefined) return "Question from the agent";
@@ -221,7 +148,7 @@ function questionTitle(request: ThreadPendingUserInput): string {
   return request.questions.length > 1 ? `${line} (+${request.questions.length - 1} more)` : line;
 }
 
-/** Everything that waits on the developer in one thread, newest first. */
+/** Pending dock actions in one thread, newest first. */
 export function derivePinnedActionDockItems(
   input: PinnedActionDockInput,
 ): ReadonlyArray<PinnedActionDockItem> {
@@ -249,8 +176,6 @@ export function derivePinnedActionDockItems(
       title,
     });
   }
-  const plan = pinnedPlanItem(input, unpins.planDigests);
-  if (plan !== null) items.push(plan);
   const followUp = input.planFollowUp;
   if (followUp !== null && !unpins.followUpPlanIds.has(followUp.id)) {
     items.push({
@@ -304,8 +229,6 @@ export function pinnedActionDockCloseAction(
               item.request.questions.map((question) => [question.id, DISMISSED_QUESTION_ANSWER]),
             ),
           };
-    case "plan":
-      return { type: "unpin-plan", digest: item.digest };
     case "plan-follow-up":
       return { type: "dismiss-plan-follow-up", planId: item.planId };
   }

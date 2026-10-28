@@ -1,7 +1,4 @@
-// Thread attention phase 6, criteria 1, 2 and 7: the pinned Factory plan card, mounted as
-// `FactoryPlanApproval.browser.test.tsx` mounts it, with `threadEnvironment.startTurn` as a spy. It
-// covers what only a browser shows: the dock at any scroll position and width, the composer input
-// left uncovered, and the unpin surviving a remount from the same browser storage.
+// Real ChatView fence for pending cards and the composer dock.
 import "~/index.css";
 import { type ReactNode } from "react";
 import {
@@ -31,7 +28,6 @@ import {
   type ThreadAgentSignal,
 } from "@t3tools/contracts";
 import {
-  FACTORY_DEFAULT_TEST_ROUTES,
   FACTORY_PLAN_DIGEST,
   makeFactoryCardTurnItem,
   makeFactoryPlanPayload,
@@ -249,7 +245,6 @@ const threadId = ThreadId.make("pinned-dock-thread");
 const now = "2026-10-24T10:00:00.000Z";
 const PLAN_TITLE = "Plan: the Software Factory inside Mesura Code";
 const PLAN_MARKDOWN = `# ${PLAN_TITLE}\n\n## Context\n\nThe developer builds with the factory from a thread.\n`;
-const UNPIN_LABEL = `Unpin plan: ${PLAN_TITLE}`;
 const DESKTOP = { width: 1280, height: 800 };
 // Playwright's `devices['Pixel 7']` viewport.
 const PIXEL_7 = { width: 412, height: 839 };
@@ -437,6 +432,11 @@ async function setupDockFixture(
   } = {},
 ) {
   await using resources = new AsyncDisposableStack();
+  const previousPanels = useRightPanelStore.getState();
+  useRightPanelStore.setState(useRightPanelStore.getInitialState(), true);
+  resources.defer(() => {
+    useRightPanelStore.setState(previousPanels, true);
+  });
   const previousViewport = { width: window.innerWidth, height: window.innerHeight };
   resources.defer(() => page.viewport(previousViewport.width, previousViewport.height));
   await page.viewport(viewport.width, viewport.height);
@@ -560,23 +560,6 @@ function dock(container: HTMLElement): HTMLElement | null {
   return container.querySelector<HTMLElement>('[role="region"][aria-label="Pending actions"]');
 }
 
-/** The dock's pinned plan card: the dock entry that names the plan. */
-function pinnedPlanCard(container: HTMLElement): HTMLElement | null {
-  const region = dock(container);
-  if (region === null) return null;
-  const unpin = region.querySelector<HTMLElement>(`button[aria-label="${UNPIN_LABEL}"]`);
-  return unpin?.closest<HTMLElement>("[data-pinned-action-dock-item]") ?? null;
-}
-
-function requirePinnedPlanCard(container: HTMLElement): HTMLElement {
-  const card = pinnedPlanCard(container);
-  expect(
-    card,
-    `Expected a pinned plan card in the Pending actions dock; dock: ${dock(container)?.outerHTML ?? "none"}`,
-  ).not.toBeNull();
-  return card!;
-}
-
 /** The dock's X whose accessible name starts with `prefix` and names `subject`. */
 function dockCloseButton(container: HTMLElement, prefix: string, subject: string) {
   const region = dock(container);
@@ -664,47 +647,150 @@ function sentApproval() {
   return readFactoryApprovalMessage(sent.input.message.text);
 }
 
-it("phase6 dock browser guard the long fixture thread scrolls the timeline card out of view", async () => {
-  await using _fixture = await setupDockFixture();
-  await using screen = await mountApp();
-  const scroller = await vi.waitFor(() => timelineScroller(screen.container));
-  expect(scroller.scrollHeight - scroller.clientHeight).toBeGreaterThan(scroller.clientHeight);
-  await scrollTimeline(screen.container, "end");
-  expect(inViewport(timelinePlanRow(screen.container))).toBe(false);
-});
-
 const WIDTHS = [
   { name: "desktop", viewport: DESKTOP },
   { name: "Pixel 7", viewport: PIXEL_7 },
 ] as const;
 
+function timelineRows(container: HTMLElement) {
+  return [...container.querySelectorAll<HTMLElement>("[data-timeline-row]")];
+}
+
+async function refreshThread() {
+  await act(async () => {
+    fixture.turnItems = [...fixture.turnItems];
+    for (const listener of fixture.threadListeners) listener();
+  });
+}
+
 it.each(WIDTHS)(
-  "phase6 dock browser AC1 keeps the pinned plan card on screen at the end and the top of the timeline at $name width",
+  "keeps the full plan and pending questions last through messages and restores their chronological positions at $name width",
   async ({ viewport }) => {
-    await using _fixture = await setupDockFixture(viewport);
+    await using _fixture = await setupDockFixture(viewport, { pending: true });
     await using screen = await mountApp();
-    for (const position of ["end", "top"] as const) {
-      await scrollTimeline(screen.container, position);
-      await vi.waitFor(() => {
-        const card = requirePinnedPlanCard(screen.container);
-        expect(inViewport(card), `pinned plan card on screen at the ${position}`).toBe(true);
-      });
-    }
-    const card = requirePinnedPlanCard(screen.container);
-    expect(card.textContent).toContain(PLAN_TITLE);
-    expect(card.textContent).toContain("2 phases");
-    expect(buttonNamed(card, "Open")).toBeDefined();
-    expect(buttonNamed(card, "Approve")?.disabled).toBe(false);
-    expect(buttonNamed(card, UNPIN_LABEL)).toBeDefined();
+    const plan = timelinePlanRow(screen.container);
+    const planId = plan.dataset.timelineRow!;
+    const pendingIds = () =>
+      timelineRows(screen.container)
+        .slice(-3)
+        .map((row) =>
+          row.querySelector("[data-timeline-row-kind]")?.getAttribute("data-timeline-row-kind"),
+        );
+    await vi.waitFor(() =>
+      expect(pendingIds()).toEqual(["factory-plan", "pending-user-input", "pending-user-input"]),
+    );
+    expect(
+      dockItems(screen.container).map((item) => item.dataset.pinnedActionDockItem),
+    ).not.toContain("plan");
+    expect(plan.textContent).toContain("The developer builds with the factory from a thread.");
+    expect(plan.querySelector('input[aria-label="Implementer budget"]')).not.toBeNull();
+    expect(plan.scrollWidth).toBeLessThanOrEqual(plan.clientWidth);
+    await typeTimelineBudget(screen.container, "40");
+    const question = screen.container.querySelector<HTMLElement>(
+      '[data-pending-user-input-request-id="pinned-dock-message-question"]',
+    )!;
+    const questionRow = question.closest<HTMLElement>("[data-timeline-row]")!;
+    const reply = makeFactoryMessageItem({
+      id: "after-pending",
+      threadId,
+      role: "assistant",
+      text: "A reply after the questions",
+      createdAt: "2026-10-24T10:06:00.000Z",
+    });
+    fixture.turnItems = [...fixture.turnItems, reply];
+    await refreshThread();
+    await vi.waitFor(() =>
+      expect(screen.container.textContent).toContain("A reply after the questions"),
+    );
+    expect(pendingIds()).toEqual(["factory-plan", "pending-user-input", "pending-user-input"]);
+    expect(timelinePlanRow(screen.container)).toBe(plan);
+    expect(question.closest("[data-timeline-row]")).toBe(questionRow);
+    expect(
+      plan.querySelector<HTMLInputElement>('input[aria-label="Implementer budget"]')?.value,
+    ).toBe("40");
+    await act(async () => buttonNamed(plan, "Approve")!.click());
+    await vi.waitFor(() => expect(fixture.startTurn).toHaveBeenCalledOnce());
+    const sent = fixture.startTurn.mock.calls[0]![0] as { input: { message: { text: string } } };
+    fixture.turnItems = [
+      ...fixture.turnItems,
+      makeFactoryMessageItem({
+        id: "approval-message",
+        threadId,
+        role: "user",
+        text: sent.input.message.text,
+        createdAt: "2026-10-24T10:07:00.000Z",
+      }),
+    ];
+    await refreshThread();
+    await vi.waitFor(() =>
+      expect(timelineRows(screen.container)[0]?.dataset.timelineRow).toBe(planId),
+    );
+    expect(timelinePlanRow(screen.container)).toBe(plan);
+    expect(plan.textContent).toContain("Approved");
+    expect(sentApproval().routes).toMatchObject({ implementer: { budgetUsd: 40 } });
+    const currentQuestion = screen.container.querySelector<HTMLElement>(
+      '[data-pending-user-input-request-id="pinned-dock-message-question"]',
+    )!;
+    const answer = currentQuestion.querySelector<HTMLTextAreaElement>("textarea")!;
+    await userEvent.fill(answer, "Update the user docs");
+    await act(async () => buttonNamed(currentQuestion, "Submit")!.click());
+    await vi.waitFor(() => expect(fixture.respondToUserInput).toHaveBeenCalledOnce());
+    fixture.projectionExtras = {
+      ...fixture.projectionExtras,
+      runtimeRequests: (fixture.projectionExtras.runtimeRequests ?? []).map((request) =>
+        request.id === "pinned-dock-message-question"
+          ? {
+              ...request,
+              status: "resolved",
+              resolvedAt: DateTime.makeUnsafe("2026-10-24T10:08:00.000Z"),
+            }
+          : request,
+      ),
+    };
+    fixture.turnItems = fixture.turnItems.map((item) =>
+      item.type === "user_input_request" && item.requestId === "pinned-dock-message-question"
+        ? {
+            ...item,
+            questionAnswer: {
+              requestId: item.requestId,
+              questionTextById: { docs: MESSAGE_QUESTION },
+              answers: { docs: "Update the user docs" },
+              attachmentsByQuestionId: {},
+            },
+          }
+        : item,
+    );
+    await refreshThread();
+    await vi.waitFor(() =>
+      expect(
+        screen.container.querySelector(
+          '[data-pending-user-input-request-id="pinned-dock-message-question"]',
+        ),
+      ).toBeNull(),
+    );
+    const rows = timelineRows(screen.container);
+    expect(
+      rows
+        .at(-1)
+        ?.querySelector('[data-pending-user-input-request-id="pinned-dock-live-question"]'),
+    ).not.toBeNull();
+    const answeredIndex = rows.findIndex((row) =>
+      row.textContent?.includes("Update the user docs"),
+    );
+    const replyIndex = rows.findIndex((row) =>
+      row.textContent?.includes("A reply after the questions"),
+    );
+    expect(answeredIndex).toBeGreaterThan(0);
+    expect(answeredIndex).toBeLessThan(replyIndex);
   },
 );
 
 it.each(WIDTHS)(
-  "phase6 dock browser AC7 the dock never covers the composer input at $name width",
+  "the dock leaves the composer input accessible at $name width",
   async ({ viewport }) => {
-    await using _fixture = await setupDockFixture(viewport);
+    await using _fixture = await setupDockFixture(viewport, { pending: true });
     await using screen = await mountApp();
-    await vi.waitFor(() => requirePinnedPlanCard(screen.container));
+    await vi.waitFor(() => expect(dockItems(screen.container)).toHaveLength(3));
     const region = dock(screen.container)!;
     const editor = composerEditor(screen.container);
     const editorRect = editor.getBoundingClientRect();
@@ -718,84 +804,28 @@ it.each(WIDTHS)(
   },
 );
 
-it("phase6 dock browser AC1 the pinned Approve sends the same approval as the timeline card", async () => {
+it("ignores persisted plan unpins and retains the full plan", async () => {
   await using _fixture = await setupDockFixture();
-  await using screen = await mountApp();
-  await scrollTimeline(screen.container, "end");
-  const card = await vi.waitFor(() => requirePinnedPlanCard(screen.container));
-  await act(async () => buttonNamed(card, "Approve")!.click());
-  await vi.waitFor(() => expect(fixture.startTurn).toHaveBeenCalledOnce());
-  const message = sentApproval();
-  expect(message.firstLine).toBe(`Approve plan sha256:${FACTORY_PLAN_DIGEST}`);
-  expect(message.routes).toEqual(FACTORY_DEFAULT_TEST_ROUTES);
-});
-
-it("phase6 dock browser AC1 the pinned Open opens the same plan view as the timeline card", async () => {
-  await using _fixture = await setupDockFixture();
-  await using screen = await mountApp();
-  const initialPanels = useRightPanelStore.getState();
-  await act(async () => buttonNamed(timelinePlanRow(screen.container), "Open")!.click());
-  const fromTimeline = JSON.stringify(useRightPanelStore.getState());
-  await act(async () => useRightPanelStore.setState(initialPanels, true));
-  const card = await vi.waitFor(() => requirePinnedPlanCard(screen.container));
-  await act(async () => buttonNamed(card, "Open")!.click());
-  expect(JSON.stringify(useRightPanelStore.getState())).toBe(fromTimeline);
-  expect(fromTimeline).not.toBe(JSON.stringify(initialPanels));
-});
-
-it("phase6 dock browser AC2 the X unpins the plan card and the timeline card still approves", async () => {
-  await using _fixture = await setupDockFixture();
-  await using screen = await mountApp();
-  const card = await vi.waitFor(() => requirePinnedPlanCard(screen.container));
-  await act(async () => buttonNamed(card, UNPIN_LABEL)!.click());
-  await vi.waitFor(() => expect(pinnedPlanCard(screen.container)).toBeNull());
-  expect(fixture.startTurn).not.toHaveBeenCalled();
-  const timelineApprove = buttonNamed(timelinePlanRow(screen.container), "Approve");
-  expect(timelineApprove?.disabled).toBe(false);
-  await act(async () => timelineApprove!.click());
-  await vi.waitFor(() => expect(fixture.startTurn).toHaveBeenCalledOnce());
-  expect(sentApproval().firstLine).toBe(`Approve plan sha256:${FACTORY_PLAN_DIGEST}`);
-});
-
-it("phase6 dock browser AC2 an unpinned plan card stays unpinned after a reload", async () => {
-  await using _fixture = await setupDockFixture();
-  {
-    await using screen = await mountApp();
-    const card = await vi.waitFor(() => requirePinnedPlanCard(screen.container));
-    await act(async () => buttonNamed(card, UNPIN_LABEL)!.click());
-    await vi.waitFor(() => expect(pinnedPlanCard(screen.container)).toBeNull());
-  }
-  // A reload: the in-memory store is gone and only browser storage remains. Clearing memory
-  // writes through to storage, so the stored value is put back before rehydrating from it.
-  const storageKey = usePinnedActionDockStore.persist.getOptions().name!;
-  const stored = localStorage.getItem(storageKey);
-  expect(stored, "Expected the unpin in browser storage").not.toBeNull();
-  usePinnedActionDockStore.setState({ unpins: {} });
-  localStorage.setItem(storageKey, stored!);
+  localStorage.setItem(
+    usePinnedActionDockStore.persist.getOptions().name!,
+    JSON.stringify({
+      version: 1,
+      state: { unpins: { legacy: { planDigests: [FACTORY_PLAN_DIGEST], followUpPlanIds: [] } } },
+    }),
+  );
   await usePinnedActionDockStore.persist.rehydrate();
-  await using reloaded = await mountApp();
-  // The timeline card is back, so the thread rendered; the dock still leaves the plan out.
-  timelinePlanRow(reloaded.container);
-  expect(pinnedPlanCard(reloaded.container)).toBeNull();
+  await using screen = await mountApp();
+  expect(timelineRows(screen.container).at(-1)).toBe(timelinePlanRow(screen.container));
+  expect(dock(screen.container)).toBeNull();
+  expect(usePinnedActionDockStore.getState().unpins).toEqual({ legacy: { followUpPlanIds: [] } });
 });
 
-it("phase6 dock browser AC7 the X is a focusable button that a keyboard press closes", async () => {
-  await using _fixture = await setupDockFixture(PIXEL_7);
+it("the full plan Open opens its Factory pane", async () => {
+  await using _fixture = await setupDockFixture();
   await using screen = await mountApp();
-  const card = await vi.waitFor(() => requirePinnedPlanCard(screen.container));
-  const unpin = buttonNamed(card, UNPIN_LABEL)!;
-  expect(unpin.tagName).toBe("BUTTON");
-  expect(unpin.tabIndex).toBeGreaterThanOrEqual(0);
-  // Touch-sized: at least 24 CSS px in each direction (WCAG 2.2 target size).
-  const rect = unpin.getBoundingClientRect();
-  expect(Math.min(rect.width, rect.height)).toBeGreaterThanOrEqual(24);
-  unpin.focus();
-  expect(document.activeElement).toBe(unpin);
-  await userEvent.keyboard("{Escape}");
-  expect(pinnedPlanCard(screen.container)).not.toBeNull();
-  unpin.focus();
-  await userEvent.keyboard("{Enter}");
-  await vi.waitFor(() => expect(pinnedPlanCard(screen.container)).toBeNull());
+  const initial = JSON.stringify(useRightPanelStore.getState());
+  await act(async () => buttonNamed(timelinePlanRow(screen.container), "Open")!.click());
+  expect(JSON.stringify(useRightPanelStore.getState())).not.toBe(initial);
 });
 
 it("phase6 dock browser AC3 the X on a question the provider does not mark dismissible answers it as dismissed", async () => {
@@ -838,11 +868,11 @@ it("phase6 dock browser AC4 the X on an approval declines it", async () => {
   });
 });
 
-it("the agent signal stays outside the pinned dock and its timeline X clears it", async () => {
+it("the ready-to-close line stays outside the pinned dock and its timeline X clears it", async () => {
   await using _fixture = await setupDockFixture(DESKTOP, {
     agentSignal: {
-      kind: "needs_input",
-      note: "Pick the migration order",
+      kind: "ready_to_close",
+      note: null,
       runId: null,
       setAt: "2026-10-24T10:04:00.000Z",
     },
@@ -850,7 +880,7 @@ it("the agent signal stays outside the pinned dock and its timeline X clears it"
   await using screen = await mountApp();
   const item = screen.container.querySelector<HTMLElement>("[data-thread-agent-signal]")!;
   expect(item).not.toBeNull();
-  expect(item.textContent).toContain("Pick the migration order");
+  expect(item.textContent).toContain("The agent thinks this thread is ready to close.");
   await scrollTimeline(screen.container, "top");
   const scroller = timelineScroller(screen.container);
   expect(scroller.contains(item)).toBe(true);
@@ -875,21 +905,20 @@ it("the agent signal stays outside the pinned dock and its timeline X clears it"
 it("phase6 dock browser AC6 at Pixel 7 width the dock expands the two newest items and keeps the input on screen", async () => {
   await using _fixture = await setupDockFixture(PIXEL_7, { pending: true });
   await using screen = await mountApp();
-  // Newest first: the message question, the live question, the approval, then the plan.
-  await vi.waitFor(() => expect(dockItems(screen.container)).toHaveLength(4));
+  // Newest first: the message question, the live question, then the approval.
+  await vi.waitFor(() => expect(dockItems(screen.container)).toHaveLength(3));
   const items = dockItems(screen.container);
   expect(items.map((entry) => entry.dataset.pinnedActionDockItem)).toEqual([
     "question",
     "question",
     "approval",
-    "plan",
   ]);
-  expect(items.map((entry) => entry.dataset.expanded)).toEqual(["true", "true", "false", "false"]);
-  const collapsed = items[3]!;
+  expect(items.map((entry) => entry.dataset.expanded)).toEqual(["true", "true", "false"]);
+  const collapsed = items[2]!;
   expect(collapsed.getBoundingClientRect().height).toBeLessThanOrEqual(48);
   // A tap expands a collapsed item; the phone limit of two still holds.
   await userEvent.click(collapsed.querySelector<HTMLElement>("[data-pinned-action-dock-expand]")!);
-  await vi.waitFor(() => expect(dockItems(screen.container)[3]!.dataset.expanded).toBe("true"));
+  await vi.waitFor(() => expect(dockItems(screen.container)[2]!.dataset.expanded).toBe("true"));
   expect(
     dockItems(screen.container).filter((entry) => entry.dataset.expanded === "true"),
   ).toHaveLength(2);
@@ -962,58 +991,27 @@ it("phase6 dock browser AC3 a question's Answer scrolls its inline card into vie
   expect(fixture.respondToUserInput).not.toHaveBeenCalled();
 });
 
-it("phase6 dock browser P1-2 edited routes survive the timeline card leaving the list and the dock plan collapsing", async () => {
+it("retains route edits and the pending Approve state while the full card leaves the virtualized list", async () => {
   await using _fixture = await setupDockFixture(PIXEL_7, { pending: true });
   await using screen = await mountApp();
-  await vi.waitFor(() => expect(dockItems(screen.container)).toHaveLength(4));
   await typeTimelineBudget(screen.container, "40");
-  // Expand the plan, so its body mounts, then drop the timeline card from the list.
-  await userEvent.click(
-    dockItem(screen.container, "plan").querySelector<HTMLElement>(
-      "[data-pinned-action-dock-expand]",
-    )!,
-  );
-  await vi.waitFor(() => expect(dockItem(screen.container, "plan").dataset.expanded).toBe("true"));
   await virtualizeOutTimelinePlanRow(screen.container);
-  // Expanding the approval collapses the plan at phone width, unmounting its body.
-  await userEvent.click(
-    dockItem(screen.container, "approval").querySelector<HTMLElement>(
-      "[data-pinned-action-dock-expand]",
-    )!,
-  );
-  await vi.waitFor(() => expect(dockItem(screen.container, "plan").dataset.expanded).toBe("false"));
-  await userEvent.click(
-    dockItem(screen.container, "plan").querySelector<HTMLElement>(
-      "[data-pinned-action-dock-expand]",
-    )!,
-  );
-  const plan = await vi.waitFor(() => {
-    const entry = dockItem(screen.container, "plan");
-    expect(entry.dataset.expanded).toBe("true");
-    return entry;
-  });
-  await act(async () => buttonNamed(plan, "Approve")!.click());
+  fixture.hiddenRows.clear();
+  await refreshThread();
+  let card = await vi.waitFor(() => timelinePlanRow(screen.container));
+  expect(
+    card.querySelector<HTMLInputElement>('input[aria-label="Implementer budget"]')?.value,
+  ).toBe("40");
+  await act(async () => buttonNamed(card, "Approve")!.click());
   await vi.waitFor(() => expect(fixture.startTurn).toHaveBeenCalledOnce());
-  expect(sentApproval().routes).toMatchObject({ implementer: { budgetUsd: 40 } });
-});
-
-it("phase6 dock browser P1-3 the timeline and dock Approve send one approval between them", async () => {
-  await using _fixture = await setupDockFixture();
-  let release: (value: { _tag: string; value: undefined }) => void = () => undefined;
-  fixture.startTurn.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        release = resolve;
-      }),
-  );
-  await using screen = await mountApp();
-  const card = await vi.waitFor(() => requirePinnedPlanCard(screen.container));
-  await act(async () => buttonNamed(timelinePlanRow(screen.container), "Approve")!.click());
-  expect(fixture.startTurn).toHaveBeenCalledOnce();
-  await vi.waitFor(() => expect(buttonNamed(card, "Approve")?.disabled).toBe(true));
+  await virtualizeOutTimelinePlanRow(screen.container);
+  fixture.hiddenRows.clear();
+  await refreshThread();
+  card = await vi.waitFor(() => timelinePlanRow(screen.container));
+  expect(buttonNamed(card, "Approve")?.disabled).toBe(true);
   await act(async () => buttonNamed(card, "Approve")!.click());
   expect(fixture.startTurn).toHaveBeenCalledOnce();
-  await act(async () => release({ _tag: "Success", value: undefined }));
+  expect(sentApproval().routes).toMatchObject({ implementer: { budgetUsd: 40 } });
 });
 
 it("phase6 dock browser P1-4 the X dismisses a question whose draft still prepares an attachment", async () => {
