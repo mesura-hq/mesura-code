@@ -97,13 +97,15 @@ export function createHyprlandWidgetRules(input: {
   readonly enabled: boolean;
   /** Applies the rules once per process; never rejects, and logs what fails. */
   readonly apply: () => Promise<void>;
+  /** Sends the rules again, with the monitors read again: a config reload dropped them. */
+  readonly reapply: () => Promise<void>;
 } {
   const enabled = isHyprlandSession(input.env);
   let applied: Promise<void> | null = null;
 
   const run = async () => {
-    // Read once per process: a monitor connected later gets the base rule's plain margin, and
-    // a bottom bar that starts or resizes later keeps the value read here.
+    // Read on each apply: until the next config reload, a monitor connected later gets the base
+    // rule's plain margin, and a bottom bar that starts or resizes later keeps this value.
     let monitors: ReadonlyArray<WidgetMonitor> = [];
     try {
       const output = await input.execute("hyprctl", ["-j", "monitors"]);
@@ -124,5 +126,10 @@ export function createHyprlandWidgetRules(input: {
     return applied;
   };
 
-  return { enabled, apply };
+  const reapply = () => {
+    applied = null;
+    return apply();
+  };
+
+  return { enabled, apply, reapply };
 }
