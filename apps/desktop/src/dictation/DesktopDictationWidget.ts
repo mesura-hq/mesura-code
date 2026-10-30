@@ -32,6 +32,7 @@ import {
 import { resolveDictationLauncher } from "./dictationLauncher.ts";
 import { createDictationSessionKeys } from "./dictationSessionKeys.ts";
 import { executeHyprctl } from "./hyprctl.ts";
+import { watchHyprlandConfigReloads } from "./hyprlandConfigReloads.ts";
 import { createHyprlandSessionBinds, resolveCommandPath } from "./hyprlandSessionBinds.ts";
 import { createHyprlandWidgetRules } from "./hyprlandWidgetRules.ts";
 
@@ -87,6 +88,27 @@ export const make = Effect.gen(function* () {
         }),
       ),
   });
+
+  if (widgetRules.enabled) {
+    yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        watchHyprlandConfigReloads({
+          env: process.env,
+          onReload: () => void widgetRules.reapply(),
+          onError: (cause) =>
+            runFork(
+              logWarning(
+                "the Hyprland event socket closed; a config reload drops the widget rules",
+                {
+                  message: causeMessage(cause),
+                },
+              ),
+            ),
+        }),
+      ),
+      (stop) => Effect.sync(stop),
+    );
+  }
 
   const widgetUrl = `${getDesktopUrl(environment.isDevelopment)}${WIDGET_PAGE_QUERY}`;
   const widget = createDictationWidgetWindow({
