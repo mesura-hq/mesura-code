@@ -602,7 +602,9 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
     />
   ) : null;
   const agentSignalEnd =
-    activeAgentSignal && !isWorking && activeThreadShell?.source.activeRunId == null ? (
+    activeAgentSignal?.kind === "ready_to_close" &&
+    !isWorking &&
+    activeThreadShell?.source.activeRunId == null ? (
       <ThreadAgentSignalEnd
         entry={{
           signal: activeAgentSignal,

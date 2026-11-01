@@ -151,7 +151,7 @@ export function useMesuraPendingThreadRequests(input: {
     return result;
   };
 
-  // One respond, shared by an answer and by the dock's dismissed answer; `describeFailure` words
+  // One respond, shared by an answer and by a dismissed answer; `describeFailure` words
   // the thread error for each.
   const sendUserInputResponse = async (
     requestId: RuntimeRequestId,
@@ -240,7 +240,7 @@ export function useMesuraPendingThreadRequests(input: {
     );
   };
 
-  // Mesura: the dock's X on a question the provider cannot dismiss. It answers "dismissed"
+  // Mesura: the inline card's X on a question the provider cannot dismiss. It answers "dismissed"
   // through the same respond, without the draft's attachments, which the developer chose not to
   // send; one still preparing or failed therefore cannot hold the question open.
   const onDismissWithAnswer = async (

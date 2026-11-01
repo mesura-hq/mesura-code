@@ -2,9 +2,11 @@
 // format byte by byte.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, expect, it } from "@effect/vitest";
+import { ImportedCookie } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as PlatformError from "effect/PlatformError";
+import * as Schema from "effect/Schema";
 
 import {
   isPermissionDenied,
@@ -14,6 +16,7 @@ import {
   SafariCookieReadError,
 } from "./SafariCookies.ts";
 
+const decodeImportedCookies = Schema.decodeUnknownSync(Schema.Array(ImportedCookie));
 const APPLE_EPOCH_OFFSET_SECONDS = 978_307_200;
 
 interface FixtureCookie {
@@ -123,6 +126,24 @@ describe("parseBinaryCookies", () => {
         sameSite: "lax",
       },
     ]);
+  });
+
+  it("Safari cookies decode as the shared ImportedCookie contract", () => {
+    const cookies = parseBinaryCookies(
+      encodeBinaryCookies([
+        { domain: ".apple.com", name: "domain", path: "/", value: "a", flags: 0x5, expiry: 8e8 },
+        {
+          domain: "example.test",
+          name: "host-only",
+          path: "/app",
+          value: "v",
+          flags: 0,
+          expiry: 0,
+        },
+      ]),
+    );
+    expect(cookies).toHaveLength(2);
+    expect(decodeImportedCookies(cookies)).toEqual(cookies);
   });
 
   it("keeps __Host- cookies host-only so Electron accepts them", () => {

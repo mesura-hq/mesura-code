@@ -1573,7 +1573,12 @@ function pendingRuntimeRequestSummary(
 function secretRequestAsPendingInput(
   item: OrchestrationV2TurnItem | null,
 ): OrchestrationV2PendingRuntimeRequestSummary | null {
-  if ((item?.type !== "secret_request" && item?.type !== "link_request") || item.nodeId === null)
+  if (
+    (item?.type !== "secret_request" &&
+      item?.type !== "link_request" &&
+      item?.type !== "browser_takeover_request") ||
+    item.nodeId === null
+  )
     return null;
   return {
     id: RuntimeRequestId.make(item.id),
@@ -1589,7 +1594,9 @@ function secretRequestAsPendingInput(
  */
 const waitsOnUser = (item: OrchestrationV2TurnItem, liveRunIds: ReadonlySet<RunId>) =>
   item.type === "link_request" ||
-  (item.type === "secret_request" && item.runId !== null && liveRunIds.has(item.runId));
+  ((item.type === "secret_request" || item.type === "browser_takeover_request") &&
+    item.runId !== null &&
+    liveRunIds.has(item.runId));
 
 export function threadShellFromProjection(
   projection: OrchestrationV2ThreadProjection,
@@ -5950,7 +5957,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 WHERE r.thread_id = t.thread_id
                   AND r.status IN ('preparing', 'starting', 'running', 'waiting')
                   AND secret.thread_id = t.thread_id AND secret.run_id = r.run_id
-                  AND secret.type IN ('secret_request', 'link_request') AND secret.status = 'waiting'
+                  AND secret.type IN ('secret_request', 'link_request', 'browser_takeover_request')
+                  AND secret.status = 'waiting'
                 ORDER BY secret.updated_at DESC, secret.turn_item_id DESC
                 LIMIT 1
               ) AS pending_secret_request_payload_json,

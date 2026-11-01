@@ -25,6 +25,8 @@ export interface SidebarThreadAttention {
   readonly kind: SidebarThreadAttentionKind;
   readonly text: string;
   readonly emphasis: SidebarThreadAttentionEmphasis;
+  /** The agent's `needs_input` question is still open while it executes a later turn. */
+  readonly questionOpen?: true;
 }
 
 export interface SidebarThreadAttentionInput {
@@ -32,6 +34,8 @@ export interface SidebarThreadAttentionInput {
   readonly isUnread: boolean;
   readonly isWoke: boolean;
   readonly agentSignal: ThreadAgentSignal | null | undefined;
+  /** The agent is executing a turn (`threadRuntimeIsExecuting`), not waiting on background work. */
+  readonly agentExecuting: boolean;
   readonly factoryRun: FactoryRunShellSummary | null | undefined;
   /** A provider goal in progress reads `Goal` instead of `Working`. */
   readonly goalActive?: boolean;
@@ -49,10 +53,11 @@ export function resolveSidebarThreadAttention(
   input: SidebarThreadAttentionInput,
 ): SidebarThreadAttention | null {
   const { status, agentSignal, factoryRun } = input;
+  const agentQuestionOpen = agentSignal?.kind === "needs_input";
   if (status === "approval") return { kind: "approval", text: "Approval", emphasis: "loud" };
   if (
     status === "input" ||
-    agentSignal?.kind === "needs_input" ||
+    (agentQuestionOpen && !input.agentExecuting) ||
     (factoryRun != null && FACTORY_NEEDS_INPUT_STATUSES.has(factoryRun.status))
   ) {
     return NEEDS_INPUT;
@@ -60,13 +65,23 @@ export function resolveSidebarThreadAttention(
   if (status === "request") return { kind: "request", text: "Request", emphasis: "loud" };
   if (status === "failed") return { kind: "failed", text: "Failed", emphasis: "loud" };
   if (status === "limited") return { kind: "limited", text: "Limited", emphasis: "loud" };
+  const busy = (attention: SidebarThreadAttention): SidebarThreadAttention =>
+    agentQuestionOpen ? { ...attention, questionOpen: true } : attention;
   if (factoryRun?.status === "running") {
-    return { kind: "factory", text: factoryRunShortLabel(factoryRun) ?? "", emphasis: "quiet" };
+    return busy({
+      kind: "factory",
+      text: factoryRunShortLabel(factoryRun) ?? "",
+      emphasis: "quiet",
+    });
   }
   if (status === "working") {
-    return { kind: "working", text: input.goalActive ? "Goal" : "Working", emphasis: "quiet" };
+    return busy({
+      kind: "working",
+      text: input.goalActive ? "Goal" : "Working",
+      emphasis: "quiet",
+    });
   }
-  if (status === "waiting") return { kind: "waiting", text: "Waiting", emphasis: "quiet" };
+  if (status === "waiting") return busy({ kind: "waiting", text: "Waiting", emphasis: "quiet" });
   if (input.isWoke) return { kind: "woke", text: "Woke", emphasis: "calm" };
   return input.isUnread ? { kind: "done", text: "Done", emphasis: "calm" } : null;
 }

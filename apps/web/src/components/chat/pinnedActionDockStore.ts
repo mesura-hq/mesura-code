@@ -6,23 +6,19 @@ import { resolveStorage } from "../../lib/storage";
 import {
   dismissPlanFollowUp,
   parsePinnedActionDockUnpins,
-  unpinFactoryPlan,
   type PinnedActionDockUnpins,
 } from "./pinnedActionDock.logic";
 
 interface PinnedActionDockStoreState {
   readonly unpins: PinnedActionDockUnpins;
-  readonly unpinPlan: (threadKey: string, digest: string) => void;
   readonly dismissFollowUp: (threadKey: string, planId: PlanId) => void;
 }
 
-/** Mesura: the dock's unpinned plans and dismissed follow-ups, kept across reloads per browser. */
+/** Dismissed plan follow-ups persist per browser. */
 export const usePinnedActionDockStore = create<PinnedActionDockStoreState>()(
   persist(
     (set) => ({
       unpins: {},
-      unpinPlan: (threadKey, digest) =>
-        set((state) => ({ unpins: unpinFactoryPlan(state.unpins, threadKey, digest) })),
       dismissFollowUp: (threadKey, planId) =>
         set((state) => ({ unpins: dismissPlanFollowUp(state.unpins, threadKey, planId) })),
     }),

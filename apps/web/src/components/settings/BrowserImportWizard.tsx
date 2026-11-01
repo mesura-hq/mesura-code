@@ -24,7 +24,7 @@ import {
   initialTargetSelection,
   canCloseWizard,
   isRetryableReason,
-  formatSkippedDomains,
+  formatImportResult,
   fullDiskAccessRecheckStep,
   outcomeToStep,
   refreshedSourceProfileDirectory,
@@ -43,6 +43,9 @@ interface BrowserImportWizardProps {
   readonly source: BrowserImportSource;
   readonly destinationEnvironmentName: string;
   readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
+  /** Empty when the environment has no server browser. */
+  readonly serverTargetProfiles: ReadonlyArray<WizardTargetProfile>;
+  readonly serverTargetNotice?: string | undefined;
   readonly canCreateProfile: boolean;
   readonly onImport: (input: {
     readonly sourceProfileDirectory: string;
@@ -58,6 +61,8 @@ export function BrowserImportWizard({
   source: initialSource,
   destinationEnvironmentName,
   targetProfiles,
+  serverTargetProfiles,
+  serverTargetNotice,
   canCreateProfile,
   onImport,
   onRefreshSource,
@@ -80,7 +85,12 @@ export function BrowserImportWizard({
 
   const runImport = () => {
     if (importInFlight.current) return;
-    const chosen = resolveWizardTarget(target, newProfileId.current, targetProfiles);
+    const chosen = resolveWizardTarget(
+      target,
+      newProfileId.current,
+      targetProfiles,
+      serverTargetProfiles,
+    );
     if (chosen === undefined) {
       setTargetError("That profile is no longer available. Choose where to import these cookies.");
       setStep({ step: "configure" });
@@ -159,6 +169,8 @@ export function BrowserImportWizard({
             source={source}
             destinationEnvironmentName={destinationEnvironmentName}
             targetProfiles={targetProfiles}
+            serverTargetProfiles={serverTargetProfiles}
+            serverTargetNotice={serverTargetNotice}
             canCreateProfile={canCreateProfile}
             sourceProfileDirectory={sourceProfileDirectory}
             onSourceProfileChange={setSourceProfileDirectory}
@@ -210,14 +222,12 @@ function cookieCountLabel(count: number | undefined): string | undefined {
   return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
 }
 
-function cookieResultCount(count: number): string {
-  return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
-}
-
 type ConfigureStepProps = {
   readonly source: BrowserImportSource;
   readonly destinationEnvironmentName: string;
   readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
+  readonly serverTargetProfiles: ReadonlyArray<WizardTargetProfile>;
+  readonly serverTargetNotice: string | undefined;
   readonly canCreateProfile: boolean;
   readonly sourceProfileDirectory: string;
   readonly onSourceProfileChange: (directory: string) => void;
@@ -318,6 +328,8 @@ function ConfigureStep({
   source,
   destinationEnvironmentName,
   targetProfiles,
+  serverTargetProfiles,
+  serverTargetNotice,
   canCreateProfile,
   sourceProfileDirectory,
   onSourceProfileChange,
@@ -328,8 +340,8 @@ function ConfigureStep({
   onImport,
 }: ConfigureStepProps) {
   const targetMissing =
-    target.kind === "existing" &&
-    !targetProfiles.some((profile) => profile.id === target.profileId);
+    target.kind !== "new" &&
+    resolveWizardTarget(target, "", targetProfiles, serverTargetProfiles) === undefined;
   const targetUncreatable = target.kind === "new" && !canCreateProfile;
   const targetFeedback =
     targetError ??
@@ -387,6 +399,18 @@ function ConfigureStep({
                 onSelect={() => onTargetChange({ kind: "existing", profileId: profile.id })}
               />
             ))}
+            {serverTargetProfiles.map((profile) => (
+              <SelectableTile
+                key={`server-${profile.id}`}
+                selected={target.kind === "server" && target.profileId === profile.id}
+                title={profile.name}
+                subtitle={`Server browser on ${destinationEnvironmentName}`}
+                onSelect={() => onTargetChange({ kind: "server", profileId: profile.id })}
+              />
+            ))}
+            {serverTargetNotice ? (
+              <p className="text-xs text-muted-foreground">{serverTargetNotice}</p>
+            ) : null}
           </section>
         </div>
         {targetFeedback ? (
@@ -500,44 +524,26 @@ function CheckingStep({
 }
 
 function DoneStep({
-  imported,
-  skipped,
-  skippedDomains,
-  targetName,
   destinationEnvironmentName,
   onClose,
-}: {
-  readonly imported: number;
-  readonly skipped: number;
-  readonly skippedDomains: ReadonlyArray<string>;
-  readonly targetName: string;
+  ...result
+}: Parameters<typeof formatImportResult>[0] & {
   readonly destinationEnvironmentName: string;
   readonly onClose: () => void;
 }) {
+  const summary = formatImportResult(result, destinationEnvironmentName);
   return (
     <>
       <DialogHeader>
-        <DialogTitle>
-          {imported > 0
-            ? `Imported ${cookieResultCount(imported)}`
-            : skipped > 0
-              ? `Skipped ${cookieResultCount(skipped)}`
-              : "No cookies found"}
-        </DialogTitle>
-        <DialogDescription>
-          {imported > 0
-            ? `Added to ${targetName} for ${destinationEnvironmentName}.${skipped > 0 ? ` ${cookieResultCount(skipped)} skipped.` : ""}`
-            : skipped > 0
-              ? `No cookies were imported for ${destinationEnvironmentName}.`
-              : `There were no cookies to import for ${destinationEnvironmentName}.`}
-        </DialogDescription>
+        <DialogTitle>{summary.title}</DialogTitle>
+        <DialogDescription>{summary.description}</DialogDescription>
       </DialogHeader>
-      {skippedDomains.length > 0 ? (
+      {summary.skippedDomains !== "" ? (
         <DialogPanel>
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Skipped
           </p>
-          <p className="mt-1 text-sm text-foreground">{formatSkippedDomains(skippedDomains)}</p>
+          <p className="mt-1 text-sm text-foreground">{summary.skippedDomains}</p>
         </DialogPanel>
       ) : null}
       <DialogFooter>

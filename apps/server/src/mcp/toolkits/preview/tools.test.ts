@@ -36,3 +36,10 @@ it("exports provider-compatible object schemas", () => {
     ).toBeDefined();
   }
 });
+
+it("preview_open tells agents the profile holds the operator's logins and that they never pay", () => {
+  const description = PreviewToolkit.tools.preview_open.description ?? "";
+  expect(description).toMatch(/operator'?s? logins/i);
+  expect(description).toMatch(/\bnever\b[^.]*\bbuy\b/i);
+  expect(description).toMatch(/\bnever\b[^.]*\bpay\b/i);
+});

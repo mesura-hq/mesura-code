@@ -24,6 +24,7 @@ export class SessionControl {
   private tail: Promise<unknown> = Promise.resolve();
   private pending: Promise<void> = Promise.resolve();
   private readonly handoff = new Set<Promise<void>>();
+  private readonly ownerWatchers = new Set<(owner: string | null) => void>();
   private owner: string | null = null;
   private epoch = 0;
   private closed = false;
@@ -71,6 +72,15 @@ export class SessionControl {
     this.owner = owner;
     this.epoch++;
     this.onGenerationChange();
+    for (const watcher of this.ownerWatchers) watcher(owner);
+  }
+
+  /** Calls `watcher` with each new controller, `null` when control returns; returns the stop. */
+  watchOwner(watcher: (owner: string | null) => void) {
+    this.ownerWatchers.add(watcher);
+    return () => {
+      this.ownerWatchers.delete(watcher);
+    };
   }
 
   private async action<A>(allowed: () => boolean, run: () => Promise<A>, deadlineMs?: number) {

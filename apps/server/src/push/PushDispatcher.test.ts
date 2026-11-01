@@ -4,7 +4,7 @@
  * `ServerEnvironment` are fakes. No sleeps: `flushSends` commits an approval on a barrier
  * thread, waits for its device, then drains; commit order puts every earlier send first.
  */
-import { DEFAULT_PUSH_PREFERENCES, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_PUSH_PREFERENCES, ThreadId, TurnItemId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -416,6 +416,70 @@ it.effect(
         const threadId = ThreadId.make("regression-v1-shell");
         yield* h.createThread(threadId, "Imported from v1", { historyOrigin: "v1_import" });
         assert.strictEqual((yield* h.shellOf(threadId))?.historyOrigin, "v1_import");
+      }),
+    ),
+);
+
+// Phase "ask the operator to take over a tab": cards recorded through the real
+// orchestrator with `dispatchCard`, the path the MCP tools take.
+const cardCommand = {
+  secret: (secretStatus: "pending" | "cancelled") => ({
+    type: "secret_request.record",
+    turnItemId: TurnItemId.make("card:takeover-guard-secret"),
+    label: "OPENAI_API_KEY",
+    reason: "The agent needs a key",
+    secretStatus,
+  }),
+  takeover: (takeoverStatus: "pending" | "done" | "declined" | "cancelled") => ({
+    type: "browser_takeover_request.record",
+    turnItemId: TurnItemId.make("card:takeover-ac2"),
+    tabId: "tab-login",
+    reason: "The bank asks for a 2FA code",
+    takeoverStatus,
+  }),
+};
+
+it.effect(
+  "takeover guard: a request_secret card recorded by the orchestrator waits for input, pushes once, and closes",
+  () =>
+    withHarness((h) =>
+      Effect.gen(function* () {
+        yield* h.subscribe(PHONE, DEFAULTS);
+        yield* h.startServer;
+        const threadId = ThreadId.make("takeover-guard-secret");
+        yield* h.createThread(threadId, "Needs a key");
+        yield* h.startRun(threadId);
+        assert.deepStrictEqual(yield* h.flushSends, []);
+        yield* h.dispatchCard(threadId, cardCommand.secret("pending"));
+        yield* h.expectPhase(threadId, "waiting_for_input");
+        assert.deepStrictEqual(endpointsOf(yield* h.flushSends), [PHONE]);
+        yield* h.dispatchCard(threadId, cardCommand.secret("cancelled"));
+        yield* h.expectPhase(threadId, "running");
+        assert.deepStrictEqual(yield* h.flushSends, []);
+      }),
+    ),
+);
+
+it.effect.each(["done", "declined", "cancelled"] as const)(
+  "takeover phase AC2: a pending browser takeover card waits for input and pushes once, then %s returns the thread to running",
+  (outcome) =>
+    withHarness((h) =>
+      Effect.gen(function* () {
+        yield* h.subscribe(PHONE, DEFAULTS);
+        yield* h.subscribe(TABLET, { ...NONE, approval: true });
+        yield* h.startServer;
+        const threadId = ThreadId.make(`takeover-ac2-${outcome}`);
+        yield* h.createThread(threadId, "Needs a login");
+        yield* h.startRun(threadId);
+        assert.deepStrictEqual(yield* h.flushSends, []);
+        yield* h.dispatchCard(threadId, cardCommand.takeover("pending"));
+        yield* h.expectPhase(threadId, "waiting_for_input");
+        const sent = yield* h.flushSends;
+        assert.deepStrictEqual(endpointsOf(sent), [PHONE], "input preference only");
+        assertAllFor(sent, threadId);
+        yield* h.dispatchCard(threadId, cardCommand.takeover(outcome));
+        yield* h.expectPhase(threadId, "running");
+        assert.deepStrictEqual(yield* h.flushSends, []);
       }),
     ),
 );

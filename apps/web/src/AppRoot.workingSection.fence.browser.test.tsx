@@ -585,6 +585,45 @@ describe("working section: place and order", () => {
     expect(sectionRowKeys(), "the next phase changes the label only").toEqual(before);
   });
 
+  // Mesura (2026-11-01): an agent asked, delegated two tasks and ended its turn; a task's wake-up
+  // turn then ran with the question still open, and the row read "Needs input" inside Working.
+  it("an agent's open question leaves Working once the agent stops executing", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const agentSignal = {
+      kind: "needs_input" as const,
+      note: "How do we upload the 545 MB RAR?",
+      runId: RunId.make("question-run"),
+      setAt: DateTime.formatIso(minutesAgo(4)),
+    };
+    const executing = { ...workingThread("question", "Question asked", 4) };
+    const withSignal = (shell: Shell, status: ShellSource["status"]) =>
+      makeFenceThreadShell({
+        id: shell.id,
+        environmentId,
+        projectId: ProjectId.make(ALPHA_PROJECT_ID),
+        title: shell.title,
+        createdAt: DateTime.formatIso(minutesAgo(64)),
+        overrides: { ...shell.source, agentSignal, status },
+      });
+    await mountWithThreads([withSignal(executing, "running")], { expanded: true });
+
+    expect(sectionRowKeys(), "the agent executes a later turn").toEqual([threadKey("question")]);
+    expect(rowCard("question").textContent).toContain("Working");
+    expect(rowCard("question").textContent).toContain("Question open");
+    const rowNames = [
+      ...document.querySelectorAll(`[data-thread-item="${threadKey("question")}"] [aria-label]`),
+    ].map((element) => element.getAttribute("aria-label") ?? "");
+    expect(
+      rowNames.find((name) => name.startsWith("Question asked")),
+      "the row's accessible name",
+    ).toContain("Question asked, Question open, Working");
+
+    await publish(withSignal(executing, "waiting"));
+
+    await vi.waitFor(() => expect(sectionRowKeys(), "only delegated work is left").toEqual([]));
+    expect(rowCard("question").textContent).toContain("Needs input");
+  });
+
   it("working section spec: the project filter applies to the section and its count", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await mountWithThreads(

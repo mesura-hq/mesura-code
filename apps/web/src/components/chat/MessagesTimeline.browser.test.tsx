@@ -1,3 +1,8 @@
+import { formatPlanApprovalMessage } from "@t3tools/client-runtime/factory/plan-approval";
+import {
+  FACTORY_DEFAULT_TEST_ROUTES,
+  makeFactoryPlanPayload,
+} from "@t3tools/client-runtime/factory/testing";
 import { AudioPreview } from "../files/AudioPreview";
 import { onTestFinished } from "vite-plus/test";
 import { stubGlobal } from "../../../test/render";
@@ -6,6 +11,7 @@ import {
   MessageId,
   RunAttemptId,
   RunId,
+  RuntimeRequestId,
   ScheduledTaskId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -853,7 +859,7 @@ it("renders automatic compaction as one live divider that finishes with its reas
   expect(container.textContent).not.toContain("Compacting before");
 });
 
-it.each(["needs_input", "ready_to_close"] as const)(
+it.each(["ready_to_close"] as const)(
   "keeps the %s signal after messages, work rows and other footer content",
   async (kind) => {
     setup();
@@ -926,7 +932,6 @@ it.each(["needs_input", "ready_to_close"] as const)(
       await click(screen.button("Settle"));
       expect(onSettle).toHaveBeenCalledOnce();
     } else {
-      expect(signal().textContent).toContain("Agent needs your input: Pick the migration order");
       expect(screen.buttons("Settle")).toHaveLength(0);
     }
     await screen.rerender(timeline(entries, { ...entry, actionsDisabled: true }));
@@ -940,7 +945,6 @@ it.each(["needs_input", "ready_to_close"] as const)(
       }),
     );
     expect(screen.buttons("Settle")).toHaveLength(0);
-    if (kind === "needs_input") expect(signal().textContent).toContain("Agent needs your input");
   },
 );
 
@@ -974,7 +978,7 @@ it("updates the signal footer without rendering the timeline rows again", async 
   await vi.waitFor(() => expect(screen.text()).toContain("html-2"));
   const initialRenders = renderHtmlRender.mock.calls.length;
   await screen.rerender(timeline(entry));
-  await expect.element(screen.getByText("Agent needs your input: Which scope?")).toBeVisible();
+  expect(screen.container.querySelector("[data-thread-agent-signal]")).toBeNull();
   expect(renderHtmlRender).toHaveBeenCalledTimes(initialRenders);
   await screen.rerender(
     timeline({ ...entry, signal: { ...entry.signal, kind: "ready_to_close" } }),
@@ -983,4 +987,104 @@ it("updates the signal footer without rendering the timeline rows again", async 
     .element(screen.getByText("The agent thinks this thread is ready to close."))
     .toBeVisible();
   expect(renderHtmlRender).toHaveBeenCalledTimes(initialRenders);
+});
+
+it("follows the end when new rows arrive before pending cards and a plan returns to its anchor", async () => {
+  setup();
+  const props = baseProps();
+  const payload = makeFactoryPlanPayload();
+  const plan: Entry = {
+    kind: "factory-plan",
+    id: "pending-plan",
+    createdAt: CREATED_AT,
+    factoryPlan: { kind: "plan", id: "pending-plan", createdAt: CREATED_AT, plan: payload },
+  };
+  const request = {
+    requestId: RuntimeRequestId.make("pending-question"),
+    createdAt: CREATED_AT,
+    dismissible: false,
+    responseCapability: "live" as const,
+    questions: [
+      { id: "scope", header: "Scope", question: "Which scope?", multiSelect: false, options: [] },
+    ],
+  };
+  const pendingUserInput = {
+    environmentId: ENVIRONMENT_ID,
+    threadId: ThreadId.make("pending-cards-thread"),
+    requests: [request],
+    supportsAttachments: false,
+    maxFileBytes: null,
+    unavailable: false,
+    respondingRequestIds: [],
+    onRespond: async () => true,
+    onDismiss: async () => true,
+    onDismissWithAnswer: async () => true,
+  };
+  const entries: Entry[] = [
+    plan,
+    ...Array.from({ length: 30 }, (_, index) =>
+      message(
+        `Reply ${index}\n\n${"A paragraph for the overflow.\n\n".repeat(8)}`,
+        { role: "assistant" },
+        `before-${index}`,
+      ),
+    ),
+  ];
+  const timeline = (nextEntries: Entry[], anchorMessageId: MessageId | null = null) => (
+    <MessagesTimeline
+      {...props}
+      timelineEntries={nextEntries}
+      anchorMessageId={anchorMessageId}
+      pendingUserInput={pendingUserInput}
+    />
+  );
+  await using screen = await renderElement(timeline(entries));
+  screen.container.style.height = "400px";
+  screen.container.style.width = "412px";
+  const list = () => props.listRef.current!;
+  const endIsVisible = () => {
+    const scroller = list().getScrollableNode()!;
+    expect(scroller.scrollHeight - scroller.clientHeight).toBeGreaterThan(0);
+    expect(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop).toBeLessThanOrEqual(
+      2,
+    );
+    expect(
+      list()
+        .getState()
+        .data.slice(-2)
+        .map((row) => row.kind),
+    ).toEqual(["factory-plan", "pending-user-input"]);
+  };
+  await vi.waitFor(endIsVisible);
+  const pendingCard = screen.container.querySelector(
+    '[data-pending-user-input-request-id="pending-question"]',
+  );
+  expect(pendingCard).not.toBeNull();
+  const appended = [
+    ...entries,
+    message("New message below the old chronological anchor", {}, "after-pending"),
+  ];
+  await screen.rerender(timeline(appended, MessageId.make("after-pending")));
+  await vi.waitFor(endIsVisible);
+  expect(
+    screen.container.querySelector('[data-pending-user-input-request-id="pending-question"]'),
+  ).toBe(pendingCard);
+  await screen.rerender(
+    timeline([
+      ...appended,
+      message(
+        formatPlanApprovalMessage({ ...payload, routes: FACTORY_DEFAULT_TEST_ROUTES }),
+        {},
+        "approval",
+      ),
+    ]),
+  );
+  await vi.waitFor(() => {
+    const scroller = list().getScrollableNode()!;
+    expect(list().getState().data[0]?.id).toBe("pending-plan");
+    expect(list().getState().data.at(-1)?.kind).toBe("pending-user-input");
+    expect(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop).toBeLessThanOrEqual(
+      2,
+    );
+  });
 });

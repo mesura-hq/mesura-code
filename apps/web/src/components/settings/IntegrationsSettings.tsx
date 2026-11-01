@@ -1,6 +1,11 @@
 import { DeviceHostUpdates } from "../device/DeviceHostUpdates";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
-import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+import {
+  useScopedSettings,
+  useScopedSettingsWriteAllowed,
+  useUpdateScopedSettings,
+} from "./useScopedSettings";
+import { useAtomValue } from "@effect/atom-react";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { DeviceHostsSettings } from "./DeviceHostsSettings";
 import { EasDeviceHostsSettings } from "./EasDeviceHostsSettings";
@@ -10,7 +15,6 @@ import { EasDeviceHostsSettings } from "./EasDeviceHostsSettings";
  */
 import {
   AuthSettingsWriteScope,
-  BrowserImportFailureReason,
   BROWSER_PROFILE_MAX_COUNT,
   type BrowserLinkTarget,
   type BrowserProfile,
@@ -105,6 +109,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   getClientSettings,
@@ -124,7 +129,17 @@ import {
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
-import type { ImportOutcome } from "./browserImportWizard.logic";
+import {
+  formatPaymentDomainsText,
+  importFailureReason,
+  importIntoServerProfile,
+  paymentDomainsPatch,
+  serverImportTargetNotice,
+  serverImportTargetProfiles,
+  type ImportOutcome,
+} from "./browserImportWizard.logic";
+
+export { importFailureReason };
 
 const FILL_VALUE = "fill";
 const RESPONSIVE_VALUE = "responsive";
@@ -180,22 +195,12 @@ const APPEARANCE_LABELS: Readonly<Record<PreviewAppearancePreference, string>> =
 
 const zoomLabel = (zoomFactor: number) => `${Math.round(zoomFactor * 100)}%`;
 
-/** IPC carries reason tokens inside messages; treat unknown tokens as read failures without exposing raw
- * text. */
 class ProfileLimitReachedError extends Error {
   constructor() {
     super("Browser profile limit reached.");
     this.name = "ProfileLimitReachedError";
   }
 }
-
-export const importFailureReason = (cause: unknown): BrowserImportFailureReason => {
-  const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
-  return (
-    BrowserImportFailureReason.literals.find((reason) => message.includes(`failed: ${reason}.`)) ??
-    "readFailed"
-  );
-};
 
 async function importBrowserCookiesIntoTarget(
   bridge: NonNullable<typeof previewBridge>,
@@ -1106,6 +1111,59 @@ function AgentBrowserAccessSetting() {
   );
 }
 
+function BrowserPaymentDomainsSetting() {
+  const { scope } = useSettingsScope();
+  const paymentDomains = useScopedSettings((settings) => settings.browserPaymentDomains);
+  const updateSettings = useUpdateScopedSettings();
+  const writeAllowed = useScopedSettingsWriteAllowed();
+  const shownText = formatPaymentDomainsText(paymentDomains);
+  const resetDomains = DEFAULT_SERVER_SETTINGS.browserPaymentDomains;
+  // SettingsRow inerts only its `control`; this textarea is a child, so it is disabled here.
+  const environmentWide = scope.kind === "project" || scope.kind === "checkout";
+  const editable = writeAllowed && !environmentWide;
+
+  return (
+    <SettingsRow
+      serverScoped
+      settingKeys={["browserPaymentDomains"]}
+      {...searchableSetting("browser-payment-domains")}
+      description="Cookies for these sites are never imported, and agents cannot open them. One domain per line; subdomains are included."
+      status={
+        environmentWide
+          ? "Environment-wide setting. Select an environment to change it."
+          : !writeAllowed
+            ? "This connection lacks permission to change settings."
+            : undefined
+      }
+      resetAction={
+        editable && paymentDomainsPatch(shownText, resetDomains) !== undefined ? (
+          <SettingResetButton
+            label="payment sites"
+            onClick={() => updateSettings({ browserPaymentDomains: resetDomains })}
+          />
+        ) : null
+      }
+    >
+      <div className="mt-3 max-w-md pb-3.5">
+        <Textarea
+          key={shownText}
+          aria-label="Payment sites"
+          autoCapitalize="none"
+          spellCheck={false}
+          rows={6}
+          disabled={!editable}
+          defaultValue={shownText}
+          placeholder="paypal.com"
+          onBlur={(event) => {
+            const patch = paymentDomainsPatch(event.target.value, paymentDomains);
+            if (editable && patch !== undefined) updateSettings(patch);
+          }}
+        />
+      </div>
+    </SettingsRow>
+  );
+}
+
 function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled: boolean }) {
   const autoShow = useClientSettings((settings) => settings.browserAutoShowFloatingPreview);
   const updateSettings = useUpdatePrimarySettings();
@@ -1161,6 +1219,13 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const runClearServerProfile = useAtomCommand(previewEnvironment.clearProfile, {
     reportFailure: false,
   });
+  const runImportServerCookies = useAtomCommand(previewEnvironment.importCookies, {
+    reportFailure: false,
+  });
+  // Imports always target the primary environment; see the Import from menu.
+  const canImportToServer = useAtomValue(
+    previewEnvironment.importCookies.permissionAtom(primaryEnvironment?.environmentId ?? null),
+  );
   const serverProfileData: ServerProfileData = {
     environmentIds: environments
       .map((environment) => environment.environmentId)
@@ -1300,12 +1365,27 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     if (importInFlightRef.current) return { kind: "blocked", reason: "readFailed" };
     importInFlightRef.current = true;
     setImportInFlight(true);
-    return importBrowserCookiesIntoTarget(previewBridge, source, environmentId, input).finally(
-      () => {
-        importInFlightRef.current = false;
-        setImportInFlight(false);
-      },
-    );
+    const bridge = previewBridge;
+    const target = input.target;
+    const importing =
+      target.kind === "server"
+        ? importIntoServerProfile(
+            {
+              canImport: () => canImportToServer,
+              readCookies: (readInput) => bridge.readBrowserCookies(readInput),
+              importCookies: async (importInput) => {
+                const result = await runImportServerCookies({ environmentId, input: importInput });
+                if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+                return result.value;
+              },
+            },
+            { sourceId: source.id, sourceProfileDirectory: input.sourceProfileDirectory, target },
+          )
+        : importBrowserCookiesIntoTarget(bridge, source, environmentId, input);
+    return importing.finally(() => {
+      importInFlightRef.current = false;
+      setImportInFlight(false);
+    });
   };
 
   const refreshImportSource = async (
@@ -1322,6 +1402,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   };
 
   const atProfileLimit = userProfiles.length >= BROWSER_PROFILE_MAX_COUNT;
+  const importSessionHasServerBrowser =
+    importSession !== null &&
+    serverProfileData.environmentIds.includes(importSession.environmentId);
 
   return (
     <SettingsRow
@@ -1574,6 +1657,14 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           source={importSession.source}
           destinationEnvironmentName={importSession.environmentName}
           targetProfiles={listedProfiles.map((profile) => ({ id: profile.id, name: profile.name }))}
+          serverTargetProfiles={serverImportTargetProfiles(
+            importSessionHasServerBrowser && canImportToServer,
+            listedProfiles,
+          )}
+          serverTargetNotice={serverImportTargetNotice(
+            importSessionHasServerBrowser,
+            canImportToServer,
+          )}
           canCreateProfile={settingsHydrated && !atProfileLimit}
           onImport={(input) =>
             runWizardImport(importSession.source, importSession.environmentId, input)
@@ -1621,6 +1712,7 @@ export function IntegrationsSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection id="browser" title="Browser">
         <AgentBrowserAccessSetting />
+        <BrowserPaymentDomainsSetting />
         {previewDefaultsDisabled ? (
           <SettingsUnavailableGroup message="Only available in the desktop app.">
             {previewDefaults}

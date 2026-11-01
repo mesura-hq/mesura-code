@@ -87,6 +87,8 @@ import type { FactoryRunTimelineItem } from "@t3tools/client-runtime/factory/run
 import type { PendingUserInput } from "../../session-logic";
 import { pendingUserInputRequestKey } from "../../pendingUserInput";
 import { placeFactoryRunRow } from "../../factory/factoryRunRow";
+import { placePendingTimelineRows } from "./pendingTimelineRows";
+import { agentSignalReplyMessageIds } from "./agentSignalReplyMessages";
 
 function timelineEntryRunId(entry: TimelineEntry): RunId | null {
   if (entry.kind === "message") {
@@ -1033,6 +1035,10 @@ function deriveTurnFolds(input: {
   liveSubagentEntryIds: ReadonlySet<string>;
   completeSupersededReplyEntryIds: ReadonlySet<string>;
 }): ReadonlyMap<string, TurnFold> {
+  const agentSignalReplyIds = agentSignalReplyMessageIds(
+    input.timelineEntries,
+    input.terminalAssistantMessageIds,
+  );
   const interruptedRunIds = new Set<RunId>();
   const promptIndexByRunId = new Map<RunId, number>();
   for (const [index, entry] of input.timelineEntries.entries()) {
@@ -1168,6 +1174,7 @@ function deriveTurnFolds(input: {
       }
       if (entry.kind === "work" && entry.entry.itemType === "notification") continue;
       if (entry.kind === "work" && entry.entry.questionAnswer !== undefined) continue;
+      if (agentSignalReplyIds.has(entry.id)) continue;
       hiddenEntryIds.add(entry.id);
     }
     if (hiddenEntryIds.size === 0) {
@@ -2238,11 +2245,14 @@ function attachCreatedThreadSummaries(
 
 const WORKTREE_SETUP_ROW_ID = "worktree-setup-row";
 
-/** Every row of the timeline, with the Software Factory run card placed by `placeFactoryRunRow`. */
+/** Derive chronological rows before moving pending cards after every message and work row. */
 export function deriveMessagesTimelineRows(
   input: Parameters<typeof deriveMessagesTimelineRowsWithoutPending>[0],
 ): MessagesTimelineRow[] {
-  return placeFactoryRunRow(deriveMessagesTimelineRowsWithPending(input), input.factoryRun ?? null);
+  return placePendingTimelineRows(
+    placeFactoryRunRow(deriveMessagesTimelineRowsWithPending(input), input.factoryRun ?? null),
+    input.timelineEntries,
+  );
 }
 
 function pendingRequestIdOfWorkEntry(entry: WorkLogEntry): string | null {

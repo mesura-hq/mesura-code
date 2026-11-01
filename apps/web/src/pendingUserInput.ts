@@ -154,3 +154,19 @@ export function createPendingUserInputProjection() {
     return (previous = stable);
   };
 }
+
+// Providers without dismissal support need an explicit answer to release the request.
+export const DISMISSED_QUESTION_ANSWER =
+  "[dismissed] The developer dismissed this question without answering. Continue without this answer, or ask again in plain text.";
+
+export function pendingUserInputDismissAction(request: PendingUserInput) {
+  return request.dismissible
+    ? { type: "dismiss" as const, requestId: request.requestId }
+    : {
+        type: "respond" as const,
+        requestId: request.requestId,
+        answers: Object.fromEntries(
+          request.questions.map((question) => [question.id, DISMISSED_QUESTION_ANSWER]),
+        ),
+      };
+}

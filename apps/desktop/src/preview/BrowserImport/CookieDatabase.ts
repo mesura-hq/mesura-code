@@ -3,20 +3,10 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import type { ImportedCookie } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
-export interface ImportedCookie {
-  readonly url: string;
-  readonly name: string;
-  readonly value: string;
-  /** Leave host-only cookies undefined; Electron widens any supplied domain and rejects __Host- cookies with one. */
-  readonly domain: string | undefined;
-  readonly path: string;
-  readonly secure: boolean;
-  readonly httpOnly: boolean;
-  readonly expirationDate: number | undefined;
-  readonly sameSite: "unspecified" | "no_restriction" | "lax" | "strict";
-}
+export type { ImportedCookie };
 
 export interface CookieReadResult {
   readonly cookies: ReadonlyArray<ImportedCookie>;

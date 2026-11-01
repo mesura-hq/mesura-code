@@ -88,6 +88,7 @@ import {
   useSidebarRowSubscriptionLease,
   setFileDragActive,
 } from "../Sidebar.logic";
+import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-inbox";
 import {
   resolveSidebarThreadAttention,
   sidebarThreadAttentionLook,
@@ -726,6 +727,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     isUnread,
     isWoke,
     agentSignal: thread.agentSignal,
+    agentExecuting: threadRuntimeIsExecuting(thread.runtime),
     factoryRun: thread.factoryRun,
     goalActive: thread.goal?.status === "active",
   });
@@ -744,6 +746,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           ...sidebarThreadAttentionLook(attention.kind),
           kind: attention.kind,
           label: attention.text,
+          questionOpen: attention.questionOpen === true,
         };
   const isWokeStatus = topStatus?.kind === "woke";
   const needsInput = topStatus?.kind === "input" || status === "request";
@@ -961,9 +964,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     title: thread.title,
     // The slot shows `5/11 Review`; a screen reader hears the run's long label.
     statusLabel:
-      topStatus?.kind === "factory"
-        ? (factoryRunLabel(thread.factoryRun)?.text ?? topStatus.label)
-        : (topStatus?.label ?? null),
+      topStatus === null
+        ? null
+        : [
+            // The row's aria-label replaces its text, so the open question is named here.
+            topStatus.questionOpen ? "Question open" : null,
+            topStatus.kind === "factory"
+              ? (factoryRunLabel(thread.factoryRun)?.text ?? topStatus.label)
+              : topStatus.label,
+          ]
+            .filter(Boolean)
+            .join(", "),
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
   });
@@ -1113,7 +1124,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 data-testid="sidebar-row-slim"
                 data-mesura-thread-key={threadKey}
                 aria-busy={isRegeneratingTitle || undefined}
-                className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+                className={cn(
+                  rowSurfaceClassName,
+                  "flex h-9 items-center gap-2.5 px-2.5 pointer-coarse:has-[[data-sidebar-dictation-waveform]]:h-11",
+                )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
@@ -1132,8 +1146,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.project ? <ProjectFavicon project={props.project} className="size-4" /> : null}
             </span>
             {draftIndicator}
-            <SidebarDictationIndicator threadRef={threadRef} />
             {title}
+            <SidebarDictationIndicator threadRef={threadRef} />
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1297,7 +1311,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           {accessibleTitle}
           <div
             className={cn(
-              "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
+              "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset) pointer-coarse:has-[[data-sidebar-dictation-waveform]]:h-auto",
               metaLineEmpty && "redesign:h-auto",
             )}
           >
@@ -1372,6 +1386,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         </span>
                       ) : (
                         <span className={cn("inline-flex items-center gap-1", topStatus.className)}>
+                          {topStatus.questionOpen ? (
+                            // Mesura: the agent's question stays open while it works (developer, 2026-11-01).
+                            <>
+                              <MessageCircleQuestionIcon
+                                aria-hidden
+                                className="size-4 shrink-0 text-needs-input"
+                              />
+                              <span className="sr-only">Question open,</span>
+                            </>
+                          ) : null}
                           {topStatus.icon === "request" ? (
                             <UserRoundIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "approval" ? (
@@ -1464,7 +1488,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.sweepAction !== null ? dragDestination : null}
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5">
-              <SidebarDictationIndicator threadRef={threadRef} />
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
@@ -1479,6 +1502,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   />
                 </span>
               ) : null}
+              <SidebarDictationIndicator threadRef={threadRef} />
             </div>
             <div
               className={cn(

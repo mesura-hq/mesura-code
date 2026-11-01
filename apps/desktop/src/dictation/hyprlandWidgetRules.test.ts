@@ -162,6 +162,16 @@ describe("search unification phase 5 fence: applying the widget rules", () => {
     expect(windowruleValues()).toEqual(once);
   });
 
+  it("reapply after a config reload sends every rule again, with the monitors read again", async () => {
+    const { rules, execute, windowruleValues } = makeRules(HYPRLAND);
+    await rules.apply();
+    const once = windowruleValues();
+    await rules.reapply();
+    expect(windowruleValues()).toEqual([...once, ...once]);
+    const monitorReads = execute.mock.calls.filter(([, args]) => args[1] === "monitors");
+    expect(monitorReads).toHaveLength(2);
+  });
+
   it("search unification phase 5 AC3: two applies started together send the rules once", async () => {
     const { rules, windowruleValues } = makeRules(HYPRLAND);
     await Promise.all([rules.apply(), rules.apply()]);

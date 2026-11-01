@@ -1,7 +1,10 @@
+import { RuntimeRequestId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildPendingUserInputAnswers,
+  DISMISSED_QUESTION_ANSWER,
+  pendingUserInputDismissAction,
   resolvePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
@@ -314,5 +317,33 @@ it("web shared setter refuses notes for an exact choice-only draft", () => {
   expect(setPendingUserInputCustomAnswer(nativeChoiceQuestion, draft, "Do not send")).toBe(draft);
   expect(buildPendingUserInputAnswers([nativeChoiceQuestion], { result: draft })).toEqual({
     result: " first\t",
+  });
+});
+
+describe("inline question dismissal", () => {
+  const request = {
+    requestId: RuntimeRequestId.make("inline-question"),
+    createdAt: "2026-10-24T10:00:00.000Z",
+    questions: [singleSelectQuestion, multiSelectQuestion],
+    responseCapability: "live" as const,
+    dismissible: false,
+  };
+
+  it("uses the existing dismiss operation for a dismissible request", () => {
+    expect(pendingUserInputDismissAction({ ...request, dismissible: true })).toEqual({
+      type: "dismiss",
+      requestId: request.requestId,
+    });
+  });
+
+  it("answers every question as dismissed when the provider cannot dismiss it", () => {
+    expect(pendingUserInputDismissAction(request)).toEqual({
+      type: "respond",
+      requestId: request.requestId,
+      answers: { scope: DISMISSED_QUESTION_ANSWER, areas: DISMISSED_QUESTION_ANSWER },
+    });
+    expect(DISMISSED_QUESTION_ANSWER).toBe(
+      "[dismissed] The developer dismissed this question without answering. Continue without this answer, or ask again in plain text.",
+    );
   });
 });

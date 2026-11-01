@@ -11,10 +11,12 @@ import {
   DesktopPreviewSetAudioMutedInputSchema,
   DesktopPreviewSetColorSchemeInputSchema,
   DesktopPreviewSetZoomFactorInputSchema,
+  BrowserCookieReadResult,
   BrowserImportResult,
   BrowserImportSource,
   DesktopPreviewClearDataInputSchema,
   DesktopPreviewImportCookiesInputSchema,
+  DesktopPreviewReadCookiesInputSchema,
   DesktopPreviewCreateTabInputSchema,
   DesktopPreviewTabInputSchema,
   DesktopPreviewWebviewConfigSchema,
@@ -319,6 +321,16 @@ export const listBrowserImportSources = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.preview.listBrowserImportSources")(function* () {
     const browserImport = yield* BrowserImport.BrowserImport;
     return yield* browserImport.listSources;
+  }),
+});
+
+export const readBrowserCookies = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_READ_COOKIES_CHANNEL,
+  payload: DesktopPreviewReadCookiesInputSchema,
+  result: BrowserCookieReadResult,
+  handler: Effect.fn("desktop.ipc.preview.readBrowserCookies")(function* (input) {
+    const browserImport = yield* BrowserImport.BrowserImport;
+    return yield* browserImport.readCookies(input);
   }),
 });
 

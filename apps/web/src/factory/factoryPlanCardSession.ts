@@ -2,12 +2,7 @@ import type { FactoryRouteSlots } from "@t3tools/client-runtime/factory/routes";
 import { useEffect } from "react";
 import { create } from "zustand";
 
-/**
- * Mesura: the plan card and the composer dock's pinned plan share one session per plan and thread
- * (the edited route rows, and whether an approval is sending), so both send the same routes and
- * both disable while either sends. It lasts while a card or the dock entry holds it, surviving
- * virtualization and a collapsed dock, and resets once nothing shows the plan.
- */
+/** The timeline retains each plan's routes and send state across virtualized card mounts. */
 interface FactoryPlanCardSession {
   readonly routes?: FactoryRouteSlots;
   readonly sending?: boolean;

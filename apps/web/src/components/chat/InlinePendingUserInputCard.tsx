@@ -11,6 +11,7 @@ import type { PendingUserInput } from "../../session-logic";
 import { useShallow } from "zustand/react/shallow";
 import {
   buildPendingUserInputAnswers,
+  pendingUserInputDismissAction,
   resolvePendingUserInputAnswer,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
@@ -227,6 +228,21 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
     }
   };
 
+  const dismiss = async () => {
+    if (responding || context.unavailable) return;
+    setError(null);
+    try {
+      const action = pendingUserInputDismissAction(request);
+      const ok = await (action.type === "dismiss"
+        ? context.onDismiss(action.requestId)
+        : context.onDismissWithAnswer(action.requestId, action.answers));
+      if (ok) return;
+    } catch {
+      // A rejected handler and a refused dismissal keep the card and its draft available.
+    }
+    setError({ kind: "dismiss", message: "Could not dismiss the request. Try again." });
+  };
+
   return (
     <section
       data-pending-user-input-request-id={request.requestId}
@@ -240,40 +256,22 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
             Answer the questions below, then submit together.
           </p>
         </div>
-        {request.dismissible ? (
-          <div>
-            <button
-              type="button"
-              aria-label="Dismiss question without answering"
-              disabled={responding || context.unavailable}
-              onClick={() => {
-                void context
-                  .onDismiss(request.requestId)
-                  .then((ok) => {
-                    if (!ok)
-                      setError({
-                        kind: "dismiss",
-                        message: "Could not dismiss the request. Try again.",
-                      });
-                  })
-                  .catch(() =>
-                    setError({
-                      kind: "dismiss",
-                      message: "Could not dismiss the request. Try again.",
-                    }),
-                  );
-              }}
-              className="rounded p-1.5 text-muted-foreground hover:bg-muted"
-            >
-              <XIcon className="size-4" />
-            </button>
-            {error?.kind === "dismiss" ? (
-              <p role="alert" className="text-xs text-destructive">
-                {error.message}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+        <div>
+          <button
+            type="button"
+            aria-label="Dismiss question without answering"
+            disabled={responding || context.unavailable}
+            onClick={() => void dismiss()}
+            className="rounded p-1.5 text-muted-foreground hover:bg-muted"
+          >
+            <XIcon className="size-4" />
+          </button>
+          {error?.kind === "dismiss" ? (
+            <p role="alert" className="text-xs text-destructive">
+              {error.message}
+            </p>
+          ) : null}
+        </div>
       </header>
       <div className="divide-y divide-border">
         {request.questions.map((question, index) => (
