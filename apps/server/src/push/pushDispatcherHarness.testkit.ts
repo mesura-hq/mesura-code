@@ -5,6 +5,7 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CommandId,
   EnvironmentId,
   EventId,
   MessageId,
@@ -205,6 +206,7 @@ const makeHarness = Effect.fnUntraced(function* (
 
   let eventSequence = 0;
   let barrierSequence = 0;
+  let cardSequence = 0;
   const runs = new Map<ThreadId, OrchestrationV2Run>();
   const created = new Map<ThreadId, OrchestrationV2AppThread>();
   const live: {
@@ -352,6 +354,21 @@ const makeHarness = Effect.fnUntraced(function* (
     } as never);
   };
 
+  /**
+   * A card recorded through the real orchestrator, as an MCP tool records it:
+   * `fields` carries the command's `type` and its card fields, the harness the run.
+   */
+  const dispatchCard = (threadId: ThreadId, fields: Record<string, unknown>) => {
+    const run = runs.get(threadId)!;
+    return threads.dispatch({
+      commandId: CommandId.make(`push-dispatcher-card-${cardSequence++}`),
+      threadId,
+      runId: run.id,
+      nodeId: run.rootNodeId,
+      ...fields,
+    } as never);
+  };
+
   const shellOf = (threadId: ThreadId) => threads.getThreadShell(threadId);
 
   /** A change the awareness filter passes that leaves the phase as it was. */
@@ -488,6 +505,7 @@ const makeHarness = Effect.fnUntraced(function* (
     assistantMessage,
     expectPhase,
     inputCard,
+    dispatchCard,
     shellOf,
     startServer,
     restartServer,

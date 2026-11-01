@@ -85,6 +85,7 @@ import * as DeviceHubProxy from "./device/DeviceHubProxy.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
+import * as BrowserTakeoverRequests from "./preview/BrowserTakeoverRequests.ts";
 import * as PreviewAgentActivity from "./preview/PreviewAgentActivity.ts";
 import * as DesktopBrowserChannel from "./preview/DesktopBrowserChannel.ts";
 import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
@@ -847,6 +848,8 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(PeerLinkRequests.layer),
   // Share the service so HTTP/WS clients single-flight reads and invalidate each other's cached patches.
   Layer.provide(layerPullRequestService),
+  // Mesura: takeover cards, asked from /mcp and answered over WebSocket.
+  Layer.provide(BrowserTakeoverRequests.layer),
   // The same activity instance RunExecutionService reports to, by layer memoization.
   Layer.provide(
     ServerBrowser.layer.pipe(

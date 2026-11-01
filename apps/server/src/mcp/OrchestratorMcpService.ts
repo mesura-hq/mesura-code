@@ -905,6 +905,9 @@ function turnItemText(item: OrchestrationV2TurnItem): string | null {
       return item.linkStatus === "linked"
         ? `Linked ${item.linkedLabel ?? item.label ?? item.url ?? "an environment"} (${item.linkedAccess}).`
         : `Asked the user to link ${item.label ?? item.url ?? "an environment"}: ${item.linkStatus}.`;
+    // Mesura: browser takeover cards.
+    case "browser_takeover_request":
+      return `Asked the operator to take over a browser tab: ${item.takeoverStatus}.`;
     case "subagent":
       return item.result ?? item.progress ?? item.prompt;
     case "dynamic_tool":

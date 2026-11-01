@@ -42,6 +42,7 @@ import {
   type PreviewNavStatus,
   type PreviewSessionSnapshot,
   type PreviewViewportSetting,
+  PreviewTabId,
   ThreadId,
   SERVER_BROWSER_AUTOMATION_CLIENT_ID,
   type PreviewAppearancePreference,
@@ -53,6 +54,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
 import { constVoid } from "effect/Function";
@@ -158,6 +160,23 @@ const isHostSetupError = Schema.is(
   ]),
 );
 
+/** Mesura: why an agent may not ask the operator to take over a tab. */
+export class ServerBrowserTakeoverError extends Schema.TaggedError<ServerBrowserTakeoverError>()(
+  "ServerBrowserTakeoverError",
+  { reason: Schema.Literals(["notFound", "agentMismatch", "tabRequired"]) },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "notFound":
+        return "No server preview tab of yours is open with that tabId. Call preview_open first.";
+      case "agentMismatch":
+        return "This tab belongs to another agent session or to the operator. Ask about a tab you opened.";
+      case "tabRequired":
+        return "Several tabs belong to this agent session. Pass the tabId of the tab the operator should take over.";
+    }
+  }
+}
+
 export class ServerBrowserLaunchError extends Schema.TaggedError<ServerBrowserLaunchError>()(
   "ServerBrowserLaunchError",
   { cause: Schema.Defect() },
@@ -259,6 +278,21 @@ export class ServerBrowser extends Context.Service<
     ) => Effect.Effect<BrowserImportResult, PreviewImportCookiesError>;
 
     readonly reportProfiles: (input: PreviewReportProfilesInput) => Effect.Effect<void>;
+
+    /**
+     * Mesura: reveals an agent's own server tab to the operator and returns the
+     * wait for one human control cycle on it, take then release. The wait
+     * watches from this call until the scope closes.
+     */
+    readonly prepareTakeover: (input: {
+      readonly threadId: string;
+      readonly agentSessionId: string;
+      readonly tabId: string | undefined;
+    }) => Effect.Effect<
+      { readonly tabId: PreviewTabId; readonly humanControlCycle: Effect.Effect<void> },
+      ServerBrowserTakeoverError,
+      Scope.Scope
+    >;
   }
 >()("t3/preview/ServerBrowser") {}
 
@@ -2672,8 +2706,42 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const prepareTakeover: ServerBrowser["Service"]["prepareTakeover"] = Effect.fn(
+    "ServerBrowser.prepareTakeover",
+  )(function* (input) {
+    const owned = [...tabs.values()].filter(
+      (tab) => tab.threadId === input.threadId && tab.control.agentId === input.agentSessionId,
+    );
+    if (input.tabId === undefined && owned.length > 1) {
+      return yield* new ServerBrowserTakeoverError({ reason: "tabRequired" });
+    }
+    const tab =
+      input.tabId === undefined ? owned[0] : tabs.get(tabKey(input.threadId, input.tabId));
+    if (!tab) return yield* new ServerBrowserTakeoverError({ reason: "notFound" });
+    if (tab.control.agentId !== input.agentSessionId) {
+      return yield* new ServerBrowserTakeoverError({ reason: "agentMismatch" });
+    }
+    const cycle = yield* Deferred.make<void>();
+    // A human already in control counts as taken: their release ends the cycle.
+    let taken = tab.control.controller !== null;
+    yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        tab.control.watchOwner((owner) => {
+          if (owner !== null) taken = true;
+          else if (taken) Deferred.doneUnsafe(cycle, Exit.void);
+        }),
+      ),
+      (stop) => Effect.sync(stop),
+    );
+    yield* manager
+      .requestReveal({ threadId: ThreadId.make(tab.threadId), tabId: tab.tabId, force: true })
+      .pipe(Effect.mapError(() => new ServerBrowserTakeoverError({ reason: "notFound" })));
+    return { tabId: PreviewTabId.make(tab.tabId), humanControlCycle: Deferred.await(cycle) };
+  });
+
   return ServerBrowser.of({
     attachViewer,
+    prepareTakeover,
     clearProfile,
     importCookies,
     reportProfiles,

@@ -90,6 +90,7 @@ it.effect.each([
       clearProfile: () => Effect.void,
       importCookies: () => Effect.die("unused"),
       reportProfiles: () => Effect.void,
+      prepareTakeover: () => Effect.die("unused"),
       openDownload: () => Effect.succeedNone,
       answerFileChooser: () => Effect.succeed(false),
       attachViewer: (input) =>
@@ -166,6 +167,7 @@ it.effect("sends replies ahead of stale frames and only the newest frame after a
       clearProfile: () => Effect.void,
       importCookies: () => Effect.die("unused"),
       reportProfiles: () => Effect.void,
+      prepareTakeover: () => Effect.die("unused"),
       openDownload: () => Effect.succeedNone,
       answerFileChooser: () => Effect.succeed(false),
       attachViewer: () => Effect.succeed({ output, input: () => Effect.void }),
@@ -238,6 +240,7 @@ it.effect.each([
       clearProfile: () => Effect.void,
       importCookies: () => Effect.die("unused"),
       reportProfiles: () => Effect.void,
+      prepareTakeover: () => Effect.die("unused"),
       openDownload: () => Effect.succeedNone,
       answerFileChooser: () => Effect.succeed(false),
       attachViewer: () => {
@@ -280,6 +283,7 @@ it.effect("serves a tab's download only to an authorized session", () =>
       clearProfile: () => Effect.void,
       importCookies: () => Effect.die("unused"),
       reportProfiles: () => Effect.void,
+      prepareTakeover: () => Effect.die("unused"),
       openDownload: (input) =>
         Effect.sync(() => {
           requests.push(input);
@@ -329,6 +333,7 @@ it.effect("passes uploaded files to the page's open picker and needs operate sco
       clearProfile: () => Effect.void,
       importCookies: () => Effect.die("unused"),
       reportProfiles: () => Effect.void,
+      prepareTakeover: () => Effect.die("unused"),
       openDownload: () => Effect.succeedNone,
       answerFileChooser: (input) =>
         Effect.sync(() => {
@@ -399,6 +404,7 @@ it.effect.each([
       clearProfile: () => Effect.void,
       importCookies: () => Effect.die("unused"),
       reportProfiles: () => Effect.void,
+      prepareTakeover: () => Effect.die("unused"),
       openDownload: () => Effect.succeedNone,
       answerFileChooser: () => Effect.succeed(false),
       attachViewer: () => Effect.fail(new ServerBrowser.ServerBrowserLaunchError({ cause: error })),

@@ -61,6 +61,7 @@ import {
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { PreviewTabId } from "./preview.ts";
 import {
   ThreadLinkedPullRequest,
   ThreadPullRequestLink,
@@ -1525,6 +1526,28 @@ const OrchestrationV2FactoryCardFields = {
   card: FactoryThreadCard,
 } as const;
 
+export const OrchestrationV2BrowserTakeoverRequestStatus = Schema.Literals([
+  "pending",
+  "done",
+  "declined",
+  "cancelled",
+]);
+export type OrchestrationV2BrowserTakeoverRequestStatus =
+  typeof OrchestrationV2BrowserTakeoverRequestStatus.Type;
+
+export const BROWSER_TAKEOVER_REASON_MAX_LENGTH = 300;
+
+/**
+ * Mesura: an agent asked the operator to take over a server browser tab, for a
+ * login, a check or a payment step it may not do itself.
+ */
+const OrchestrationV2BrowserTakeoverRequestFields = {
+  type: Schema.Literal("browser_takeover_request"),
+  tabId: PreviewTabId,
+  reason: TrimmedNonEmptyString.check(Schema.isMaxLength(BROWSER_TAKEOVER_REASON_MAX_LENGTH)),
+  takeoverStatus: OrchestrationV2BrowserTakeoverRequestStatus,
+} as const;
+
 export const OrchestrationV2LinkRequestStatus = Schema.Literals([
   "pending",
   "linked",
@@ -1753,6 +1776,10 @@ export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
     ...OrchestrationV2LinkRequestFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
+    ...OrchestrationV2BrowserTakeoverRequestFields,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2602,6 +2629,10 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
     ...OrchestrationV2LinkRequestFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
+    ...OrchestrationV2BrowserTakeoverRequestFields,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
@@ -3525,6 +3556,21 @@ const OrchestrationV2InternalCommand = Schema.Union([
     placeholder: Schema.optional(Schema.String),
     delivery: Schema.optional(OrchestrationV2SecretRequestDelivery),
     secretStatus: OrchestrationV2SecretRequestStatus,
+  }),
+  /**
+   * Mesura: records or updates a browser takeover card. Internal so no client
+   * can close a request the tool or the answer RPC did not close.
+   */
+  Schema.Struct({
+    type: Schema.Literal("browser_takeover_request.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    nodeId: NodeId,
+    turnItemId: TurnItemId,
+    tabId: PreviewTabId,
+    reason: OrchestrationV2BrowserTakeoverRequestFields.reason,
+    takeoverStatus: OrchestrationV2BrowserTakeoverRequestStatus,
   }),
   /**
    * Records or updates a link an agent asked the user to make. Internal so no

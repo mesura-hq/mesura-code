@@ -423,6 +423,7 @@ import {
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
+import { BrowserTakeoverAnswerInput, BrowserTakeoverError } from "./browserTakeover.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -651,6 +652,8 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
+  // Mesura: the operator answers a browser takeover card.
+  previewAnswerTakeoverRequest: "preview.answerTakeoverRequest",
   guestShareCreate: "guestShare.create",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
@@ -2264,6 +2267,11 @@ const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
 });
 
+export const WsPreviewAnswerTakeoverRequestRpc = Rpc.make(WS_METHODS.previewAnswerTakeoverRequest, {
+  payload: BrowserTakeoverAnswerInput,
+  error: Schema.Union([BrowserTakeoverError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksListWebhookDeliveriesRpc = Rpc.make(
   WS_METHODS.scheduledTasksListWebhookDeliveries,
   {
@@ -2431,6 +2439,7 @@ const UpstreamWsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
+  WsPreviewAnswerTakeoverRequestRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,

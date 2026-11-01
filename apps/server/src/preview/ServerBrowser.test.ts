@@ -9,6 +9,9 @@ import { it } from "@effect/vitest";
 import {
   type BrowserRecordingFrameRate,
   EnvironmentId,
+  MessageId,
+  NodeId,
+  OrchestrationV2TurnItem,
   PreviewTabId,
   ProviderInstanceId,
   ServerSettingsError,
@@ -16,6 +19,8 @@ import {
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import { constVoid } from "effect/Function";
@@ -25,6 +30,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import type { BrowserContext, Page } from "playwright-core";
 import { beforeEach, expect, vi } from "vite-plus/test";
@@ -33,6 +39,13 @@ import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as Broker from "../mcp/PreviewAutomationBroker.ts";
+import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
+import * as McpToolAccess from "../mcp/McpToolAccess.ts";
+import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
+import * as PreviewHandlers from "../mcp/toolkits/preview/handlers.ts";
+import { PreviewStandardToolkit } from "../mcp/toolkits/preview/tools.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as BrowserTakeoverRequests from "./BrowserTakeoverRequests.ts";
 import * as DesktopChannel from "./DesktopBrowserChannel.ts";
 import * as Manager from "./Manager.ts";
 import * as PreviewAgentActivity from "./PreviewAgentActivity.ts";
@@ -1935,4 +1948,366 @@ it.live("importCookies refuses the incognito profile and unknown profile ids by 
       expect(cookieImports).toEqual([]);
     }),
   ).pipe(Effect.provide(layer)),
+);
+
+// Entry point: `preview_request_takeover` through `PreviewStandardToolkit.handle` and the
+// production handlers, over this file's Chromium fakes; a viewer's input is the human.
+// The thread service fake decodes each card with `OrchestrationV2TurnItem`; the
+// orchestrator's side of the record command is pinned in `push/PushDispatcher.test.ts`.
+const TAKEOVER_TOOL_NAME = "preview_request_takeover";
+const TAKEOVER_REASON = "The bank asks for a 2FA code";
+const TAKEOVER_EPOCH = DateTime.makeUnsafe("2026-11-01T12:00:00.000Z");
+const decodeTakeoverTurnItem = Schema.decodeUnknownSync(OrchestrationV2TurnItem);
+type TakeoverStatus = "pending" | "done" | "declined" | "cancelled";
+
+const makeTakeoverThreads = Effect.gen(function* () {
+  const shell = liveThreadShell(scope.thread.threadId);
+  const runId = shell.activeRunId!;
+  const records: Array<Record<string, unknown>> = [];
+  const items = new Map<string, OrchestrationV2TurnItem>();
+  const pendingRecorded = yield* Deferred.make<Record<string, unknown>>();
+  const pendingPolled = yield* Deferred.make<void>();
+  let runStatus: "running" | "completed" = "running";
+  const run = () => ({
+    id: runId,
+    threadId: scope.thread.threadId,
+    ordinal: 1,
+    providerInstanceId: scope.thread.providerInstanceId,
+    modelSelection: { instanceId: scope.thread.providerInstanceId, model: "gpt-5.4" },
+    providerThreadId: null,
+    userMessageId: MessageId.make("message:takeover"),
+    rootNodeId: NodeId.make("node:takeover"),
+    activeAttemptId: null,
+    status: runStatus,
+    requestedAt: TAKEOVER_EPOCH,
+    startedAt: TAKEOVER_EPOCH,
+    completedAt: runStatus === "running" ? null : TAKEOVER_EPOCH,
+    checkpointId: null,
+    contextHandoffId: null,
+  });
+  const projection = () => ({
+    ...idleThreadProjection(shell),
+    runs: [run()],
+    turnItems: [...items.values()],
+  });
+  const storeCard = (command: Record<string, unknown>) => {
+    const { type: _type, commandId: _commandId, turnItemId, ...fields } = command;
+    // As the orchestrator does, a card keeps its first answer.
+    const existing = items.get(String(turnItemId));
+    if (existing?.type === "browser_takeover_request" && existing.takeoverStatus !== "pending")
+      return;
+    const pending = command.takeoverStatus === "pending";
+    items.set(
+      String(turnItemId),
+      decodeTakeoverTurnItem({
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: items.size + 1,
+        title: null,
+        startedAt: TAKEOVER_EPOCH,
+        updatedAt: TAKEOVER_EPOCH,
+        ...fields,
+        id: turnItemId,
+        type: "browser_takeover_request",
+        status: pending ? "waiting" : "completed",
+        completedAt: pending ? null : TAKEOVER_EPOCH,
+      }),
+    );
+  };
+  const layer = Layer.mock(ThreadManagementService.ThreadManagementService)({
+    getThreadShell: () =>
+      Effect.succeed({ ...shell, activeRunId: runStatus === "running" ? runId : null }),
+    getThreadProjection: () => Effect.sync(projection),
+    getThreadRecords: (() =>
+      Effect.sync(projection).pipe(
+        Effect.tap((current) =>
+          current.turnItems.some(
+            (item) => item.type === "browser_takeover_request" && item.takeoverStatus === "pending",
+          )
+            ? Deferred.succeed(pendingPolled, undefined)
+            : Effect.void,
+        ),
+      )) as never,
+    dispatch: (command) =>
+      Effect.gen(function* () {
+        const recorded = command as unknown as Record<string, unknown>;
+        records.push(recorded);
+        storeCard(recorded);
+        if (recorded.takeoverStatus === "pending")
+          yield* Deferred.succeed(pendingRecorded, recorded);
+        return {} as never;
+      }),
+  });
+  /** Re-records the card with the operator's answer, as the answer RPC does. */
+  const answer = (
+    pending: Record<string, unknown>,
+    takeoverStatus: Exclude<TakeoverStatus, "pending">,
+  ) => Effect.sync(() => storeCard({ ...pending, takeoverStatus }));
+  const endRun = Effect.sync(() => {
+    runStatus = "completed";
+  });
+  return {
+    layer,
+    records,
+    pendingRecorded: Deferred.await(pendingRecorded),
+    /** Once a read has seen the card pending: the next card poll is a poll interval away. */
+    pendingPolled: Deferred.await(pendingPolled),
+    answer,
+    endRun,
+  };
+});
+
+const callTakeover = (
+  threads: Layer.Layer<ThreadManagementService.ThreadManagementService>,
+  params: { readonly tabId?: PreviewTabId; readonly reason: string; readonly timeoutMs?: number },
+  caller: typeof scope = scope,
+) =>
+  Effect.gen(function* () {
+    // Built once, so the handlers and the call share one takeover service.
+    const context = yield* Layer.build(
+      BrowserTakeoverRequests.layer.pipe(Layer.provideMerge(threads)),
+    );
+    const toolkit = yield* PreviewStandardToolkit.pipe(
+      Effect.provide(McpToolAccess.HandlersLayer.layer(PreviewHandlers.layerStandard)),
+      Effect.provide(context),
+    );
+    const chunk = yield* toolkit
+      .handle(TAKEOVER_TOOL_NAME, params)
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(context));
+    return chunk.at(-1)!.result as unknown as Record<string, unknown>;
+  }).pipe(Effect.scoped, Effect.provideService(McpInvocationContext.McpInvocationContext, caller));
+
+/** The pending card, or the tool's own end when it ends without recording one. */
+const untilPending = <A, E>(
+  threads: Effect.Success<typeof makeTakeoverThreads>,
+  call: Fiber.Fiber<A, E>,
+) =>
+  Effect.raceFirst(
+    threads.pendingRecorded,
+    Fiber.join(call).pipe(
+      Effect.flatMap((result) =>
+        Effect.die(`The tool returned before recording a pending card: ${JSON.stringify(result)}`),
+      ),
+    ),
+  );
+
+/** The `preview_status` the tool returns, wherever the result carries it. */
+const returnedPreviewStatus = (result: Record<string, unknown>, tabId: PreviewTabId) =>
+  Object.values(result).find(
+    (value): value is PreviewAutomationStatus =>
+      typeof value === "object" &&
+      value !== null &&
+      (value as { tabId?: unknown }).tabId === tabId &&
+      "control" in value,
+  );
+
+const takeoverCards = (records: ReadonlyArray<Record<string, unknown>>) =>
+  records.filter((record) => record.type === "browser_takeover_request.record");
+
+it.live(
+  "takeover phase AC1: preview_request_takeover on the agent's own server tab reveals it and records a pending card",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { tabId } = yield* ready;
+        const manager = yield* Manager.PreviewManager;
+        const threads = yield* makeTakeoverThreads;
+        const call = yield* callTakeover(threads.layer, { tabId, reason: TAKEOVER_REASON }).pipe(
+          Effect.forkScoped,
+        );
+        const pending = yield* untilPending(threads, call);
+        expect(pending).toMatchObject({
+          type: "browser_takeover_request.record",
+          threadId: scope.thread.threadId,
+          tabId,
+          reason: TAKEOVER_REASON,
+          takeoverStatus: "pending",
+        });
+        const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
+        expect(sessions.find((session) => session.tabId === tabId)).toMatchObject({
+          revealRequest: { force: true },
+        });
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live(
+  "takeover phase AC3: preview_request_takeover returns done with a fresh preview_status after a human takes and releases the tab",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { browser, broker, tabId } = yield* ready;
+        const before = yield* broker.invoke<PreviewAutomationStatus>({
+          scope,
+          tabId,
+          operation: "status",
+          input: {},
+        });
+        const threads = yield* makeTakeoverThreads;
+        const call = yield* callTakeover(threads.layer, { tabId, reason: TAKEOVER_REASON }).pipe(
+          Effect.forkScoped,
+        );
+        yield* untilPending(threads, call);
+        const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+        yield* viewer.input({ type: "takeControl" });
+        yield* viewer.input({ type: "releaseControl" });
+        const result = yield* Fiber.join(call);
+        expect(result.status).toBe("done");
+        const status = returnedPreviewStatus(result, tabId);
+        expect(status?.control?.owner).toBe("agent");
+        expect(status!.control!.generation).toBeGreaterThan(before.control!.generation);
+        expect(takeoverCards(threads.records).at(-1)).toMatchObject({ takeoverStatus: "done" });
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live.each(["done", "declined"] as const)(
+  "takeover phase AC4: preview_request_takeover returns %s when the operator answers the card",
+  (answer) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { tabId } = yield* ready;
+        const threads = yield* makeTakeoverThreads;
+        const call = yield* callTakeover(threads.layer, { tabId, reason: TAKEOVER_REASON }).pipe(
+          Effect.forkScoped,
+        );
+        yield* threads.answer(yield* untilPending(threads, call), answer);
+        const result = yield* Fiber.join(call);
+        expect(result.status).toBe(answer);
+        expect(returnedPreviewStatus(result, tabId)?.tabId).toBe(tabId);
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live.each(["timeout", "run end"] as const)(
+  "takeover phase AC5: preview_request_takeover returns cancelled after its %s and closes the card",
+  (ending) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { tabId } = yield* ready;
+        const threads = yield* makeTakeoverThreads;
+        const call = yield* callTakeover(threads.layer, {
+          tabId,
+          reason: TAKEOVER_REASON,
+          ...(ending === "timeout" ? { timeoutMs: 1 } : {}),
+        }).pipe(Effect.forkScoped);
+        // A 1 ms timeout can end the call before a race would see its pending card.
+        if (ending === "run end") {
+          yield* untilPending(threads, call);
+          yield* threads.endRun;
+        }
+        const result = yield* Fiber.join(call);
+        expect(result.status).toBe("cancelled");
+        expect(takeoverCards(threads.records).map((record) => record.takeoverStatus)).toEqual([
+          "pending",
+          "cancelled",
+        ]);
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live(
+  "takeover phase AC6: preview_request_takeover on a tab another agent owns fails and records no card",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const broker = yield* Broker.PreviewAutomationBroker;
+        yield* ServerBrowser.ServerBrowser;
+        yield* Effect.yieldNow;
+        const others = yield* broker.invoke<PreviewAutomationStatus>({
+          scope: asSession("agent-b"),
+          operation: "open",
+          input: { reuseExistingTab: false, show: false },
+        });
+        const tabId = PreviewTabId.make(others.tabId!);
+        const threads = yield* makeTakeoverThreads;
+        const outcome = yield* callTakeover(threads.layer, { tabId, reason: TAKEOVER_REASON }).pipe(
+          Effect.exit,
+        );
+        expect(outcome._tag).toBe("Failure");
+        expect(String(outcome)).toMatch(/another agent/i);
+        expect(threads.records).toEqual([]);
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live(
+  "takeover guard: a human take and release on an agent's server tab returns control to the agent with a newer generation",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { browser, broker, tabId } = yield* ready;
+        const status = () =>
+          broker.invoke<PreviewAutomationStatus>({ scope, tabId, operation: "status", input: {} });
+        const before = yield* status();
+        expect(before.control).toMatchObject({ owner: "agent", ownedByCaller: true });
+        const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+        yield* viewer.input({ type: "takeControl" });
+        const held = yield* status();
+        expect(held.control).toMatchObject({ owner: "human", ownedByCaller: true });
+        const refused = yield* broker
+          .invoke<void>({ scope, tabId, operation: "evaluate", input: { expression: "held()" } })
+          .pipe(Effect.flip);
+        expect(refused).toMatchObject({ reason: "humanControl" });
+        yield* viewer.input({ type: "releaseControl" });
+        const after = yield* status();
+        expect(after.control).toMatchObject({ owner: "agent", ownedByCaller: true });
+        expect(after.control!.generation).toBeGreaterThan(held.control!.generation);
+        expect(held.control!.generation).toBeGreaterThan(before.control!.generation);
+        expect(
+          yield* broker.invoke({
+            scope,
+            tabId,
+            operation: "evaluate",
+            input: { expression: "released()" },
+          }),
+        ).toBe("evaluated");
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live(
+  "takeover rework: an operator who answers Cannot and then releases the tab gets declined back, not done",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { browser, tabId } = yield* ready;
+        const threads = yield* makeTakeoverThreads;
+        const call = yield* callTakeover(threads.layer, { tabId, reason: TAKEOVER_REASON }).pipe(
+          Effect.forkScoped,
+        );
+        const pending = yield* untilPending(threads, call);
+        const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+        yield* viewer.input({ type: "takeControl" });
+        yield* threads.answer(pending, "declined");
+        // The release ends the control cycle before the next card poll can see the answer.
+        yield* viewer.input({ type: "releaseControl" });
+        const result = yield* Fiber.join(call);
+        expect(result.status).toBe("declined");
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live(
+  "takeover rework: an operator who answers Done just before the timeout gets done back, not cancelled",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { tabId } = yield* ready;
+        const threads = yield* makeTakeoverThreads;
+        // Shorter than the card poll, so the timeout fires before any poll sees the answer.
+        const call = yield* callTakeover(threads.layer, {
+          tabId,
+          reason: TAKEOVER_REASON,
+          timeoutMs: 300,
+        }).pipe(Effect.forkScoped);
+        const pending = yield* untilPending(threads, call);
+        yield* threads.pendingPolled;
+        yield* threads.answer(pending, "done");
+        const result = yield* Fiber.join(call);
+        expect(result.status).toBe("done");
+      }),
+    ).pipe(Effect.provide(layer)),
 );
