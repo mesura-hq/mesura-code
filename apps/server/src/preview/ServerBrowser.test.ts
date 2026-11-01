@@ -11,12 +11,14 @@ import {
   EnvironmentId,
   PreviewTabId,
   ProviderInstanceId,
+  ServerSettingsError,
   ThreadId,
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import { constVoid } from "effect/Function";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -29,6 +31,7 @@ import { beforeEach, expect, vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as Broker from "../mcp/PreviewAutomationBroker.ts";
 import * as DesktopChannel from "./DesktopBrowserChannel.ts";
 import * as Manager from "./Manager.ts";
@@ -83,13 +86,68 @@ const PNG_HEADER = (() => {
   return header.toString("base64");
 })();
 
+type FetchDecision = "Fetch.continueRequest" | "Fetch.failRequest";
+
+const globMatches = (pattern: string, url: string) =>
+  new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*")}$`).test(url);
+
 function makeSession(frame?: ReturnType<typeof makeFrame>) {
   const events = new NodeEvents.EventEmitter();
-  return {
-    on: vi.fn((name: string, listener: () => void) => events.on(name, listener)),
-    emit: (name: string) => events.emit(name),
+  const pausedRequests = new Map<
+    string,
+    { readonly url: string; readonly decision: PromiseWithResolvers<FetchDecision> }
+  >();
+  let pauseCount = 0;
+  const session = {
+    on: vi.fn((name: string, listener: Parameters<NodeEvents.EventEmitter["on"]>[1]) =>
+      events.on(name, listener),
+    ),
+    emit: (name: string, ...args: unknown[]) => events.emit(name, ...args),
     detach: vi.fn(async () => {}),
+    fetchPatterns: null as ReadonlyArray<Record<string, unknown>> | null,
+    fetchDecisions: [] as Array<{ url: string; method: FetchDecision; errorReason?: unknown }>,
+    // Stands in for Chrome pausing a main-frame document request at the request stage.
+    pausesDocumentRequest: (url: string) =>
+      (session.fetchPatterns ?? []).some(
+        (pattern) =>
+          (pattern.requestStage ?? "Request") === "Request" &&
+          (pattern.resourceType ?? "Document") === "Document" &&
+          globMatches(String(pattern.urlPattern ?? "*"), url),
+      ),
+    pauseDocument: (url: string, frameId = "main") => {
+      const requestId = `request-${++pauseCount}`;
+      const decision = Promise.withResolvers<FetchDecision>();
+      pausedRequests.set(requestId, { url, decision });
+      events.emit("Fetch.requestPaused", {
+        requestId,
+        request: { url, method: "GET", headers: {} },
+        frameId,
+        resourceType: "Document",
+      });
+      return decision.promise;
+    },
     send: vi.fn(async (method: string, input?: unknown): Promise<Record<string, unknown>> => {
+      if (method === "Fetch.enable") {
+        session.fetchPatterns =
+          (input as { patterns?: Array<Record<string, unknown>> }).patterns ?? [];
+        fetchCommandListener?.(method, input);
+        return {};
+      }
+      if (method === "Fetch.continueRequest" || method === "Fetch.failRequest") {
+        const { requestId, errorReason } = input as { requestId: string; errorReason?: unknown };
+        const paused = pausedRequests.get(requestId);
+        // Chrome answers each paused request once and rejects a second answer.
+        if (!paused) throw new Error("Invalid InterceptionId.");
+        pausedRequests.delete(requestId);
+        session.fetchDecisions.push({
+          url: paused.url,
+          method,
+          ...(errorReason === undefined ? {} : { errorReason }),
+        });
+        paused.decision.resolve(method);
+        fetchCommandListener?.(method, input);
+        return {};
+      }
       if (method === "Page.getNavigationHistory") return { currentIndex: 0, entries: [{}] };
       if (method === "Page.getLayoutMetrics") return { cssVisualViewport: { pageX: 0, pageY: 0 } };
       if (method === "Page.captureScreenshot") {
@@ -121,13 +179,14 @@ function makeSession(frame?: ReturnType<typeof makeFrame>) {
       return { result: { value: "evaluated" } };
     }),
   };
+  return session;
 }
 
 function makeContext(onClose?: (context: BrowserContext) => void) {
   const events = new NodeEvents.EventEmitter();
   const nativeFileChooser = vi.fn();
   const setChooserFiles = vi.fn(async (_files: unknown) => {});
-  const sessions: ReturnType<typeof makeSession>[] = [];
+  const sessions: Array<ReturnType<typeof makeSession> & { readonly target: unknown }> = [];
   let url = "about:blank";
   let viewport = { width: 1280, height: 800 };
   let closed = false;
@@ -163,7 +222,22 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
     setViewportSize: vi.fn(async (size: typeof viewport) => {
       viewport = size;
     }),
+    // Every session intercepting a document gets it in turn, as Chrome chains them.
+    loadDocument: async (next: string, frameId = "main") => {
+      for (const session of sessions) {
+        if (session.target !== page || !session.pausesDocumentRequest(next)) continue;
+        if ((await session.pauseDocument(next, frameId)) === "Fetch.failRequest") {
+          throw new Error(`page.goto: net::ERR_BLOCKED_BY_CLIENT at ${next}`);
+        }
+      }
+    },
+    mouse: {
+      click: vi.fn(async () => {
+        await mouseClick?.();
+      }),
+    },
     goto: vi.fn(async (next: string) => {
+      await page.loadDocument(next);
       url = next;
       events.emit("load");
       const pending = initialNavigation;
@@ -200,8 +274,9 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
     newPage: async () => page as unknown as Page,
     grantPermissions: vi.fn(async () => {}),
     newCDPSession: async (target: unknown) => {
-      const session = makeSession(
-        target === page ? undefined : (target as ReturnType<typeof makeFrame>),
+      const session = Object.assign(
+        makeSession(target === page ? undefined : (target as ReturnType<typeof makeFrame>)),
+        { target },
       );
       sessions.push(session);
       return session;
@@ -267,6 +342,10 @@ let keyCopy = "";
 let focusedFrame: ReturnType<typeof makeFrame> | null = null;
 let contextFailure: Error | null = null;
 let initialNavigation: (() => Promise<void>) | null = null;
+let mouseClick: (() => Promise<void>) | null = null;
+// Sees each Fetch command after the fake applied it, so tests await the guard without polling.
+let fetchCommandListener: ((method: string, input: unknown) => void) | null = null;
+let settingsReadFails = false;
 let desktopRendersNext = false;
 const desktopDetaches = new NodeEvents.EventEmitter();
 const desktopTabs = new Set<string>();
@@ -297,56 +376,78 @@ const asSession = (providerSessionId: string) => ({
   ...scope,
   thread: { ...testThread, providerSessionId },
 });
-const dependencies = Layer.mergeAll(
-  Broker.layer,
-  Manager.layer,
-  Layer.succeed(ServerEnvironment.ServerEnvironment, {
-    getEnvironmentId: Effect.succeed(scope.environmentId),
-    getDescriptor: Effect.die("unused descriptor"),
-  }),
-  Layer.succeed(PreviewBrowser.PreviewBrowser, {
-    executable: Effect.die("mock Chromium does not need an executable"),
-    installed: Effect.die("mock Chromium does not need an executable"),
-  }),
-  Layer.succeed(DesktopChannel.DesktopBrowserChannel, {
-    available: true,
-    awaitAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
-    detached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          const onDetach = (key: { threadId: string; tabId: string }) =>
-            Queue.offerUnsafe(queue, key);
-          desktopDetaches.on("detach", onDetach);
-          return onDetach;
-        }),
-        (onDetach) => Effect.sync(() => desktopDetaches.off("detach", onDetach)),
+// Settings reads fail while `settingsReadFails` is set; writes keep working.
+const failingSettingsLayer = Layer.effect(
+  ServerSettings.ServerSettingsService,
+  Effect.gen(function* () {
+    const settings = yield* ServerSettings.ServerSettingsService;
+    return ServerSettings.ServerSettingsService.of({
+      ...settings,
+      getSettings: Effect.suspend(() =>
+        settingsReadFails
+          ? Effect.fail(
+              new ServerSettingsError({ settingsPath: "settings.json", operation: "read-secret" }),
+            )
+          : settings.getSettings,
       ),
-    ),
-    attached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          const onAttach = (key: { threadId: string; tabId: string }) =>
-            Queue.offerUnsafe(queue, key);
-          desktopDetaches.on("attach", onAttach);
-          return onAttach;
-        }),
-        (onAttach) => Effect.sync(() => desktopDetaches.off("attach", onAttach)),
-      ),
-    ),
-    isAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
-    endpoint: (key) =>
-      Effect.acquireRelease(Effect.succeed(`ws://desktop/${key.tabId}`), () =>
-        Effect.sync(() => releasedDesktopTabs.push(key.tabId)),
-      ),
-    pointer: () => Effect.void,
-    turn: (threadId, active) => Effect.sync(() => desktopTurns.emit("turn", threadId, active)),
+    });
   }),
-  PreviewAgentActivity.layer,
-).pipe(
-  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-server-browser-" })),
-  Layer.provideMerge(NodeServices.layer),
-);
-const layer = ServerBrowser.layer.pipe(Layer.provideMerge(dependencies));
+).pipe(Layer.provide(ServerSettings.ServerSettingsService.layerTest()));
+const dependenciesAt = (baseDirOrPrefix: string | { readonly prefix: string }) =>
+  Layer.mergeAll(
+    Broker.layer,
+    Manager.layer,
+    Layer.succeed(ServerEnvironment.ServerEnvironment, {
+      getEnvironmentId: Effect.succeed(scope.environmentId),
+      getDescriptor: Effect.die("unused descriptor"),
+    }),
+    Layer.succeed(PreviewBrowser.PreviewBrowser, {
+      executable: Effect.die("mock Chromium does not need an executable"),
+      installed: Effect.die("mock Chromium does not need an executable"),
+    }),
+    Layer.succeed(DesktopChannel.DesktopBrowserChannel, {
+      available: true,
+      awaitAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
+      detached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            const onDetach = (key: { threadId: string; tabId: string }) =>
+              Queue.offerUnsafe(queue, key);
+            desktopDetaches.on("detach", onDetach);
+            return onDetach;
+          }),
+          (onDetach) => Effect.sync(() => desktopDetaches.off("detach", onDetach)),
+        ),
+      ),
+      attached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            const onAttach = (key: { threadId: string; tabId: string }) =>
+              Queue.offerUnsafe(queue, key);
+            desktopDetaches.on("attach", onAttach);
+            return onAttach;
+          }),
+          (onAttach) => Effect.sync(() => desktopDetaches.off("attach", onAttach)),
+        ),
+      ),
+      isAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
+      endpoint: (key) =>
+        Effect.acquireRelease(Effect.succeed(`ws://desktop/${key.tabId}`), () =>
+          Effect.sync(() => releasedDesktopTabs.push(key.tabId)),
+        ),
+      pointer: () => Effect.void,
+      turn: (threadId, active) => Effect.sync(() => desktopTurns.emit("turn", threadId, active)),
+    }),
+    PreviewAgentActivity.layer,
+    failingSettingsLayer,
+  ).pipe(
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDirOrPrefix)),
+    Layer.provideMerge(NodeServices.layer),
+  );
+// A fixed base directory stands in for one server's state across restarts.
+const layerAt = (baseDirOrPrefix: string | { readonly prefix: string }) =>
+  ServerBrowser.layer.pipe(Layer.provideMerge(dependenciesAt(baseDirOrPrefix)));
+const layer = layerAt({ prefix: "t3-server-browser-" });
 const ready = Effect.gen(function* () {
   const browser = yield* ServerBrowser.ServerBrowser;
   const broker = yield* Broker.PreviewAutomationBroker;
@@ -375,6 +476,9 @@ beforeEach(() => {
   contextGate = null;
   contextFailure = null;
   initialNavigation = null;
+  mouseClick = null;
+  fetchCommandListener = null;
+  settingsReadFails = false;
   pageCopy = "";
   keyCopy = "";
   focusedFrame = null;
@@ -1279,4 +1383,468 @@ it.live(
         });
       }),
     ).pipe(Effect.provide(layer)),
+);
+
+// Phase "remember profiles, block agent payments": every spec below drives the
+// PreviewAutomationBroker, the entry point the preview MCP tools call, or a
+// viewer's input, the entry point a human's browser pane uses.
+const openAgentTab = (input: { readonly profileId?: string } = {}) =>
+  Effect.gen(function* () {
+    const broker = yield* Broker.PreviewAutomationBroker;
+    yield* ServerBrowser.ServerBrowser;
+    yield* Effect.yieldNow;
+    return yield* broker.invoke<PreviewAutomationStatus>({
+      scope,
+      operation: "open",
+      input: { reuseExistingTab: false, show: false, ...input },
+    });
+  });
+const reportWorkProfile = Effect.gen(function* () {
+  const browser = yield* ServerBrowser.ServerBrowser;
+  yield* Effect.yieldNow;
+  yield* browser.reportProfiles({
+    profiles: [{ id: "profile-work", name: "Work", kind: "persistent" }],
+    defaultProfileId: "profile-work",
+  });
+});
+const withRestartableState = <A, E, R>(use: (baseDir: string) => Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const baseDir = yield* fs.realPath(
+      yield* fs.makeTempDirectoryScoped({ prefix: "t3-server-browser-restart-" }),
+    );
+    return yield* use(baseDir);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+const fetchPatterns = () => contexts[0]!.sessions.flatMap((session) => session.fetchPatterns ?? []);
+const fetchDecisions = () => contexts[0]!.sessions.flatMap((session) => session.fetchDecisions);
+const navigateAgent = (tabId: PreviewTabId, url: string) =>
+  Effect.gen(function* () {
+    const broker = yield* Broker.PreviewAutomationBroker;
+    return yield* broker.invoke<PreviewAutomationStatus>({
+      scope,
+      tabId,
+      operation: "navigate",
+      input: { url },
+    });
+  });
+
+it.live(
+  "after a restart with no client report, preview_open uses the last reported default profile",
+  () =>
+    withRestartableState((baseDir) =>
+      Effect.gen(function* () {
+        yield* reportWorkProfile.pipe(Effect.scoped, Effect.provide(layerAt(baseDir)));
+        contextRequests.length = 0;
+        yield* openAgentTab().pipe(Effect.scoped, Effect.provide(layerAt(baseDir)));
+        expect(contextRequests).toEqual([{ profileId: "profile-work", isolated: false }]);
+      }),
+    ),
+);
+
+it.live(
+  "a later client report replaces the saved profile list, and the replacement survives a restart",
+  () =>
+    withRestartableState((baseDir) =>
+      Effect.gen(function* () {
+        yield* Effect.gen(function* () {
+          yield* reportWorkProfile;
+          const browser = yield* ServerBrowser.ServerBrowser;
+          yield* browser.reportProfiles({
+            profiles: [{ id: "profile-personal", name: "Personal", kind: "persistent" }],
+            defaultProfileId: "profile-personal",
+          });
+        }).pipe(Effect.scoped, Effect.provide(layerAt(baseDir)));
+        contextRequests.length = 0;
+        const opened = yield* openAgentTab().pipe(Effect.scoped, Effect.provide(layerAt(baseDir)));
+        expect(opened.defaultProfileId).toBe("profile-personal");
+        expect(opened.profiles?.map((profile) => profile.id)).toEqual([
+          "default",
+          "incognito",
+          "profile-personal",
+        ]);
+        expect(contextRequests).toEqual([{ profileId: "profile-personal", isolated: false }]);
+      }),
+    ),
+);
+
+it.live(
+  "with no saved profile list and no report, agent tabs open the persistent default profile",
+  () =>
+    Effect.gen(function* () {
+      yield* openAgentTab();
+      expect(contextRequests).toEqual([{ profileId: "default", isolated: false }]);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live.each([
+  { url: "https://paypal.com/checkoutnow", domain: "paypal.com" },
+  { url: "https://www.PayPal.com/signin", domain: "paypal.com" },
+  { url: "https://checkout.stripe.com/c/pay/cs_test_1", domain: "checkout.stripe.com" },
+  { url: "https://www.mercadopago.com.ar/checkout", domain: "mercadopago.com.ar" },
+])(
+  "an agent document navigation to the payment page $url fails and names $domain",
+  ({ url, domain }) =>
+    Effect.gen(function* () {
+      const { tabId } = yield* ready;
+      const error = yield* navigateAgent(tabId, url).pipe(Effect.flip);
+      expect(error.message.toLowerCase()).toContain(domain);
+      expect(contexts[0]!.page.url()).not.toBe(url);
+      expect(contexts[0]!.page.goto).not.toHaveBeenCalledWith(url, expect.anything());
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("a human holding control reaches a payment page the guard would refuse an agent", () =>
+  Effect.gen(function* () {
+    const { browser, tabId } = yield* ready;
+    const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+    yield* viewer.input({ type: "takeControl" });
+    const url = "https://www.paypal.com/checkoutnow";
+    yield* viewer.input({ type: "navigate", url });
+    expect(contexts[0]!.page.url()).toBe(url);
+    expect(fetchDecisions()).toEqual([{ url, method: "Fetch.continueRequest" }]);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("the payment guard pauses only document requests and lets other sites through", () =>
+  Effect.gen(function* () {
+    const { tabId } = yield* ready;
+    const requestStage = fetchPatterns().filter(
+      (pattern) => (pattern.requestStage ?? "Request") === "Request",
+    );
+    expect(requestStage).toEqual([{ resourceType: "Document", requestStage: "Request" }]);
+    const urls = [
+      "https://notpaypal.com/",
+      "https://paypal.com.example.test/",
+      "http://localhost:5173/app",
+    ];
+    for (const url of urls) yield* navigateAgent(tabId, url);
+    expect(contexts[0]!.page.url()).toBe(urls.at(-1));
+    expect(fetchDecisions()).toEqual(urls.map((url) => ({ url, method: "Fetch.continueRequest" })));
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("a patched browserPaymentDomains list applies to the next agent navigation", () =>
+  Effect.gen(function* () {
+    const { tabId } = yield* ready;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({ browserPaymentDomains: ["shop.example.test"] });
+    const error = yield* navigateAgent(tabId, "https://cart.shop.example.test/pay").pipe(
+      Effect.flip,
+    );
+    expect(error.message).toContain("shop.example.test");
+    yield* navigateAgent(tabId, "https://paypal.com/");
+    expect(contexts[0]!.page.url()).toBe("https://paypal.com/");
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+// Guards: behaviour this phase must keep.
+it.live("with nothing reported, an explicit profile still resolves by id or by name", () =>
+  Effect.gen(function* () {
+    yield* openAgentTab({ profileId: "default" });
+    yield* openAgentTab({ profileId: "DEFAULT" });
+    expect(contextRequests).toEqual([
+      { profileId: "default", isolated: false },
+      { profileId: "default", isolated: false },
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("with nothing reported, the incognito profile still opens an isolated context", () =>
+  Effect.gen(function* () {
+    yield* openAgentTab({ profileId: "incognito" });
+    yield* openAgentTab({ profileId: "Incognito" });
+    expect(contextRequests).toEqual([
+      { profileId: "incognito", isolated: true },
+      { profileId: "incognito", isolated: true },
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live(
+  "with nothing reported, an unknown profile is still refused with the built-in choices",
+  () =>
+    Effect.gen(function* () {
+      const refused = yield* openAgentTab({ profileId: "Personal" }).pipe(Effect.flip);
+      expect(refused).toMatchObject({
+        _tag: "PreviewAutomationExecutionError",
+        reason:
+          'No browser profile is named "Personal". Use one of: Default (id default), Incognito (id incognito).',
+      });
+      expect(contextRequests).toEqual([]);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("a human holding control still navigates an ordinary site without an error", () =>
+  Effect.gen(function* () {
+    const { browser, tabId } = yield* ready;
+    const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+    yield* viewer.input({ type: "takeControl" });
+    yield* viewer.input({ type: "navigate", url: "http://localhost:5173/mine" });
+    expect(contexts[0]!.page.goto).toHaveBeenLastCalledWith(
+      "http://localhost:5173/mine",
+      expect.anything(),
+    );
+    expect(contexts[0]!.page.url()).toBe("http://localhost:5173/mine");
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("agent tabs keep the PDF asset interception at the response stage", () =>
+  Effect.gen(function* () {
+    yield* ready;
+    expect(fetchPatterns()).toContainEqual({
+      urlPattern: "*/api/assets/*",
+      resourceType: "Document",
+      requestStage: "Response",
+    });
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+// Review rework: the guard and the pre-check hold for every agent path.
+const TAKEOVER_TOOL = "preview_request_takeover";
+
+it.live(
+  "an agent reusing a released operator tab through preview_open cannot open a payment page",
+  () =>
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const broker = yield* Broker.PreviewAutomationBroker;
+      const manager = yield* Manager.PreviewManager;
+      yield* Effect.yieldNow;
+      const opened = yield* manager.open({
+        threadId: scope.thread.threadId,
+        url: "http://localhost:5173/mine",
+        runtime: "server",
+      });
+      const tabId = PreviewTabId.make(opened.tabId);
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* viewer.input({ type: "takeControl" });
+      yield* viewer.input({ type: "releaseControl" });
+      const url = "https://www.paypal.com/checkoutnow";
+      const error = yield* broker
+        .invoke<PreviewAutomationStatus>({ scope, tabId, operation: "open", input: { url } })
+        .pipe(Effect.flip);
+      expect(error.message).toContain("paypal.com");
+      expect(error.message).toContain(TAKEOVER_TOOL);
+      expect(contexts[0]!.page.goto).not.toHaveBeenCalledWith(url, expect.anything());
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("a page navigation in an operator tab nobody controls is refused at a payment site", () =>
+  Effect.gen(function* () {
+    const browser = yield* ServerBrowser.ServerBrowser;
+    const manager = yield* Manager.PreviewManager;
+    yield* Effect.yieldNow;
+    const opened = yield* manager.open({
+      threadId: scope.thread.threadId,
+      url: "http://localhost:5173/mine",
+      runtime: "server",
+    });
+    // A read-only viewer: an operating one takes control of an operator tab on attach.
+    yield* browser.attachViewer(viewerInput(PreviewTabId.make(opened.tabId), false));
+    // Stands in for the page's own script redirecting while no human holds the tab.
+    const url = "https://checkout.stripe.com/c/pay/cs_test_2";
+    const failure = yield* Effect.promise(() =>
+      contexts[0]!.page.goto(url).then(
+        () => null,
+        (cause: Error) => cause.message,
+      ),
+    );
+    expect(failure).toContain("ERR_BLOCKED_BY_CLIENT");
+    expect(fetchDecisions().at(-1)).toEqual({
+      url,
+      method: "Fetch.failRequest",
+      errorReason: "BlockedByClient",
+    });
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("a settings read failure keeps the last payment list the guard read", () =>
+  Effect.gen(function* () {
+    const { tabId } = yield* ready;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({ browserPaymentDomains: ["shop.example.test"] });
+    yield* navigateAgent(tabId, "https://example.test/");
+    settingsReadFails = true;
+    const error = yield* navigateAgent(tabId, "https://cart.shop.example.test/pay").pipe(
+      Effect.flip,
+    );
+    expect(error.message).toContain("shop.example.test");
+    expect(contexts[0]!.page.url()).toBe("https://example.test/");
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("with no payment list read yet, a settings read failure refuses agent navigation", () =>
+  Effect.gen(function* () {
+    const { tabId } = yield* ready;
+    settingsReadFails = true;
+    const error = yield* navigateAgent(tabId, "https://example.test/").pipe(Effect.flip);
+    expect(error.message).toContain("settings could not be read");
+    expect(contexts[0]!.page.goto).not.toHaveBeenCalledWith(
+      "https://example.test/",
+      expect.anything(),
+    );
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("preview_navigate without a readiness wait refuses a payment page before navigating", () =>
+  Effect.gen(function* () {
+    const { broker, tabId } = yield* ready;
+    const url = "https://www.paypal.com/checkoutnow";
+    const error = yield* broker
+      .invoke<PreviewAutomationStatus>({
+        scope,
+        tabId,
+        operation: "navigate",
+        input: { url, readiness: "none" },
+      })
+      .pipe(Effect.flip);
+    expect(error.message).toContain("paypal.com");
+    expect(error.message).toContain(TAKEOVER_TOOL);
+    expect(contexts[0]!.page.goto).not.toHaveBeenCalledWith(url, expect.anything());
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("a preview_click that loads a payment iframe fails and names the payment domain", () =>
+  Effect.gen(function* () {
+    const { broker, tabId } = yield* ready;
+    const frameUrl = "https://pay.google.com/gp/p/ui/pay";
+    mouseClick = () => contexts[0]!.page.loadDocument(frameUrl, "checkout-frame").catch(constVoid);
+    const error = yield* broker
+      .invoke<void>({ scope, tabId, operation: "click", input: { x: 20, y: 20 } })
+      .pipe(Effect.flip);
+    expect(error.message).toContain("pay.google.com");
+    expect(error.message).toContain(TAKEOVER_TOOL);
+    expect(fetchDecisions().at(-1)).toMatchObject({ url: frameUrl, method: "Fetch.failRequest" });
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+// Regression: what phase 1 learned beyond its acceptance specs.
+const fetchCommands = Effect.gen(function* () {
+  const commands = yield* Queue.unbounded<{ readonly method: string; readonly input: unknown }>();
+  fetchCommandListener = (method, input) => Queue.offerUnsafe(commands, { method, input });
+  return commands;
+});
+const takeFetchCommand = (
+  commands: Queue.Queue<{ readonly method: string; readonly input: unknown }>,
+  matches: (command: { readonly method: string; readonly input: unknown }) => boolean,
+) =>
+  Effect.gen(function* () {
+    while (true) {
+      const command = yield* Queue.take(commands);
+      if (matches(command)) return command;
+    }
+  });
+const pausesDocumentsAtRequest = (input: unknown) =>
+  ((input as { patterns?: ReadonlyArray<Record<string, unknown>> }).patterns ?? []).some(
+    (pattern) => (pattern.requestStage ?? "Request") === "Request",
+  );
+
+it.live("a corrupt saved profile file is ignored and agent tabs open the default profile", () =>
+  withRestartableState((baseDir) =>
+    Effect.gen(function* () {
+      yield* Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const file = path.join(config.stateDir, "server-browser", "reported-profiles.json");
+        yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+        yield* fs.writeFileString(file, '{"profiles": [');
+      }).pipe(Effect.scoped, Effect.provide(layerAt(baseDir)));
+      contextRequests.length = 0;
+      const opened = yield* openAgentTab().pipe(Effect.scoped, Effect.provide(layerAt(baseDir)));
+      expect(contextRequests).toEqual([{ profileId: "default", isolated: false }]);
+      expect(opened.defaultProfileId).toBeUndefined();
+    }),
+  ),
+);
+
+it.live("a payment document the guard refuses is recorded in the action timeline by domain", () =>
+  Effect.gen(function* () {
+    const { broker, tabId } = yield* ready;
+    mouseClick = () =>
+      contexts[0]!.page.loadDocument("https://www.paypal.com/checkoutnow").catch(constVoid);
+    yield* broker
+      .invoke<void>({ scope, tabId, operation: "click", input: { x: 5, y: 5 } })
+      .pipe(Effect.flip);
+    const snapshot = yield* broker.invoke<PreviewAutomationSnapshot>({
+      scope,
+      tabId,
+      operation: "snapshot",
+      input: {},
+    });
+    expect(snapshot.actionTimeline).toContainEqual(
+      expect.objectContaining({
+        action: "blockPaymentNavigation",
+        status: "failed",
+        error: "Blocked paypal.com, a payment site.",
+      }),
+    );
+    expect(snapshot.actionTimeline.find((event) => event.action === "click")).toMatchObject({
+      action: "click",
+      status: "failed",
+      error: expect.stringContaining("preview_request_takeover"),
+    });
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("a desktop-rendered tab gets no payment guard on the desktop's page", () =>
+  Effect.gen(function* () {
+    desktopRendersNext = true;
+    yield* openAgentTab();
+    expect(desktopConnections).toHaveLength(1);
+    const patterns = desktopConnections[0]!.context.sessions.flatMap(
+      (session) => session.fetchPatterns ?? [],
+    );
+    expect(patterns.filter((pattern) => (pattern.requestStage ?? "Request") === "Request")).toEqual(
+      [],
+    );
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("a popup an agent's page opens becomes a tab with its own payment guard", () =>
+  Effect.gen(function* () {
+    yield* ready;
+    const commands = yield* fetchCommands;
+    const popup = makeContext();
+    contexts[0]!.page.emit("popup", popup.page);
+    yield* takeFetchCommand(
+      commands,
+      ({ method, input }) => method === "Fetch.enable" && pausesDocumentsAtRequest(input),
+    );
+    const guard = popup.sessions.find((session) =>
+      pausesDocumentsAtRequest({ patterns: session.fetchPatterns ?? [] }),
+    );
+    expect(guard?.fetchPatterns).toEqual([{ resourceType: "Document", requestStage: "Request" }]);
+    const url = "https://pay.google.com/gp/p/ui/pay";
+    const failure = yield* Effect.promise(() =>
+      popup.page.goto(url).then(
+        () => null,
+        (cause: Error) => cause.message,
+      ),
+    );
+    expect(failure).toContain("ERR_BLOCKED_BY_CLIENT");
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.live("an operator tab's first payment load is refused until a human takes control", () =>
+  Effect.gen(function* () {
+    const browser = yield* ServerBrowser.ServerBrowser;
+    const manager = yield* Manager.PreviewManager;
+    yield* Effect.yieldNow;
+    const commands = yield* fetchCommands;
+    const url = "https://www.paypal.com/checkoutnow";
+    const opened = yield* manager.open({ threadId: scope.thread.threadId, url, runtime: "server" });
+    const tabId = PreviewTabId.make(opened.tabId);
+    yield* browser.attachViewer(viewerInput(tabId, false));
+    yield* takeFetchCommand(commands, ({ method }) => method === "Fetch.failRequest");
+    expect(contexts[0]!.page.url()).not.toBe(url);
+    // An operating viewer on an operator tab takes control as it attaches.
+    const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+    yield* viewer.input({ type: "navigate", url });
+    expect(contexts[0]!.page.url()).toBe(url);
+    expect(fetchDecisions().map((decision) => decision.method)).toEqual([
+      "Fetch.failRequest",
+      "Fetch.continueRequest",
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
 );

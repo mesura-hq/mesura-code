@@ -1164,6 +1164,15 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+const DEFAULT_BROWSER_PAYMENT_DOMAINS: ReadonlyArray<string> = [
+  "mercadopago.com",
+  "mercadopago.com.ar",
+  "payoneer.com",
+  "paypal.com",
+  "checkout.stripe.com",
+  "pay.google.com",
+];
+
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1189,6 +1198,10 @@ export const ServerSettings = Schema.Struct({
   ),
 
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Agents cannot navigate to these hosts or their subdomains while no human holds the tab. */
+  browserPaymentDomains: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_PAYMENT_DOMAINS)),
+  ),
   projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
@@ -1561,6 +1574,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
+  browserPaymentDomains: Schema.optionalKey(Schema.Array(Schema.String)),
   projectAgentBrowserAccessOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),

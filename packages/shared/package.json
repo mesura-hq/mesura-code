@@ -319,6 +319,10 @@
       "types": "./src/preview.ts",
       "import": "./src/preview.ts"
     },
+    "./paymentDomains": {
+      "types": "./src/paymentDomains.ts",
+      "import": "./src/paymentDomains.ts"
+    },
     "./previewViewport": {
       "types": "./src/previewViewport.ts",
       "import": "./src/previewViewport.ts"

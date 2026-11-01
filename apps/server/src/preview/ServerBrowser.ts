@@ -51,12 +51,15 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import type * as FileSystem from "effect/FileSystem";
 import { constVoid } from "effect/Function";
+import type * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -76,6 +79,7 @@ import * as ServerConfig from "../config.ts";
 import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
 import * as PreviewAgentActivity from "./PreviewAgentActivity.ts";
 import * as PreviewManager from "./Manager.ts";
@@ -85,6 +89,13 @@ import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
 import { presentAsChrome, ServerBrowserContexts } from "./ServerBrowserContexts.ts";
 import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
 import { installPdfDocumentNavigation, isPdfAssetUrl } from "./PdfDocumentNavigation.ts";
+import {
+  installPaymentNavigationGuard,
+  paymentDomainOfUrl,
+  paymentNavigationBlockedMessage,
+  type PaymentNavigationBlock,
+} from "./PaymentNavigationGuard.ts";
+import { loadReportedProfiles, saveReportedProfiles } from "./ReportedBrowserProfiles.ts";
 
 const SERVER_HOST_CLIENT_ID = SERVER_BROWSER_AUTOMATION_CLIENT_ID;
 const RENDER_SCALE = 2;
@@ -319,6 +330,8 @@ interface ServerTab {
     readonly generation: number;
     readonly timer: ReturnType<typeof setTimeout>;
   } | null;
+  /** The last payment document, in any frame, the agent guard refused. */
+  paymentBlock: PaymentNavigationBlock | null;
 
   recordingStart: Promise<Recording> | null;
   captureLock: Promise<void>;
@@ -459,6 +472,8 @@ const make = Effect.gen(function* () {
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
   const launchServices = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const fileServices = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
   const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
 
   const tabs = new Map<string, ServerTab>();
@@ -774,11 +789,18 @@ const make = Effect.gen(function* () {
       initialNavigation: null,
       navigationGeneration: 0,
       abortedNavigation: null,
+      paymentBlock: null,
       captureLock: Promise.resolve(),
       capturing: 0,
     };
     if (!desktop) {
       await page.setViewportSize(fixedViewportSize(tab.setting) ?? UNATTACHED_FILL_VIEWPORT);
+      // Adopted popups get it too; only the request that opened a popup goes out unguarded.
+      await installPaymentNavigationGuard(page, {
+        agentDrives: () => tab.control.controller === null,
+        paymentDomains: readPaymentDomains,
+        onBlocked: (block) => recordPaymentBlock(tab, block),
+      });
     }
     await applyRendering(tab, snapshot);
     const isMainNavigation = (request: { isNavigationRequest(): boolean; frame(): unknown }) =>
@@ -1306,16 +1328,39 @@ const make = Effect.gen(function* () {
   // last report outlives the client, which lets agents record while no client is connected.
   let recordingFrameRate = DEFAULT_BROWSER_RECORDING_FRAME_RATE;
 
-  const reportProfiles: ServerBrowser["Service"]["reportProfiles"] = (input) =>
-    Effect.sync(() => {
+  const applyReportedProfiles = (
+    report: Pick<PreviewReportProfilesInput, "profiles" | "defaultProfileId">,
+  ) => {
+    const profiles = resolveBrowserProfiles(report.profiles);
+    reportedProfiles = {
+      profiles,
+      defaultProfileId:
+        findBrowserProfile(profiles, report.defaultProfileId)?.id ?? DEFAULT_BROWSER_PROFILE_ID,
+    };
+  };
+  // Saved so agent tabs open the reported default profile after a restart, before any client.
+  const reportedProfilesPath = NodePath.join(
+    config.stateDir,
+    "server-browser",
+    "reported-profiles.json",
+  );
+  const savedProfiles = yield* loadReportedProfiles(reportedProfilesPath).pipe(
+    Effect.provide(fileServices),
+  );
+  if (Option.isSome(savedProfiles)) applyReportedProfiles(savedProfiles.value);
+  const profileReports = yield* Semaphore.make(1);
+
+  const reportProfiles: ServerBrowser["Service"]["reportProfiles"] = Effect.fn(
+    "ServerBrowser.reportProfiles",
+  )(
+    function* (input: PreviewReportProfilesInput) {
       if (input.recordingFrameRate !== undefined) recordingFrameRate = input.recordingFrameRate;
-      const profiles = resolveBrowserProfiles(input.profiles);
-      reportedProfiles = {
-        profiles,
-        defaultProfileId:
-          findBrowserProfile(profiles, input.defaultProfileId)?.id ?? DEFAULT_BROWSER_PROFILE_ID,
-      };
-    });
+      applyReportedProfiles(input);
+      yield* saveReportedProfiles(reportedProfilesPath, input);
+    },
+    profileReports.withPermits(1),
+    Effect.provide(fileServices),
+  );
 
   const profileStatus = () => {
     const profiles = reportedProfiles?.profiles ?? BUILT_IN_BROWSER_PROFILES;
@@ -1329,8 +1374,9 @@ const make = Effect.gen(function* () {
     };
   };
 
-  const resolveOpenProfile = (requested: string | undefined): string | undefined => {
-    if (requested === undefined) return reportedProfiles?.defaultProfileId;
+  const resolveOpenProfile = (requested: string | undefined): string => {
+    if (requested === undefined)
+      return reportedProfiles?.defaultProfileId ?? DEFAULT_BROWSER_PROFILE_ID;
     const profiles = reportedProfiles?.profiles ?? BUILT_IN_BROWSER_PROFILES;
     const wanted = requested.toLowerCase();
     const match =
@@ -1662,6 +1708,74 @@ const make = Effect.gen(function* () {
     );
   };
 
+  // A failed read keeps the last list, so an unrelated settings error cannot drop a custom
+  // domain; with no list read yet, agent navigation is refused rather than guessed.
+  let lastPaymentDomains: ReadonlyArray<string> | undefined;
+  const readPaymentDomains = async () => {
+    const domains = await runPromise(
+      serverSettings.getSettings.pipe(
+        Effect.map((settings) => settings.browserPaymentDomains),
+        Effect.tap((read) => Effect.sync(() => (lastPaymentDomains = read))),
+        Effect.catch((cause) =>
+          Effect.logWarning("Could not read the browser payment domains.", { cause }).pipe(
+            Effect.as(lastPaymentDomains),
+          ),
+        ),
+      ),
+    );
+    if (domains === undefined) {
+      throw new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        "The server settings could not be read, so agent navigation is refused until the payment-site list loads.",
+      );
+    }
+    return domains;
+  };
+
+  const paymentNavigationError = (domain: string) =>
+    new ServerBrowserPage.ServerBrowserOperationError(
+      "PreviewAutomationExecutionError",
+      paymentNavigationBlockedMessage(domain),
+    );
+
+  // Refused before navigating, so even a navigation the agent does not wait for reports it.
+  const assertNotPaymentDestination = async (url: string) => {
+    const domain = paymentDomainOfUrl(url, await readPaymentDomains());
+    if (domain !== undefined) throw paymentNavigationError(domain);
+  };
+
+  const recordPaymentBlock = (tab: ServerTab, block: PaymentNavigationBlock) => {
+    tab.paymentBlock = block;
+    const now = new Date().toISOString();
+    pushBounded(
+      tab.actionTimeline,
+      {
+        id: NodeCrypto.randomUUID(),
+        action: "blockPaymentNavigation",
+        status: "failed",
+        startedAt: now,
+        completedAt: now,
+        error: `Blocked ${block.domain}, a payment site.`,
+      },
+      ACTION_TIMELINE_LIMIT,
+    );
+  };
+
+  // A blocked navigation reads as a generic network failure, or not at all after a click.
+  const failOnPaymentBlock = async <A>(tab: ServerTab, run: () => Promise<A>): Promise<A> => {
+    const before = tab.paymentBlock;
+    const blocked = () =>
+      tab.paymentBlock !== before && tab.paymentBlock !== null
+        ? paymentNavigationError(tab.paymentBlock.domain)
+        : null;
+    const result = await run().catch((cause: unknown) => {
+      throw blocked() ?? cause;
+    });
+    const error = blocked();
+    if (error) throw error;
+    return result;
+  };
+
   const requireTab = async (request: PreviewAutomationRequest) => {
     if (!request.agentSessionId)
       throw new BrowserControlInterrupted("The agent session is missing. Reconnect the provider.");
@@ -1767,6 +1881,7 @@ const make = Effect.gen(function* () {
           found && (request.tabIdExplicit || found.control.agentId === request.agentSessionId)
             ? found
             : undefined;
+        if (url) await assertNotPaymentDestination(url);
         const navigationTimeout = Math.min(request.timeoutMs, NAVIGATION_TIMEOUT_MS);
         const profileId = existing ? undefined : resolveOpenProfile(open.profileId);
         if (!existing) {
@@ -1801,9 +1916,13 @@ const make = Effect.gen(function* () {
                 "dialogPending",
               );
             if (existing) {
-              if (url) await navigate(tab, url, "load", navigationTimeout);
+              if (url)
+                await failOnPaymentBlock(tab, () => navigate(tab, url, "load", navigationTimeout));
             } else {
-              await tab.initialNavigation;
+              // A new tab's first document can redirect to a payment site before this awaits it.
+              await tab.initialNavigation?.catch((cause: unknown) => {
+                throw tab.paymentBlock ? paymentNavigationError(tab.paymentBlock.domain) : cause;
+              });
             }
             const reveal = open.open ?? open.show;
             if (reveal !== false) {
@@ -1927,12 +2046,16 @@ const make = Effect.gen(function* () {
       case "navigate": {
         const navigateInput = input as PreviewAutomationNavigateInput;
         await recordAction(tab, "navigate", () =>
-          navigate(
-            tab,
-            resolveNavigationUrl(navigateInput),
-            navigateInput.readiness ?? "load",
-            navigateInput.timeoutMs ?? request.timeoutMs,
-          ),
+          failOnPaymentBlock(tab, async () => {
+            const url = resolveNavigationUrl(navigateInput);
+            await assertNotPaymentDestination(url);
+            await navigate(
+              tab,
+              url,
+              navigateInput.readiness ?? "load",
+              navigateInput.timeoutMs ?? request.timeoutMs,
+            );
+          }),
         );
         return statusWithTitle(tab, request.agentSessionId);
       }
@@ -1967,7 +2090,9 @@ const make = Effect.gen(function* () {
       case "click": {
         const clickInput = input as PreviewAutomationClickInput;
         await recordAction(tab, "click", () =>
-          ServerBrowserPage.click(tab.page, clickInput, pointerFor(tab)),
+          failOnPaymentBlock(tab, () =>
+            ServerBrowserPage.click(tab.page, clickInput, pointerFor(tab)),
+          ),
         );
         return undefined;
       }
