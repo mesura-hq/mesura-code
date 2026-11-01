@@ -610,6 +610,13 @@ describe("working section: place and order", () => {
     expect(sectionRowKeys(), "the agent executes a later turn").toEqual([threadKey("question")]);
     expect(rowCard("question").textContent).toContain("Working");
     expect(rowCard("question").textContent).toContain("Question open");
+    const rowNames = [
+      ...document.querySelectorAll(`[data-thread-item="${threadKey("question")}"] [aria-label]`),
+    ].map((element) => element.getAttribute("aria-label") ?? "");
+    expect(
+      rowNames.find((name) => name.startsWith("Question asked")),
+      "the row's accessible name",
+    ).toContain("Question asked, Question open, Working");
 
     await publish(withSignal(executing, "waiting"));
 

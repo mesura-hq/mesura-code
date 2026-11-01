@@ -964,9 +964,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     title: thread.title,
     // The slot shows `5/11 Review`; a screen reader hears the run's long label.
     statusLabel:
-      topStatus?.kind === "factory"
-        ? (factoryRunLabel(thread.factoryRun)?.text ?? topStatus.label)
-        : (topStatus?.label ?? null),
+      topStatus === null
+        ? null
+        : [
+            // The row's aria-label replaces its text, so the open question is named here.
+            topStatus.questionOpen ? "Question open" : null,
+            topStatus.kind === "factory"
+              ? (factoryRunLabel(thread.factoryRun)?.text ?? topStatus.label)
+              : topStatus.label,
+          ]
+            .filter(Boolean)
+            .join(", "),
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
   });
