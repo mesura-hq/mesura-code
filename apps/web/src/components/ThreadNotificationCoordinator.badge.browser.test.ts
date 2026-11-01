@@ -326,7 +326,8 @@ it("a ready_to_close signal adds no notification and preserves the normal comple
 });
 
 // regression: phase 3 review P1-1 — the run's completion replaced the agent's Input needed.
-it("keeps Input needed when the run that signalled needs_input completes", async () => {
+// Mesura: a question signalled mid-turn notifies once the agent stops executing (2026-11-01).
+it("notifies Input needed, not a completion, when the run that signalled needs_input completes", async () => {
   await using app = setup();
   app.start();
   using _timers = fakeTimers();
@@ -337,7 +338,7 @@ it("keeps Input needed when the run that signalled needs_input completes", async
     setAt: "2026-09-13T07:00:30.000Z",
   };
   state.shells.set("one", shell({ agentSignal }));
-  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Input needed"]);
+  expect(TestNotification.sent).toHaveLength(0);
   state.shells.set(
     "one",
     shell({
