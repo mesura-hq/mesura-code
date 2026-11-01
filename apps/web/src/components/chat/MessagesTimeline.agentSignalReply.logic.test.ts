@@ -120,12 +120,37 @@ describe("a reply split by an agent signal", () => {
     ).toEqual(["user-entry", "turn-fold:turn-1", "closing-entry"]);
   });
 
-  it("does not treat another tool whose name ends the same way as a signal", () => {
+  it("keeps the questions and every later message when the signal comes right after the questions", () => {
+    expect(
+      collapsedRowIds([
+        message("user", 0, "user"),
+        command("read-files", 10),
+        message("questions", 16, "assistant"),
+        signal("signal", 20, "mcp__t3-code__t3_thread_signal"),
+        message("continuation", 24, "assistant"),
+        message("closing", 28, "assistant"),
+      ]),
+    ).toEqual([
+      "user-entry",
+      "turn-fold:turn-1",
+      "questions-entry",
+      "continuation-entry",
+      "closing-entry",
+    ]);
+  });
+
+  it.each([
+    "mcp__other__t3_thread_signal",
+    "mcp__other-t3-code__t3_thread_signal",
+    "mcp__not-t3-code__t3_thread_signal",
+    "mcp__t3-code__not_t3_thread_signal",
+    "t3-code.t3_thread_signal_v2",
+  ])("does not treat %s as a signal", (toolName) => {
     expect(
       collapsedRowIds([
         message("user", 0, "user"),
         message("progress", 8, "assistant"),
-        signal("lookalike", 20, "mcp__other__not_t3_thread_signal"),
+        signal("lookalike", 20, toolName),
         message("closing", 28, "assistant"),
       ]),
     ).toEqual(["user-entry", "turn-fold:turn-1", "closing-entry"]);

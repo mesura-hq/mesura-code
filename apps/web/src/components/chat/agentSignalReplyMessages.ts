@@ -1,29 +1,30 @@
+import { resolveT3McpToolName } from "@t3tools/shared/t3McpToolPresentation";
+
 import type { TimelineEntry } from "../../session-logic";
 
 /**
  * Mesura: `t3_thread_signal` is this fork's tool. Agents often write their question, signal
- * `needs_input`, then close with one line, and the turn fold shows only that last line. Every
- * provider names the tool with its own prefix (`mcp__t3-code__…`, `t3-code.…`).
+ * `needs_input`, then close with one line, and the turn fold shows only that last line.
  */
 const AGENT_SIGNAL_TOOL = "t3_thread_signal";
-const MESURA_TOOL_SERVER = /t3[-_]code/;
 
-const isAgentSignalToolName = (toolName: string) =>
-  toolName === AGENT_SIGNAL_TOOL ||
-  (toolName.endsWith(AGENT_SIGNAL_TOOL) && MESURA_TOOL_SERVER.test(toolName));
-
-function isAgentSignalOrReasoning(entry: TimelineEntry): boolean {
+function isAgentSignal(entry: TimelineEntry): boolean {
   if (entry.kind !== "work") return false;
   const item = entry.entry.structuredPayload;
-  if (item?.type === "reasoning") return true;
   return (
-    item?.type === "dynamic_tool" && item.toolName !== null && isAgentSignalToolName(item.toolName)
+    item?.type === "dynamic_tool" &&
+    item.toolName !== null &&
+    resolveT3McpToolName(item.toolName) === AGENT_SIGNAL_TOOL
   );
 }
 
+const isReasoning = (entry: TimelineEntry) =>
+  entry.kind === "work" && entry.entry.structuredPayload?.type === "reasoning";
+
 /**
- * The assistant messages that end a reply before its terminal message: the terminal message is
- * reached from them through agent signals and reasoning only. The turn fold keeps them visible.
+ * The assistant messages of a reply that an agent signal splits: walking back from the terminal
+ * message through assistant messages, signals and reasoning only, every message is kept once a
+ * signal lies between it and the terminal message. The turn fold keeps them visible.
  */
 export function agentSignalReplyMessageIds(
   timelineEntries: ReadonlyArray<TimelineEntry>,
@@ -35,17 +36,25 @@ export function agentSignalReplyMessageIds(
       continue;
     }
     let crossedSignal = false;
+    let messagesAfterSignal: string[] = [];
     for (let index = terminalIndex - 1; index >= 0; index -= 1) {
       const entry = timelineEntries[index]!;
-      if (isAgentSignalOrReasoning(entry)) {
-        crossedSignal ||= entry.kind === "work" && entry.entry.itemType !== "reasoning";
+      if (isReasoning(entry)) continue;
+      if (isAgentSignal(entry)) {
+        crossedSignal = true;
         continue;
       }
       const isSameReply =
         entry.kind === "message" &&
         entry.message.role === "assistant" &&
         entry.message.runId === terminal.message.runId;
-      if (!isSameReply || !crossedSignal) break;
+      if (!isSameReply) break;
+      if (!crossedSignal) {
+        messagesAfterSignal.push(entry.id);
+        continue;
+      }
+      for (const id of messagesAfterSignal) replyMessageIds.add(id);
+      messagesAfterSignal = [];
       replyMessageIds.add(entry.id);
     }
   }
