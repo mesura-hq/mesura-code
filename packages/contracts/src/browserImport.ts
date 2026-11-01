@@ -37,6 +37,7 @@ export const BrowserImportFailureReason = Schema.Literals([
   "profileNotSaved",
   "profileLimitReached",
   "readFailed",
+  "serverPermissionDenied",
 ]);
 export type BrowserImportFailureReason = typeof BrowserImportFailureReason.Type;
 
@@ -69,6 +70,12 @@ export const DesktopPreviewImportCookiesInputSchema = Schema.Struct({
   targetProfileId: BrowserProfileId,
 });
 
+export const DesktopPreviewReadCookiesInputSchema = Schema.Struct({
+  sourceId: BrowserImportSourceId,
+  sourceProfileDirectory: TrimmedNonEmptyString,
+});
+export type DesktopPreviewReadCookiesInput = typeof DesktopPreviewReadCookiesInputSchema.Type;
+
 export const ImportedCookie = Schema.Struct({
   url: Schema.String,
   name: Schema.String,
@@ -83,6 +90,14 @@ export const ImportedCookie = Schema.Struct({
   sameSite: Schema.Literals(["unspecified", "no_restriction", "lax", "strict"]),
 });
 export type ImportedCookie = typeof ImportedCookie.Type;
+
+/** Cookies a desktop read parsed, plus the ones it could not decrypt. */
+export const BrowserCookieReadResult = Schema.Struct({
+  cookies: Schema.Array(ImportedCookie),
+  undecryptable: Schema.Int,
+  undecryptableHosts: Schema.Array(Schema.String),
+});
+export type BrowserCookieReadResult = typeof BrowserCookieReadResult.Type;
 
 export const BrowserImportResult = Schema.Struct({
   imported: Schema.Int,
@@ -113,4 +128,6 @@ export const BROWSER_IMPORT_FAILURE_COPY: Readonly<Record<BrowserImportFailureRe
   profileLimitReached:
     "You've reached the profile limit. Delete a profile or import into an existing one.",
   readFailed: "The browser's cookie database could not be read.",
+  serverPermissionDenied:
+    "This connection lacks permission to use the server browser, so it can't import cookies into it.",
 };
