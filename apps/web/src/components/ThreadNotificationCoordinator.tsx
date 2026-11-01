@@ -40,6 +40,7 @@ import {
   watchPushRegistration,
 } from "../pushNotifications/pushRegistration";
 import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "./Sidebar.logic";
+import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-inbox";
 import { resolveSidebarThreadAttention } from "./sidebarThreadAttention";
 import {
   createThreadNotificationGate,
@@ -263,6 +264,7 @@ export function startThreadNotifications(
           isUnread: false,
           isWoke: false,
           agentSignal: thread.agentSignal,
+          agentExecuting: threadRuntimeIsExecuting(thread.runtime),
           factoryRun: thread.factoryRun,
         })?.kind ?? null;
       const loudKind: LoudKind | null =

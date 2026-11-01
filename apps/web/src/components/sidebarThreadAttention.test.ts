@@ -25,6 +25,7 @@ function attention(
     isUnread: boolean;
     isWoke: boolean;
     agentSignal: ThreadAgentSignal | null;
+    agentExecuting: boolean;
     factoryRun: FactoryRunShellSummary | null;
   }> = {},
 ) {
@@ -33,6 +34,7 @@ function attention(
     isUnread: false,
     isWoke: false,
     agentSignal: null,
+    agentExecuting: false,
     factoryRun: null,
     ...input,
   });
@@ -68,6 +70,35 @@ describe("sidebar thread attention mapping", () => {
       attention({ status: "working", agentSignal: needsInput, factoryRun: factoryRunAt("running") })
         ?.kind,
     ).toBe("input");
+  });
+
+  it("an open agent question keeps the busy label, with the question marked, while the agent executes", () => {
+    expect(attention({ status: "working", agentSignal: needsInput, agentExecuting: true })).toEqual(
+      { kind: "working", text: "Working", emphasis: "quiet", questionOpen: true },
+    );
+    expect(attention({ status: "waiting", agentSignal: needsInput, agentExecuting: true })).toEqual(
+      { kind: "waiting", text: "Waiting", emphasis: "quiet", questionOpen: true },
+    );
+    expect(
+      attention({
+        status: "working",
+        agentSignal: needsInput,
+        agentExecuting: true,
+        factoryRun: factoryRunAt("running"),
+      }),
+    ).toMatchObject({ kind: "factory", questionOpen: true });
+    expect(attention({ status: "working", agentExecuting: true })).not.toHaveProperty(
+      "questionOpen",
+    );
+  });
+
+  it("structured input and approvals still win over an executing agent's open question", () => {
+    expect(
+      attention({ status: "input", agentSignal: needsInput, agentExecuting: true })?.kind,
+    ).toBe("input");
+    expect(
+      attention({ status: "approval", agentSignal: needsInput, agentExecuting: true })?.kind,
+    ).toBe("approval");
   });
 
   it("sidebar attention AC3: a ready_to_close signal uses the normal finished presentation", () => {

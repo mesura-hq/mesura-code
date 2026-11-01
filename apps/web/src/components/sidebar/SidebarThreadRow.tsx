@@ -88,6 +88,7 @@ import {
   useSidebarRowSubscriptionLease,
   setFileDragActive,
 } from "../Sidebar.logic";
+import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-inbox";
 import {
   resolveSidebarThreadAttention,
   sidebarThreadAttentionLook,
@@ -726,6 +727,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     isUnread,
     isWoke,
     agentSignal: thread.agentSignal,
+    agentExecuting: threadRuntimeIsExecuting(thread.runtime),
     factoryRun: thread.factoryRun,
     goalActive: thread.goal?.status === "active",
   });
@@ -744,6 +746,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           ...sidebarThreadAttentionLook(attention.kind),
           kind: attention.kind,
           label: attention.text,
+          questionOpen: attention.questionOpen === true,
         };
   const isWokeStatus = topStatus?.kind === "woke";
   const needsInput = topStatus?.kind === "input" || status === "request";
@@ -1375,6 +1378,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         </span>
                       ) : (
                         <span className={cn("inline-flex items-center gap-1", topStatus.className)}>
+                          {topStatus.questionOpen ? (
+                            // Mesura: the agent's question stays open while it works (developer, 2026-11-01).
+                            <>
+                              <MessageCircleQuestionIcon
+                                aria-hidden
+                                className="size-4 shrink-0 text-needs-input"
+                              />
+                              <span className="sr-only">Question open,</span>
+                            </>
+                          ) : null}
                           {topStatus.icon === "request" ? (
                             <UserRoundIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "approval" ? (
