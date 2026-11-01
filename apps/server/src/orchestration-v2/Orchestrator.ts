@@ -171,6 +171,8 @@ import {
   decideAgentSignalCommand,
   type ThreadAgentSignalCommand,
 } from "./ThreadSignal.ts";
+// Mesura: a failed compaction holds the queue whatever its failure class.
+import { failedCompactionHoldsQueue } from "./CompactionQueueHold.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -1555,6 +1557,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (
         worktreeMissing ||
         instanceDisabledForProject ||
+        // Mesura: a follow-up queued behind a failed compaction must not run uncompacted.
+        failedCompactionHoldsQueue(projection.messages, failedRun, options?.failedRunId) ||
         (failureClass !== undefined &&
           failureClass !== "validation_error" &&
           failedRun?.providerInstanceId === queuedRun.providerInstanceId)

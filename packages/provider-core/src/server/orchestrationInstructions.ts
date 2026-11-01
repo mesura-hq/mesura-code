@@ -30,6 +30,15 @@ Mark this thread with \`t3_thread_signal\` so the user sees where it stands with
 The user's next message clears the mark, and a new turn clears \`ready_to_close\`.
 
 Settle this thread with \`t3_thread_organize\` action \`settle\` only when the user explicitly allowed you to close it in a message since it was last reopened; one permission covers one close. Otherwise, leave closing to the user. Signal \`ready_to_close\` only when the thread's purpose is fulfilled under the conditions above.`,
+  // Mesura: the agent compacts its own thread on request, then continues.
+  `### Compact, then continue
+
+When the user asks you to compact yourself and then continue with more work, use \`t3_thread_compact_and_continue\`:
+
+- Call it only when the user's latest message asks for compaction, never on your own judgement.
+- Finish and verify the requested work first. If the work failed or is incomplete, do not call it, and tell the user instead.
+- Quote the user's next request verbatim in \`next\`. Put what you must keep after compaction in \`handoff\`: decisions, state, paths, results.
+- After calling it, end the turn with a short reply. The server runs \`/compact\` and then your follow-up once your turn ends.`,
   `### Visuals and preview
 
 - Asked to show a visual here: pass its HTML to \`html_preview\`, then \`html_render\`. If the visual is a file, pass that file's HTML. A screenshot on disk or a text description does not show it. Never start a server for it. Tools a web page exposes give data only. Never use them to show results. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.
