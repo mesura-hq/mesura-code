@@ -2,9 +2,13 @@
 import { threadRuntimeIsActive, type EnvironmentThreadShell } from "./models.ts";
 import { toSortableTimestamp } from "./threadSort.ts";
 import { effectiveSnoozed } from "./threadSettled.ts";
+import { agentQuestionAwaitsUser } from "./agentQuestion.ts";
+
+export { agentQuestionAwaitsUser, threadRuntimeIsExecuting } from "./agentQuestion.ts";
 
 type WorkingThreadInput = Pick<
   EnvironmentThreadShell,
+  | "agentSignal"
   | "hasActionableProposedPlan"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
@@ -17,6 +21,7 @@ type WorkingThreadInput = Pick<
 export function isThreadWorking(thread: WorkingThreadInput): boolean {
   if (thread.hasPendingApprovals || thread.hasPendingUserInput) return false;
   if (thread.pendingSubagentRequest != null) return false;
+  if (agentQuestionAwaitsUser(thread)) return false;
   if (!threadRuntimeIsActive(thread.runtime) && thread.runtime?.status !== "idle") return false;
   const run = thread.latestRun;
   const runSettled =
@@ -199,6 +204,7 @@ export function createInboxReturnTracker() {
           thread.hasPendingApprovals ||
           thread.hasPendingUserInput ||
           thread.pendingSubagentRequest != null ||
+          agentQuestionAwaitsUser(thread) ||
           (thread.pendingGuestMessageCount ?? 0) > 0 ||
           (thread.interactionMode === "plan" && thread.hasActionableProposedPlan) ||
           thread.runtime?.lastError != null ||
