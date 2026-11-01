@@ -43,6 +43,8 @@ import * as PeerLinks from "../../../peer/PeerLinks.ts";
 import * as FactoryRunTracker from "../../../factory/FactoryRunTracker.ts";
 import * as FactorySnapshotStore from "../../../factory/FactorySnapshotStore.ts";
 import * as ProjectFaviconResolver from "../../../project/ProjectFaviconResolver.ts";
+// Mesura: the compact-then-continue tool reads the live provider session.
+import * as ProviderSessionManager from "../../../orchestration-v2/ProviderSessionManager.ts";
 
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
 
@@ -77,6 +79,8 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(FactoryRunTracker.FactoryRunTracker)({}),
   Layer.mock(FactorySnapshotStore.FactorySnapshotStore)({}),
   Layer.mock(ProjectFaviconResolver.ProjectFaviconResolver)({}),
+  // Mesura: the compact-then-continue tool.
+  Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({}),
 );
 
 const ToolsListPayload = Schema.fromJsonString(

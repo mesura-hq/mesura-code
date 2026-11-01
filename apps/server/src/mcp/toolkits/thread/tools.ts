@@ -30,6 +30,9 @@ import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTaskService from "../../../scheduledTasks/ScheduledTaskService.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+// Mesura: the compact-then-continue tool's schemas and the live session it checks.
+import * as CompactAndContinue from "../../../orchestration-v2/CompactAndContinue.ts";
+import * as ProviderSessionManager from "../../../orchestration-v2/ProviderSessionManager.ts";
 
 const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
   description:
@@ -83,6 +86,24 @@ const ThreadSignalTool = Tool.make("t3_thread_signal", {
     Crypto.Crypto,
   ],
 }).annotate(Tool.Title, "Signal the user");
+
+// Mesura: the agent queues /compact and the user's next request on its own thread.
+const ThreadCompactAndContinueTool = Tool.make("t3_thread_compact_and_continue", {
+  description:
+    "Queue a context compaction of this thread, then a follow-up message with the user's next request, both to run after your turn ends. Call it only when the user's latest message asks you to compact, and only after you finished and verified the requested work; if the work failed or is incomplete, do not call it and tell the user instead. Put the user's next request in `next`, quoted as they wrote it, and in `handoff` what you must keep after compaction (decisions, state, paths, results). After calling it, end your turn with a one-line reply.",
+  parameters: Schema.Struct({
+    next: CompactAndContinue.CompactAndContinueNext,
+    handoff: Schema.optional(CompactAndContinue.CompactAndContinueHandoff),
+  }),
+  success: CompactAndContinue.CompactAndContinueResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return" as const,
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService.ThreadManagementService,
+    ProviderSessionManager.ProviderSessionManagerV2,
+  ],
+}).annotate(Tool.Title, "Compact, then continue");
 
 const queueTarget = {
   environmentId: OrchestratorMcpEnvironmentTarget,
@@ -339,6 +360,8 @@ export const ThreadToolkit = Toolkit.make(
   PendingRequestRespondTool,
   ThreadOrganizeTool,
   ThreadSignalTool,
+  // Mesura: compact this thread, then continue.
+  ThreadCompactAndContinueTool,
   QueueListTool,
   QueueReadTool,
   QueueEditTool,
