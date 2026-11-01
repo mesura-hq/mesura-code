@@ -360,7 +360,7 @@ function normalizeT3McpToolLabel(value: string): string {
 }
 
 // ACP tool prefixes vary; match loosely but require a known display-name entry.
-function resolveT3McpToolName(value: string): string | null {
+export function resolveT3McpToolName(value: string): string | null {
   const label = normalizeT3McpToolLabel(value);
   const mcpMatch = /^mcp__(?<server>.+?)__(?<tool>.+)$/i.exec(label);
   if (mcpMatch?.groups) {

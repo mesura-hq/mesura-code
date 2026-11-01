@@ -16,7 +16,7 @@ const SIGNAL_SECTION_SNAPSHOT = `### Signal the user, and close only with permis
 
 Mark this thread with \`t3_thread_signal\` so the user sees where it stands without opening it:
 
-- \`needs_input\`: call it before you end a turn with a question or a decision only the user can make, and put that question in \`note\` in a few words. Structured questions and approvals already mark the thread; this is for questions you ask in your reply.
+- \`needs_input\`: call it before you end a turn with a question or a decision only the user can make, and put that question in \`note\` in a few words. Call it before you write your final reply, and make the question part of that final reply: the chat folds what you write before your last tool call into a collapsed group. Structured questions and approvals already mark the thread; this is for questions you ask in your reply.
 - \`ready_to_close\`: call it only when you judge that the thread's purpose (the goal the user gave this thread) is fulfilled and no background command, subagent, delegated task, or watch is still running. Do not call it just because a turn or one step ended. The user may give the thread a new purpose afterwards.
 - \`clear\`: remove a mark that no longer holds.
 
