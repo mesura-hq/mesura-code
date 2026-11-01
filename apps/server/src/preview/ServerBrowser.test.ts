@@ -54,6 +54,23 @@ vi.mock("./ServerBrowserContexts.ts", () => ({
       contexts.push(context);
       return context as unknown as BrowserContext;
     }
+    async openPage(
+      profileId: string,
+      isolationKey: string | undefined,
+      prepare: (context: BrowserContext) => Promise<void>,
+    ) {
+      const context = await this.contextFor(profileId, isolationKey);
+      await prepare(context);
+      return context.newPage();
+    }
+    async importCookies(
+      profileId: string,
+      cookies: ReadonlyArray<{ readonly url: string }>,
+      paymentDomains: ReadonlyArray<string>,
+    ) {
+      cookieImports.push({ profileId, cookies, paymentDomains });
+      return { imported: cookies.length, skipped: 0, skippedDomains: [] };
+    }
     async scratchPage() {
       return makeEncoderPage() as unknown as Page;
     }
@@ -336,6 +353,11 @@ function makeEncoderPage() {
 const contexts: ReturnType<typeof makeContext>[] = [];
 const encoderStreams: Array<{ frameRate: number | undefined; bitsPerSecond: number }> = [];
 const contextRequests: Array<{ profileId: string; isolated: boolean }> = [];
+const cookieImports: Array<{
+  profileId: string;
+  cookies: ReadonlyArray<{ readonly url: string }>;
+  paymentDomains: ReadonlyArray<string>;
+}> = [];
 let contextGate: PromiseWithResolvers<void> | null = null;
 let pageCopy = "";
 let keyCopy = "";
@@ -473,6 +495,7 @@ beforeEach(() => {
   contexts.length = 0;
   encoderStreams.length = 0;
   contextRequests.length = 0;
+  cookieImports.length = 0;
   contextGate = null;
   contextFailure = null;
   initialNavigation = null;
@@ -1847,4 +1870,69 @@ it.live("an operator tab's first payment load is refused until a human takes con
       "Fetch.continueRequest",
     ]);
   }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+const cookieToImport = {
+  url: "https://github.com/",
+  name: "session",
+  value: "abc",
+  domain: ".github.com",
+  path: "/",
+  secure: true,
+  httpOnly: true,
+  expirationDate: 1_800_000_000,
+  sameSite: "lax",
+} as const;
+
+it.live("importCookies writes into a reported persistent profile with the payment list", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* Effect.yieldNow;
+      yield* settings.updateSettings({ browserPaymentDomains: ["shop.example.test"] });
+      yield* browser.reportProfiles({
+        profiles: [{ id: "profile-work", name: "Work", kind: "persistent" }],
+        defaultProfileId: "profile-work",
+      });
+      const result = yield* browser.importCookies({
+        profileId: "profile-work",
+        cookies: [cookieToImport],
+      });
+      expect(result).toEqual({ imported: 1, skipped: 0, skippedDomains: [] });
+      expect(cookieImports).toEqual([
+        {
+          profileId: "profile-work",
+          cookies: [cookieToImport],
+          paymentDomains: ["shop.example.test"],
+        },
+      ]);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("importCookies refuses the incognito profile and unknown profile ids by reason", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      yield* Effect.yieldNow;
+      const incognito = yield* browser
+        .importCookies({ profileId: "incognito", cookies: [cookieToImport] })
+        .pipe(Effect.flip);
+      expect(incognito).toMatchObject({
+        _tag: "PreviewImportCookiesError",
+        profileId: "incognito",
+        reason: "incognitoProfile",
+      });
+      const unknown = yield* browser
+        .importCookies({ profileId: "profile-gone", cookies: [cookieToImport] })
+        .pipe(Effect.flip);
+      expect(unknown).toMatchObject({
+        _tag: "PreviewImportCookiesError",
+        profileId: "profile-gone",
+        reason: "unknownProfile",
+      });
+      expect(cookieImports).toEqual([]);
+    }),
+  ).pipe(Effect.provide(layer)),
 );

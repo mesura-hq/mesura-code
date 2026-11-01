@@ -69,6 +69,21 @@ export const DesktopPreviewImportCookiesInputSchema = Schema.Struct({
   targetProfileId: BrowserProfileId,
 });
 
+export const ImportedCookie = Schema.Struct({
+  url: Schema.String,
+  name: Schema.String,
+  value: Schema.String,
+  /** Undefined for a host-only cookie; a domain cookie keeps its leading dot. */
+  domain: Schema.optional(Schema.String),
+  path: Schema.String,
+  secure: Schema.Boolean,
+  httpOnly: Schema.Boolean,
+  /** Seconds since the Unix epoch; undefined for a session cookie. */
+  expirationDate: Schema.optional(Schema.Number),
+  sameSite: Schema.Literals(["unspecified", "no_restriction", "lax", "strict"]),
+});
+export type ImportedCookie = typeof ImportedCookie.Type;
+
 export const BrowserImportResult = Schema.Struct({
   imported: Schema.Int,
   skipped: Schema.Int,

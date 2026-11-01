@@ -34,7 +34,10 @@ import {
   type PreviewAutomationTypeInput,
   type PreviewAutomationUploadInput,
   type PreviewAutomationWaitForInput,
+  type BrowserImportResult,
   PreviewClearProfileError,
+  PreviewImportCookiesError,
+  type PreviewImportCookiesInput,
   type PreviewEvent,
   type PreviewNavStatus,
   type PreviewSessionSnapshot,
@@ -251,6 +254,9 @@ export class ServerBrowser extends Context.Service<
     }) => Effect.Effect<Option.Option<{ readonly path: string; readonly fileName: string }>>;
 
     readonly clearProfile: (profileId: string) => Effect.Effect<void, PreviewClearProfileError>;
+    readonly importCookies: (
+      input: PreviewImportCookiesInput,
+    ) => Effect.Effect<BrowserImportResult, PreviewImportCookiesError>;
 
     readonly reportProfiles: (input: PreviewReportProfilesInput) => Effect.Effect<void>;
   }
@@ -735,16 +741,17 @@ const make = Effect.gen(function* () {
       desktop === null &&
       ((snapshot.automationOwner !== undefined && snapshot.profileId === undefined) ||
         snapshot.profileId === INCOGNITO_BROWSER_PROFILE_ID);
-    const context =
-      adopted?.page.context() ??
-      desktop?.page.context() ??
-      (await contexts.contextFor(
+    if (adopted?.page.isClosed()) throw new Error("The popup closed before it opened.");
+    if (adopted) await prepareContext(adopted.page.context());
+    const page =
+      adopted?.page ??
+      desktop?.page ??
+      (await contexts.openPage(
         snapshot.profileId ?? "default",
         isolatedContext ? tabKey(snapshot.threadId, snapshot.tabId) : undefined,
+        prepareContext,
       ));
-    if (adopted?.page.isClosed()) throw new Error("The popup closed before it opened.");
-    if (!desktop) await prepareContext(context);
-    const page = adopted?.page ?? desktop?.page ?? (await context.newPage());
+    const context = page.context();
     const cdp = await context.newCDPSession(page);
     await installPdfDocumentNavigation(cdp);
     // The desktop's page is already a normal browser. A popup's first request
@@ -2647,9 +2654,28 @@ const make = Effect.gen(function* () {
       catch: (cause) => new PreviewClearProfileError({ profileId, cause }),
     });
 
+  const importCookies: ServerBrowser["Service"]["importCookies"] = Effect.fn(
+    "ServerBrowser.importCookies",
+  )(function* ({ profileId, cookies }: PreviewImportCookiesInput) {
+    const profile = findBrowserProfile(
+      reportedProfiles?.profiles ?? BUILT_IN_BROWSER_PROFILES,
+      profileId,
+    );
+    if (!profile)
+      return yield* new PreviewImportCookiesError({ profileId, reason: "unknownProfile" });
+    if (profile.kind === "incognito") {
+      return yield* new PreviewImportCookiesError({ profileId, reason: "incognitoProfile" });
+    }
+    return yield* Effect.tryPromise({
+      try: async () => contexts.importCookies(profileId, cookies, await readPaymentDomains()),
+      catch: (cause) => new PreviewImportCookiesError({ profileId, reason: "importFailed", cause }),
+    });
+  });
+
   return ServerBrowser.of({
     attachViewer,
     clearProfile,
+    importCookies,
     reportProfiles,
     openDownload,
     answerFileChooser,

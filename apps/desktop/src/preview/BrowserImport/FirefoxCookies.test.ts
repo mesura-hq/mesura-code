@@ -3,9 +3,11 @@
 import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import { ImportedCookie } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as NodeSqlite from "node:sqlite";
 
@@ -76,6 +78,8 @@ const writeFirefoxCookieDatabase = Effect.fnUntraced(function* (
   database.close();
   return file;
 });
+
+const decodeImportedCookies = Schema.decodeUnknownEffect(Schema.Array(ImportedCookie));
 
 const run = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Scope.Scope>) =>
   effect.pipe(Effect.provide(NodeServices.layer), Effect.scoped);
@@ -157,6 +161,24 @@ describe("readFirefoxCookies", () => {
             sameSite: "no_restriction",
           },
         ]);
+      }),
+    ),
+  );
+
+  it.effect("Firefox cookies decode as the shared ImportedCookie contract", () =>
+    run(
+      Effect.gen(function* () {
+        const row = { value: "v", path: "/", isSecure: 1, isHttpOnly: 1 };
+        const cookies = yield* readFirefoxCookies(
+          yield* writeFirefoxCookieDatabase([
+            { ...row, host: ".github.com", name: "domain", expiry: 1_800_000_000, sameSite: 1 },
+            { ...row, host: "example.test", name: "host-only", expiry: 0, sameSite: 0 },
+            { ...row, host: "strict.test", name: "strict", expiry: 0, sameSite: 2 },
+            { ...row, host: "unset.test", name: "unset", expiry: 0, sameSite: 256 },
+          ]),
+        );
+        expect(cookies).toHaveLength(4);
+        expect(yield* decodeImportedCookies(cookies)).toEqual(cookies);
       }),
     ),
   );
