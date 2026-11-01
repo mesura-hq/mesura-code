@@ -2,18 +2,12 @@
  * Mesura: a failed compaction holds the thread's queue. Kept apart from `CompactAndContinue.ts` so
  * the orchestrator can import it without an import cycle through `ThreadManagementService`.
  */
-import type {
-  OrchestrationV2ConversationMessage,
-  OrchestrationV2Run,
-  RunId,
+import {
+  isCompactionCommandMessage,
+  type OrchestrationV2ConversationMessage,
+  type OrchestrationV2Run,
+  type RunId,
 } from "@t3tools/contracts";
-
-/** The rule `RunExecutionService` uses to run a message as a compaction turn. */
-function isCompactionMessage(
-  message: Pick<OrchestrationV2ConversationMessage, "text" | "attachments">,
-): boolean {
-  return message.attachments.length === 0 && message.text.trim().toLowerCase() === "/compact";
-}
 
 /**
  * Whether the run that just failed was a compaction, which holds the queue whatever its failure
@@ -26,5 +20,5 @@ export function failedCompactionHoldsQueue(
 ): boolean {
   if (failedRun == null || failedRunId === undefined || failedRun.id !== failedRunId) return false;
   const message = messages.find((candidate) => candidate.id === failedRun.userMessageId);
-  return message !== undefined && isCompactionMessage(message);
+  return message !== undefined && isCompactionCommandMessage(message);
 }
