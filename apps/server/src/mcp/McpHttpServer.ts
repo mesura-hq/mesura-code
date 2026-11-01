@@ -56,6 +56,7 @@ import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 import * as OrchestratorHandlers from "./toolkits/orchestrator/handlers.ts";
 import { OrchestratorToolkit } from "./toolkits/orchestrator/tools.ts";
 import * as PreviewHandlers from "./toolkits/preview/handlers.ts";
+import * as BrowserTakeoverRequests from "../preview/BrowserTakeoverRequests.ts";
 import {
   PreviewSnapshotTool,
   PreviewSnapshotToolkit,
@@ -1018,10 +1019,11 @@ const layerPreviewSnapshotRegistration = imageToolRegistration(
   PreviewHandlers.layerSnapshot,
 );
 
+// Mesura: `preview_request_takeover` waits on its card through the takeover service.
 export const layerPreviewToolkit = Layer.mergeAll(
   layerPreviewStandardToolkitRegistration,
   layerPreviewSnapshotRegistration,
-);
+).pipe(Layer.provide(BrowserTakeoverRequests.layer));
 
 export const layerOrchestratorToolkit = toolkitRegistration(
   OrchestratorToolkit,

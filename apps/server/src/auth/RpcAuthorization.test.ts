@@ -269,6 +269,12 @@ describe("RPC authorization scopes", () => {
     }
   });
 
+  it("requires preview operation to import cookies into a server browser profile", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.previewImportCookies)).toBe(
+      AuthPreviewOperateScope,
+    );
+  });
+
   it("separates passive terminal observation from operations that can change a shell", () => {
     for (const method of [
       WS_METHODS.terminalObserve,

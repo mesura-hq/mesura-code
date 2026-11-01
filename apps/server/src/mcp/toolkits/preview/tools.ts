@@ -1,4 +1,5 @@
 import {
+  BROWSER_TAKEOVER_REASON_MAX_LENGTH,
   OrchestratorMcpFailure,
   ToolActivityIcon,
   PreviewAutomationClickInput,
@@ -25,6 +26,8 @@ import {
   PreviewAutomationTypeInput,
   PreviewAutomationUploadInput,
   PreviewAutomationWaitForInput,
+  PreviewTabId,
+  TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
@@ -33,6 +36,7 @@ import { Tool, Toolkit } from "effect/ai";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as ServerConfig from "../../../config.ts";
+import * as BrowserTakeoverRequests from "../../../preview/BrowserTakeoverRequests.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 
 const dependencies = [
@@ -72,7 +76,7 @@ const PreviewStatusTool = Tool.make("preview_status", {
 const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Open a preview tab in this thread and show it. `open=false` keeps it in the background. Reuses your current tab unless `tabId` or `reuseExistingTab=false` says otherwise. Parallel subagents in one session must each use `reuseExistingTab=false`, then their own returned `tabId`.",
+      "Open a preview tab in this thread and show it. `open=false` keeps it in the background. Reuses your current tab unless `tabId` or `reuseExistingTab=false` says otherwise. Parallel subagents in one session must each use `reuseExistingTab=false`, then their own returned `tabId`. The default profile holds the operator's logins. Never buy, pay or confirm a purchase; payment pages are blocked.",
     parameters: PreviewAutomationOpenInput,
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
@@ -294,6 +298,31 @@ const PreviewRecordingStopTool = safeBrowserTool(
   }).annotate(Tool.Title, "Stop browser recording"),
 );
 
+const PreviewRequestTakeoverTool = safeBrowserTool(
+  Tool.make("preview_request_takeover", {
+    description:
+      'Ask the operator to take over your server tab when a page needs a person: a login, 2FA, "verify it\'s you", a CAPTCHA, or any payment or purchase step. Shows the tab and a card, then waits until the operator takes control and releases it, or answers the card. Returns done, declined or cancelled with a fresh preview status; refs from earlier snapshots are stale.',
+    parameters: Schema.Struct({
+      tabId: Schema.optional(PreviewTabId),
+      reason: TrimmedNonEmptyString.check(
+        Schema.isMaxLength(BROWSER_TAKEOVER_REASON_MAX_LENGTH),
+      ).annotate({ description: "What the operator should do, in one or two sentences." }),
+      timeoutMs: Schema.optional(
+        Schema.Int.check(
+          Schema.isGreaterThan(0),
+          Schema.isLessThanOrEqualTo(BrowserTakeoverRequests.BROWSER_TAKEOVER_MAX_TIMEOUT_MS),
+        ),
+      ).annotate({ description: "How long to wait. Default 30 minutes, at most 2 hours." }),
+    }),
+    success: Schema.Struct({
+      status: Schema.Literals(["done", "declined", "cancelled"]),
+      preview: Schema.NullOr(PreviewAutomationStatus),
+    }),
+    failure: PreviewToolFailure,
+    dependencies: [...dependencies, BrowserTakeoverRequests.BrowserTakeoverRequests],
+  }).annotate(Tool.Title, "Ask the operator to take over a preview tab"),
+);
+
 export const PreviewToolkit = Toolkit.make(
   PreviewDialogTool,
   PreviewStatusTool,
@@ -314,6 +343,7 @@ export const PreviewToolkit = Toolkit.make(
   PreviewWaitForTool,
   PreviewRecordingStartTool,
   PreviewRecordingStopTool,
+  PreviewRequestTakeoverTool,
 );
 
 export const PreviewStandardToolkit = Toolkit.make(
@@ -335,6 +365,7 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewWaitForTool,
   PreviewRecordingStartTool,
   PreviewRecordingStopTool,
+  PreviewRequestTakeoverTool,
 );
 
 export const PreviewSnapshotToolkit = Toolkit.make(PreviewSnapshotTool);

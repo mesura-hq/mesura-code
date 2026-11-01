@@ -28,6 +28,7 @@ import {
 } from "../../../attachmentStore.ts";
 import { resolveAttachmentRelativePath } from "../../../attachmentPaths.ts";
 import * as ServerConfig from "../../../config.ts";
+import * as BrowserTakeoverRequests from "../../../preview/BrowserTakeoverRequests.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
@@ -251,6 +252,13 @@ const handlers = {
       );
       const artifact = yield* claimPreviewRecording(scope.thread.threadId, response.result);
       return { ...artifact, ...(response.toolIcon ? { toolIcon: response.toolIcon } : {}) };
+    }),
+  ),
+  preview_request_takeover: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
+      const takeovers = yield* BrowserTakeoverRequests.BrowserTakeoverRequests;
+      return yield* takeovers.request({ scope, ...input });
     }),
   ),
 } satisfies McpToolAccess.Handlers<typeof PreviewToolkit.tools>;

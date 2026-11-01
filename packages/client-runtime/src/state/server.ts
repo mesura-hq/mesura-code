@@ -1546,6 +1546,16 @@ export function createServerEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.threadId, input.turnItemId]),
       },
     }),
+    // Mesura: like a secret card's answer, off the config lane, one per card at a time.
+    answerBrowserTakeoverRequest: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:preview:answer-takeover-request",
+      tag: WS_METHODS.previewAnswerTakeoverRequest,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.turnItemId]),
+      },
+    }),
     // Like a secret card's answer: off the config lane, one per card at a time.
     answerLinkRequest: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:peer-links:answer-request",

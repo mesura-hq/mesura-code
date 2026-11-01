@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { BrowserImportResult, ImportedCookie } from "./browserImport.ts";
 import { BROWSER_PROFILE_MAX_COUNT, BrowserProfile, BrowserProfileId } from "./browserProfile.ts";
 
 export const PREVIEW_URL_MAX_LENGTH = 2_048;
@@ -271,6 +272,17 @@ export const PreviewClearProfileInput = Schema.Struct({
 });
 export type PreviewClearProfileInput = typeof PreviewClearProfileInput.Type;
 
+export const PREVIEW_IMPORT_COOKIES_MAX_COUNT = 5000;
+
+export const PreviewImportCookiesInput = Schema.Struct({
+  profileId: BrowserProfileId,
+  cookies: Schema.Array(ImportedCookie).check(Schema.isMaxLength(PREVIEW_IMPORT_COOKIES_MAX_COUNT)),
+});
+export type PreviewImportCookiesInput = typeof PreviewImportCookiesInput.Type;
+
+export const PreviewImportCookiesResult = BrowserImportResult;
+export type PreviewImportCookiesResult = typeof PreviewImportCookiesResult.Type;
+
 export const PreviewListInput = Schema.Struct({
   threadId: ThreadId,
 });
@@ -412,6 +424,26 @@ export class PreviewClearProfileError extends Schema.TaggedError<PreviewClearPro
 ) {
   override get message() {
     return "The environment could not delete this browser profile's data.";
+  }
+}
+
+export class PreviewImportCookiesError extends Schema.TaggedError<PreviewImportCookiesError>()(
+  "PreviewImportCookiesError",
+  {
+    profileId: Schema.String,
+    reason: Schema.Literals(["incognitoProfile", "unknownProfile", "importFailed"]),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message() {
+    switch (this.reason) {
+      case "incognitoProfile":
+        return "Cookies cannot be imported into the incognito profile.";
+      case "unknownProfile":
+        return "This environment has no browser profile with that id.";
+      case "importFailed":
+        return "The environment could not import cookies into this browser profile.";
+    }
   }
 }
 

@@ -18,6 +18,7 @@ import {
   SubagentElapsed,
   V2LifecycleRow,
 } from "./V2LifecycleRow";
+import { BrowserTakeoverRequestCard } from "./BrowserTakeoverRequestCard";
 import { LinkRequestCard } from "./LinkRequestCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { TimelineRowCtx, type TimelineRow } from "./timelineRowContext";
@@ -42,6 +43,16 @@ export function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
     return (
       <LinkRequestCard
         environmentId={ctx.activeThreadEnvironmentId}
+        item={item}
+        visibility={visibility}
+      />
+    );
+  }
+  if (item.type === "browser_takeover_request") {
+    return (
+      <BrowserTakeoverRequestCard
+        environmentId={ctx.activeThreadEnvironmentId}
+        threadRef={ctx.threadRef}
         item={item}
         visibility={visibility}
       />

@@ -495,3 +495,28 @@ describe("ServerSettings.removeAgentCreditsOnMerge", () => {
     ).toBe(true);
   });
 });
+
+describe("browser payment domains", () => {
+  it("defaults browserPaymentDomains to the payment wallets when settings omit it", () => {
+    expect(decodeServerSettings({}).browserPaymentDomains).toEqual([
+      "mercadopago.com",
+      "mercadopago.com.ar",
+      "payoneer.com",
+      "paypal.com",
+      "checkout.stripe.com",
+      "pay.google.com",
+    ]);
+    expect(DEFAULT_SERVER_SETTINGS.browserPaymentDomains).toEqual(
+      decodeServerSettings({}).browserPaymentDomains,
+    );
+  });
+
+  it("accepts a browserPaymentDomains patch and keeps a saved list", () => {
+    expect(decodeServerSettingsPatch({ browserPaymentDomains: ["shop.example.test"] })).toEqual({
+      browserPaymentDomains: ["shop.example.test"],
+    });
+    expect(
+      decodeServerSettings({ browserPaymentDomains: ["shop.example.test"] }).browserPaymentDomains,
+    ).toEqual(["shop.example.test"]);
+  });
+});

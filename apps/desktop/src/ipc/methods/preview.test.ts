@@ -9,7 +9,9 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
+import * as IpcChannels from "../channels.ts";
 import * as PreviewIpc from "./preview.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
@@ -136,4 +138,113 @@ describe("preview IPC methods", () => {
       namespace: "profile",
     });
   });
+});
+
+// Phase 3 fence: entry point is the registered IPC channel, as the preload invokes it.
+describe("preview cookie read and import IPC", () => {
+  const readResult = {
+    cookies: [
+      {
+        url: "https://host.zen.example/account",
+        name: "host_cookie",
+        value: "b",
+        path: "/account",
+        secure: true,
+        httpOnly: true,
+        sameSite: "lax" as const,
+      },
+    ],
+    undecryptable: 1,
+    undecryptableHosts: ["locked.example"],
+  };
+
+  const invokeRegistered = (
+    method: typeof PreviewIpc.importBrowserCookies,
+    browserImport: Partial<BrowserImport.BrowserImport["Service"]>,
+    payload: unknown,
+  ) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registered = new Map<string, DesktopIpc.DesktopIpcHandleListener>();
+        const ipc = DesktopIpc.make({
+          removeHandler: vi.fn(),
+          handle: (channel, listener) => {
+            registered.set(channel, listener);
+          },
+          removeAllListeners: vi.fn(),
+          on: vi.fn(),
+        });
+        yield* ipc.handle(method);
+        const [entry] = [...registered.entries()];
+        if (entry === undefined) throw new Error("the method registered no IPC channel");
+        const [channel, listener] = entry;
+        const result = yield* Effect.promise(async () =>
+          structuredClone(await listener({ sender: { id: 7 } }, payload)),
+        );
+        return { channel, result };
+      }).pipe(
+        Effect.provideService(
+          BrowserImport.BrowserImport,
+          browserImport as BrowserImport.BrowserImport["Service"],
+        ),
+        Effect.provideService(DesktopClientSettings.DesktopClientSettings, {
+          get: Effect.succeedNone,
+          set: () => Effect.void,
+        }),
+      ),
+    );
+
+  effectIt.effect(
+    "returns parsed cookies over desktop:preview-read-cookies without importing",
+    () =>
+      Effect.gen(function* () {
+        const readCookies = vi.fn(() => Effect.succeed(readResult));
+        const importCookies = vi.fn(() => Effect.die("importCookies must not be reached"));
+
+        const { channel, result } = yield* invokeRegistered(
+          PreviewIpc.readBrowserCookies,
+          { readCookies, importCookies } as never,
+          { sourceId: "zen", sourceProfileDirectory: "abc.default" },
+        );
+
+        expect(channel).toBe(IpcChannels.PREVIEW_READ_COOKIES_CHANNEL);
+        expect(channel).toBe("desktop:preview-read-cookies");
+        expect(readCookies).toHaveBeenCalledExactlyOnceWith({
+          sourceId: "zen",
+          sourceProfileDirectory: "abc.default",
+        });
+        expect(importCookies).not.toHaveBeenCalled();
+        expect(result).toEqual(readResult);
+      }),
+  );
+
+  effectIt.effect("still imports into the desktop profile partition over the import channel", () =>
+    Effect.gen(function* () {
+      const importCookies = vi.fn(() =>
+        Effect.succeed({ imported: 1, skipped: 0, skippedDomains: [] }),
+      );
+
+      const { channel, result } = yield* invokeRegistered(
+        PreviewIpc.importBrowserCookies,
+        { importCookies } as never,
+        {
+          environmentId: "environment-a",
+          sourceId: "zen",
+          sourceProfileDirectory: "abc.default",
+          targetProfileId: "profile-work",
+        },
+      );
+
+      expect(channel).toBe("desktop:preview-import-cookies");
+      expect(importCookies).toHaveBeenCalledExactlyOnceWith({
+        input: {
+          sourceId: "zen",
+          sourceProfileDirectory: "abc.default",
+          targetProfileId: "profile-work",
+        },
+        ...PreviewIpc.resolvePartitionScope("environment-a", "profile-work"),
+      });
+      expect(result).toEqual({ imported: 1, skipped: 0, skippedDomains: [] });
+    }),
+  );
 });

@@ -534,6 +534,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
       return command.parentThreadId;
     case "secret_request.record":
     case "link_request.record":
+    // Mesura: browser takeover cards.
+    case "browser_takeover_request.record":
     // Mesura: Software Factory cards.
     case "factory_card.record":
     // Mesura: agent signals.
@@ -8251,6 +8253,99 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   );
 
   /**
+   * Mesura: records or updates the card for a browser tab an agent asked the
+   * operator to take over. Like a secret card, its agent waits in the run.
+   */
+  const dispatchBrowserTakeoverRequestRecord = Effect.fn(
+    "orchestrationV2.dispatch.browserTakeoverRequestRecord",
+  )(function* (
+    command: Extract<
+      OrchestrationV2InternalCommand,
+      { readonly type: "browser_takeover_request.record" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const projection = yield* projectionStore
+      .getThreadRecords(
+        command.threadId,
+        ["runs", "nodes", "turnItems", "attempts", "providerTurns"],
+        { turnItemTypes: ["browser_takeover_request"], messageRoles: [] },
+      )
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    const run = projection.runs.find((candidate) => candidate.id === command.runId);
+    if (run === undefined || run.rootNodeId !== command.nodeId) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Node ${command.nodeId} is not the root of run ${command.runId}.`,
+      });
+    }
+    const existing = projection.turnItems.find((item) => item.id === command.turnItemId);
+    if (existing !== undefined && existing.type !== "browser_takeover_request") {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Turn item ${command.turnItemId} is not a browser takeover request.`,
+      });
+    }
+    if (existing !== undefined && existing.runId !== command.runId) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Browser takeover request ${command.turnItemId} belongs to another run.`,
+      });
+    }
+    const now = yield* DateTime.now;
+    // A request is answered once: a later answer or a retry records the card unchanged.
+    const unchanged =
+      existing !== undefined &&
+      (existing.takeoverStatus !== "pending" || command.takeoverStatus === "pending");
+    const pending = command.takeoverStatus === "pending";
+    const turnItem: OrchestrationV2TurnItem = unchanged
+      ? existing
+      : {
+          id: command.turnItemId,
+          threadId: command.threadId,
+          runId: command.runId,
+          nodeId: command.nodeId,
+          providerThreadId: run.providerThreadId,
+          providerTurnId: providerTurnForRun(projection, run)?.id ?? null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: existing?.ordinal ?? (yield* nextTurnItemOrdinal(projection)),
+          status: pending
+            ? "waiting"
+            : command.takeoverStatus === "done"
+              ? "completed"
+              : "cancelled",
+          title: "Take over the browser",
+          startedAt: existing?.startedAt ?? now,
+          completedAt: pending ? null : now,
+          updatedAt: now,
+          type: "browser_takeover_request",
+          tabId: command.tabId,
+          reason: command.reason,
+          takeoverStatus: command.takeoverStatus,
+        };
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "turn-item.updated",
+      threadId: command.threadId,
+      runId: command.runId,
+      nodeId: command.nodeId,
+      providerInstanceId: run.providerInstanceId,
+      occurredAt: now,
+      payload: turnItem,
+    });
+  });
+
+  /**
    * Mesura: sets or clears the agent's signal. The decision lives in `ThreadSignal.ts`; this
    * reads the thread and its active run and emits what it returns.
    */
@@ -12783,6 +12878,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "link_request.record":
         yield* dispatchLinkRequestRecord(command, events, effects);
+        break;
+      // Mesura: browser takeover cards.
+      case "browser_takeover_request.record":
+        yield* dispatchBrowserTakeoverRequestRecord(command, events);
         break;
       // Mesura: Software Factory cards.
       case "factory_card.record":

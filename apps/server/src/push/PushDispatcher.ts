@@ -72,13 +72,14 @@ const AWARENESS_EVENT_TYPES: ReadonlySet<OrchestrationV2DomainEvent["type"]> = n
 ]);
 
 /**
- * Secret and link cards are turn items the shell reads as pending input
+ * Secret, link and browser takeover cards are turn items the shell reads as pending input
  * (`secretRequestAsPendingInput` in `ProjectionStore.ts`). The relay's filter
  * passes no such item, so the dispatcher adds them.
  */
 const INPUT_CARD_TURN_ITEM_TYPES: ReadonlySet<OrchestrationV2TurnItem["type"]> = new Set([
   "secret_request",
   "link_request",
+  "browser_takeover_request",
 ]);
 
 function canChangeAwareness(event: OrchestrationV2DomainEvent): boolean {

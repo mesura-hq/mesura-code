@@ -375,6 +375,25 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("saves a browserPaymentDomains patch and reads it back after a reload", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      assert.include((yield* serverSettings.getSettings).browserPaymentDomains, "paypal.com");
+
+      const next = yield* serverSettings.updateSettings({
+        browserPaymentDomains: ["shop.example.test"],
+      });
+
+      assert.deepEqual(next.browserPaymentDomains, ["shop.example.test"]);
+      const persisted = yield* decodeServerSettingsJson(
+        yield* fs.readFileString(config.settingsPath),
+      );
+      assert.deepEqual(persisted.browserPaymentDomains, ["shop.example.test"]);
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("keeps an external settings edit that the watcher has not reloaded yet", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;

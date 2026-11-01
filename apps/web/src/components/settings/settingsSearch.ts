@@ -783,6 +783,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["allow disable enable open drive preview tools sessions project override"],
   },
   {
+    id: "browser-payment-domains",
+    title: "Payment sites",
+    to: "/settings/integrations",
+    searchTerms: [
+      "payment checkout buy purchase block domains cookies import agents paypal stripe",
+    ],
+  },
+  {
     id: "device-hosts",
     title: "Device hosts",
     to: "/settings/integrations",

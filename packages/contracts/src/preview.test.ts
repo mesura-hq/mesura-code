@@ -7,7 +7,11 @@ import {
   PreviewOpenInput,
   PreviewOpenLinkTargetInput,
   PreviewOpenLinkTargetResult,
+  PreviewImportCookiesError,
+  PreviewImportCookiesInput,
+  PreviewImportCookiesResult,
 } from "./preview.ts";
+import { WS_METHODS } from "./rpc.ts";
 import { PreviewAutomationHost, PreviewAutomationStatus } from "./previewAutomation.ts";
 
 const decodePreviewEvent = Schema.decodeUnknownSync(PreviewEvent);
@@ -18,6 +22,8 @@ const decodeManualOpenInput = Schema.decodeUnknownSync(PreviewOpenInput);
 const decodeSnapshot = Schema.decodeUnknownSync(PreviewSessionSnapshot);
 const decodeAutomationHost = Schema.decodeUnknownSync(PreviewAutomationHost);
 const decodeAutomationStatus = Schema.decodeUnknownSync(PreviewAutomationStatus);
+const decodeImportInput = Schema.decodeUnknownSync(PreviewImportCookiesInput);
+const decodeImportResult = Schema.decodeUnknownSync(PreviewImportCookiesResult);
 
 describe("thread-link allocation contracts", () => {
   const legacy = {
@@ -129,5 +135,57 @@ describe("PreviewAutomationStatus", () => {
         viewport: { width: 412, height: 915 },
       }).viewport,
     ).toEqual({ width: 412, height: 915 });
+  });
+});
+
+describe("previewImportCookies contracts", () => {
+  const cookie = {
+    url: "https://example.test/",
+    name: "session",
+    value: "abc",
+    domain: ".example.test",
+    path: "/",
+    secure: true,
+    httpOnly: true,
+    expirationDate: 1_800_000_000,
+    sameSite: "lax",
+  } as const;
+
+  it("previewImportCookies is a preview RPC that takes a profile id and its cookies", () => {
+    expect(WS_METHODS.previewImportCookies).toBe("preview.importCookies");
+    const input = { profileId: "profile-work", cookies: [cookie] };
+    expect(decodeImportInput(input)).toEqual(input);
+  });
+
+  it("previewImportCookies input refuses more than 5000 cookies and an unknown SameSite", () => {
+    expect(
+      decodeImportInput({
+        profileId: "profile-work",
+        cookies: Array.from({ length: 5000 }, () => cookie),
+      }).cookies,
+    ).toHaveLength(5000);
+    expect(() =>
+      decodeImportInput({
+        profileId: "profile-work",
+        cookies: Array.from({ length: 5001 }, () => cookie),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeImportInput({ profileId: "profile-work", cookies: [{ ...cookie, sameSite: "none" }] }),
+    ).toThrow();
+  });
+
+  it("previewImportCookies result reports imported, skipped and skippedDomains", () => {
+    const result = { imported: 2, skipped: 1, skippedDomains: ["www.paypal.com"] };
+    expect(decodeImportResult(result)).toEqual(result);
+    expect(() => decodeImportResult({ imported: 2, skipped: 1 })).toThrow();
+  });
+
+  it("previewImportCookies refusals are typed by reason", () => {
+    for (const reason of ["incognitoProfile", "unknownProfile"] as const) {
+      const error = new PreviewImportCookiesError({ profileId: "incognito", reason });
+      expect(error._tag).toBe("PreviewImportCookiesError");
+      expect(error.reason).toBe(reason);
+    }
   });
 });

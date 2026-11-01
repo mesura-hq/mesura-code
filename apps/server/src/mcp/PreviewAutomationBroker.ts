@@ -163,7 +163,8 @@ const selectorDiagnosticsFromInput = (
 };
 
 /** Codex/OpenCode share sessions across threads; include thread id to isolate tabs and ownership. */
-const hostAssignmentKey = (scope: McpInvocationContext.McpThreadInvocationScope): string =>
+/** The agent session id a server browser host sees in each request from `scope`. */
+export const hostAssignmentKey = (scope: McpInvocationContext.McpThreadInvocationScope): string =>
   `${scope.environmentId}\u0000${scope.thread.providerSessionId}\u0000${scope.thread.threadId}`;
 
 const isPreviewTabId = Schema.is(PreviewTabId);

@@ -8,6 +8,10 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   WS_METHODS,
+  BrowserTakeoverError,
+  type BrowserTakeoverAnswerInput,
+  TurnItemId,
+  WsPreviewAnswerTakeoverRequestRpc,
   WsServerRefreshProvidersRpc,
   WsSubscribeServerConfigRpc,
   type OrchestrationV2StoredEvent,
@@ -31,6 +35,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
+import * as BrowserTakeoverRequests from "./preview/BrowserTakeoverRequests.ts";
 import * as AcpRegistryRuntimeCoordinator from "@t3tools/provider-acp-registry/server/AcpRegistryRuntimeCoordinator";
 import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
@@ -445,6 +450,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ReviewService.ReviewService)({}),
   Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
   Layer.mock(SecretRequests.SecretRequests)({}),
+  Layer.mock(BrowserTakeoverRequests.BrowserTakeoverRequests)({}),
   Layer.mock(GuestShareService.GuestShareService)({}),
   Layer.mock(ServerLifecycleEvents.ServerLifecycleEvents)({}),
   Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({}),
@@ -890,4 +896,94 @@ it.effect("thread resume across compacted history keeps message order and final 
       ),
     ),
   ),
+);
+
+it.effect(
+  "takeover answer RPC: preview.answerTakeoverRequest hands the operator's answer to the takeover service and returns its failure",
+  () =>
+    Effect.gen(function* () {
+      const answers: Array<BrowserTakeoverAnswerInput> = [];
+      const exits = yield* Queue.unbounded<RpcMessage.ResponseExitEncoded["exit"]>();
+      const server = yield* RpcServer.makeNoSerialization(
+        RpcGroup.make(WsPreviewAnswerTakeoverRequestRpc),
+        {
+          ...WS_RPC_SERVER_OPTIONS,
+          onFromServer: (response) =>
+            response._tag === "Exit" ? Queue.offer(exits, response.exit as never) : Effect.void,
+        },
+      ).pipe(
+        Effect.provide(
+          layerWsRpc(
+            {
+              sessionId: AuthSessionId.make("takeover-test"),
+              subject: "takeover-test",
+              method: "browser-session-cookie",
+              scopes: [],
+            },
+            {},
+            {},
+            yield* PreviewAutomationBroker.PreviewAutomationBroker,
+            yield* ServerBrowser.ServerBrowser,
+          ).pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                layerUnusedConfigRpcServices,
+                // Read when the handlers are built; this RPC uses none of them.
+                Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+                Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+                Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+                Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+                Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+                Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                  namedProjectsRoot: process.cwd(),
+                }),
+                Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+                Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+                Layer.mock(BrowserTakeoverRequests.BrowserTakeoverRequests)({
+                  answer: (input) =>
+                    Effect.sync(() => answers.push(input)).pipe(
+                      Effect.andThen(
+                        input.answer === "declined"
+                          ? Effect.fail(new BrowserTakeoverError({ reason: "already_answered" }))
+                          : Effect.void,
+                      ),
+                    ),
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      const ask = (id: string, answer: BrowserTakeoverAnswerInput["answer"]) =>
+        server.write(0, {
+          _tag: "Request",
+          id: RpcMessage.RequestId(id),
+          tag: WS_METHODS.previewAnswerTakeoverRequest,
+          payload: {
+            threadId: ThreadId.make("thread:takeover"),
+            turnItemId: TurnItemId.make("turn-item:takeover"),
+            answer,
+          },
+          headers: Headers.empty,
+        });
+      yield* ask("done", "done");
+      assert.equal((yield* Queue.take(exits))._tag, "Success");
+      yield* ask("declined", "declined");
+      const declined = yield* Queue.take(exits);
+      assert.equal(declined._tag, "Failure");
+      assert.include(JSON.stringify(declined), "already_answered");
+      assert.deepEqual(
+        answers.map((input) => input.answer),
+        ["done", "declined"],
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.fresh(layerConfigSources),
+          Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+          Layer.mock(ServerBrowser.ServerBrowser)({}),
+        ),
+      ),
+      Effect.scoped,
+    ),
 );

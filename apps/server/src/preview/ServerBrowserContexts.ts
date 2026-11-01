@@ -1,5 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off - Owns Playwright resources outside the Effect runtime.
-import { INCOGNITO_BROWSER_PROFILE_ID } from "@t3tools/contracts";
+import {
+  type BrowserImportResult,
+  type ImportedCookie,
+  INCOGNITO_BROWSER_PROFILE_ID,
+} from "@t3tools/contracts";
+import { matchPaymentDomain } from "@t3tools/shared/paymentDomains";
 import { constVoid } from "effect/Function";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
@@ -67,10 +72,49 @@ export const presentAsChrome = async (
   if (identity) await cdp.send("Emulation.setUserAgentOverride", identity);
 };
 
+type PlaywrightCookie = Parameters<BrowserContext["addCookies"]>[0][number];
+
+const PLAYWRIGHT_SAME_SITE = {
+  no_restriction: "None",
+  lax: "Lax",
+  strict: "Strict",
+  // Chrome treats a cookie without SameSite as Lax.
+  unspecified: "Lax",
+} as const satisfies Record<ImportedCookie["sameSite"], PlaywrightCookie["sameSite"]>;
+
+const cookieHost = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+};
+
+// Always domain + path: Playwright rewrites a `url` cookie's path to the url's directory and
+// its Secure flag to the url's scheme. Chrome keeps a domain without a leading dot host-only.
+const toPlaywrightCookie = (cookie: ImportedCookie): PlaywrightCookie => {
+  const sameSite = PLAYWRIGHT_SAME_SITE[cookie.sameSite];
+  return {
+    name: cookie.name,
+    value: cookie.value,
+    domain: cookie.domain?.startsWith(".") ? cookie.domain : cookieHost(cookie.url),
+    path: cookie.path,
+    expires: cookie.expirationDate ?? -1,
+    httpOnly: cookie.httpOnly,
+    // Chrome drops SameSite=None without Secure.
+    secure: cookie.secure || sameSite === "None",
+    sameSite,
+  };
+};
+
+const MAX_REPORTED_SKIPPED_DOMAINS = 20;
+
 export class ServerBrowserContexts {
   private readonly options: Options;
   private readonly contexts = new Map<string, Promise<BrowserContext>>();
   private readonly clearing = new Map<string, Promise<void>>();
+  /** Operations that still use a persistent context; an idle close waits for none. */
+  private readonly leases = new Map<string, number>();
   private browser: Promise<Browser> | undefined;
   private closing: Promise<void> | undefined;
 
@@ -193,6 +237,13 @@ export class ServerBrowserContexts {
 
   async clearProfile(profileId: string) {
     if (profileId === INCOGNITO_BROWSER_PROFILE_ID) return;
+    await this.closeProfileContext(profileId, () =>
+      NodeFSP.rm(this.profileDirectory(profileId), { recursive: true, force: true }),
+    );
+  }
+
+  /** Requests for the profile wait until the close and `afterClose` finish, then reopen it. */
+  private async closeProfileContext(profileId: string, afterClose?: () => Promise<void>) {
     const key = JSON.stringify([profileId, null]);
     const clearing = (async () => {
       const pending = this.contexts.get(key);
@@ -201,7 +252,7 @@ export class ServerBrowserContexts {
         const context = await pending.catch(() => undefined);
         await context?.close();
       }
-      await NodeFSP.rm(this.profileDirectory(profileId), { recursive: true, force: true });
+      await afterClose?.();
     })();
     this.clearing.set(key, clearing);
     try {
@@ -209,6 +260,82 @@ export class ServerBrowserContexts {
     } finally {
       if (this.clearing.get(key) === clearing) this.clearing.delete(key);
     }
+  }
+
+  /** Writes through the live persistent context; Chrome holds the on-disk cookie store open. */
+  private async withLease<A>(profileId: string, use: () => Promise<A>) {
+    const key = JSON.stringify([profileId, null]);
+    this.leases.set(key, (this.leases.get(key) ?? 0) + 1);
+    try {
+      return await use();
+    } finally {
+      const remaining = (this.leases.get(key) ?? 1) - 1;
+      if (remaining === 0) this.leases.delete(key);
+      else this.leases.set(key, remaining);
+    }
+  }
+
+  /** Opens a page, keeping an import from closing the context before the page exists. */
+  async openPage(
+    profileId: string,
+    isolationKey: string | undefined,
+    prepare: (context: BrowserContext) => Promise<void>,
+  ) {
+    const open = async () => {
+      const context = await this.contextFor(profileId, isolationKey);
+      await prepare(context);
+      return context.newPage();
+    };
+    return isolationKey === undefined ? this.withLease(profileId, open) : open();
+  }
+
+  /** Writes through the live persistent context; Chrome holds the on-disk cookie store open. */
+  async importCookies(
+    profileId: string,
+    cookies: ReadonlyArray<ImportedCookie>,
+    paymentDomains: ReadonlyArray<string>,
+  ): Promise<BrowserImportResult> {
+    if (profileId === INCOGNITO_BROWSER_PROFILE_ID) {
+      throw new Error("Cookies cannot be imported into the incognito profile.");
+    }
+    const key = JSON.stringify([profileId, null]);
+    let imported = 0;
+    let skipped = 0;
+    const skippedDomains = new Set<string>();
+    const skip = (cookie: ImportedCookie) => {
+      skipped += 1;
+      skippedDomains.add(cookieHost(cookie.url));
+    };
+    const pending = this.contextFor(profileId);
+    const context = await this.withLease(profileId, async () => {
+      const context = await pending;
+      for (const cookie of cookies) {
+        const written = toPlaywrightCookie(cookie);
+        if (matchPaymentDomain(written.domain ?? "", paymentDomains) !== undefined) {
+          skip(cookie);
+          continue;
+        }
+        // One at a time, so a cookie Chrome rejects does not drop the rest.
+        const added = await context.addCookies([written]).then(
+          () => true,
+          () => false,
+        );
+        if (added) imported += 1;
+        else skip(cookie);
+      }
+      return context;
+    });
+    // Chrome commits cookies to disk only on a graceful close or about 30 s later, and a
+    // service stop signals Chrome itself, which drops uncommitted ones. Closing an idle
+    // profile makes the import durable now; a profile with open tabs commits on Chrome's timer.
+    const idle =
+      this.contexts.get(key) === pending && !this.leases.has(key) && context.pages().length === 0;
+    if (imported > 0 && idle) await this.closeProfileContext(profileId);
+    return {
+      imported,
+      skipped,
+      skippedDomains: [...skippedDomains].slice(0, MAX_REPORTED_SKIPPED_DOMAINS),
+    };
   }
 
   close() {

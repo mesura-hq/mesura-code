@@ -162,6 +162,43 @@ describe("command permissions", () => {
         }),
       ),
   );
+  it.effect(
+    "cookie import command needs the target preview grant and denies execution after revocation",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* setup;
+          const command = createPreviewEnvironmentAtoms(runtime).importCookies;
+          const previewGrant = {
+            ...grant(false),
+            scopes: [AuthPreviewOperateScope],
+            permissions: [AuthPreviewOperateScope],
+          };
+          expect(command.requiredScopes()).toEqual([AuthPreviewOperateScope]);
+          registry.set(sessions(env), AsyncResult.success(grant(true)));
+          expect(registry.get(command.permissionAtom(env))).toBe(false);
+          registry.set(sessions(env), AsyncResult.success(previewGrant));
+          expect(registry.get(command.permissionAtom(env))).toBe(true);
+          registry.set(sessions(other), AsyncResult.success(grant(false)));
+          expect(registry.get(command.permissionAtom(other))).toBe(false);
+          registry.set(sessions(env), AsyncResult.success({ ...previewGrant, permissions: [] }));
+          expect(registry.get(command.permissionAtom(env))).toBe(false);
+          const result = yield* Effect.promise(() =>
+            command.run(registry, {
+              environmentId: env,
+              input: { profileId: "default", cookies: [] },
+            }),
+          );
+          expect(result._tag).toBe("Failure");
+          if (result._tag === "Failure") {
+            expect(Option.getOrThrow(Cause.findErrorOption(result.cause))).toMatchObject({
+              _tag: "EnvironmentAuthorizationError",
+              requiredPermission: AuthPreviewOperateScope,
+            });
+          }
+        }),
+      ),
+  );
   it.effect("uses the target grant for both availability and execution", () =>
     Effect.scoped(
       Effect.gen(function* () {
