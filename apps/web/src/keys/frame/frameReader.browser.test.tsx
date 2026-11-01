@@ -120,6 +120,9 @@ describe("the Vim reader in an embedded page", () => {
         "Quarterly report\nAlpha beta gamma.\nNorth\t12\nMore\n",
       ),
     );
+    expect(readKeyEngineSnapshot().notice).toBe("yanked 49 characters");
+    await userEvent.keyboard("j");
+    await vi.waitFor(() => expect(readKeyEngineSnapshot().notice).toBeNull());
     expect(reader.pageKeys()).toEqual([]);
   });
 

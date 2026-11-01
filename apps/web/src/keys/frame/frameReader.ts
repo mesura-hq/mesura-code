@@ -162,6 +162,8 @@ function onMessage(event: MessageEvent): void {
     case "key": {
       // A page can post keys of its own; the user's keydown in the frame activates this window too.
       if (navigator.userActivation?.isActive === false) return;
+      // As in the app's own key handler: a key ends the previous key's notice.
+      if (readKeyEngineSnapshot().notice !== null) updateKeyEngineSnapshot({ notice: null });
       const token = keyTokenOf({
         key: message.key,
         code: message.code,
