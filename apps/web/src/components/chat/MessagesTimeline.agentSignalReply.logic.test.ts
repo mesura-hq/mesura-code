@@ -61,6 +61,8 @@ describe("a reply split by an agent signal", () => {
   it.each([
     ["Claude", "mcp__t3-code__t3_thread_signal"],
     ["Codex", "t3-code.t3_thread_signal"],
+    ["OpenCode", "t3-code-thread_opencode2-adapter_t3_thread_signal"],
+    ["bare-named", "t3_thread_signal"],
   ])(
     "keeps the questions visible when a %s agent signals before its closing line",
     (_, toolName) => {

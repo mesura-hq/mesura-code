@@ -7,14 +7,23 @@ import type { TimelineEntry } from "../../session-logic";
  * `needs_input`, then close with one line, and the turn fold shows only that last line.
  */
 const AGENT_SIGNAL_TOOL = "t3_thread_signal";
+/** OpenCode names its Mesura server per thread: `t3-code-<thread>_t3_thread_signal`. */
+const OPENCODE_THREAD_SIGNAL = /^t3-code-[\w-]+_t3_thread_signal$/;
+
+/**
+ * The shared parser resolves bare and OpenCode names only for tools in upstream's registry, which
+ * lacks this fork's tool; registering it would touch three upstream files, so both forms are here.
+ */
+const isAgentSignalToolName = (toolName: string) =>
+  toolName === AGENT_SIGNAL_TOOL ||
+  OPENCODE_THREAD_SIGNAL.test(toolName) ||
+  resolveT3McpToolName(toolName) === AGENT_SIGNAL_TOOL;
 
 function isAgentSignal(entry: TimelineEntry): boolean {
   if (entry.kind !== "work") return false;
   const item = entry.entry.structuredPayload;
   return (
-    item?.type === "dynamic_tool" &&
-    item.toolName !== null &&
-    resolveT3McpToolName(item.toolName) === AGENT_SIGNAL_TOOL
+    item?.type === "dynamic_tool" && item.toolName !== null && isAgentSignalToolName(item.toolName)
   );
 }
 
