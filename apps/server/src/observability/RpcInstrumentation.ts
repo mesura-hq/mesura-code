@@ -92,6 +92,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverRefreshUsageRates]: "server",
   [WS_METHODS.serverSignalProcess]: "server",
   [WS_METHODS.serverReportClientActivity]: "server",
+  // Mesura: device zone metadata.
+  [WS_METHODS.serverReportClientTimeZone]: "server",
   [WS_METHODS.scheduledTasksSubscribe]: "scheduledTasks",
   [WS_METHODS.scheduledTasksUpsert]: "scheduledTasks",
   [WS_METHODS.scheduledTasksSetEnabled]: "scheduledTasks",

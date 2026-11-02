@@ -168,3 +168,17 @@ describe("orchestration instructions: compact and continue", () => {
     expect(text).toMatch(/short reply|one-line reply/i);
   });
 });
+
+it("snooze-zone AC6 spec: the injected snooze rule resolves user times through the tool", () => {
+  const section = T3_CODE_ORCHESTRATION_SECTIONS.find((text) => /^### Snooze\b/m.test(text));
+  expect(section, "the orchestration instructions need a Snooze rule").toBeDefined();
+  const text = section ?? "";
+  expect(text).toContain("t3_thread_organize");
+  expect(text).toMatch(/snoozeForMinutes[^\n.]*relative/i);
+  expect(text).toMatch(/snoozeUntilLocal[^\n.]*clock/i);
+  expect(text).toMatch(/timeZone[^\n.]*only when the user names a zone/i);
+  expect(text).toMatch(/never[^\n.]*convert[^\n.]*UTC|do not[^\n.]*convert[^\n.]*UTC/i);
+  expect(text).toMatch(/report[^\n.]*wake time[^\n.]*zone/i);
+  expect(text).toContain("wake time from `snoozedUntilLocal`");
+  expect(T3_CODE_ORCHESTRATION_INSTRUCTIONS).toContain(text);
+});

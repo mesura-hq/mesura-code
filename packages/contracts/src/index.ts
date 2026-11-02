@@ -29,6 +29,8 @@ export * from "./model.ts";
 export * from "./keybindings.ts";
 export * from "./server.ts";
 export * from "./settings.ts";
+// Mesura: time zone contracts.
+export * from "./timeZone.ts";
 export * from "./managedPolicy.ts";
 export * from "./git.ts";
 export * from "./vcs.ts";

@@ -19,6 +19,8 @@ import {
   TrimmedNonEmptyString,
   TrimmedString,
 } from "./baseSchemas.ts";
+// Mesura: shared IANA validation.
+import { IanaTimeZone } from "./timeZone.ts";
 import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
 import { UsageModelFilter } from "./usage.ts";
 import { SecretProviderId, SecretProviderSlug } from "./secretReference.ts";
@@ -1333,6 +1335,10 @@ export const ServerSettings = Schema.Struct({
   idleCompactionEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Mesura: null follows the latest reported device zone.
+  snoozeTimeZone: Schema.NullOr(IanaTimeZone).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   snoozePresets: SnoozePresetSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SNOOZE_PRESETS)),
   ),
@@ -1736,6 +1742,8 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
+  // Mesura: an explicit agent snooze zone, or null for Device.
+  snoozeTimeZone: Schema.optionalKey(Schema.NullOr(IanaTimeZone)),
   snoozePresets: Schema.optionalKey(SnoozePresetSettings),
   guestSharingEnabled: Schema.optionalKey(Schema.Boolean),
   linkedEnvironmentsEnabled: Schema.optionalKey(Schema.Boolean),

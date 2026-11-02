@@ -15,6 +15,8 @@ import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
 import { PlusIcon, XIcon } from "lucide-react";
 
+// Mesura: keep the agent zone row beside the existing snooze presets.
+import { SnoozeTimeZoneRow } from "./SnoozeTimeZoneSettings";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { reconcileSnoozeDraft, sortSnoozeRows } from "./SnoozePresetsSettings.logic";
 import { formatShortTimestamp } from "../../timestampFormat";
@@ -123,7 +125,17 @@ function withWhen(
  * Edits the snooze menu's options. Rows sort by wake time like the menu, but only when focus
  * leaves the list, so a row never moves under the pointer mid-edit.
  */
+// Mesura: wrap the unchanged preset editor with the agent time zone row.
 export function SnoozePresetsRow() {
+  return (
+    <>
+      <SnoozeTimeZoneRow />
+      <SnoozePresetsEditor />
+    </>
+  );
+}
+
+function SnoozePresetsEditor() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const saved = settings.snoozePresets;

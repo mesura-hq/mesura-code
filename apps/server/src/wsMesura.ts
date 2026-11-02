@@ -26,6 +26,7 @@ import * as GitHubIssueCli from "./issues/GitHubIssueCli.ts";
 import { listIssues, readIssueDetail, resolveIssueReference } from "./issues/readIssues.ts";
 import * as ThreadSearchBroker from "./mcp/ThreadSearchBroker.ts";
 import { RpcInstrumentation } from "./observability/RpcInstrumentation.ts";
+import * as ClientTimeZone from "./orchestration-v2/ClientTimeZone.ts";
 import * as ThreadSearchEvidence from "./orchestration-v2/ThreadSearchEvidence.ts";
 import { ProjectIconDiscovery } from "./project/ProjectIconDiscovery.ts";
 import { ClientPresence } from "./push/ClientPresence.ts";
@@ -43,15 +44,18 @@ import { projectFileFailureContext } from "./ws.ts";
  * `captureMesuraServerScope` (ws.ts).
  */
 export const layerMesuraServerScope = Layer.mergeAll(
+  ClientTimeZone.layer,
   ThreadSearchBroker.layer,
   StartThreadSearchChat.layer,
 );
 
 /** The server-scope instances, as a layer to provide to one connection's handlers. */
 export const captureMesuraServerScope = Effect.gen(function* () {
+  const clientTimeZone = yield* ClientTimeZone.ClientTimeZone;
   const broker = yield* ThreadSearchBroker.ThreadSearchBroker;
   const starter = yield* StartThreadSearchChat.StartThreadSearchChat;
   return Layer.mergeAll(
+    Layer.succeed(ClientTimeZone.ClientTimeZone, clientTimeZone),
     Layer.succeed(ThreadSearchBroker.ThreadSearchBroker, broker),
     Layer.succeed(StartThreadSearchChat.StartThreadSearchChat, starter),
   );
@@ -62,6 +66,7 @@ const ServerWsRpcGroupMesura = WsRpcGroupMesura.middleware(RpcInstrumentation);
 
 export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
   Effect.gen(function* () {
+    const clientTimeZone = yield* ClientTimeZone.ClientTimeZone;
     const threadSearchEvidence = yield* ThreadSearchEvidence.ThreadSearchEvidence;
     const reasonThreadSearch = yield* makeReasonThreadSearch;
     const startThreadSearchChat = yield* StartThreadSearchChat.StartThreadSearchChat;
@@ -83,6 +88,7 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
     const review = yield* ReviewService.ReviewService;
 
     return ServerWsRpcGroupMesura.of({
+      [WS_METHODS.serverReportClientTimeZone]: (input) => clientTimeZone.report(input.timeZone),
       // Agent thread search reads (threadSearchEvidence.ts contracts) and one
       // bounded reasoning step on this environment's configured text model.
       [THREAD_SEARCH_WS_METHODS.listThreadSearchCatalog]: (input) =>

@@ -6,6 +6,8 @@ import { QuitHoldOverlay } from "./components/QuitHoldOverlay";
 import { openPushTargets } from "./pushNotifications/notificationTarget";
 import { PresenceReporter } from "./pushNotifications/PresenceReporter";
 import { AppAtomRegistryProvider } from "./rpc/atomRegistry";
+// Mesura: client zones resolve agent snoozes on every host.
+import { ClientTimeZoneReporter } from "./state/reportClientTimeZone";
 import type { AppRouter } from "./router";
 
 // Keep webviews outside the router but inside its atom registry so route changes preserve them.
@@ -19,6 +21,8 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
       <ElectronBrowserHost />
       {/* Mesura: while the developer is at this client, the host holds phone pushes. */}
       <PresenceReporter />
+      {/* Mesura: report the current device zone for agent snoozes. */}
+      <ClientTimeZoneReporter />
       <QuitHoldOverlay />
     </AppAtomRegistryProvider>
   );

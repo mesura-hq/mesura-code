@@ -39,6 +39,10 @@ When the user asks you to compact yourself and then continue with more work, use
 - Finish and verify the requested work first. If the work failed or is incomplete, do not call it, and tell the user instead.
 - Quote the user's next request verbatim in \`next\`. Put what you must keep after compaction in \`handoff\`: decisions, state, paths, results.
 - After calling it, end the turn with a short reply. The server runs \`/compact\` and then your follow-up once your turn ends.`,
+  // Mesura: resolve agent snoozes in the user's time zone on the server.
+  `### Snooze
+
+When the user asks to snooze a thread, call \`t3_thread_organize\` with action \`snooze\`. Use \`snoozeForMinutes\` for relative times and \`snoozeUntilLocal\` (YYYY-MM-DDTHH:MM) for clock times. Pass \`timeZone\` only when the user names a zone. Never convert clock times to UTC yourself. Report the wake time from \`snoozedUntilLocal\` and its \`timeZone\` back to the user.`,
   `### Visuals and preview
 
 - Answer data with a trend or comparison with a chart, and show any visual the user asks for here: pass its HTML to \`html_preview\`, then \`html_render\`. If the visual is a file, pass that file's HTML. A screenshot on disk or a text description does not show it. Never start a server for it. Tools a web page exposes give data only. Never use them to show results. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.

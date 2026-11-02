@@ -461,6 +461,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     searchTerms: ["sort projects sidebar manual created recent"],
   },
+  // Mesura: the agent snooze zone appears in Settings search.
+  {
+    id: "snooze-time-zone",
+    title: "Snooze time zone",
+    to: "/settings/threads",
+    searchTerms: ["snooze agent time zone timezone device IANA clock"],
+    environmentOnly: true,
+    scope: "environment-defaults",
+  },
   {
     id: "snooze-options",
     title: "Snooze options",

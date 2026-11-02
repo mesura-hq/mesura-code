@@ -50,6 +50,8 @@ import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as ResourceCleanupService from "./ResourceCleanupService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
+// Mesura: share the device-zone store with fork RPC handlers.
+import * as ClientTimeZone from "./ClientTimeZone.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import * as ThreadForkService from "./ThreadForkService.ts";
@@ -248,6 +250,7 @@ const layerAgentSessionImporterProvided = AgentSessionImporter.layer.pipe(
 );
 
 const layerThreadManagementProvided = ThreadManagementService.layerWithLegacyImporter.pipe(
+  Layer.provide(ClientTimeZone.layer), // Mesura: memoized with the fork server scope.
   Layer.provide(
     Layer.mergeAll(
       layerOrchestratorProvided,
