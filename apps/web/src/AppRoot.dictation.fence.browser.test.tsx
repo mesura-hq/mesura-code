@@ -204,6 +204,7 @@ vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }))
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => undefined,
   LegendList: ({
     data,
     renderItem,

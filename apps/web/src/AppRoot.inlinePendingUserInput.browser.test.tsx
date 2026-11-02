@@ -98,6 +98,7 @@ vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 // Keep application routing and timeline projection real. Replace the virtual
 // list boundary to keep every pending request mounted during the interaction.
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => undefined,
   LegendList: ({
     data,
     renderItem,

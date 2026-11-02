@@ -71,6 +71,8 @@ const fixture = vi.hoisted(() => ({
       environmentId: "pinned-dock-environment",
       label: "Pinned dock environment",
       connection: { phase: "connected" },
+      // The composer banners read whether the environment is switched on.
+      entry: { enabled: true },
       serverConfig: {
         environment: {
           capabilities: {
@@ -201,6 +203,7 @@ vi.mock("../BranchToolbar", () => ({ BranchToolbar: () => null }));
 // scrolling decides whether it is on screen. The real list brings its own scroll viewport; this
 // one bounds itself to half the screen so the page around it keeps the app's height.
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => undefined,
   LegendList: ({
     data,
     renderItem,
@@ -1205,7 +1208,10 @@ it("phase6 dock browser P1-6 an approval arriving while typing stays out of the 
       .map((item) => item.textContent ?? "");
   await vi.waitFor(() => expect(approvalTexts()).toHaveLength(1));
   expect(approvalTexts()[0]).toContain("rm -rf build");
-  expect(screen.container.textContent).not.toContain("git push --force");
+  // Upstream's timeline row shows the held command; the dock alone must not offer it.
+  expect(
+    dockItems(screen.container).some((item) => item.textContent?.includes("git push --force")),
+  ).toBe(false);
   const send = screen.container.querySelector<HTMLButtonElement>(
     'button[aria-label="Submit message"]',
   );

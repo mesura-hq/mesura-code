@@ -274,7 +274,7 @@ describe("dictation settings guards", () => {
     using _fixture = setup();
 
     await using settings = await mountSettings();
-    for (const label of ["General", "Providers", "Integrations", "Connections", "Archive"]) {
+    for (const label of ["General", "Providers", "Browser", "Environments", "Archive"]) {
       settings.navButton(label);
     }
     await click(settings.navButton("Providers"));

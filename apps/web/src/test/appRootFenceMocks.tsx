@@ -470,6 +470,7 @@ export async function mockHandleNewThread() {
 
 export function mockThreadActions() {
   return {
+    canTurnThreadIntoProject: () => false,
     useAcknowledgeThreadWoke: () => success,
     useThreadActions: () => ({
       settleThread: success,
@@ -541,6 +542,8 @@ export function mockHighlights() {
  */
 export function mockLegendList() {
   return {
+    // The changed-files tree re-measures the list after it expands; no list, nothing to measure.
+    useSyncLayout: () => () => undefined,
     LegendList: <Item,>({
       data,
       renderItem,

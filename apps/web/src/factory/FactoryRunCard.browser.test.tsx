@@ -59,6 +59,8 @@ const fixture = vi.hoisted(() => ({
       environmentId: "factory-run-environment",
       label: "Factory run environment",
       connection: { phase: "connected" },
+      // The composer banners read whether the environment is switched on.
+      entry: { enabled: true },
       serverConfig: {
         environment: {
           capabilities: {
@@ -213,6 +215,7 @@ vi.mock("../components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 
 // Keep timeline rows mounted so card assertions do not depend on list virtualization.
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => undefined,
   LegendList: ({
     data,
     renderItem,
@@ -692,8 +695,8 @@ it("phase9 web AC1 keeps the run opened maximized when a narrow window that open
   await mountApp();
   await openRunFromCard();
   expect(factoryTab("Run").getAttribute("aria-pressed")).toBe("true");
-  // As a sheet the pane covers the chat by itself; nothing is maximized away.
-  expect(document.querySelector('[data-chat-column-maximized-away="true"]')).toBeNull();
+  // Upstream lets a maximized panel win over the narrow sheet, so it is maximized here too.
+  expect(document.querySelector('[data-chat-column-maximized-away="true"]')).not.toBeNull();
 
   await resizeTo(1440);
 

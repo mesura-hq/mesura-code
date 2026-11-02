@@ -54,6 +54,8 @@ const fixture = vi.hoisted(() => ({
       environmentId: "factory-approval-environment",
       label: "Factory approval environment",
       connection: { phase: "connected" },
+      // The composer banners read whether the environment is switched on.
+      entry: { enabled: true },
       serverConfig: {
         environment: {
           capabilities: {
@@ -179,6 +181,7 @@ vi.mock("../components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 
 // Keep timeline rows mounted so card assertions do not depend on list virtualization.
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => undefined,
   LegendList: ({
     data,
     renderItem,

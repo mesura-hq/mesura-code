@@ -135,6 +135,8 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
       "/settings/threads",
       "/settings/browser",
       "/settings/devices",
+      // Mesura: speech-to-text settings.
+      "/settings/dictation",
       "/settings/scheduled-tasks",
     ],
   },

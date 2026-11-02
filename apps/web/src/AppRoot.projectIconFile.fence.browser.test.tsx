@@ -148,6 +148,9 @@ vi.mock("./state/environments", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./state/environments")>()),
   useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
   useEnvironment: () => fixture.environments[0],
+  // Upstream's group update reads each member's environment at write time.
+  readEnvironment: (environmentId: string) =>
+    fixture.environments.find((environment) => environment.environmentId === environmentId) ?? null,
   useEnvironmentProviders: () => new Map(),
   usePrimaryEnvironment: () => null,
   usePrimaryEnvironmentId: () => "icon-laptop",

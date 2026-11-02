@@ -185,10 +185,12 @@ vi.mock("../composerDraftStore", () => ({
   },
 }));
 vi.mock("../lib/utils", () => ({
+  randomUUID: () => crypto.randomUUID(),
   newDraftId: () => "draft-from-index",
   newThreadId: () => "thread-from-index",
 }));
-vi.mock("../logicalProject", () => ({
+// Mesura: upstream moved project grouping to client-runtime.
+vi.mock("@t3tools/client-runtime/state/project-grouping", () => ({
   deriveLogicalProjectKeyFromSettings: () => "remote-project",
   getProjectOrderKey: () => "remote-project",
   selectProjectGroupingSettings: () => ({}),
@@ -212,6 +214,7 @@ vi.mock("../state/server", () => ({
   serverEnvironment: { providersValueAtom: () => "providers" },
 }));
 vi.mock("../threadRoutes", () => ({
+  resolveThreadRouteRef: () => null,
   resolveThreadRouteTarget: () =>
     state.openDraft
       ? { kind: "draft", draftId: "explicit-draft" }
@@ -224,6 +227,7 @@ vi.mock("../uiStateStore", () => ({
   useUiStateStore: () => [],
 }));
 vi.mock("../hooks/useSettings", () => ({
+  getClientSettings: () => ({}),
   useClientSettings: () => ({}),
 }));
 vi.mock("../components/files/projectFilesQueryState", () => ({

@@ -28,6 +28,7 @@ vi.mock("../../state/server", async (original) => {
   };
 });
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => undefined,
   LegendList: ({
     data,
     renderItem,

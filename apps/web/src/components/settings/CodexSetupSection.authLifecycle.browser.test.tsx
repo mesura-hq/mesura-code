@@ -43,7 +43,9 @@ const fixture = vi.hoisted(() => ({
   openExternal: vi.fn<(url: string) => Promise<void>>(),
   consumed: vi.fn(),
 }));
-vi.mock("../../state/server", () => ({
+vi.mock("../../state/server", async (importOriginal) => ({
+  // The managed policy reads the environment configs from this module too.
+  ...(await importOriginal<typeof import("../../state/server")>()),
   serverEnvironment: {
     providerAuthState: () => ({ kind: "auth" }),
     providerInstallState: () => ({ kind: "install" }),

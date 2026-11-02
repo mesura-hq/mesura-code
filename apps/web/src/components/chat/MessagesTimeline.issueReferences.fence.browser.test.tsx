@@ -37,6 +37,7 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => undefined,
   LegendList: (props: {
     data: Array<{ id: string }>;
     keyExtractor: (item: { id: string }) => string;
