@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { isEmbeddedDocumentExit } from "@t3tools/shared/embeddedDocument";
 import {
   type KeybindingCommand,
   type KeybindingShortcut,
@@ -8,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import {
   type HtmlRenderShortcut,
+  HTML_RENDER_BOOTSTRAP_VERSION,
   htmlRenderShortcutsMessage,
   htmlRenderThemeFragment,
   htmlRenderThemeMessage,
@@ -42,6 +44,7 @@ import { shortcutConflictKey } from "~/keybindings";
 import { useOpenChangeRequestLink } from "~/lib/openPullRequestLink";
 import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";
+import { focusPane } from "~/lib/paneFocus";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "~/state/server";
 
 /**
@@ -145,12 +148,20 @@ export function HtmlRenderDocument(props: {
   readonly className?: string;
   readonly threadRef?: ScopedThreadRef | undefined;
   readonly onContentHeight?: (height: number) => void;
+  readonly onExit?: () => void;
   /** Reports fullscreen changes so virtualized rows can stay mounted. */
   readonly onFullscreenChange?: ((fullscreen: boolean) => void) | undefined;
 }) {
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
-  const [src] = useState(() => `${props.src.split("#", 1)[0]}${htmlRenderThemeFragment(theme)}`);
+  const [src] = useState(() => {
+    const url = new URL(props.src, window.location.href);
+    // A new bridge must bypass cached historical responses without changing signed asset grants.
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      url.searchParams.set("mesura-html-bootstrap", HTML_RENDER_BOOTSTRAP_VERSION);
+    }
+    return `${url.href.split("#", 1)[0]}${htmlRenderThemeFragment(theme)}`;
+  });
   const [loaded, setLoaded] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const postTheme = () => {
@@ -244,7 +255,14 @@ export function HtmlRenderDocument(props: {
       props.onContentHeight?.(height);
       return;
     }
-    if (document.activeElement !== frame || navigator.userActivation?.isActive === false) return;
+    if (document.activeElement !== frame) return;
+    if (isEmbeddedDocumentExit(event.data)) {
+      frame.blur();
+      if (props.onExit) props.onExit();
+      else focusPane("chat");
+      return;
+    }
+    if (navigator.userActivation?.isActive === false) return;
     const linkRequest = readHtmlRenderLinkRequest(event.data);
     if (linkRequest !== undefined) {
       open(linkRequest.url, linkRequest);
@@ -279,6 +297,7 @@ export function HtmlRenderDocument(props: {
     <>
       <iframe
         ref={frameRef}
+        data-mesura-chat-object-entry=""
         src={src}
         title={props.title}
         // Never allow-same-origin: the opaque origin keeps the page out of the app's session.

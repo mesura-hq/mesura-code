@@ -6,6 +6,38 @@ import { assert, it } from "vite-plus/test";
 
 import { repositoryRoot } from "./contractHarness.ts";
 
+it("modal keys seam guard: document frames retain keyboard entry and focused exit", () => {
+  const html = read("apps/web/src/components/files/BrowserDocumentFrame.tsx");
+  assert.include(html, tokens('data-mesura-chat-object-entry=""'));
+  assert.include(html, tokens("event.source === frame.contentWindow"));
+  assert.include(html, tokens("document.activeElement !== frame"));
+  assert.include(html, tokens("isEmbeddedDocumentExit(event.data)"));
+  assert.include(html, tokens('focusPane("chat")'));
+  assert.include(
+    read("apps/web/src/components/chat/HtmlRenderDialog.tsx"),
+    tokens("onExit={props.onClose}"),
+  );
+  const mcp = read("apps/web/src/components/chat/McpAppFrame.tsx");
+  assert.include(mcp, tokens('data-mesura-chat-object-entry=""'));
+  assert.include(mcp, tokens("isEmbeddedDocumentExit(event.data)"));
+  assert.include(mcp, tokens('focusPane("chat")'));
+});
+
+it("modal keys seam guard: served HTML renders and MCP apps receive the page agent", () => {
+  assert.lengthOf(
+    callArguments(readCanonical("apps/server/src/http.ts"), "htmlRenderAssetResponse"),
+    1,
+  );
+  assert.include(
+    read("packages/shared/src/htmlRender.ts"),
+    tokens("${EMBEDDED_DOCUMENT_AGENT_SCRIPT}"),
+  );
+  assert.include(
+    read("packages/shared/src/mcpApp.ts"),
+    tokens("${EMBEDDED_DOCUMENT_AGENT_SCRIPT}"),
+  );
+});
+
 /**
  * The modal key layer (docs/mesura/adr-009-modal-keys.md) reaches the app through small seams in
  * upstream files that a sync can drop while the fork's own tests pass, so each seam is asserted at
@@ -326,8 +358,35 @@ it("modal keys seam guard: the composer registers its Vim adapter", () => {
   assertCallCarries(
     "apps/web/src/components/chat/useMesuraComposerInput.ts",
     "registerComposerVimAdapter",
-    ["read:", "write:", "setCursor:", "draftKey:"],
+    ["read:", "write:", "setCursor:", "draftKey:", "editor:", "insertAtEnd:"],
   );
+  // A page quote from the frame reader appends through the composer handle's own insert path.
+  assert.include(
+    read("apps/web/src/components/chat/ChatComposer.tsx"),
+    tokens("insertTextAtEnd: insertComposerTextAtEndStable,"),
+    "the composer handle no longer exposes insertTextAtEnd",
+  );
+  // Normal mode reads and edits the editor's document; without the handle's editor it has none.
+  const editorFile = "apps/web/src/components/ComposerPromptEditorTiptap.tsx";
+  assert.include(
+    read(editorFile),
+    tokens("editor: () => TiptapEditor | null;"),
+    "the composer editor handle no longer declares its editor",
+  );
+  assert.include(
+    read(editorFile),
+    tokens("editor: () => editor ?? null,"),
+    "the composer editor handle no longer returns its editor",
+  );
+});
+
+it("modal keys seam guard: the patched Vim grammar is applied to @vimee/core", () => {
+  const workspace = NodeFS.readFileSync(
+    NodePath.join(repositoryRoot, "pnpm-workspace.yaml"),
+    "utf8",
+  );
+  assert.include(workspace, '"@vimee/core@0.3.0": patches/@vimee__core@0.3.0.patch');
+  assert.include(workspace, '"@vimee/core": 0.3.0', "the patched version is not pinned");
 });
 
 it("modal keys seam guard: a cite in Vim mode lands at the prompt's end and focuses the composer", () => {
@@ -1241,5 +1300,62 @@ it("modal keys seam guard round 2: the panel commands and the Ctrl+Q defaults st
   );
   for (const id of ["2026-10-terminal-close-ctrl-q", "2026-10-right-panel-close-ctrl-q"]) {
     assert.include(added, tokens(`id: "${id}"`), `ADDED_KEYBINDING_DEFAULTS lost ${id}`);
+  }
+});
+
+it("modal keys seam guard: a window regaining focus leaves the chat buffer its keys", () => {
+  const file = "apps/web/src/components/ChatView.tsx";
+  assert.include(
+    region(
+      read(file),
+      "const onWindowFocus = () => {",
+      'window.addEventListener("focus", onWindowFocus);',
+      file,
+    ),
+    tokens("!chatBufferHoldsKeys()"),
+    "window focus moves the chat buffer's keys into the composer again",
+  );
+});
+
+it("modal keys seam guard: question options and the minimap retain key ownership", () => {
+  const question = "apps/web/src/components/chat/InlinePendingUserInputCard.tsx";
+  assert.include(
+    region(read(question), 'className="space-y-1.5"', "{question.options.map", question),
+    tokens("data-mesura-owns-keys"),
+    "the question option area no longer owns numeric input",
+  );
+  const minimap = "apps/web/src/components/chat/TimelineMinimap.tsx";
+  assert.include(
+    region(read(minimap), "<button", "onBlur=", minimap),
+    tokens("data-mesura-owns-keys"),
+    "the minimap strip no longer owns navigation input",
+  );
+});
+
+it("modal keys seam guard: rich chat content retains atomic object markers", () => {
+  const seams: ReadonlyArray<readonly [string, string, number]> = [
+    ["TimelineAssistantRows.tsx", 'data-mesura-chat-object="html-render"', 2],
+    ["TimelineAssistantRows.tsx", 'data-mesura-chat-object="mcp-app"', 1],
+    ["MermaidDiagram.tsx", 'data-mesura-chat-object="diagram"', 1],
+    ["MarkdownMermaidCodeBlock.tsx", "data-mesura-chat-object-toggle", 1],
+    ["ChatMarkdownMedia.tsx", 'data-mesura-chat-object="image"', 1],
+    ["MarkdownMath.tsx", 'data-mesura-chat-object="math"', 1],
+  ];
+  for (const [name, marker, count] of seams) {
+    assert.equal(
+      countOf(read(`apps/web/src/components/chat/${name}`), marker),
+      count,
+      `${name} lost ${marker}`,
+    );
+  }
+});
+
+it("modal keys seam guard: expanded work output retains readable regions", () => {
+  for (const name of ["WorkLog.tsx", "TimelineWorkEntryRow.tsx"]) {
+    assert.include(
+      read(`apps/web/src/components/chat/${name}`),
+      tokens("data-mesura-readable"),
+      `${name} lost its readable region`,
+    );
   }
 });

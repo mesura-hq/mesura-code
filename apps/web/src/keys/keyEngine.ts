@@ -19,6 +19,13 @@ import {
   updateKeyEngineSnapshot,
   type EngineModeLabel,
 } from "./keyEngineStore";
+import {
+  cancelFlashOutsideOwner,
+  cancelFlashOutsideScope,
+  handleFlashKey,
+  isFlashActive,
+  stopFlash,
+} from "./flashSession";
 import { toggleComposerExpanded } from "./composer/composerExpanded";
 import {
   cancelComposerNormalResume,
@@ -46,6 +53,9 @@ export interface KeySurface {
   /** Returns true when the surface consumed the key. */
   handleKey(token: string, event: KeyboardEvent): boolean;
   runCommand?(command: string, count: number | null): boolean;
+  focusIn?(target: EventTarget | null): void;
+  pointerDown?(event: PointerEvent): void;
+  pointerUp?(event: PointerEvent): void;
   reset(): void;
 }
 
@@ -90,10 +100,59 @@ export function installKeyEngine(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
   window.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("keydown", onControlEscape);
+  window.addEventListener(
+    "focusin",
+    (event) => {
+      if (enabled) surfaces.get("chat")?.focusIn?.(event.target);
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (enabled) surfaces.get("chat")?.pointerDown?.(event);
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointerup",
+    (event) => {
+      if (!enabled) return;
+      surfaces.get("chat")?.pointerUp?.(event);
+      refreshModeIndicator();
+    },
+    true,
+  );
   // The indicator follows focus, not just keys: clicking into the composer
   // is entering insert mode. Read after the surfaces' own focus listeners,
   // which run later and may change their mode.
-  window.addEventListener("focusin", () => queueMicrotask(settleOnInput), true);
+  window.addEventListener(
+    "focusin",
+    (event) => {
+      cancelFlashOutsideOwner(event.target);
+      const scope = resolveKeyScope();
+      if (scope !== readKeyEngineSnapshot().scope) {
+        sequence = IDLE_SEQUENCE;
+        clearWhichKey();
+        for (const [ownerScope, surface] of surfaces) {
+          if (ownerScope !== scope) surface.reset();
+        }
+      }
+      queueMicrotask(settleOnInput);
+    },
+    true,
+  );
+  // A click into a frame moves focus with no `focusin` here: the window's blur is the one signal.
+  window.addEventListener("blur", () => {
+    const frame = document.activeElement;
+    if (!(frame instanceof HTMLIFrameElement)) return;
+    stopFlash();
+    if (!enabled) return;
+    surfaces.get("chat")?.focusIn?.(frame);
+    surfaces.get("frame")?.focusIn?.(frame);
+    refreshModeIndicator();
+  });
   window.addEventListener("focusout", () => queueMicrotask(refreshModeIndicator), true);
   // A click on a pane's text moves the keys there without focusing anything.
   // Where an element holds focus, the press blurs it next and `focusout`
@@ -101,6 +160,7 @@ export function installKeyEngine(): void {
   window.addEventListener(
     "pointerdown",
     (event) => {
+      cancelFlashOutsideOwner(event.target);
       notePointerPane(event.target);
       const active = document.activeElement;
       if (active === null || active === document.body) queueMicrotask(refreshModeIndicator);
@@ -110,6 +170,7 @@ export function installKeyEngine(): void {
 }
 
 function resetEngine(): void {
+  stopFlash();
   sequence = IDLE_SEQUENCE;
   if (isPaneModeActive()) stopPaneMode();
   helpOpen = false;
@@ -135,6 +196,14 @@ function showWhichKey(node: KeyNode, title: string, immediately: boolean): void 
   else whichKeyTimer = window.setTimeout(open, WHICH_KEY_DELAY_MS);
 }
 
+/**
+ * Whether Vim mode's chat buffer holds the keys. Focus then rests on <body> on purpose, so a
+ * window regaining focus (an app switch, a frame's exit) must not move it into the composer.
+ */
+export function chatBufferHoldsKeys(): boolean {
+  return refreshModeIndicator() === "chat";
+}
+
 /** Shows where the keys go and in which mode; returns that scope, or null while off. */
 export function refreshModeIndicator(): KeyScope | null {
   if (!enabled) {
@@ -142,6 +211,7 @@ export function refreshModeIndicator(): KeyScope | null {
     return null;
   }
   const scope = resolveKeyScope();
+  cancelFlashOutsideScope(scope);
   markChatBufferKeys(scope === "chat");
   const surface = surfaces.get(scope);
   const mode: EngineModeLabel = isPaneModeActive()
@@ -207,6 +277,16 @@ function consume(event: KeyboardEvent): void {
   event.stopImmediatePropagation();
 }
 
+function onControlEscape(event: KeyboardEvent): void {
+  if (!enabled || event.defaultPrevented || event.isComposing || event.key !== "Escape") return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (resolveKeyScope(target) !== "control") return;
+  resetEngine();
+  focusPane("chat");
+  consume(event);
+  settleOnInput();
+}
+
 function onKeyDown(event: KeyboardEvent): void {
   if (!enabled) return;
   // Any key ends a composer resume the palette armed, before a command can
@@ -234,12 +314,15 @@ function onKeyDown(event: KeyboardEvent): void {
 }
 
 function handleKey(scope: KeyScope, token: string, event: KeyboardEvent): boolean {
-  if (scope === "passthrough") {
+  cancelFlashOutsideScope(scope);
+  if (isFlashActive(scope)) return handleFlashKey(token);
+  // A frame's page posts its keys to its reader; the few that reach here are the page's own.
+  if (scope === "passthrough" || scope === "frame") {
     if (isPaneModeActive()) stopPaneMode();
     if (sequence !== IDLE_SEQUENCE) resetEngine();
     return false;
   }
-  if (scope === "insert") {
+  if (scope === "insert" || scope === "control") {
     if (isPaneModeActive()) stopPaneMode();
     return false;
   }

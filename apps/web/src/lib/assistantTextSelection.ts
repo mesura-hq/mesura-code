@@ -127,7 +127,18 @@ export type TextChunk = { node: Text | Element; start: number; end: number };
  * text, and hidden or aria-hidden subtrees and controls give none. No layout reads, generated
  * content or soft wraps enter the stream, so reflow cannot move it.
  */
-export function readAssistantText(root: HTMLElement) {
+export function readAssistantText(
+  root: HTMLElement,
+  options: {
+    objectStops?: boolean;
+    readableRegions?: boolean;
+    tableRows?: boolean;
+    emptyPreformatted?: boolean;
+    includeElement?: (element: Element) => boolean;
+    includeText?: (text: Text) => boolean;
+    inlineChildren?: (element: Element) => boolean;
+  } = {},
+) {
   const parts: string[] = [];
   const chunks: TextChunk[] = [];
   let length = 0;
@@ -147,18 +158,86 @@ export function readAssistantText(root: HTMLElement) {
   const visit = (node: Node) => {
     if (node.nodeType === 3) {
       const text = node as Text;
-      if (text.length > 0) append(text, text.data);
+      if (text.length > 0 && (options.includeText?.(text) ?? true)) append(text, text.data);
       return;
     }
     if (node.nodeType !== 1) return;
     const element = node as Element;
-    if (element.matches(EXCLUDED_SELECTOR)) return;
-    const block = element.matches(BLOCK_SELECTOR);
+    if (options.includeElement?.(element) === false) return;
+    if (options.objectStops && element.matches("[data-mesura-chat-object]")) {
+      if (element.matches("[hidden], [aria-hidden=true]")) return;
+      separator = true;
+      append(element, "\ufffc");
+      separator = true;
+      return;
+    }
+    if (element.matches(EXCLUDED_SELECTOR)) {
+      if (
+        options.readableRegions &&
+        element.matches('[role="button"]') &&
+        !element.matches(
+          "button, input, textarea, select, [contenteditable], [hidden], [aria-hidden=true]",
+        )
+      ) {
+        for (const region of element.querySelectorAll("[data-mesura-readable]")) {
+          const parentRegion = region.parentElement?.closest("[data-mesura-readable]");
+          if (!parentRegion || !element.contains(parentRegion)) visit(region);
+        }
+      }
+      return;
+    }
+    if (options.tableRows && element.tagName === "TR") {
+      if (length > 0) {
+        parts.push("\n");
+        length += 1;
+      }
+      separator = false;
+      const cells = [...element.children].filter((child) => child.matches("th, td"));
+      cells.forEach((cell, index) => {
+        if (index > 0) {
+          parts.push("\t");
+          length += 1;
+        }
+        const stream = readAssistantText(cell as HTMLElement, options);
+        for (const chunk of stream.chunks)
+          chunks.push({ ...chunk, start: chunk.start + length, end: chunk.end + length });
+        parts.push(stream.text.replaceAll("\n", " "));
+        length += stream.text.length;
+      });
+      separator = true;
+      return;
+    }
+    const block =
+      element.matches(BLOCK_SELECTOR) &&
+      !(element.parentElement && options.inlineChildren?.(element.parentElement));
     if (block || element.tagName === "BR") separator = true;
+    const beforeChunks = chunks.length;
     if (element.matches("[data-markdown-math]")) {
       append(element, element.getAttribute("data-markdown-copy")?.trim() ?? "");
     } else {
-      for (const child of element.childNodes) visit(child);
+      const inline = options.inlineChildren?.(element) ?? false;
+      let previousContent = false;
+      for (const child of element.childNodes) {
+        const before = length;
+        const beforeParts = parts.length;
+        if (inline && previousContent && child.nodeType === Node.ELEMENT_NODE) {
+          separator = false;
+          if (!/\s$/.test(parts.at(-1) ?? "")) {
+            parts.push(" ");
+            length += 1;
+          }
+        }
+        const contentStart = length;
+        visit(child);
+        if (length > contentStart) previousContent = true;
+        else if (length > before) {
+          parts.splice(beforeParts);
+          length = before;
+        }
+      }
+    }
+    if (options.emptyPreformatted && element.tagName === "PRE" && chunks.length === beforeChunks) {
+      append(element.querySelector("code") ?? element, "");
     }
     if (block) separator = true;
   };

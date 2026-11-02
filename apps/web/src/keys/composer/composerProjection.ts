@@ -1,9 +1,9 @@
 import { splitPromptIntoComposerSegments } from "~/composer-editor-mentions";
 
 /**
- * Every inline token is ONE private-use character, matching the composer's collapsed-cursor model
- * (`composer-logic.ts`), so an offset here needs no conversion. Each token gets its own code point,
- * so deleting one can never hand its identity to the next when the text is expanded back.
+ * The prompt in the composer's collapsed-cursor model (`composer-logic.ts`): every inline token is
+ * ONE private-use character, so an offset here is a collapsed cursor. Undo locates changes in it;
+ * Vim itself reads the editor's document (`composerDocument.ts`).
  */
 
 const TOKEN_BASE = 0xe000;
@@ -33,12 +33,6 @@ export function projectPrompt(prompt: string): ComposerProjection {
   return { text, tokens };
 }
 
-export function expandProjection(text: string, tokens: ReadonlyMap<string, string>): string {
-  let prompt = "";
-  for (const char of text) prompt += tokens.get(char) ?? char;
-  return prompt;
-}
-
 /** Offset into the projection for a Vim line/column. */
 export function offsetOf(text: string, line: number, col: number): number {
   let offset = 0;
@@ -54,101 +48,4 @@ export function positionOf(text: string, offset: number): { line: number; col: n
   const before = text.slice(0, offset);
   const line = before.split("\n").length - 1;
   return { line, col: offset - (before.lastIndexOf("\n") + 1) };
-}
-
-/**
- * A paragraph whose last line is empty ends with one extra `<br>` that holds the line open but is
- * not a character. ProseMirror marks it `ProseMirror-trailingBreak` and may put a separator `<img>`
- * before it after a chip, so the class decides first.
- */
-function isPlaceholderBreak(br: HTMLBRElement): boolean {
-  if (br.classList.contains("ProseMirror-trailingBreak")) return true;
-  if (br.nextSibling !== null) return false;
-  const previous = br.previousSibling;
-  return previous === null || previous.nodeName === "BR";
-}
-
-/**
- * The DOM point for a collapsed offset inside the composer editor. Text nodes
- * count their length, a non-editable chip counts one, a line-break `<br>`
- * counts one, and each paragraph after the first starts after one line break.
- */
-export function domPointAt(
-  editor: HTMLElement,
-  offset: number,
-): { node: Node; offset: number } | null {
-  let remaining = offset;
-  let last: { node: Node; offset: number } | null = null;
-  const paragraphs = [...editor.children];
-  for (let index = 0; index < paragraphs.length; index += 1) {
-    const paragraph = paragraphs[index]!;
-    if (index > 0) {
-      remaining -= 1;
-    }
-    // Empty paragraphs still have a caret at their start. A separator belongs
-    // to the preceding paragraph's end; consume it before mapping the next line.
-    last = { node: paragraph, offset: 0 };
-    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_ALL, {
-      acceptNode(node) {
-        const parent = node.parentElement;
-        if (parent && parent !== paragraph && parent.closest('[contenteditable="false"]')) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const length = (node as Text).length;
-        // An empty Text child has no collapsed character or caret box. Keep
-        // the paragraph start so caretRectAt can use the paragraph's geometry.
-        if (length === 0) continue;
-        if (remaining <= length) return { node, offset: remaining };
-        remaining -= length;
-        last = { node, offset: length };
-      } else if (node instanceof HTMLElement && node.getAttribute("contenteditable") === "false") {
-        const parent = node.parentNode!;
-        const at = [...parent.childNodes].indexOf(node);
-        if (remaining === 0) return { node: parent, offset: at };
-        remaining -= 1;
-        last = { node: parent, offset: at + 1 };
-      } else if (node instanceof HTMLBRElement && !isPlaceholderBreak(node)) {
-        const parent = node.parentNode!;
-        const at = [...parent.childNodes].indexOf(node);
-        if (remaining === 0) return { node: parent, offset: at };
-        remaining -= 1;
-        last = { node: parent, offset: at + 1 };
-      }
-    }
-    if (remaining === 0) return last;
-  }
-  return last;
-}
-
-/**
- * The box of the caret at an offset, for a cursor that has no character to
- * highlight (an empty line, the end of a line) and for the line gutter.
- */
-export function caretRectAt(editor: HTMLElement, offset: number): DOMRect | null {
-  const point = domPointAt(editor, offset);
-  if (!point) return null;
-  const range = document.createRange();
-  range.setStart(point.node, point.offset);
-  range.collapse(true);
-  const rect = range.getClientRects()[0];
-  if (rect && rect.height > 0) return rect;
-  // A caret before a `<br>` or in an empty paragraph has no box of its own.
-  const child = point.node.childNodes[point.offset];
-  // Tiptap can leave an empty Text child before a placeholder break. The
-  // paragraph still supplies the caret box when that child is not an Element.
-  const element =
-    point.node instanceof Element
-      ? child instanceof Element
-        ? child
-        : point.node
-      : point.node.parentElement;
-  const box = element?.getBoundingClientRect();
-  if (!box) return null;
-  const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight) || 20;
-  return new DOMRect(box.left, box.top, 0, lineHeight);
 }

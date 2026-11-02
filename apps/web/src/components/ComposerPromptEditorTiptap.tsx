@@ -145,6 +145,8 @@ export interface ComposerPromptEditorHandle {
   isCaretOnVisualEdge: (edge: "start" | "end") => boolean;
   /** Mesura: true when the editor holds a selection, so text can land at the caret instead of the end. */
   hasCaret: () => boolean;
+  /** Mesura: the live editor, which the Vim layer reads and edits as a document. */
+  editor: () => TiptapEditor | null;
 }
 
 export interface ComposerPromptEditorProps {
@@ -1732,6 +1734,7 @@ function ComposerPromptEditorTiptapInner(
       // Focus history preserves the caret after a toolbar click. NodeSelection
       // and AllSelection have no text caret, so dictation must append instead.
       hasCaret: () => hasFocusedRef.current && editor?.state.selection instanceof TextSelection,
+      editor: () => editor ?? null,
       isCaretOnVisualEdge: (edge) => {
         const snapshot = readSnapshot();
         if (snapshot.value.length === 0) return true;

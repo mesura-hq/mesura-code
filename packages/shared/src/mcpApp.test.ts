@@ -61,17 +61,20 @@ describe("injectMcpAppThemeBootstrap", () => {
     const script = html.slice(html.indexOf("<script>") + 8, html.indexOf("</script>"));
     const parent = {};
     const style = { colorScheme: "normal" };
-    let receive: ((event: { source: object; data: unknown }) => void) | undefined;
+    type Receive = (event: { source: object; data: unknown }) => void;
+    const receivers: Receive[] = [];
     NodeVM.runInNewContext(script, {
       window: {
         parent,
-        addEventListener: (_type: string, callback: typeof receive) => {
-          receive = callback;
+        addEventListener: (type: string, callback: Receive) => {
+          if (type === "message") receivers.push(callback);
         },
       },
-      document: { documentElement: { style } },
+      document: { documentElement: { style }, hasFocus: () => false },
     });
-    const send = (data: unknown, source = parent) => receive?.({ source, data });
+    const send = (data: unknown, source = parent) => {
+      for (const receive of receivers) receive({ source, data });
+    };
     const initialized = { jsonrpc: "2.0", id: 1, result: { hostContext: { theme: "dark" } } };
     send(initialized, {});
     expect(style.colorScheme).toBe("normal");

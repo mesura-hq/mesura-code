@@ -254,7 +254,9 @@ painting.**
   position.
 - Motions run in **`@vimee/core` 0.3.0** (MIT, a pure
   `processKeystroke(key, ctx, buffer)` over a `TextBuffer`), read-only: a key
-  that would enter insert mode is answered with an Escape.
+  that would enter insert mode is answered with an Escape. 0.3.0 is the latest
+  release and lacks `E` and Vim's `cw` range; `patches/@vimee__core@0.3.0.patch`
+  adds both (`keys/vimGrammar.test.ts` pins them against Neovim).
 - The cursor is a CSS highlight (`mesura-chat-cursor`). A visual selection is
   the native selection, so copy and the cite pipeline work on it unchanged.
   The letter under the cursor takes the page background, as a terminal block
@@ -313,14 +315,39 @@ the workaround and the fork's `focusEditor` option on `insertComposerText`.
 
 ### The composer
 
-Insert mode is upstream's composer, untouched. Escape enters normal mode: the
-prompt is projected with each inline token (mention, citation, skill, context
-reference) as one private-use character, run through `@vimee/core`, and written
-back through `applyPromptReplacement`. One character per token is the
-composer's own collapsed-cursor model, and one code point per token keeps a
-token's identity when an earlier one is deleted. A second Escape leaves for the
-chat. Rejected: a Neovim-backed composer (tailnet latency, no token model),
-and replacing Lexical with CodeMirror (a rewrite of the composer).
+Insert mode is upstream's composer, untouched. Escape enters normal mode, which
+runs `@vimee/core` over the text the editor shows, read from its ProseMirror
+document (`composer/composerDocument.ts`): one line per textblock line (a
+paragraph, a list item, a heading, a code line), and each inline atom (mention,
+citation, skill, context reference) as one private-use character. List markers,
+quote prefixes, fences, checkboxes and code headers are structure, not
+characters. An atom keeps its character for the life of the page, so a register
+or an undo state still names the real node after the document that made it is
+gone. A second Escape leaves for the chat.
+
+Each edit is applied as editor transactions on the one span that changed
+(`composer/composerEdits.ts`): a deleted line break joins blocks as Backspace
+does, an inserted one splits them as Enter does (`splitOrLiftListItem` in a
+list, a newline in code), and a linewise delete removes whole blocks with
+`deleteRange`, so `dd` on the last item removes its list. The caret moves in
+the same transaction, so a key typed right after `cw` or `o` lands there. The
+editor handle exposes its editor (`editor()`, a fork line in an upstream file)
+for this. Offsets crossing `composerSurface.ts`'s API stay the composer's
+collapsed cursor, converted through the editor's own Markdown maps, so the
+palette return, focus return and undo keep one cursor model.
+
+Rejected, with the reason:
+
+- **The Markdown prompt as the buffer.** The first build did this, for the old
+  flat editor. Once upstream made the composer rich text, `1. `, `> ` and
+  fences became characters Vim moved over and deleted but nobody could see,
+  and the offset map, which counted DOM children, put the cursor, the
+  selection and flash on the wrong text. Stripping markers by pattern cannot
+  express nested items, code, or structural edits.
+- **Rewriting the whole prompt after each edit.** It reparsed every node and
+  raced insert mode: the caret moved a frame after the write.
+- A Neovim-backed composer (tailnet latency, no token model), and replacing
+  the editor with CodeMirror (a rewrite of the composer).
 
 Undo is the composer's own, not vimee's (`composer/composerUndo.ts`; the
 vimee buffer records no snapshots):
@@ -345,15 +372,105 @@ its card (`[data-chat-composer-main-surface]`, anchored on the
 of a line) is drawn as an element (`cursorOverlayStore.ts`), because a
 highlight needs a character to paint; it keeps its own look
 (`bg-sky-500/80`). A cursor on a narrow glyph is widened as in the chat,
-drawn in the editor's host because Lexical owns the editable content; the
-editor's scrolling clips it through a `clip-path`.
+drawn in the editor's host because the editor owns the editable content; the
+editor's scrolling clips it through a `clip-path`. Paint is rebuilt on every
+editor transaction while normal mode is on, because a selection change alone
+redraws the editor's mark decorations and detaches the painted ranges.
 
 `<leader>e` toggles the expanded composer: half the window high, with a
 gutter of hybrid line numbers (the cursor's line absolute, the others
-relative in normal mode, as Neovim's `number` + `relativenumber`). The
-composer is one Lexical paragraph whose lines are `<br>` elements, so CSS
-counters cannot number it; `ComposerLineNumbers` measures each line start and
-re-measures only on input, the editor's scroll, or a Vim key.
+relative in normal mode, as Neovim's `number` + `relativenumber`). It numbers
+the lines Vim moves by, not Markdown lines, so a fence gets no number;
+`ComposerLineNumbers` measures each line start and re-measures only on input,
+the editor's scroll, or a Vim key.
+
+### Rich chat content and embedded documents
+
+Added 2026-10-28, after upstream's inline HTML renders, MCP apps, Mermaid,
+math and expandable tool output made parts of the chat unreachable by keys.
+
+- **Object stops.** An element marked `data-mesura-chat-object` (`html-render`,
+  `mcp-app`, `diagram`, `image`, `math`) is one buffer line of one placeholder
+  character, painted as an outline (`blockCursor.ts`), so `j`/`k` and `gg`/`G`
+  never skip it. `Enter` focuses its `data-mesura-chat-object-entry` (the
+  iframe of a render or an app) or runs its `data-mesura-chat-object-toggle`
+  (a diagram's Show code). `y` copies a formula's TeX or a diagram's source.
+  Rejected: projecting frame text into the parent buffer; ranges cannot cross
+  documents and the sandbox (no `allow-same-origin`) stays.
+- **What the buffer reads.** Blank lines inside preformatted text are kept;
+  incidental blank lines between blocks are not. Text that is not visible
+  (`display: none`, `visibility: hidden`, `opacity: 0`, `user-select: none`
+  chrome, a closed `<details>`) is skipped, so a hover-only timestamp is no
+  stop. Readable output under an activation wrapper (`role="button"` work
+  rows) is marked `data-mesura-readable`. A table row is one line with cells
+  joined by a tab. `readAssistantText`'s normalization is unchanged, because
+  stored citations hold offsets into it.
+- **Embedded documents.** The frame bootstrap
+  (`packages/shared/src/embeddedDocument.ts`) posts one payload-free exit
+  notification on `Shift+Escape`, or on `Escape` the page did not handle. The
+  host accepts it only from the focused frame and returns to the chat pane
+  entry; the full-screen dialog closes instead. The bootstrap is versioned and
+  added at serve time to HTML renders published before it
+  (`apps/server/src/htmlRender/htmlRenderAssetResponse.ts`), without rewriting
+  stored files. MCP apps get it through the host's existing theme script. A
+  focused iframe is the `passthrough` scope, or `frame` while its reader runs.
+  A click into a frame fires no `focusin` in the parent, so the window's
+  `blur` updates the indicator, moves the chat cursor onto the frame's object
+  stop and starts the frame's reader.
+- **The frame reader** (`keys/frame/frameReader.ts`). The page's agent, in
+  the same bootstrap, owns the text and the painting: it projects the page's
+  visible text, posts its keys while it reads, and paints the cursor and the
+  visual span with CSS highlights it is given as offsets. Vim runs in the app
+  on that text, with the chat's grammar (`readOnlyVim.ts`). The page is
+  untrusted code that can post any message, so the host takes a message only
+  from the focused frame, a key only while `navigator.userActivation` is
+  active (a key in the frame activates its ancestors), and lets the page
+  reach nothing but its reader: the leader sequence of `chat.cite`, `y`, and
+  the exit. A text field keeps its keys; `i` hands every key to the page
+  until an unhandled `Escape`. Rejected: a reader written inside the page,
+  which would be a second Vim to keep in step with vimee and the patch;
+  projecting into the parent buffer, for the sandbox reason above.
+- **Page quotes.** `Space c` appends the selection as a Markdown block quote
+  under the page's title through the composer's own `insertTextAtEnd`, not as
+  an assistant citation. `AssistantCitation` requires an assistant
+  `messageId`, and its chip reveals the source by offsets in that message.
+  A page citation would need a second source kind across the contract, the
+  href format, the chip, the source reveal and the navigation
+  (`AssistantCitationChip.tsx` alone moved 18 times upstream in three
+  months), and a reveal protocol into the page; a quote carries the same text
+  to the agent. Revisit if page quotes need the jump back to their source.
+- **The agent is typed TypeScript, shipped as generated JavaScript.**
+  `packages/shared/src/embeddedDocumentAgent.ts` is checked against the DOM,
+  which `apps/server`'s program has no types for, and the server injects the
+  bootstrap. So the server imports only the generated string
+  (`embeddedDocumentAgentSource.ts`, from
+  `scripts/generate-embedded-document-agent.ts`), and
+  `tests/unit/embedded-document-agent.test.ts` fails when the two differ.
+  Rejected: `Function.prototype.toString()` of an imported function, which
+  pulls the DOM-typed code into the server's program; a hand-written string,
+  which no type check or lint reads. The agent reads nothing outside its
+  function; constants arrive as arguments. Bump
+  `HTML_RENDER_BOOTSTRAP_VERSION` when it changes, or renders published
+  earlier keep the old agent.
+- **Window focus.** Upstream refocuses the composer when the window regains
+  focus with `<body>` active. In Vim mode `<body>` is where the chat buffer
+  holds the keys, so `ChatView` skips that refocus while
+  `chatBufferHoldsKeys()` is true (an app switch, a frame's exit).
+- **Focused controls.** Focus inside `data-mesura-owns-keys` (a question's
+  options, the message minimap) passes every key to the control except an
+  unhandled `Escape`, which returns to the chat. Plain buttons are not marked:
+  `Enter` activates them and `Space` stays the leader.
+- **Flash lifecycle.** A flash session belongs to the surface that started it
+  and ends on a focus or pointer move outside it, a frame taking focus, a
+  layer opening, a route change, a scroll, a wheel or a resize: labels are
+  fixed overlays and would detach. Content changing under the targets
+  (streaming, an expanded row) does not end it: targets are live ranges, so
+  labels are measured again and a jump resolves the range, never a stored
+  line number. A search with no match stays in flash. A label sits on the
+  match's last line fragment, not its union box.
+- **Mouse and Vim.** A click on chat text places the cursor; a drag selection
+  inside the buffer becomes Vim's visual selection, both endpoints stored as
+  `{ rowId, offset }` so they survive a rebuild of the virtualized list.
 
 ### Navigation by message
 
@@ -471,10 +588,11 @@ the size it is about to change.
 Each of these cost a debugging round and still shapes the code. Read the
 entry before changing the code it names.
 
-- **Moving the composer caret in the same tick as a write reverts the write.**
-  `focusAt` reports the editor's stale text as a change. The adapter's
-  `write` places the caret itself, on the next frame, after the editor has
-  the new prompt.
+- **Moving the composer caret in the same tick as a controlled write reverts
+  the write.** `focusAt` reports the editor's stale text as a change. Only
+  undo and redo still write the prompt through the adapter, so they set
+  `pendingWrite` and place the cursor when the editor's transaction for that
+  prompt arrives.
 - **vimee does not report every edit** (`ciw`, a visual `d`) as a
   `content-change`. The composer compares text before and after instead.
 - **Live-follow only learns about reading from wheel, touch and pointer
@@ -487,9 +605,9 @@ entry before changing the code it names.
 - **Screen-reader-only text is in the projection**: each message starts with
   an `sr-only` author heading ("You", "T3 Code"). The buffer drops lines made
   only of such text, or the cursor would land somewhere invisible.
-- **Lexical's `<br>` carries no marker**, and a paragraph ending in an empty
-  line has one extra placeholder `<br>`. The composer's offset map counts
-  every `<br>` except that trailing placeholder.
+- **Place the composer caret before painting.** Moving the editor's
+  selection redraws its mark decorations, which splits text nodes; ranges
+  built before the move are detached.
 - **`resolveKeyScope` must read the focused pane before any early return.**
   The prototype returned early for the composer, so the pane remembered for a
   later blur stayed stale: after `Esc Esc` from the composer, focus was on
@@ -527,6 +645,9 @@ Each item has its own issue on `mesura-hq/mesura-code`, tracked by #86:
   the command has no default chord.
 - #87: refactor(keys): one command list for the palette, the chords and the
   modal keys — the chord listeners and the palette rows reading the registry.
+- Not filed yet: flash (`s`) and the scroll keys (`Ctrl+D` and the rest)
+  inside a frame's reader. Flash labels are drawn in the app's document over
+  ranges of that document, and a frame's ranges are in another one.
 
 Known limits of round 2, with no issue of their own:
 

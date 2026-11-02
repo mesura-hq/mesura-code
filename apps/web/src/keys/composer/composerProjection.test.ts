@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 
 import { formatAssistantCitationForComposer } from "~/composer-logic";
-import { expandProjection, offsetOf, positionOf, projectPrompt } from "./composerProjection";
+import { offsetOf, positionOf, projectPrompt } from "./composerProjection";
 
 const citation = (text: string) =>
   formatAssistantCitationForComposer({
@@ -18,20 +18,12 @@ const citation = (text: string) =>
   }).trimEnd();
 
 describe("projectPrompt", () => {
-  it("collapses each inline token to one character and expands it back", () => {
-    const prompt = `${citation("first")}: why\n${citation("second")}: and this`;
-    const projection = projectPrompt(prompt);
-    expect(projection.text).toBe(": why\n: and this");
-    expect(expandProjection(projection.text, projection.tokens)).toBe(prompt);
-  });
-
-  it("keeps each token's identity when a token before it is deleted", () => {
+  it("collapses each inline token to one character that names its source", () => {
     const first = citation("first");
     const second = citation("second");
-    const projection = projectPrompt(`${first}: a\n${second}: b`);
-    // `dd` on the first line, as Vim leaves the text.
-    const edited = projection.text.split("\n").slice(1).join("\n");
-    expect(expandProjection(edited, projection.tokens)).toBe(`${second}: b`);
+    const projection = projectPrompt(`${first}: why\n${second}: and this`);
+    expect(projection.text.replace(/[\ue000-\uf8ff]/g, "")).toBe(": why\n: and this");
+    expect([...projection.tokens.values()]).toEqual([first, second]);
   });
 });
 

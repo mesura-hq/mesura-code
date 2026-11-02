@@ -1,5 +1,7 @@
 import { readAssistantText, type TextChunk } from "~/lib/assistantTextSelection";
 
+import type { BufferPosition } from "../readOnlyVim";
+
 /**
  * Every buffer position resolves to a `Range` on the rendered chat; one empty line between rows
  * lets `{`/`}` step by message. The timeline is virtualized, so only mounted rows are in it and the
@@ -28,10 +30,7 @@ export interface ChatBuffer {
   readonly lineRow: readonly number[];
 }
 
-export interface BufferPosition {
-  readonly line: number;
-  readonly col: number;
-}
+export type { BufferPosition };
 
 /**
  * A position that survives a rebuild: the row and an offset into its text.
@@ -55,6 +54,36 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     .map((element) => ({ element, top: element.getBoundingClientRect().top }))
     .toSorted((left, right) => left.top - right.top);
 
+  const styles = new Map<Element, CSSStyleDeclaration>();
+  const styleOf = (element: Element) => {
+    let style = styles.get(element);
+    if (!style) {
+      style = getComputedStyle(element);
+      styles.set(element, style);
+    }
+    return style;
+  };
+  const displayed = new Map<Element, boolean>();
+  const isDisplayed = (element: Element): boolean => {
+    const cached = displayed.get(element);
+    if (cached !== undefined) return cached;
+    const style = styleOf(element);
+    const visible =
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      style.visibility !== "collapse" &&
+      style.opacity !== "0" &&
+      (!element.parentElement || isDisplayed(element.parentElement));
+    displayed.set(element, visible);
+    return visible;
+  };
+  const inClosedDetails = (node: Node) => {
+    const element = node instanceof Element ? node : node.parentElement;
+    const details = element?.closest("details:not([open])");
+    return (
+      !!details && node !== details && !details.querySelector(":scope > summary")?.contains(node)
+    );
+  };
   const rows: BufferRow[] = [];
   const lines: string[] = [];
   const lineRow: number[] = [];
@@ -64,26 +93,43 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     // a visual selection inside what the cite pipeline can capture.
     const source =
       element.querySelector<HTMLElement>("[data-assistant-citation-source]") ?? element;
-    const { text: rawText, chunks } = readAssistantText(source);
-    if (rawText.trim().length === 0) continue;
-    const collapses = collapseReader(chunks);
+    const { text: rawText, chunks } = readAssistantText(source, {
+      objectStops: true,
+      readableRegions: true,
+      tableRows: true,
+      emptyPreformatted: true,
+      includeElement: (element) => !inClosedDetails(element) && isDisplayed(element),
+      includeText: (node) =>
+        !inClosedDetails(node) &&
+        (!node.parentElement || styleOf(node.parentElement).userSelect !== "none"),
+      inlineChildren: (element) => {
+        const style = styleOf(element);
+        return (
+          style.display.includes("grid") ||
+          (style.display.includes("flex") && !style.flexDirection.startsWith("column"))
+        );
+      },
+    });
+    if (chunks.length === 0) continue;
+    const collapses = collapseReader(chunks, styleOf);
     const text = renderedText(rawText, chunks, collapses);
-    // Blank lines (whitespace between HTML blocks) and screen-reader-only lines
-    // (the "You" and "T3 Code" headings) are dropped: a cursor there paints
-    // nothing, and the blank line between rows already gives `{`/`}` their stops.
+    const projected = projectBufferLines(text, (offset) =>
+      chunks.some(
+        (chunk) =>
+          chunk.start <= offset &&
+          chunk.end >= offset &&
+          !!(chunk.node instanceof Element ? chunk.node : chunk.node.parentElement)?.closest("pre"),
+      ),
+    );
     const rowLines: string[] = [];
     const lineStarts: number[] = [];
-    let offset = 0;
-    for (const line of text.split("\n")) {
-      // Collapsible whitespace at the start of a line renders as nothing,
-      // such as the newline remark-breaks puts after a `<br>`.
-      const start = offset + leadingCollapsedLength(line, offset, chunks, collapses);
-      const end = offset + line.length;
-      if (line.trim().length > 0 && !isScreenReaderOnly(chunks, start, end)) {
+    for (const line of projected) {
+      const start = line.start + leadingCollapsedLength(line.text, line.start, chunks, collapses);
+      const end = line.start + line.text.length;
+      if (!isScreenReaderOnly(chunks, start, end)) {
         rowLines.push(text.slice(start, end));
         lineStarts.push(start);
       }
-      offset = end + 1;
     }
     if (rowLines.length === 0) continue;
     if (lines.length > 0) {
@@ -106,6 +152,28 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
   return { rows, lines, lineRow };
 }
 
+export function projectBufferLines(
+  text: string,
+  isPreformatted: (offset: number) => boolean,
+): { text: string; start: number }[] {
+  const lines: { text: string; start: number }[] = [];
+  let start = 0;
+  for (const line of text.split("\n")) {
+    let segmentStart = start;
+    for (const segment of line.split(/(\ufffc)/)) {
+      if (
+        segment.trim().length > 0 ||
+        ((segment.length > 0 || line.length === 0) && isPreformatted(segmentStart))
+      ) {
+        lines.push({ text: segment, start: segmentStart });
+      }
+      segmentStart += segment.length;
+    }
+    start += line.length + 1;
+  }
+  return lines;
+}
+
 /**
  * CSS's collapsible white space: spaces, tabs and segment breaks. Not `\s`,
  * which also matches a no-break space, a character the browser renders.
@@ -121,14 +189,17 @@ const PRESERVED_NEWLINES = new Set(["pre", "pre-wrap", "pre-line", "break-spaces
  * whitespace matters, once per parent. An unstyled element in a DOM without a
  * user-agent stylesheet reports "", the initial `normal`.
  */
-function collapseReader(chunks: readonly TextChunk[]): (index: number) => boolean {
+function collapseReader(
+  chunks: readonly TextChunk[],
+  styleOf: (element: Element) => CSSStyleDeclaration,
+): (index: number) => boolean {
   const byParent = new Map<Element, boolean>();
   return (index) => {
     const parent = chunks[index]?.node.parentElement;
     if (!parent) return true;
     let collapses = byParent.get(parent);
     if (collapses === undefined) {
-      collapses = !PRESERVED_NEWLINES.has(getComputedStyle(parent).whiteSpace);
+      collapses = !PRESERVED_NEWLINES.has(styleOf(parent).whiteSpace);
       byParent.set(parent, collapses);
     }
     return collapses;
@@ -214,9 +285,90 @@ export function fromRowPosition(buffer: ChatBuffer, position: RowPosition): Buff
   };
 }
 
+export function domPointToRowPosition(
+  buffer: ChatBuffer,
+  node: Node,
+  offset: number,
+): RowPosition | null {
+  if (node.nodeType !== Node.TEXT_NODE) {
+    const after = node.childNodes[offset];
+    const before = node.childNodes[offset - 1];
+    const chunks = buffer.rows
+      .flatMap((row) => row.chunks)
+      .filter((chunk) => chunk.node.nodeType === Node.TEXT_NODE);
+    const next = after && chunks.find((chunk) => after.contains(chunk.node));
+    if (next) return domPointToRowPosition(buffer, next.node, 0);
+    const previous = before && chunks.findLast((chunk) => before.contains(chunk.node));
+    return previous
+      ? domPointToRowPosition(buffer, previous.node, previous.end - previous.start)
+      : null;
+  }
+  for (const row of buffer.rows) {
+    const chunk = row.chunks.find((chunk) => chunk.node === node);
+    if (!chunk || offset < 0 || offset > chunk.end - chunk.start) continue;
+    const position = { rowId: row.id, offset: chunk.start + offset };
+    const at = fromRowPosition(buffer, position);
+    if (at && at.col >= 0 && at.col <= (buffer.lines[at.line]?.length ?? 0)) return position;
+  }
+  return null;
+}
+
+export function isSupportedChatSelection(buffer: ChatBuffer, range: Range): boolean {
+  const root = range.commonAncestorContainer;
+  const nodes = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  const supported = new Set(buffer.rows.flatMap((row) => row.chunks.map((chunk) => chunk.node)));
+  for (let node: Node | null = root; node; node = nodes.nextNode()) {
+    if (!range.intersectsNode(node)) continue;
+    if (
+      node instanceof Element &&
+      node.matches("[data-mesura-chat-object], iframe, input, textarea, select, [contenteditable]")
+    )
+      return false;
+    if (node.nodeType !== Node.TEXT_NODE) continue;
+    const start = node === range.startContainer ? range.startOffset : 0;
+    const end = node === range.endContainer ? range.endOffset : node.textContent!.length;
+    if (node.textContent!.slice(start, end).trim() && !supported.has(node as Text)) return false;
+  }
+  return true;
+}
+
 function rowAt(buffer: ChatBuffer, line: number): BufferRow | null {
   const index = buffer.lineRow[line];
   return index === undefined || index === -1 ? null : buffer.rows[index]!;
+}
+
+export function tableMotionColumn(from: string, to: string, column: number): number {
+  const cells = from.slice(0, column).split("\t");
+  const cellIndex = cells.length - 1;
+  const inCell = cells.at(-1)!.length;
+  const targetCells = to.split("\t");
+  const targetIndex = Math.min(cellIndex, targetCells.length - 1);
+  const prefix = targetCells
+    .slice(0, targetIndex)
+    .reduce((length, cell) => length + cell.length + 1, 0);
+  return prefix + Math.min(inCell, Math.max(0, targetCells[targetIndex]!.length - 1));
+}
+
+export function tableAt(buffer: ChatBuffer, line: number): Element | null {
+  const row = rowAt(buffer, line);
+  if (!row) return null;
+  const start = row.lineStarts[line - row.firstLine]!;
+  const chunk = row.chunks.find((chunk) => chunk.start >= start);
+  const element = chunk?.node instanceof Element ? chunk.node : chunk?.node.parentElement;
+  return element?.closest("tr")?.closest("table") ?? null;
+}
+
+export function objectAt(buffer: ChatBuffer, position: BufferPosition): HTMLElement | null {
+  const row = rowAt(buffer, position.line);
+  if (!row) return null;
+  const offset = row.lineStarts[position.line - row.firstLine]! + position.col;
+  const node = row.chunks.find((chunk) => chunk.start === offset)?.node;
+  return node instanceof HTMLElement && node.hasAttribute("data-mesura-chat-object") ? node : null;
+}
+
+export function objectYankText(object: HTMLElement): string {
+  if (object.dataset.mesuraChatObject === "image") return object.getAttribute("alt") ?? "";
+  return object.getAttribute("data-markdown-copy")?.trimEnd() ?? "";
 }
 
 function boundaryAt(
@@ -224,7 +376,11 @@ function boundaryAt(
   offset: number,
   edge: "start" | "end",
 ): { node: Node; offset: number } | null {
-  const chunk = row.chunks.find((candidate) => offset < candidate.end) ?? row.chunks.at(-1);
+  const chunk =
+    row.chunks.find((candidate) => candidate.start <= offset && offset < candidate.end) ??
+    row.chunks.find((candidate) => candidate.end === offset) ??
+    row.chunks.find((candidate) => candidate.start > offset) ??
+    row.chunks.at(-1);
   if (!chunk) return null;
   if (chunk.node.nodeType === Node.TEXT_NODE) {
     return {

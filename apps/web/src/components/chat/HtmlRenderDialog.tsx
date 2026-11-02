@@ -41,6 +41,7 @@ export function HtmlRenderDialog(props: {
                 src={props.src}
                 title={props.title}
                 threadRef={props.threadRef}
+                onExit={props.onClose}
                 className="block size-full"
               />
             </div>

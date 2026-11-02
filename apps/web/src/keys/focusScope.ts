@@ -26,7 +26,9 @@ const PASSTHROUGH_SELECTOR = [
 
 /** Layers that may be open while focus stays behind them. */
 const OPEN_LAYER_SELECTOR = [
-  '[role="dialog"][aria-modal="true"]',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[role="menu"]',
   '[data-slot="dialog-popup"]:is([data-open])',
   '[data-slot="sheet-popup"]:is([data-open])',
   '[data-slot="menu-popup"]',
@@ -76,8 +78,13 @@ export function deepActiveElement(): Element | null {
  */
 const TREE_SELECTOR = '[role="tree"]';
 
+/** Set on a frame while its page's Vim reader holds the keys (`keys/frame/frameReader.ts`). */
+export const FRAME_READER_ATTRIBUTE = "data-mesura-reader";
+
 export type KeyScope =
   | "composer"
+  | "frame"
+  | "control"
   | "insert"
   | "passthrough"
   | "tree"
@@ -90,11 +97,20 @@ export function resolveKeyScope(active: Element | null = deepActiveElement()): K
   // to <body> falls back to. Skipped for the composer, a click from the terminal
   // left the terminal recorded and `Esc Esc` handed every key to its passthrough.
   const focusedPane = getFocusedPane();
+  if (active instanceof HTMLIFrameElement) {
+    return active.hasAttribute(FRAME_READER_ATTRIBUTE) ? "frame" : "passthrough";
+  }
   if (isCommandPaletteOpen()) return "passthrough";
+  if (active?.closest("[data-mesura-owns-keys]") && !isTextEditable(active)) return "control";
+  // A control in the composer's non-editable chrome (a code block's language picker) is not the
+  // prompt: normal mode's letters would edit the prompt instead of reaching it.
+  if (active?.closest('[contenteditable="false"]') && active.closest(COMPOSER_EDITOR_SELECTOR)) {
+    return "control";
+  }
   if (active?.closest(COMPOSER_EDITOR_SELECTOR)) return "composer";
   if (active?.closest(PASSTHROUGH_SELECTOR)) return "passthrough";
   if (isTextEditable(active)) return "insert";
-  if (document.querySelector(OPEN_LAYER_SELECTOR)) return "passthrough";
+  if (hasOpenKeyLayer()) return "passthrough";
   if (active?.closest(TREE_SELECTOR)) return "tree";
   const pane = focusedPane ?? reachableLastPane();
   if (pane === "terminal") return "passthrough";
@@ -139,4 +155,12 @@ export function isComposerInDialog(active: Element | null = deepActiveElement())
 
 export function isComposerMenuOpen(): boolean {
   return document.querySelector("[data-composer-command-drawer]") !== null;
+}
+
+export function hasOpenKeyLayer(): boolean {
+  return (
+    isCommandPaletteOpen() ||
+    isComposerMenuOpen() ||
+    document.querySelector(OPEN_LAYER_SELECTOR) !== null
+  );
 }

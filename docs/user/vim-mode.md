@@ -74,12 +74,36 @@ In the right panel:
 
 In NORMAL mode the chat works like a read-only Vim buffer with a block cursor:
 
-- Move with `h` `j` `k` `l`, words with `w` `b` `e`, lines with `0` and `$`.
+- Move with `h` `j` `k` `l`, words with `w` `b` `e`, lines with `0` and `$`. `W` `B` `E` move
+  by words separated only by spaces.
 - `gg` and `G` go to the start and the end of the thread. `Ctrl+D`, `Ctrl+U`, `Ctrl+F` and
   `Ctrl+B` scroll by half a page or a page.
 - `[u` and `]u` jump to your previous and next message.
 - `y` with a motion copies text, for example `yiw` for a word. In VISUAL mode, `y` copies the
   selection.
+- An HTML render, an app, a diagram, an image and a formula are one stop each, drawn with an
+  outline. `Enter` on a render or an app moves the keyboard into it, and `Enter` on a diagram shows
+  its code. `y` on a formula or a diagram copies its source.
+- In a table, `j` and `k` move by row and keep the column. `V` then `y` copies the row, its cells
+  separated by tabs.
+- Code keeps its blank lines. Text you cannot see, such as a label that shows only on hover or a
+  closed section, is skipped.
+- A click in the chat puts the cursor there, and a mouse selection becomes a VISUAL selection,
+  so `y`, `Space c` and the motions work on it.
+
+Inside an HTML render or an app, the same read-only Vim reads the page's text:
+
+- Enter it with `Enter` on its stop, or click into it. The indicator shows `frame`.
+- The motions, `v`, `V` and `y` work as in the chat, and a mouse selection becomes a VISUAL
+  selection. `Space c` quotes the selection into the composer under the page's title.
+- `Enter` focuses the link, button or field under the cursor, and `i` hands every key to the page.
+  A text field always keeps its keys. `Escape` gives the keys back to the reader.
+- `Escape` in the reader returns to the chat. `Shift+Escape` leaves from anywhere in the page, also
+  when the page uses `Escape` itself. In full screen, either key closes it.
+
+The number keys of a question's options and the arrows of the message minimap stay with them
+while they have focus. `Escape` there returns to the chat. Switching back to Mesura Code from
+another window keeps the chat in NORMAL mode.
 
 To cite part of an answer, press `Space c` in NORMAL mode. A label appears at the start of each
 sentence on screen: type the label where the cite starts. Labels then appear at the end of each
@@ -102,7 +126,9 @@ place.
 
 Press `s` in NORMAL or VISUAL mode, in the chat or in the composer. Type the first characters
 of the place you want. Each match gets a label; type the label to move the cursor there.
-`Backspace` on an empty search and `Escape` leave flash.
+A capital letter makes the search match case exactly. A search with no match stays open, so
+`Backspace` can fix it. `Backspace` on an empty search and `Escape` leave flash, and so does a
+click, a scroll or a focus change.
 
 ## Edit in the composer
 
@@ -111,6 +137,10 @@ of the place you want. Each match gets a label; type the label to move the curso
 - `Escape` switches the composer to NORMAL mode. A ring around the composer shows the mode.
   Vim motions, operators, counts and VISUAL mode work on your prompt. Mentions, citations and
   skills count as one character each.
+- In a list, a task list, a quote or a code block, NORMAL mode works on the text you see. The
+  numbers, bullets, checkboxes and code fences are not characters: `0` goes to an item's first
+  letter, `v$` selects the item's text, `dd` deletes the whole item, and `o` and `O` open a new
+  item below or above.
 - `u` undoes and `Ctrl+R` redoes. Each typing session and each NORMAL-mode change is one step,
   and the history goes back across sessions until you send the prompt.
 - A second `Escape` leaves the composer for the chat.

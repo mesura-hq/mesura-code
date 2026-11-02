@@ -1,0 +1,136 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index bc03f443c21d359241d7672f5ffdec72c6045ee9..5133ff26109976a1f6a91a8e0a8a8a664b2a3fee 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -526,6 +526,45 @@ function motionB(cursor, buffer, count) {
+     }
+   };
+ }
++function motionBigE(cursor, buffer, count) {
++  let { line, col } = cursor;
++  for (let i = 0; i < count; i++) {
++    col++;
++    while (col >= buffer.getLineLength(line)) {
++      if (line >= buffer.getLineCount() - 1) break;
++      line++;
++      col = 0;
++    }
++    const lineText = buffer.getLine(line);
++    while (col < lineText.length && (lineText[col] === " " || lineText[col] === "\t")) {
++      col++;
++    }
++    while (col + 1 < lineText.length && lineText[col + 1] !== " " && lineText[col + 1] !== "\t") col++;
++  }
++  const newCursor = {
++    line: clampLine(line, buffer),
++    col: clampCol(col, clampLine(line, buffer), buffer)
++  };
++  return {
++    cursor: newCursor,
++    range: { start: cursor, end: newCursor, linewise: false, inclusive: true }
++  };
++}
++function changeWordEnd(cursor, buffer, count, big) {
++  const text = buffer.getLine(cursor.line);
++  const ch = text[cursor.col];
++  if (ch === undefined || ch === " " || ch === "\t") return null;
++  const sameClass = big
++    ? (next) => next !== undefined && next !== " " && next !== "\t"
++    : isWordChar(ch)
++      ? (next) => next !== undefined && isWordChar(next)
++      : (next) => next !== undefined && isPunctuation(next);
++  let col = cursor.col;
++  while (sameClass(text[col + 1])) col++;
++  let end = { line: cursor.line, col };
++  if (count > 1) end = (big ? motionBigE : motionE)(end, buffer, count - 1).cursor;
++  return { cursor: end, range: { start: cursor, end, linewise: false, inclusive: true } };
++}
+ function motionBigW(cursor, buffer, count) {
+   let { line, col } = cursor;
+   for (let i = 0; i < count; i++) {
+@@ -930,6 +969,8 @@ function resolveMotion(key, cursor, buffer, count, countExplicit, ctx) {
+       return motionBigW(cursor, buffer, count);
+     case "B":
+       return motionBigB(cursor, buffer, count);
++    case "E":
++      return motionBigE(cursor, buffer, count);
+     // --- Intra-line movement ---
+     case "0":
+       return motionZero(cursor, buffer, count);
+@@ -1834,7 +1875,7 @@ function handleOperatorPending(key, ctx, buffer) {
+   }
+   const count = getEffectiveCount(ctx);
+   const countExplicit = isCountExplicit(ctx);
+-  const motion = resolveMotion(key, ctx.cursor, buffer, count, countExplicit, ctx);
++  const motion = (ctx.operator === "c" && (key === "w" || key === "W") ? changeWordEnd(ctx.cursor, buffer, count, key === "W") : null) ?? resolveMotion(key, ctx.cursor, buffer, count, countExplicit, ctx);
+   if (motion) {
+     buffer.saveUndoPoint(ctx.cursor);
+     const result = executeOperatorOnRange(
+diff --git a/dist/index.js b/dist/index.js
+index 2bc1c0fa0c5ce38a0748d49678a72ca9c484fdca..b95212f90967a13e0848a54e34ba60b73e39cb49 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -475,6 +475,45 @@ function motionB(cursor, buffer, count) {
+     }
+   };
+ }
++function motionBigE(cursor, buffer, count) {
++  let { line, col } = cursor;
++  for (let i = 0; i < count; i++) {
++    col++;
++    while (col >= buffer.getLineLength(line)) {
++      if (line >= buffer.getLineCount() - 1) break;
++      line++;
++      col = 0;
++    }
++    const lineText = buffer.getLine(line);
++    while (col < lineText.length && (lineText[col] === " " || lineText[col] === "\t")) {
++      col++;
++    }
++    while (col + 1 < lineText.length && lineText[col + 1] !== " " && lineText[col + 1] !== "\t") col++;
++  }
++  const newCursor = {
++    line: clampLine(line, buffer),
++    col: clampCol(col, clampLine(line, buffer), buffer)
++  };
++  return {
++    cursor: newCursor,
++    range: { start: cursor, end: newCursor, linewise: false, inclusive: true }
++  };
++}
++function changeWordEnd(cursor, buffer, count, big) {
++  const text = buffer.getLine(cursor.line);
++  const ch = text[cursor.col];
++  if (ch === undefined || ch === " " || ch === "\t") return null;
++  const sameClass = big
++    ? (next) => next !== undefined && next !== " " && next !== "\t"
++    : isWordChar(ch)
++      ? (next) => next !== undefined && isWordChar(next)
++      : (next) => next !== undefined && isPunctuation(next);
++  let col = cursor.col;
++  while (sameClass(text[col + 1])) col++;
++  let end = { line: cursor.line, col };
++  if (count > 1) end = (big ? motionBigE : motionE)(end, buffer, count - 1).cursor;
++  return { cursor: end, range: { start: cursor, end, linewise: false, inclusive: true } };
++}
+ function motionBigW(cursor, buffer, count) {
+   let { line, col } = cursor;
+   for (let i = 0; i < count; i++) {
+@@ -879,6 +918,8 @@ function resolveMotion(key, cursor, buffer, count, countExplicit, ctx) {
+       return motionBigW(cursor, buffer, count);
+     case "B":
+       return motionBigB(cursor, buffer, count);
++    case "E":
++      return motionBigE(cursor, buffer, count);
+     // --- Intra-line movement ---
+     case "0":
+       return motionZero(cursor, buffer, count);
+@@ -1783,7 +1824,7 @@ function handleOperatorPending(key, ctx, buffer) {
+   }
+   const count = getEffectiveCount(ctx);
+   const countExplicit = isCountExplicit(ctx);
+-  const motion = resolveMotion(key, ctx.cursor, buffer, count, countExplicit, ctx);
++  const motion = (ctx.operator === "c" && (key === "w" || key === "W") ? changeWordEnd(ctx.cursor, buffer, count, key === "W") : null) ?? resolveMotion(key, ctx.cursor, buffer, count, countExplicit, ctx);
+   if (motion) {
+     buffer.saveUndoPoint(ctx.cursor);
+     const result = executeOperatorOnRange(

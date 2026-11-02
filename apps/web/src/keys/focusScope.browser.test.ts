@@ -17,7 +17,7 @@ const LAYOUT = `
   </div>
   <div data-chat-column-maximized-away="false">
     <div data-testid="chat-focus" tabindex="0">chat</div>
-    <div data-testid="composer-editor" contenteditable="true"><span data-testid="composer-inner">hi</span></div>
+    <div data-testid="composer-editor" contenteditable="true"><span data-testid="composer-inner">hi</span><div contenteditable="false"><button data-testid="composer-chrome-button">TypeScript</button></div></div>
     <div data-terminal-owner="drawer"><textarea data-testid="terminal-input"></textarea></div>
   </div>
   <div data-preview-panel-mode="inline">
@@ -43,10 +43,25 @@ function scopeAfterBlurToBody() {
 }
 
 describe("resolveKeyScope by focused element", () => {
+  it("reports passthrough while a frame inside a shadow root owns focus", () => {
+    using fixture = mountKeyDom(LAYOUT);
+    const host = document.createElement("div");
+    fixture.container.querySelector("[data-chat-column-maximized-away]")!.append(host);
+    const frame = document.createElement("iframe");
+    host.attachShadow({ mode: "open" }).append(frame);
+    frame.focus();
+    expect(resolveKeyScope()).toBe("passthrough");
+  });
+
   it("reads the composer scope inside the composer editor", () => {
     using _fixture = mountKeyDom(LAYOUT);
     expect(scopeAfterFocusing("composer-editor")).toBe("composer");
     expect(resolveKeyScope(byTestId("composer-inner"))).toBe("composer");
+  });
+
+  it("gives a control in the composer's non-editable chrome its own keys, not the prompt's", () => {
+    using _fixture = mountKeyDom(LAYOUT);
+    expect(scopeAfterFocusing("composer-chrome-button")).toBe("control");
   });
 
   it("reads the insert scope in a text input outside the composer", () => {
@@ -58,6 +73,17 @@ describe("resolveKeyScope by focused element", () => {
     using _fixture = mountKeyDom(LAYOUT);
     expect(scopeAfterFocusing("terminal-input")).toBe("passthrough");
     expect(scopeAfterFocusing("monaco-input")).toBe("passthrough");
+  });
+
+  it("gives marked controls their own scope while their text fields stay insert", () => {
+    using fixture = mountKeyDom(LAYOUT);
+    fixture.container.insertAdjacentHTML(
+      "beforeend",
+      '<div data-mesura-owns-keys><button data-testid="owned">Options</button><textarea data-testid="answer"></textarea></div>',
+    );
+    expect(scopeAfterFocusing("owned")).toBe("control");
+    expect(scopeAfterFocusing("answer")).toBe("insert");
+    expect(scopeAfterFocusing("chat-focus")).toBe("chat");
   });
 
   it("reads the tree scope in a tree, which leaves the leader to the keymap", () => {

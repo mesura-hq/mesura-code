@@ -10,7 +10,7 @@ import { cn } from "~/lib/utils";
 import { clearChatSurfacePaint, chatSurface, setChatThreadKey } from "./chat/chatSurface";
 import {
   composerCursorLine,
-  composerProjectedText,
+  composerGutterLines,
   composerSurface,
 } from "./composer/composerSurface";
 import {
@@ -18,12 +18,13 @@ import {
   subscribeComposerLayout,
   useComposerExpanded,
 } from "./composer/composerExpanded";
-import { caretRectAt } from "./composer/composerProjection";
 import { useCursorOverlays, type CursorGlyph, type CursorOverlay } from "./cursorOverlayStore";
 import { composerEditorElement } from "./focusScope";
+import { frameSurface } from "./frame/frameReader";
 import { configureKeyEngine, registerKeySurface } from "./keyEngine";
 import { useKeyEngineSnapshot } from "./keyEngineStore";
 import { useFlashSnapshot } from "./flashStore";
+import { stopFlash } from "./flashSession";
 
 /**
  * Turns the modal key engine on from the `vimMode` setting and draws what it
@@ -33,6 +34,7 @@ import { useFlashSnapshot } from "./flashStore";
  */
 export function KeyEngineHost() {
   const vimMode = useClientSettings((settings) => settings.vimMode);
+  const router = useRouter();
 
   // The engine is global and installed once, but only the chat layout mounts
   // this host: leaving it (Settings, the pull requests page) turns the engine
@@ -40,14 +42,19 @@ export function KeyEngineHost() {
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: turns the global key engine on with the vimMode setting and off when the chat layout unmounts
   useEffect(() => {
     configureKeyEngine({ enabled: vimMode });
-    return () => configureKeyEngine({ enabled: false });
-  }, [vimMode]);
+    const unsubscribe = router.subscribe("onBeforeNavigate", stopFlash);
+    return () => {
+      unsubscribe();
+      configureKeyEngine({ enabled: false });
+    };
+  }, [router, vimMode]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the chat and composer key surfaces for as long as vimMode is on
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the chat, composer and frame key surfaces for as long as vimMode is on
   useEffect(() => {
     if (!vimMode) return;
     const disposeChat = registerKeySurface(chatSurface);
     const disposeComposer = registerKeySurface(composerSurface);
+    const disposeFrame = registerKeySurface(frameSurface);
     // Entering the chat by a pane chord is entering the chat buffer in normal
     // mode, not the composer: the keyboard goes to <body>, and `focusPane`
     // records the chat as the last pane, which is where body focus resolves.
@@ -56,6 +63,7 @@ export function KeyEngineHost() {
     return () => {
       disposeChat();
       disposeComposer();
+      disposeFrame();
       disposeChatEntry();
       clearChatSurfacePaint();
       collapseComposer();
@@ -226,7 +234,7 @@ function FlashLabels() {
 function BlockCursor() {
   const overlays = useCursorOverlays();
   return [...overlays].map(([owner, overlay]) =>
-    overlay.glyph && overlay.container ? (
+    overlay.container ? (
       createPortal(
         <WidenedCursor overlay={overlay} glyph={overlay.glyph} />,
         overlay.container,
@@ -249,7 +257,13 @@ function BlockCursor() {
  * the container's, whatever positioned ancestor the anchor resolves against.
  * Placed in the commit, before paint.
  */
-function WidenedCursor({ overlay, glyph }: { overlay: CursorOverlay; glyph: CursorGlyph }) {
+function WidenedCursor({
+  overlay,
+  glyph,
+}: {
+  overlay: CursorOverlay;
+  glyph?: CursorGlyph | undefined;
+}) {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the anchor's DOM box in the commit, before paint
@@ -264,7 +278,7 @@ function WidenedCursor({ overlay, glyph }: { overlay: CursorOverlay; glyph: Curs
     <span ref={anchorRef} aria-hidden className="pointer-events-none absolute">
       <span
         ref={cursorRef}
-        data-mesura-block-cursor="glyph"
+        data-mesura-block-cursor={overlay.outline ? "object" : "glyph"}
         className="pointer-events-none absolute select-none overflow-hidden whitespace-pre text-center"
         style={{
           width: overlay.width,
@@ -272,14 +286,16 @@ function WidenedCursor({ overlay, glyph }: { overlay: CursorOverlay; glyph: Curs
           // The glyph's box is its font's content area: a line exactly that
           // high puts the redrawn glyph where the original one is.
           lineHeight: `${overlay.height}px`,
-          fontFamily: glyph.fontFamily,
-          fontSize: glyph.fontSize,
-          fontWeight: glyph.fontWeight,
-          fontStyle: glyph.fontStyle,
+          outline: overlay.outline ? "2px solid var(--color-key-normal)" : undefined,
+          outlineOffset: overlay.outline ? -2 : undefined,
+          fontFamily: glyph?.fontFamily,
+          fontSize: glyph?.fontSize,
+          fontWeight: glyph?.fontWeight,
+          fontStyle: glyph?.fontStyle,
           clipPath: overlay.clip,
         }}
       >
-        {glyph.text}
+        {glyph?.text}
       </span>
     </span>
   );
@@ -308,21 +324,18 @@ function ComposerLineNumbers() {
     if (!editor || !host) return;
     let frame = 0;
     const measure = () => {
-      const text = composerProjectedText();
-      if (text === null) return;
+      const starts = composerGutterLines();
+      if (starts === null) return;
       const hostBox = host.getBoundingClientRect();
       const editorBox = editor.getBoundingClientRect();
       const cursorLine = composerCursorLine();
       const lines: GutterLine[] = [];
-      let offset = 0;
-      text.split("\n").forEach((line, index) => {
-        const rect = caretRectAt(editor, offset);
-        offset += line.length + 1;
-        if (!rect || rect.bottom < editorBox.top || rect.top > editorBox.bottom) return;
+      for (const { index, top } of starts) {
+        if (top < editorBox.top || top > editorBox.bottom) continue;
         const number =
           cursorLine === null || index === cursorLine ? index + 1 : Math.abs(index - cursorLine);
-        lines.push({ number, top: rect.top - hostBox.top, current: index === cursorLine });
-      });
+        lines.push({ number, top: top - hostBox.top, current: index === cursorLine });
+      }
       setGutter({ host, lines });
     };
     // The prompt reaches the composer's state after the input event, so the

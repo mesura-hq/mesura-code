@@ -12,6 +12,8 @@ import {
 } from "@t3tools/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
 import { MCP_APP_MAX_HTML_BYTES } from "@t3tools/shared/mcpApp";
+import { EMBEDDED_DOCUMENT_AGENT_SCRIPT } from "@t3tools/shared/embeddedDocument";
+import { HTML_RENDER_BOOTSTRAP_VERSION } from "@t3tools/shared/htmlRender";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -123,6 +125,45 @@ const layerTest = Layer.mergeAll(
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 describe("AssetAccess", () => {
+  it.effect("upgrades a signed historical HTML render only while its grant is valid", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const attachmentId = "thread-1-00000000-0000-4000-8000-000000000032-html";
+      yield* fs.makeDirectory(config.attachmentsDir, { recursive: true });
+      const stored =
+        '<!doctype html><head><style id="t3-theme">old theme</style>' +
+        '<script>(function(){var s=document.getElementById("t3-theme");})();</script></head><p>☃</p>';
+      yield* fs.writeFileString(path.join(config.attachmentsDir, `${attachmentId}.html`), stored);
+      const grant = yield* issueAssetUrl({
+        resource: {
+          _tag: "attachment",
+          attachmentId,
+          mimeType: "text/html",
+          disposition: "inline",
+        },
+      });
+      const suffix = grant.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separator = suffix.indexOf("/");
+      const token = suffix.slice(0, separator);
+      const name = suffix.slice(separator + 1);
+      const asset = yield* resolveAsset(token, name);
+      if (asset?.kind !== "file") throw new Error("Expected HTML render attachment");
+      const response = HttpServerResponse.toWeb(yield* assetFileResponse(asset));
+      const displayed = yield* Effect.promise(() => response.text());
+      expect(displayed).toContain(`data-mesura-html-bootstrap="${HTML_RENDER_BOOTSTRAP_VERSION}"`);
+      expect(displayed).toContain(EMBEDDED_DOCUMENT_AGENT_SCRIPT);
+      const [payload, signature] = token.split(".");
+      const claims = JSON.parse(Buffer.from(payload!, "base64url").toString("utf8"));
+      claims.attachmentId = "another-render";
+      const tampered = `${Buffer.from(JSON.stringify(claims)).toString("base64url")}.${signature}`;
+      expect(yield* resolveAsset(tampered, name)).toBeNull();
+      yield* TestClock.setTime(grant.expiresAt + 1);
+      expect(yield* resolveAsset(token, name)).toBeNull();
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   describe("readMcpAppHtml", () => {
     it.effect("accepts snapshots at the stored HTML byte limit", () =>
       Effect.gen(function* () {

@@ -159,6 +159,7 @@ export function TimelineMinimap({
             }}
           />
           <button
+            data-mesura-owns-keys
             aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
             className="absolute inset-y-0 left-0 w-full cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
             onBlur={() => setActiveIndex(null)}

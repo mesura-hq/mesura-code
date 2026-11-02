@@ -262,6 +262,7 @@ overrides:
   '@ff-labs/fff-node': 0.11.0
   '@legendapp/list': 3.3.5
   '@pierre/diffs': 1.6.1
+  '@vimee/core': 0.3.0
   '@react-native-ai/apple': 0.12.0
   '@react-native-menu/menu': 2.0.0
   '@react-navigation/native-stack': 7.21.0
@@ -349,6 +350,7 @@ patchedDependencies:
   '@legendapp/list@3.3.5': 011a862a7116ec5b5f4bba17d37bc58c9b5a8f64a6a9f527345f316ce9c96e63
   '@muse-code/sdk@1.4.6': 7b495b607fc5d76b444c7c4d58821e839726a30e6f3c53564f0d59f2d5b42101
   '@pierre/diffs@1.6.1': 4645364ddf113e48e8827f3b4966b3b1ff745317011e5a3d904e2d8672dee7dc
+  '@vimee/core@0.3.0': a9a5b84dbd5e44a9bbcb49ac6c56d9a589081087f6abb130e481597d532ae2b3
   alchemy@2.0.0-beta.80: bea1b6c0c0b23157fd5f439a1d7feff430f28ac1621ba135d8a13eeec60ccacd
   app-builder-lib@26.16.1: a28c2dfcfc2b90d6c6247e199e6537391db9ecd941854c650910d607442512d3
   dbus-next@0.10.2: cfff57561b0ee59b5addb3b2e6c6f20906e967507a530ab67e8db8108e520ba4
@@ -822,7 +824,7 @@ importers:
         version: 3.31.3
       '@vimee/core':
         specifier: 0.3.0
-        version: 0.3.0
+        version: 0.3.0(patch_hash=a9a5b84dbd5e44a9bbcb49ac6c56d9a589081087f6abb130e481597d532ae2b3)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -17335,7 +17337,7 @@ snapshots:
     optionalDependencies:
       ajv: 6.15.0
 
-  '@vimee/core@0.3.0': {}
+  '@vimee/core@0.3.0(patch_hash=a9a5b84dbd5e44a9bbcb49ac6c56d9a589081087f6abb130e481597d532ae2b3)': {}
 
   '@vitejs/plugin-react@6.1.2(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(babel-plugin-react-compiler@1.0.0)(oxc-transform-react@0.152.0)':
     dependencies:
