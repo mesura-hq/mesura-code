@@ -11,7 +11,11 @@ import { NvimStatusStrip } from "./nvim/NvimStatusStrip";
 import { useNvimFileEditor } from "./nvim/useNvimFileEditor";
 import { installFileEditorDismissal } from "../fileEditorDismissal";
 import { getProjectFileContents, setProjectFileQueryData } from "../projectFilesQueryState";
-import { useFileSaveCoordinator } from "../useFileSaveCoordinator";
+import {
+  changeFileSaveSession,
+  flushFileSaveSession,
+  useFileSaveSession,
+} from "../fileSaveSessions";
 import { minimalTextEdit, type MinimalTextEdit } from "./monacoFileEdit";
 import { ensureMonacoEnvironment } from "./monacoEnvironment";
 import { useMonacoFileComments } from "./monacoFileComments";
@@ -113,12 +117,14 @@ export function MonacoFileSurface({
     id: number;
   } | null>(null);
 
-  const saveCoordinator = useFileSaveCoordinator({
-    environmentId,
-    cwd,
-    relativePath,
-    onPendingChange,
-  });
+  useFileSaveSession({ environmentId, cwd, relativePath }, onPendingChange);
+  const saveCoordinator = useMemo(() => {
+    const target = { environmentId, cwd, relativePath };
+    return {
+      change: (contents: string) => changeFileSaveSession(target, contents),
+      flush: () => flushFileSaveSession(target),
+    };
+  }, [environmentId, cwd, relativePath]);
   // The change handler is rebuilt as its inputs move, but the editor is created
   // once, so the listener reads the current handler through a ref instead of
   // being torn down and reinstalled.

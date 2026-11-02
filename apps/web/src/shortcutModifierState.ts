@@ -47,6 +47,7 @@ export function useShortcutModifierState(
     if (enabled) setState(stateRef.current);
   }, [enabled]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window key, focus, paste and blur listeners that track held shortcut modifiers
   useEffect(() => {
     const updateState = (next: ShortcutModifierState) => {
       if (areShortcutModifierStatesEqual(stateRef.current, next)) return;

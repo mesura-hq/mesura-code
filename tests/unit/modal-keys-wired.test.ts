@@ -456,11 +456,11 @@ it("modal keys seam guard: the sidebar rail is a pane edge", () => {
 // The command registry: each upstream owner's block.
 
 it("modal keys seam guard: the chat route registers new thread and preview", () => {
-  assertRegistersCommands("apps/web/src/routes/_chat.tsx", [
-    "chat.new",
-    "chat.newLocal",
-    "preview.toggle",
-  ]);
+  assertCallCarries(
+    "apps/web/src/shortcuts/chatRouteCommands.ts",
+    "registerCommandsWithLeaderKeys",
+    ['"chat.new":', '"chat.newLocal":', '"preview.toggle":'],
+  );
 });
 
 it("modal keys seam guard: ChatView registers its thread and panel commands", () => {
@@ -497,13 +497,8 @@ it("modal keys seam guard: the composer registers attach and stash", () => {
   ]);
 });
 
-it("modal keys seam guard: both sidebars register thread traversal", () => {
-  for (const file of [
-    "apps/web/src/components/Sidebar.tsx",
-    "apps/web/src/components/LegacySidebar.tsx",
-  ]) {
-    assertRegistersCommands(file, ["thread.next", "thread.previous"]);
-  }
+it("modal keys seam guard: the sidebar registers thread traversal", () => {
+  assertRegistersCommands("apps/web/src/components/Sidebar.tsx", ["thread.next", "thread.previous"]);
 });
 
 it("modal keys seam guard: the sidebar control registers sidebar.toggle", () => {
@@ -529,12 +524,11 @@ it("modal keys seam guard: the pull requests page registers its panel commands",
 });
 
 it("modal keys seam guard: the command palette registers its overlay toggles", () => {
-  assertCallCarries("apps/web/src/components/CommandPalette.tsx", "useCommandHandlers", [
-    '["commandPalette.toggle", "command"]',
-    '["filePicker.toggle", "files"]',
-    '["projectSearch.toggle", "content"]',
-    "toggleMode(mode as SearchOverlayMode)",
-  ]);
+  assertCallCarries(
+    "apps/web/src/shortcuts/commandPaletteCommands.ts",
+    "registerCommandsWithLeaderKeys",
+    ['"commandPalette.toggle":', '"filePicker.toggle":', '"projectSearch.toggle":'],
+  );
 });
 
 // The thread search and the project filter left the palette for the sidebar's

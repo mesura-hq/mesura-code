@@ -104,7 +104,7 @@ export class ServerUpdateResumeTimeoutError extends Schema.TaggedError<ServerUpd
   },
 ) {
   override get message(): string {
-    return `The server did not resume on t3@${this.targetVersion}.`;
+    return `Could not confirm that the server resumed on t3@${this.targetVersion}. Reconnect to check the update outcome.`;
   }
 }
 
@@ -258,8 +258,8 @@ export const waitForDesktopUpdateTarget = Effect.fn("waitForDesktopUpdateTarget"
   targetVersion: string,
   nextReady: Effect.Effect<ServerLifecycleStreamReadyEvent, EReady>,
   retryCommit: Effect.Effect<void, ECommit>,
-  maxCommitAttempts = 3,
 ): Effect.fn.Return<ServerLifecycleStreamReadyEvent, EReady | ECommit | ServerUpdateTerminalError> {
+  const maxCommitAttempts = 3;
   for (let attempt = 1; attempt <= maxCommitAttempts; attempt += 1) {
     const ready = yield* nextReady;
     if (ready.payload.environment.serverVersion === targetVersion) return ready;
@@ -339,6 +339,7 @@ export function resolveServerUpdateProgressResult<E>(
   targetVersion: string,
   terminal: Option.Option<ServerSelfUpdateResult>,
   streamExit: Exit.Exit<void, E>,
+  accepted?: ServerSelfUpdateResult,
 ): Effect.Effect<ServerSelfUpdateResult, E | ServerUpdateProgressIncompleteError> {
   if (
     Option.isSome(terminal) &&
@@ -347,6 +348,9 @@ export function resolveServerUpdateProgressResult<E>(
     return Effect.succeed(terminal.value);
   }
   if (Exit.isFailure(streamExit)) {
+    if (accepted !== undefined && isLegacyUpdateHandoffLoss(streamExit.cause)) {
+      return Effect.succeed(accepted);
+    }
     return Effect.failCause(streamExit.cause);
   }
   return Effect.fail(new ServerUpdateProgressIncompleteError({ targetVersion }));
@@ -800,8 +804,9 @@ export function createServerEnvironmentAtoms<R, E>(
     }
     let previousProviders: ServerConfig["providers"] | undefined;
     return Atom.make((get): ServerConfig | null => {
-      const projection = Option.getOrNull(
-        AsyncResult.value(get(configProjection({ environmentId, input: {} }))),
+      const projection = AsyncResult.getOrElse(
+        get(configProjection({ environmentId, input: {} })),
+        () => null,
       );
       const config = resolveServerConfigValue(
         projection,
@@ -889,6 +894,7 @@ export function createServerEnvironmentAtoms<R, E>(
               currentConfig?.environment.capabilities.serverSelfUpdateProgress === true;
             const updateResult: ServerSelfUpdateResult = supportsProgress
               ? yield* Effect.gen(function* () {
+                  let receivedProgress = false;
                   const terminal = yield* Ref.make<Option.Option<ServerSelfUpdateResult>>(
                     Option.none(),
                   );
@@ -900,6 +906,7 @@ export function createServerEnvironmentAtoms<R, E>(
                     .pipe(
                       Stream.runForEach((event) =>
                         Effect.sync(() => {
+                          receivedProgress ||= event.type === "progress";
                           const state = serverUpdateStateForProgressEvent(
                             fromVersion,
                             targetVersion,
@@ -917,10 +924,18 @@ export function createServerEnvironmentAtoms<R, E>(
                       ),
                       Effect.exit,
                     );
+                  const selfUpdateMethod = currentConfig?.environment.capabilities.serverSelfUpdate;
+                  // Desktop preparation needs its terminal commit token.
+                  const accepted =
+                    receivedProgress &&
+                    (selfUpdateMethod === "boot-service" || selfUpdateMethod === "respawn")
+                      ? { targetVersion, method: selfUpdateMethod }
+                      : undefined;
                   return yield* resolveServerUpdateProgressResult(
                     targetVersion,
                     yield* Ref.get(terminal),
                     streamExit,
+                    accepted,
                   );
                 })
               : yield* Effect.gen(function* () {
@@ -975,6 +990,17 @@ export function createServerEnvironmentAtoms<R, E>(
             return updateResult;
           }),
         );
+
+        // A track switch's desktop host already on its track's newest build only saved the
+        // track; nothing restarts.
+        if (
+          result.method === "desktop-app" &&
+          result.desktopUpdateToken === undefined &&
+          result.targetVersion === fromVersion
+        ) {
+          atomRegistry.set(stateAtom, IDLE_SERVER_UPDATE_STATE);
+          return result;
+        }
 
         yield* nudgeReconnectDuringUpdateRestart({
           stateChanges: environmentRegistry.stateChanges(target.environmentId),
@@ -1094,6 +1120,13 @@ export function createServerEnvironmentAtoms<R, E>(
       ]);
     }).pipe(Atom.withLabel(`environment-data:server:usage-scan-settings:${environmentId}`)),
   );
+  // Settings snapshots rebuild the filter object; only a changed filter should touch the Usage tab.
+  const usageModelFilterAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => get(settingsValueAtom(environmentId))?.usageModelFilter).pipe(
+      Atom.withEquality((a, b) => JSON.stringify(a) === JSON.stringify(b)),
+      Atom.withLabel(`environment-data:server:usage-model-filter:${environmentId}`),
+    ),
+  );
   const providersValueAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) => get(configValueAtom(environmentId))?.providers ?? null).pipe(
       Atom.withLabel(`environment-data:server:providers:${environmentId}`),
@@ -1162,6 +1195,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverRunStorageCleanup,
       concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
     }),
+    prepareTriage: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:prepare-triage",
+      tag: WS_METHODS.serverPrepareTriage,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
     databaseStorage,
     databaseCompactionRecommendations,
     storageCleanupReport: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
@@ -1171,6 +1209,7 @@ export function createServerEnvironmentAtoms<R, E>(
     }),
     updateStateAtom,
     settingsValueAtom,
+    usageModelFilterAtom,
     providersValueAtom,
     providerAuthState: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:provider:auth-state",
@@ -1209,11 +1248,6 @@ export function createServerEnvironmentAtoms<R, E>(
         runStream(WS_METHODS.chatGptHandoffSubscribe, input),
       idleTtlMs: 0,
     }),
-    codexAuthCallbackState: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
-      label: "environment-data:codex:auth-callback",
-      tag: WS_METHODS.codexAuthCallbackSubscribe,
-      idleTtlMs: 0,
-    }),
     cancelProviderAuth: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:provider:auth-cancel",
       tag: WS_METHODS.providerAuthCancel,
@@ -1232,7 +1266,7 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.providerInstallStart,
       concurrency: {
         mode: "singleFlight",
-        key: ({ environmentId }) => environmentId,
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input]),
       },
     }),
     cancelProviderInstall: createEnvironmentRpcCommand(runtime, {
@@ -1246,6 +1280,12 @@ export function createServerEnvironmentAtoms<R, E>(
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
       tag: WS_METHODS.serverGetTraceDiagnostics,
+    }),
+    npmRelease: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:npm-release",
+      tag: WS_METHODS.serverGetNpmRelease,
+      staleTimeMs: 60_000,
+      refreshIntervalMs: 5 * 60_000,
     }),
     processDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:process-diagnostics",
@@ -1321,8 +1361,9 @@ export function createServerEnvironmentAtoms<R, E>(
     searchAcpRegistry: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:acp-registry:search",
       tag: WS_METHODS.serverSearchAcpRegistry,
-      staleTimeMs: 0,
-      idleTtlMs: 0,
+      // Reopening Add provider reuses recent results. Submitting the same search asks the
+      // server again, which reuses a Registry index fetched in the last five minutes.
+      staleTimeMs: 5 * 60_000,
     }),
     accountLimits: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:account-limits",

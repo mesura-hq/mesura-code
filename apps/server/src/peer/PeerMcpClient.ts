@@ -76,6 +76,13 @@ const fromLinkError = (error: PeerLinkError) =>
     message: error.message,
   });
 
+/** Not final, so a task already running there resumes once the beta is on there again. */
+const linkedEnvironmentsOffThere = new OrchestratorMcpFailure({
+  code: "orchestration_error",
+  message:
+    "The linked environment has Linked environments turned off. Turn it on in its Settings → Labs.",
+});
+
 /** The body of an MCP response: JSON, or a single server-sent event carrying JSON. */
 const responseJson = (contentType: string | undefined, text: string) =>
   contentType?.includes("text/event-stream") === true
@@ -126,6 +133,7 @@ const make = Effect.gen(function* () {
       limitHeader,
     );
     const sessionId = initialized.headers["mcp-session-id"];
+    if (initialized.status === 403) return yield* linkedEnvironmentsOffThere;
     if (initialized.status !== 200 || sessionId === undefined) {
       return yield* new OrchestratorMcpFailure({
         code: initialized.status === 401 ? "capability_denied" : "orchestration_error",
@@ -167,13 +175,15 @@ const make = Effect.gen(function* () {
         );
       const existing = (yield* Ref.get(sessions)).get(sessionKey);
       const sessionId = existing ?? (yield* openSession(resolved.url, resolved.token, limitHeader));
+      // The initialized session outlives a tool request, including a long wait or cancellation.
+      if (existing === undefined) {
+        yield* Ref.update(sessions, (current) => new Map(current).set(sessionKey, sessionId));
+      }
       let response = yield* callOnce(sessionId);
       if (response.status === 404) {
         const renewed = yield* openSession(resolved.url, resolved.token, limitHeader);
         yield* Ref.update(sessions, (current) => new Map(current).set(sessionKey, renewed));
         response = yield* callOnce(renewed);
-      } else if (existing === undefined) {
-        yield* Ref.update(sessions, (current) => new Map(current).set(sessionKey, sessionId));
       }
       if (response.status === 401) {
         return yield* new OrchestratorMcpFailure({
@@ -182,6 +192,7 @@ const make = Effect.gen(function* () {
             "The linked environment no longer accepts this link. It may have been revoked there; link it again.",
         });
       }
+      if (response.status === 403) return yield* linkedEnvironmentsOffThere;
       if (response.status !== 200) {
         return yield* new OrchestratorMcpFailure({
           code: "orchestration_error",

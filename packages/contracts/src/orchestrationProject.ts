@@ -19,6 +19,9 @@ export const OrchestrationProjectShell = Schema.Struct({
   // Mesura: optional so snapshots from older servers still decode.
   iconDiscovery: Schema.optional(Schema.NullOr(ProjectIconDiscoveryState)),
   scripts: Schema.Array(ProjectScript),
+  // Pinned projects lead project pickers; archived ones leave them. Optional so older servers decode.
+  pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

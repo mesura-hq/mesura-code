@@ -1,4 +1,8 @@
-import type { BrowserLinkTarget, ScopedThreadRef } from "@t3tools/contracts";
+import {
+  AuthPreviewOperateScope,
+  type BrowserLinkTarget,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 
 import { ensureClientSettingsHydrated, getClientSettings } from "~/hooks/useSettings";
 import { appAtomRegistry } from "~/rpc/atomRegistry";

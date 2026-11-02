@@ -31,7 +31,7 @@ it("retains the thread scope from the web thread route", () => {
   );
   assert.include(
     view,
-    "useThreadBackgroundScope(serverThreadRef)",
+    "useThreadBackgroundScope(backgroundScopeThreadRef)",
     "the web thread route no longer retains a thread background scope, so the server cannot tell a browser is looking at a thread",
   );
   assert.match(

@@ -33,8 +33,9 @@
       // Knip loads its preprocessor through a CLI option; native verification and
       // worktree setup (from t3.json) run directly. release-desktop.yml bundles the
       // Windows verify script with esbuild through a path knip does not trace, and
-      // electron-builder loads the macOS signer by path. The upstream sync runs
-      // remove-native-mobile.ts directly (ADR-008). Agents run mesura-checks.ts
+      // electron-builder loads the macOS signer by path. release-desktop.yml runs the
+      // desktop launch check through xvfb-run, which knip does not trace. The upstream
+      // sync runs remove-native-mobile.ts directly (ADR-008). Agents run mesura-checks.ts
       // (AGENTS.md's Deterministic Checks) and mesura-browser.ts directly.
       "entry": [
         // These fixture scripts are injected into a browser page by path.
@@ -45,6 +46,8 @@
         "mesura-browser.ts",
         "setup-worktree.ts",
         "sign-macos.ts",
+        "prepare-server-compile-cache.cjs",
+        "smoke-desktop-app.ts",
         "verify-windows-desktop-artifact.ts",
         // Chromium fixture builders load these Vite library entries by path.
         "lib/mesura-panel.launcher.fixture.mjs",
@@ -62,7 +65,6 @@
         "src/bin.ts!",
         "src/claude-history-worker.ts!",
         "scripts/cli.ts",
-        "scripts/evaluate-thread-titles.ts",
         "scripts/fetch-expo-schema.ts",
         "scripts/probe-claude-fork-local-rollback-replay.ts",
         "scripts/update-test-shard-weights.ts",
@@ -87,7 +89,12 @@
       // The Vite+ web build prerequisite.
       // Native and disk-loaded provider packages stay external to the bundle; the
       // CLI archive and desktop sidecar stage them from this manifest.
-      "ignoreDependencies": ["@effect/platform-node-shared", "@t3tools/web", "@napi-rs/keyring"],
+      "ignoreDependencies": [
+        "@effect/platform-node-shared",
+        "@t3tools/web",
+        "@napi-rs/keyring",
+        "ffi-rs",
+      ],
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.
@@ -99,6 +106,7 @@
         "src/snapShot/SnapShotAccessibilityWorker.ts!",
         "src/boot.ts!",
         "src/compileCache.ts!",
+        "src/serverCompileCache.ts!",
         "src/main.ts!",
         "src/preload.ts!",
         "src/preview-pick-preload.ts!",
@@ -155,7 +163,8 @@
       ],
     },
     "infra/relay": {
-      "entry": ["alchemy.run.ts!", "src/persistence/schema.ts!"],
+      // Alchemy loads src/worker.ts as the Worker entry and reads its default export.
+      "entry": ["alchemy.run.ts!", "src/persistence/schema.ts!", "src/worker.ts!"],
     },
     "packages/*": {
       // These workspace packages are private to this monorepo.

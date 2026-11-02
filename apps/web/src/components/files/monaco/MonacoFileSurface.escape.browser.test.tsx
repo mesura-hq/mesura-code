@@ -16,8 +16,10 @@ vi.mock("~/hooks/useSettings", () => ({
   useClientSettings: <T,>(select: (settings: Record<string, unknown>) => T) =>
     select({ fontFamilyCode: "", fontSizeCode: 13 }),
 }));
-vi.mock("~/components/files/useFileSaveCoordinator", () => ({
-  useFileSaveCoordinator: () => ({ change: () => {}, flush: async () => {} }),
+vi.mock("~/components/files/fileSaveSessions", () => ({
+  useFileSaveSession: () => {},
+  changeFileSaveSession: () => {},
+  flushFileSaveSession: async () => {},
 }));
 vi.mock("~/components/files/monaco/monacoFileComments", () => ({
   useMonacoFileComments: () => ({ zones: null, hasOpenDraft: false }),

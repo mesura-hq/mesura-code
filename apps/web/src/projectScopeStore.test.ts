@@ -12,20 +12,20 @@ describe("projectScopeStore", () => {
     // Read the module's own initial state, not what beforeEach wrote. This does NOT prove
     // the scope is unpersisted: this suite has no localStorage, and asserting the absence
     // of zustand's `persist` key would test zustand's API surface, not our behaviour.
-    expect(useProjectScopeStore.getInitialState().projectScopeKey).toBe(null);
+    expect(useProjectScopeStore.getInitialState().projectScopeKeys).toEqual([]);
   });
 
-  it("scopes the thread list to one project", () => {
-    useProjectScopeStore.getState().setProjectScopeKey("env-1:project-a");
+  it("scopes the thread list to one project or several", () => {
+    useProjectScopeStore.getState().setProjectScopeKeys(["env-1:project-a"]);
 
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe("env-1:project-a");
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual(["env-1:project-a"]);
   });
 
   it("replaces the scope rather than accumulating scopes", () => {
-    useProjectScopeStore.getState().setProjectScopeKey("env-1:project-a");
-    useProjectScopeStore.getState().setProjectScopeKey("env-1:project-b");
+    useProjectScopeStore.getState().setProjectScopeKeys(["env-1:project-a"]);
+    useProjectScopeStore.getState().setProjectScopeKeys(["env-1:project-b"]);
 
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe("env-1:project-b");
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual(["env-1:project-b"]);
   });
 
   it("keeps the setter's identity stable across scope changes", () => {
@@ -33,18 +33,18 @@ describe("projectScopeStore", () => {
     // cheap while the setter's reference survives a state change; an action
     // rebuilt on every set would re-render the sidebar on every filter change
     // for no reason, and nothing else would notice.
-    const setProjectScopeKey = useProjectScopeStore.getState().setProjectScopeKey;
+    const setProjectScopeKeys = useProjectScopeStore.getState().setProjectScopeKeys;
 
-    setProjectScopeKey("env-1:project-a");
+    setProjectScopeKeys(["env-1:project-a"]);
 
-    expect(useProjectScopeStore.getState().setProjectScopeKey).toBe(setProjectScopeKey);
+    expect(useProjectScopeStore.getState().setProjectScopeKeys).toBe(setProjectScopeKeys);
   });
 
   it("clears back to every project", () => {
-    useProjectScopeStore.getState().setProjectScopeKey("env-1:project-a");
-    useProjectScopeStore.getState().setProjectScopeKey(null);
+    useProjectScopeStore.getState().setProjectScopeKeys(["env-1:project-a"]);
+    useProjectScopeStore.getState().setProjectScopeKeys([]);
 
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe(null);
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual([]);
   });
 });
 
@@ -52,47 +52,47 @@ describe("projectScopeStore", () => {
 // every project and the last project, through the store both surfaces write.
 describe("projectScopeStore toggleAllProjects", () => {
   it("project toggle spec: from a project it switches to every project", () => {
-    useProjectScopeStore.getState().setProjectScopeKey("env-1:project-a");
+    useProjectScopeStore.getState().setProjectScopeKeys(["env-1:project-a"]);
 
     useProjectScopeStore.getState().toggleAllProjects();
 
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe(null);
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual([]);
   });
 
   it("project toggle spec: pressed again it returns to the last project", () => {
-    useProjectScopeStore.getState().setProjectScopeKey("env-1:project-a");
+    useProjectScopeStore.getState().setProjectScopeKeys(["env-1:project-a"]);
     useProjectScopeStore.getState().toggleAllProjects();
 
     useProjectScopeStore.getState().toggleAllProjects();
 
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe("env-1:project-a");
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual(["env-1:project-a"]);
   });
 
   it("project toggle spec: with no last project it leaves every project in place", () => {
     useProjectScopeStore.getState().toggleAllProjects();
 
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe(null);
-    expect(useProjectScopeStore.getState().lastProjectScopeKey).toBe(null);
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual([]);
+    expect(useProjectScopeStore.getState().lastProjectScopeKeys).toEqual([]);
   });
 
   it("project toggle spec: the last project is the latest one set, not the first", () => {
-    useProjectScopeStore.getState().setProjectScopeKey("env-1:project-a");
-    useProjectScopeStore.getState().setProjectScopeKey("env-1:project-b");
-    useProjectScopeStore.getState().setProjectScopeKey(null);
+    useProjectScopeStore.getState().setProjectScopeKeys(["env-1:project-a"]);
+    useProjectScopeStore.getState().setProjectScopeKeys(["env-1:project-b"]);
+    useProjectScopeStore.getState().setProjectScopeKeys([]);
 
     useProjectScopeStore.getState().toggleAllProjects();
 
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe("env-1:project-b");
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual(["env-1:project-b"]);
   });
 
   it("project toggle spec: clearing to every project keeps the last project remembered", () => {
-    useProjectScopeStore.getState().setProjectScopeKey("env-1:project-a");
-    useProjectScopeStore.getState().setProjectScopeKey(null);
+    useProjectScopeStore.getState().setProjectScopeKeys(["env-1:project-a"]);
+    useProjectScopeStore.getState().setProjectScopeKeys([]);
 
-    expect(useProjectScopeStore.getState().lastProjectScopeKey).toBe("env-1:project-a");
+    expect(useProjectScopeStore.getState().lastProjectScopeKeys).toEqual(["env-1:project-a"]);
   });
 
   it("project toggle spec: a fresh store remembers no last project", () => {
-    expect(useProjectScopeStore.getInitialState().lastProjectScopeKey).toBe(null);
+    expect(useProjectScopeStore.getInitialState().lastProjectScopeKeys).toEqual([]);
   });
 });

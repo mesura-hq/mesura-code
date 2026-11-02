@@ -15,11 +15,12 @@ import {
   matchesKeybindingShortcutModifiers,
   normalizeEventKey,
   resolveEventKeys,
-  type ShortcutEventLike,
+  type ShortcutEventLike as SharedShortcutEventLike,
   type ShortcutModifierStateLike,
 } from "@t3tools/shared/keybindings";
 import { diagnoseUnhandledKeybinding } from "./commands/unhandledKeybinding";
 import { isElectron } from "./env";
+import { isEditableFocused } from "./lib/editableFocus";
 import { projectScriptIdFromCommand } from "./projectScripts";
 import { getFocusedPane, isSidebarSearchFocused, type PaneId } from "./lib/paneFocus";
 // Type only, so nothing from the component graph is pulled in at runtime.
@@ -28,8 +29,12 @@ import type { ThreadTraversalDirection } from "./components/Sidebar.logic";
 import { isFileManagerOpen } from "~/components/files/mesuraFileManager/isFileManagerOpen";
 import { isDictationLive } from "~/dictation/dictationSessionStore";
 
-export type { ShortcutEventLike, ShortcutModifierStateLike } from "@t3tools/shared/keybindings";
+export type { ShortcutModifierStateLike } from "@t3tools/shared/keybindings";
 export { shortcutKeyFromEvent } from "@t3tools/shared/keybindings";
+
+export interface ShortcutEventLike extends SharedShortcutEventLike {
+  target?: EventTarget | null;
+}
 
 export interface ShortcutMatchContext {
   terminalFocus: boolean;
@@ -282,6 +287,9 @@ export function findLastMatchingBinding(
 ): ResolvedKeybindingsConfig[number] | null {
   const platform = resolvePlatform(options);
   const context = resolveContext(options);
+  if (options?.context?.editableFocus === undefined && typeof document !== "undefined") {
+    context.editableFocus = isEditableFocused(event.target ?? document.activeElement);
+  }
 
   for (let index = bindings.length - 1; index >= 0; index -= 1) {
     const binding = bindings[index];
@@ -595,10 +603,6 @@ export function terminalNavigationShortcutData(
       return moveLine;
     }
     return null;
-  }
-
-  if (event.ctrlKey && !event.metaKey && !event.altKey) {
-    return moveWord;
   }
 
   if (event.altKey && !event.metaKey && !event.ctrlKey) {

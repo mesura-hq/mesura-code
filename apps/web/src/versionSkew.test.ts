@@ -1,8 +1,4 @@
-import {
-  appendVersionMismatchHint,
-  supportsDesktopAppUpdate,
-  serverUpdateGuidance,
-} from "./versionSkew";
+import { appendVersionMismatchHint, supportsDesktopAppUpdate } from "./versionSkew";
 import { EnvironmentId } from "@t3tools/contracts";
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -209,17 +205,6 @@ describe("versionSkew", () => {
     expect(supportsDesktopAppUpdate(null)).toBe(false);
   });
 
-  it("matches version-drift guidance to the advertised update path", () => {
-    expect(serverUpdateGuidance("respawn", "Remote server")).toBe(
-      "Update the Remote server so they stay in sync.",
-    );
-    expect(serverUpdateGuidance("desktop-managed", "Desktop server")).toBe(
-      "Update the desktop app that runs the Desktop server.",
-    );
-    expect(serverUpdateGuidance(null, "Local server")).toBe(
-      "Install a matching Mesura Code build on the Local server's machine to sync them.",
-    );
-  });
 
   // Regression guard: a hardcoded `npx t3@<version>` installed upstream's server over the fork's.
   // Do not restore one: while Mesura publishes nothing, the honest answer is no command.

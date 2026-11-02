@@ -866,7 +866,7 @@ describe("search unification guards", () => {
       /* @vite-ignore */ `${new URL("./projectScopeStore.ts", import.meta.url).pathname}?reload`
     )) as typeof import("./projectScopeStore");
 
-    expect(reloaded.useProjectScopeStore.getState().projectScopeKey).toBe(null);
+    expect(reloaded.useProjectScopeStore.getState().projectScopeKeys).toEqual([]);
     for (const value of Object.values(window.localStorage)) {
       expect(value).not.toContain(BETA_PROJECT_ID);
     }
@@ -964,16 +964,16 @@ describe("search unification regression: the commands on Settings and with the l
     await using _browserFixture0 = await setupBrowserFixture0();
     await mountWithThreads(crossProjectThreads());
     await chooseProjectInFilter(BETA_TITLE);
-    const betaKey = useProjectScopeStore.getState().projectScopeKey;
+    const betaKeys = useProjectScopeStore.getState().projectScopeKeys;
     await act(async () => {
       await router!.navigate({ to: "/settings" });
     });
     await settle();
 
     await press(TOGGLE_ALL_CHORD);
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe(null);
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual([]);
     await press(TOGGLE_ALL_CHORD);
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe(betaKey);
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual(betaKeys);
   });
 
   it("search unification regression: with the legacy sidebar Mod+Alt+K and Mod+Shift+F open the command palette", async () => {
@@ -995,12 +995,12 @@ describe("search unification regression: the commands on Settings and with the l
     await using _browserFixture0 = await setupBrowserFixture0();
     sidebarLists.legacySidebar = true;
     await mountWithThreads(crossProjectThreads());
-    useProjectScopeStore.getState().setProjectScopeKey("legacy-fence-scope");
+    useProjectScopeStore.getState().setProjectScopeKeys(["legacy-fence-scope"]);
 
     await press(TOGGLE_ALL_CHORD);
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe(null);
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual([]);
     await press(TOGGLE_ALL_CHORD);
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe("legacy-fence-scope");
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual(["legacy-fence-scope"]);
   });
 });
 

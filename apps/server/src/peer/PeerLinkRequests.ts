@@ -63,7 +63,8 @@ export class PeerLinkRequests extends Context.Service<
   {
     /**
      * Shows a link card in the calling thread and returns at once. A retry
-     * with the same clientRequestId returns the card's current outcome.
+     * with the same clientRequestId and MCP credential returns the card's
+     * current outcome.
      */
     readonly request: (
       scope: McpInvocationContext.McpInvocationScope,
@@ -143,6 +144,12 @@ const make = Effect.gen(function* () {
         "t3_environment_link",
       );
       const threadId = threadScope.thread.threadId;
+      if (!(yield* peerLinks.enabled)) {
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: PeerLinks.LINKED_ENVIRONMENTS_OFF,
+        });
+      }
       const unreadable = (error: unknown) =>
         new OrchestratorMcpFailure({
           code: "orchestration_error",

@@ -62,6 +62,8 @@ export const ApplicationProjectMetaUpdatedPayload = Schema.Struct({
   // Mesura: the project's agent icon search; optional so older events decode.
   iconDiscovery: Schema.optional(Schema.NullOr(ProjectIconDiscoveryState)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   updatedAt: IsoDateTime,
 });
 export type ApplicationProjectMetaUpdatedPayload = typeof ApplicationProjectMetaUpdatedPayload.Type;
