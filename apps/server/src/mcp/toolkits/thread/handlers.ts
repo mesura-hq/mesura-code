@@ -22,6 +22,8 @@ import {
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts";
 import { queuedRunsInDeliveryOrder } from "../../../orchestration-v2/QueuedRunOrder.ts";
+// Mesura: compact this thread, then continue.
+import { queueCompactAndContinue } from "../../../orchestration-v2/CompactAndContinue.ts";
 import { ThreadToolkit } from "./tools.ts";
 
 function queueEntry(
@@ -305,6 +307,31 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
           note: input.note,
         })
         .pipe(Effect.mapError(dispatchFailure));
+    }),
+  ),
+  // Mesura: the agent queues /compact and the user's next request on its own thread.
+  t3_thread_compact_and_continue: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const { scope } = yield* readCaller();
+      if (scope.thread === undefined) return yield* unavailable();
+      return yield* queueCompactAndContinue({
+        threadId: scope.thread.threadId,
+        subagent: scope.thread.subagent === true,
+        next: input.next,
+        handoff: input.handoff,
+      }).pipe(
+        Effect.mapError((error) =>
+          error._tag === "CompactAndContinueRefusedError" ||
+          error._tag === "ThreadManagementThreadArchivedError"
+            ? new OrchestratorMcpFailure({ code: "invalid_request", message: error.message })
+            : error._tag === "CompactAndContinueAttemptsExhaustedError"
+              ? new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message })
+              : error._tag === "OrchestratorDispatchError" ||
+                  error._tag === "OrchestratorCommandRejectedError"
+                ? dispatchFailure(error)
+                : unavailable(),
+        ),
+      );
     }),
   ),
   t3_thread_organize: writesThread((input) =>

@@ -60,3 +60,28 @@ describe("orchestration instructions: thread signal", () => {
     }
   });
 });
+
+describe("orchestration instructions: compact and continue", () => {
+  const compactSection = () =>
+    T3_CODE_ORCHESTRATION_SECTIONS.find((section) =>
+      section.includes("t3_thread_compact_and_continue"),
+    );
+
+  it("compact-and-continue instructions spec: a rule says when and how to call the tool", () => {
+    const section = compactSection();
+    expect(section, "no section mentions t3_thread_compact_and_continue").toBeDefined();
+    const text = section ?? "";
+    // Only on the user's request.
+    expect(text).toMatch(/only when the user's latest message asks/i);
+    // The work comes first, and a failed or incomplete job never compacts.
+    expect(text).toMatch(/finish and verify/i);
+    expect(text).toMatch(/fail/i);
+    expect(text).toMatch(/incomplete/i);
+    // The next request travels verbatim in `next`.
+    expect(text).toMatch(/quote/i);
+    expect(text).toContain("`next`");
+    // The turn ends right after the call.
+    expect(text).toMatch(/end (the|your) turn/i);
+    expect(text).toMatch(/short reply|one-line reply/i);
+  });
+});
