@@ -556,14 +556,6 @@ const make = Effect.gen(function* () {
           message: `The link to ${link.label} expired. Link it again with a new pairing code from ${link.label}.`,
         });
       }
-      // Its token was issued before links were marked as links, so the peer
-      // never fences the work it carries, whatever version it runs now.
-      if (row.value.fenced !== 1) {
-        return yield* new PeerLinkError({
-          reason: "incompatible",
-          message: `The link to ${link.label} was made by an older Mesura Code. Link it again with a new pairing code from ${link.label}.`,
-        });
-      }
       const stored = yield* secrets.get(row.value.secret_name).pipe(Effect.catch(failStorage));
       if (Option.isNone(stored)) {
         return yield* new PeerLinkError({

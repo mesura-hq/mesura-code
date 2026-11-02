@@ -276,6 +276,8 @@ describe("IdleCompactionService", () => {
             Layer.mock(ServerSettings.ServerSettingsService)({
               getSettings: Effect.succeed({
                 ...DEFAULT_SERVER_SETTINGS,
+                // Mesura: the app compacts on its own only behind this switch.
+                idleCompactionEnabled: true,
                 idleCompaction: test.mode,
                 providerInstances:
                   "unconfigured" in test

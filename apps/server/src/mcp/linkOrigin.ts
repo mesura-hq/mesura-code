@@ -9,10 +9,10 @@ import * as Effect from "effect/Effect";
 import type { Caller } from "./threadAccess.ts";
 
 /**
- * Below full access, work a link starts (it carries the session in `linkOrigin`)
- * may change only work from that same link, and may not use this environment's
- * links. Reads are not fenced. Full access is unfenced because the link's agents
- * already run as this environment's user; this fences T3's tools, not the OS.
+ * Below full access, work a link starts here (all of it carries that session in `linkOrigin`)
+ * may change only work from the same link: not the user's threads, projects or settings, nor
+ * this environment's links. Reads are not fenced. It is a routing rule for T3's tools; agents
+ * still run as this environment's user, so a full-access link is not fenced at all.
  */
 
 /** The link a caller acts for: its own session, or the link that started its thread. */

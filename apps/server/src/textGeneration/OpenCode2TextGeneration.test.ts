@@ -50,8 +50,11 @@ function materializeTitleGenerationTranscript(
   };
 }
 
-const replayTitleGenerationServer = (transcript: ProviderReplayTranscript) =>
-  OpenCode2AdapterV2Testkit.replayServer(materializeTitleGenerationTranscript(transcript));
+const replayTitleGenerationServer = (
+  transcript: ProviderReplayTranscript,
+  options?: Parameters<typeof OpenCode2AdapterV2Testkit.replayServer>[1],
+) =>
+  OpenCode2AdapterV2Testkit.replayServer(materializeTitleGenerationTranscript(transcript), options);
 
 const recordedTitleGenerationTranscript: ProviderReplayTranscript = {
   provider: "opencode",
@@ -393,7 +396,7 @@ it.layer(layer)("OpenCode2TextGeneration", (it) => {
       const [subscribe, connected, create, created] = OPENCODE2_TITLE_GENERATION;
       const sessionId = "ses_f0ec85cf6ffebfalpvV2E9nocu";
       const prompted = yield* Deferred.make<void>();
-      const server = yield* OpenCode2AdapterV2Testkit.replayServer(
+      const server = yield* replayTitleGenerationServer(
         {
           provider: "opencode",
           protocol: OpenCode2AdapterV2Testkit.OPENCODE2_HTTP_PROTOCOL,
