@@ -71,6 +71,7 @@ vi.mock("./hooks/useHandleNewThread", async () => ({
   useNewThreadHandler: () => async () => ({ _tag: "Success", value: undefined }),
 }));
 vi.mock("./hooks/useThreadActions", () => ({
+  canTurnThreadIntoProject: () => false,
   useAcknowledgeThreadWoke: () => fixture.acknowledgeWoke,
   useThreadActions: () => ({
     settleThread: fixture.settleThread,
@@ -81,7 +82,10 @@ vi.mock("./hooks/useThreadActions", () => ({
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));

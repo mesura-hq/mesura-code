@@ -4,13 +4,9 @@
 // local server.
 import { expect, it, vi } from "vite-plus/test";
 
-vi.hoisted(() => {
-  Object.defineProperty(window, "desktopBridge", {
-    value: { getLocalEnvironmentBootstraps: () => [] },
-    configurable: true,
-    writable: true,
-  });
-});
+await vi.hoisted(async () =>
+  (await import("./test/loadTimeDesktopBridge")).installLoadTimeDesktopBridge(),
+);
 
 const fenceMocks = vi.hoisted(() => () => import("./test/presenceFenceMocks"));
 vi.mock("./state/pushNotifications", async (original) =>
@@ -23,8 +19,13 @@ vi.mock("./state/primaryEnvironment", async (original) =>
   (await fenceMocks()).mockPrimaryEnvironment(original),
 );
 vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
-vi.mock("./browser/BrowserProfileReporter", () => ({ BrowserProfileReporter: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
+vi.mock("./browser/BrowserProfileReporter", () => ({
+  startBrowserProfileReporting: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 
 import { isElectron } from "./env";

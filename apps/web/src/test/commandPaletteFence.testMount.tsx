@@ -8,6 +8,7 @@ import "../mesura.css";
  * loading, and a fixture module importing `CommandPalette` would deadlock on that circular import.
  */
 import {
+  type AnyRouter,
   createMemoryHistory,
   createRootRoute,
   createRoute,
@@ -22,6 +23,7 @@ type RouteComponent = () => ReactNode;
 import { expect, vi } from "vite-plus/test";
 
 import type { AppRouter } from "../router";
+import { installAppShortcuts } from "./appRootFenceApp";
 import { AppRoot } from "../AppRoot";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
@@ -85,6 +87,7 @@ export async function mountApp(
   });
   const router = createAppRouter(options.homeRoute);
   await router.load();
+  resources.defer(installAppShortcuts(router as unknown as AnyRouter));
   // AppRoot owns this fixture's memory router.
   resources.use(
     await renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {

@@ -232,20 +232,25 @@ export function ComposerControlsBar(props: {
         MODEL_TRIGGER_STATES,
         composerControlsCollapsed ? "min-w-13 shrink text-xs!" : "min-w-13",
       )}
-      triggerSuffix={effort.suffix}
-      triggerDetail={effort.detail}
-      triggerShortcuts={
-        pickerOwnsModeShortcut ? "composer.effort composer.mode" : "composer.effort"
-      }
-      effortColumn={<ComposerEffortColumn traits={traitsInput} />}
-      footer={
-        <ComposerPickerFooter
-          traits={traitsInput}
-          runtimeMode={compatibleRuntimeMode}
-          runtimeModeOptions={compatibleRuntimeModeOptions}
-          onRuntimeModeChange={handleRuntimeModeChange}
-        />
-      }
+      // Mesura: the combined picker brings its own effort label, More options and access.
+      {...(combinedPicker
+        ? {}
+        : {
+            triggerSuffix: effort.suffix,
+            triggerDetail: effort.detail,
+            triggerShortcuts: pickerOwnsModeShortcut
+              ? "composer.effort composer.mode"
+              : "composer.effort",
+            effortColumn: <ComposerEffortColumn traits={traitsInput} />,
+            footer: (
+              <ComposerPickerFooter
+                traits={traitsInput}
+                runtimeMode={compatibleRuntimeMode}
+                runtimeModeOptions={compatibleRuntimeModeOptions}
+                onRuntimeModeChange={handleRuntimeModeChange}
+              />
+            ),
+          })}
       terminalOpen={terminalOpen}
       open={modelPickerOpen}
       instanceIndicatorBackground={

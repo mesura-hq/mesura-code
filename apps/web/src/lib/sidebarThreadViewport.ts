@@ -7,8 +7,8 @@ import { useEffect, useLayoutEffect, useState, type Dispatch, type SetStateActio
  */
 
 const THREAD_ROW_SELECTOR = "[data-mesura-thread-key]";
-/** What Up and Down walk: the rows, and section headers such as Working's. */
-const NAV_STOP_SELECTOR = "[data-mesura-thread-key], [data-mesura-nav-stop]";
+/** What Up and Down walk: the rows of upstream's sidebar tree (`sidebarTree.ts`), headers included. */
+const NAV_STOP_SELECTOR = "[data-sidebar-row]";
 /** The sidebar's Search field; Down from it, while empty, enters the list. */
 const THREAD_SEARCH_SELECTOR = "[data-mesura-thread-search]";
 const SCROLL_VIEWPORT_SELECTOR = '[data-slot="scroll-area-viewport"]';
@@ -27,8 +27,9 @@ const PENDING_SCROLL_EVENT = "mesura:thread-list-scroll-target";
 
 function threadListScroller(): HTMLElement | null {
   return (
-    document.querySelector(NAV_STOP_SELECTOR)?.closest<HTMLElement>(SCROLL_VIEWPORT_SELECTOR) ??
-    null
+    document
+      .querySelector(`${THREAD_ROW_SELECTOR}, ${NAV_STOP_SELECTOR}`)
+      ?.closest<HTMLElement>(SCROLL_VIEWPORT_SELECTOR) ?? null
   );
 }
 
@@ -184,7 +185,7 @@ function refreshViewportThreadKeys(
 
 function navStops(scroller: HTMLElement): HTMLElement[] {
   return [...scroller.querySelectorAll<HTMLElement>(NAV_STOP_SELECTOR)].filter(
-    (stop) => stop.closest("[inert]") === null,
+    (stop) => stop.closest('[hidden], [inert], [aria-hidden="true"]') === null,
   );
 }
 
@@ -227,13 +228,23 @@ export function moveThreadListFocus(key: "ArrowDown" | "ArrowUp"): boolean {
 export function useThreadRowArrowKeys(): void {
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: window keydown listener for thread-row arrow navigation, removed on unmount
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
+    const listenerFor = (fromSearch: boolean) => (event: KeyboardEvent) => {
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.shiftKey) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if ((target?.matches(THREAD_SEARCH_SELECTOR) ?? false) !== fromSearch) return;
       if (moveThreadListFocus(event.key)) event.preventDefault();
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    // In the list, run before `sidebarTree.ts`, whose capture handler keeps Up on the top row
+    // instead of returning to Search. Search queues its own keys first, so it listens last.
+    const inList = listenerFor(false);
+    const inSearch = listenerFor(true);
+    window.addEventListener("keydown", inList, true);
+    window.addEventListener("keydown", inSearch);
+    return () => {
+      window.removeEventListener("keydown", inList, true);
+      window.removeEventListener("keydown", inSearch);
+    };
   }, []);
 }

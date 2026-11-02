@@ -267,16 +267,21 @@ export async function mockPresentation(
 export async function mockEnvironments(
   importOriginal: ImportOriginal<typeof import("../state/environments")>,
 ): Promise<FenceEnvironmentsModule> {
-  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
+  const { DEFAULT_SERVER_SETTINGS, EnvironmentId } = await import("@t3tools/contracts");
   for (const environment of appRootFence.environments) {
     environment.serverConfig.settings = {
       ...DEFAULT_SERVER_SETTINGS,
       ...environment.serverConfig.settings,
     };
   }
+  // One array for every render, as the real atom keeps; a fresh one defeats the memoized rows.
+  const connectedEnvironmentIds = appRootFence.environments.map((environment) =>
+    EnvironmentId.make(environment.environmentId),
+  );
   return {
     ...(await importOriginal()),
     useEnvironments: () => ({ environments: appRootFence.environments, isReady: true }),
+    useConnectedEnvironmentIds: () => connectedEnvironmentIds,
     useEnvironmentProviders: () =>
       new Map(
         appRootFence.environments.map((environment) => [
@@ -453,6 +458,9 @@ export async function mockHandleNewThread() {
   const { scopeThreadRef } = await import("@t3tools/client-runtime/environment");
   const { EnvironmentId, ThreadId } = await import("@t3tools/contracts");
   return {
+    // Upstream's app-start chat shortcuts build their own handler from the router.
+    createNewThreadHandler: () => success,
+    resolveDefaultProjectRef: () => null,
     useNewThreadHandler: () => success,
     useHandleNewThread: () => ({
       activeDraftThread: null,

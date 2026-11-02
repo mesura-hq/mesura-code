@@ -184,11 +184,14 @@ vi.mock("../composerDraftStore", () => ({
     }),
   },
 }));
-vi.mock("../lib/utils", () => ({
-  randomUUID: () => crypto.randomUUID(),
-  newDraftId: () => "draft-from-index",
-  newThreadId: () => "thread-from-index",
-}));
+vi.mock("../lib/utils", () => {
+  let issued = 0;
+  return {
+    randomUUID: () => `00000000-0000-4000-8000-${String((issued += 1)).padStart(12, "0")}`,
+    newDraftId: () => "draft-from-index",
+    newThreadId: () => "thread-from-index",
+  };
+});
 // Mesura: upstream moved project grouping to client-runtime.
 vi.mock("@t3tools/client-runtime/state/project-grouping", () => ({
   deriveLogicalProjectKeyFromSettings: () => "remote-project",

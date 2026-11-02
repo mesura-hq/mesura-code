@@ -1,7 +1,6 @@
 /**
  * The desktop shell is `window.desktopBridge`, set before any app module loads because
- * `env.ts` reads it once at load. The bridge carries only what the settings page reads
- * while mounting.
+ * `env.ts` reads it once at load (`test/loadTimeDesktopBridge.ts`).
  */
 import { expect, it, vi } from "vite-plus/test";
 
@@ -12,13 +11,9 @@ import {
   pushSettingsFence as browser,
 } from "../test/pushSettingsFenceMocks";
 
-vi.hoisted(() => {
-  Object.defineProperty(window, "desktopBridge", {
-    value: { getLocalEnvironmentBootstraps: () => [] },
-    configurable: true,
-    writable: true,
-  });
-});
+await vi.hoisted(async () =>
+  (await import("../test/loadTimeDesktopBridge")).installLoadTimeDesktopBridge(),
+);
 
 const fenceMocks = vi.hoisted(() => () => import("../test/pushSettingsFenceMocks"));
 vi.mock("~/state/use-atom-command", async () => (await fenceMocks()).mockUseAtomCommand());

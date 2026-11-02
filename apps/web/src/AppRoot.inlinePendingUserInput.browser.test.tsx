@@ -90,7 +90,10 @@ vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadA
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));

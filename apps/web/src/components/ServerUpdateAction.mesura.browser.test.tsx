@@ -12,6 +12,11 @@ vi.mock(import("~/state/use-atom-command"), async (original) => ({
   ...(await original()),
   useAtomCommand: (() => testState.update) as never,
 }));
+// The stub above answers every atom; the server version reads its own config map.
+vi.mock(import("~/state/entities"), async (original) => ({
+  ...(await original()),
+  useServerConfigs: (() => new Map()) as never,
+}));
 vi.mock(import("~/hooks/useSettings"), async (original) => ({
   ...(await original()),
   useEnvironmentSettings: ((

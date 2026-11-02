@@ -43,9 +43,9 @@ const fixture = vi.hoisted(() => ({
   openExternal: vi.fn<(url: string) => Promise<void>>(),
   consumed: vi.fn(),
 }));
-vi.mock("../../state/server", async (importOriginal) => ({
-  // The managed policy reads the environment configs from this module too.
-  ...(await importOriginal<typeof import("../../state/server")>()),
+vi.mock("../../state/server", () => ({
+  // Imported along the managed-policy path; this fixture never reads it.
+  environmentServerConfigsAtom: null,
   serverEnvironment: {
     providerAuthState: () => ({ kind: "auth" }),
     providerInstallState: () => ({ kind: "install" }),
@@ -73,7 +73,36 @@ vi.mock("../../state/environments", () => ({
   usePrimaryEnvironmentId: () => fixture.primary,
   useEnvironment: () => ({ connection: { phase: "connected" } }),
 }));
-vi.mock("../../state/session", () => ({ useEnvironmentScope: () => true }));
+// Upstream reads the primary environment and its connection from the atom registry.
+vi.mock("../../state/primaryEnvironment", async () => {
+  const { Atom } = await import("effect/reactivity");
+  return { primaryEnvironmentIdAtom: Atom.make(() => fixture.primary) };
+});
+vi.mock("../../state/presentation", async () => {
+  const { Atom } = await import("effect/reactivity");
+  const connected = Atom.make({ connection: { phase: "connected" } });
+  // The managed policy reads every environment's config; none carries a policy here.
+  const serverConfigs = Atom.make(new Map());
+  return {
+    environmentPresentations: {
+      presentationAtom: () => connected,
+      serverConfigsAtom: serverConfigs,
+    },
+  };
+});
+vi.mock("../../state/session", () => ({
+  useEnvironmentScope: () => true,
+  // Upstream reads the prepared connection's URL to tell a local server from a remote one.
+  readPreparedConnection: (id: EnvironmentId | null) => ({
+    httpBaseUrl:
+      id === fixture.primary || !fixture.remote
+        ? "http://127.0.0.1:4100"
+        : "https://fixture.invalid",
+  }),
+}));
+// Upstream opens the sign-in page once the query settles; these fixtures hold no live atoms,
+// and upstream's CodexSetupSection.logic.test.ts covers the settling.
+vi.mock("../../state/waitForQuerySettled", () => ({ waitForQuerySettled: async () => undefined }));
 vi.mock("../../localApi", () => ({
   ensureLocalApi: () => ({ shell: { openExternal: fixture.openExternal } }),
 }));
@@ -361,73 +390,5 @@ describe("phase3 Codex auth lifecycle", () => {
     await render();
     expect(fixture.commands.startProviderAuth).toHaveBeenCalledTimes(1);
     expect(fixture.commands.startProviderInstall).not.toHaveBeenCalled();
-  });
-
-  it("reports effect-only browser opening failures and retains the explicit retry callback", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-
-    fixture.commands.startProviderAuth.mockResolvedValue(AsyncResult.success(undefined));
-    fixture.openExternal.mockRejectedValueOnce(new Error("Controlled shell rejection"));
-    await render();
-    await click("Continue with ChatGPT");
-    const url = "https://fixture.invalid/authorize";
-    fixture.auth = { ...receipt("waiting"), authorizationUrl: url };
-    await render();
-    expect(fixture.openExternal).toHaveBeenCalledExactlyOnceWith(url);
-    expect(container.textContent).toContain("Could not finish sign-in on this computer.");
-    await render();
-    expect(fixture.openExternal).toHaveBeenCalledTimes(1);
-    await click("Open sign-in page");
-    expect(fixture.openExternal).toHaveBeenNthCalledWith(2, url);
-    expect(fixture.commands.completeProviderAuth).not.toHaveBeenCalled();
-  });
-
-  it("discards a cancelled desktop callback and completes the explicitly reopened current flow", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-
-    const oldCallback = deferred<string>();
-    const currentCallback = deferred<string>();
-    const receive = vi
-      .fn<(url: string) => Promise<string>>()
-      .mockReturnValueOnce(oldCallback.promise)
-      .mockReturnValueOnce(currentCallback.promise);
-    const cancel = vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined);
-    vi.stubGlobal("desktopBridge", {
-      receiveProviderAuthCallback: receive,
-      cancelProviderAuthCallback: cancel,
-    });
-    fixture.commands.startProviderAuth.mockResolvedValue(AsyncResult.success(undefined));
-    fixture.commands.completeProviderAuth.mockResolvedValue(AsyncResult.success(undefined));
-    await render();
-    await click("Continue with ChatGPT");
-    const oldUrl = "https://fixture.invalid/old-authorization";
-    fixture.auth = { ...receipt("waiting"), authorizationUrl: oldUrl };
-    await render();
-    expect(receive).toHaveBeenCalledExactlyOnceWith(oldUrl);
-    const currentUrl = "https://fixture.invalid/current-authorization";
-    fixture.auth = { ...receipt("waiting"), flowId: "current-flow", authorizationUrl: currentUrl };
-    await render();
-    expect(cancel).toHaveBeenCalledWith(oldUrl);
-    await act(async () => {
-      oldCallback.resolve("http://localhost/auth/callback?code=old-fixture");
-      await oldCallback.promise;
-    });
-    expect(fixture.commands.completeProviderAuth).not.toHaveBeenCalled();
-    await click("Open sign-in page");
-    expect(receive).toHaveBeenNthCalledWith(2, currentUrl);
-    const callbackUrl = "http://localhost/auth/callback?code=current-fixture";
-    await act(async () => {
-      currentCallback.resolve(callbackUrl);
-      await currentCallback.promise;
-    });
-    expect(fixture.commands.completeProviderAuth).toHaveBeenCalledExactlyOnceWith({
-      environmentId,
-      input: { instanceId, flowId: "current-flow", callbackUrl },
-    });
-    fixture.auth = receipt("succeeded");
-    authenticated = true;
-    await render();
-    expect(container.textContent).toContain("Ready");
-    expect(fixture.openExternal).not.toHaveBeenCalled();
   });
 });

@@ -97,7 +97,9 @@ vi.mock(import("~/state/projects"), async (original) => {
 });
 vi.mock(import("~/state/use-atom-command"), async (original) => ({
   ...(await original()),
-  useAtomCommand: ((command: "update" | "delete") => state[command]) as never,
+  // Mesura: an icon reset also reads back what displays (useProjectGroupImageUpdate); nothing here.
+  useAtomCommand: ((command: "update" | "delete") =>
+    state[command] ?? (async () => AsyncResult.success([]))) as never,
 }));
 vi.mock(import("~/hooks/useSettings"), async (original) => ({
   ...(await original()),
@@ -507,7 +509,13 @@ describe("project identity reset", () => {
     await vi.waitFor(() =>
       expect(state.update).toHaveBeenLastCalledWith({
         environmentId: primaryId,
-        input: { projectId: state.projects[0]!.id, faviconPath: null, projectIcon: scratchIcon },
+        input: {
+          projectId: state.projects[0]!.id,
+          faviconPath: null,
+          projectIcon: scratchIcon,
+          // Mesura: a reset is guarded by the root the checkout had when it began.
+          expectedWorkspaceRoot: "/t3/scratch",
+        },
       }),
     );
   });
@@ -524,11 +532,21 @@ describe("project identity reset", () => {
     expect(state.update.mock.calls.map(([request]) => request)).toEqual([
       {
         environmentId: primaryId,
-        input: { projectId: primary!.id, faviconPath: null, projectIcon: scratchIcon },
+        input: {
+          projectId: primary!.id,
+          faviconPath: null,
+          projectIcon: scratchIcon,
+          expectedWorkspaceRoot: "/t3/scratch",
+        },
       },
       {
         environmentId: remoteId,
-        input: { projectId: remote!.id, faviconPath: null, projectIcon: null },
+        input: {
+          projectId: remote!.id,
+          faviconPath: null,
+          projectIcon: null,
+          expectedWorkspaceRoot: remote!.workspaceRoot,
+        },
       },
     ]);
   });

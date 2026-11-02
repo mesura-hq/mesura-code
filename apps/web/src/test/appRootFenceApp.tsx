@@ -26,7 +26,10 @@ import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
 
+import type { AnyRouter } from "@tanstack/react-router";
 import type { AppRouter } from "../router";
+import { installChatRouteCommands } from "../shortcuts/chatRouteCommands";
+import { installCommandPaletteCommands } from "../shortcuts/commandPaletteCommands";
 import { AppRoot } from "../AppRoot";
 import { AppRouteModal } from "../components/AppRouteModal";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
@@ -207,12 +210,30 @@ export async function renderFenceApp(
   appRootFence.openThreadId = threadId;
   const router = createFenceRouter(threadId);
   await router.load();
+  const uninstallShortcuts = installAppShortcuts(router as unknown as AnyRouter);
   // AppRoot owns this fixture's memory router.
-  const root = await renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {
+  const screen = await renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {
     container,
     router: false,
   });
+  const root: Screen = {
+    ...screen,
+    [Symbol.asyncDispose]: async () => {
+      uninstallShortcuts();
+      await screen[Symbol.asyncDispose]();
+    },
+  };
   return { root, router };
+}
+
+/** Upstream installs the chat route and palette shortcuts at app start (appInit.tsx), which a fence skips. */
+export function installAppShortcuts(router: AnyRouter): () => void {
+  const uninstallChat = installChatRouteCommands(router);
+  const uninstallPalette = installCommandPaletteCommands(router);
+  return () => {
+    uninstallPalette();
+    uninstallChat();
+  };
 }
 
 /** Publishes a detail projection and its corresponding shell through both fixture sources. */

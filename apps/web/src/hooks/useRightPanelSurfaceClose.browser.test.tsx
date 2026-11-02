@@ -20,6 +20,7 @@ vi.mock("../components/ChatView.logic", () => ({
 }));
 vi.mock("../previewStateStore", () => ({
   useThreadPreviewState: () => ({ sessions: {}, desktopByTabId: {} }),
+  readThreadPreviewState: () => ({ sessions: {}, desktopByTabId: {} }),
   setActivePreviewTab: () => {},
   beginPreviewSessionClose: () => {},
   cancelPreviewSessionClose: () => {},
@@ -62,6 +63,8 @@ vi.mock("../state/shell", () => ({ environmentShell: { stateValueAtom: () => nul
 vi.mock("@t3tools/client-runtime/state/runtime", () => ({
   isAtomCommandInterrupted: () => false,
 }));
+// Mesura: the hook asks whether the palette is open; the real bus pulls the palette's runtime.
+vi.mock("../commandPaletteBus", () => ({ isCommandPaletteOpen: () => false }));
 
 function setup() {
   fixture.allowed = new Set(["environment-a", "environment-b"]);

@@ -3606,7 +3606,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   showMobilePendingAnswerActions && "hidden sm:flex",
                 )}
               >
-                {composerAttachButton ? <div className="me-2">{composerAttachButton}</div> : null}
                 <div
                   data-chat-composer-actions="right"
                   data-chat-composer-transition-actions="true"
@@ -3634,6 +3633,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   ) : reserveContextWindowMeter ? (
                     <ContextWindowMeterPlaceholder />
                   ) : null}
+                  {/* Mesura: attach sits with the actions, read as context, attach, microphone, send. */}
+                  {composerAttachButton}
                   {dictationStartControl}
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}

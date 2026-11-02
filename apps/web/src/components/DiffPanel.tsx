@@ -848,7 +848,9 @@ export default function DiffPanel({
         <DropdownMenu open={modeMenuOpen} onOpenChange={setModeMenuOpen}>
           <DropdownMenuTrigger
             render={<Button size="xs" variant="secondary" />}
-            className={cn("max-w-full", headerCommitSha !== null && "min-w-0 shrink")}
+            // Mesura: the longer mode labels (Branch changes) give way before the comparison
+            // target does, so a narrow panel on a phone keeps the target reachable.
+            className="min-w-0 max-w-full shrink"
             aria-label={`Diff scope: ${selectedScopeLabel}`}
             data-workspace-focus-default
           >

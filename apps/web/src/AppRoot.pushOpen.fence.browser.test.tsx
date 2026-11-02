@@ -16,8 +16,13 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { act, render as renderBrowser } from "../test/render";
 import type { AppRouter } from "./router";
 
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
-vi.mock("./browser/BrowserProfileReporter", () => ({ BrowserProfileReporter: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
+vi.mock("./browser/BrowserProfileReporter", () => ({
+  startBrowserProfileReporting: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 const openSearch = vi.hoisted(() => vi.fn());
 vi.mock("./components/searches/agentSearchNotification", async (original) => ({

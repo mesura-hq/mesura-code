@@ -187,6 +187,7 @@ vi.mock("../../hooks/useHandleNewThread", () => ({
   useNewThreadHandler: () => fixture.noopCommand,
 }));
 vi.mock("../../hooks/useThreadActions", () => ({
+  canTurnThreadIntoProject: () => false,
   useAcknowledgeThreadWoke: () => fixture.noopCommand,
   useThreadActions: () => ({
     settleThread: fixture.noopCommand,

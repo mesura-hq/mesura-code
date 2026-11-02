@@ -175,6 +175,7 @@ vi.mock("./hooks/useHandleNewThread", async (importOriginal) => ({
   useNewThreadHandler: () => fixture.noopCommand,
 }));
 vi.mock("./hooks/useThreadActions", () => ({
+  canTurnThreadIntoProject: () => false,
   useThreadActions: () => ({
     settleThread: fixture.noopCommand,
     pinThread: fixture.noopCommand,
@@ -184,7 +185,10 @@ vi.mock("./hooks/useThreadActions", () => ({
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 
 import { openCommandPalette } from "./commandPaletteBus";

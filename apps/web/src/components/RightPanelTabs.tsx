@@ -1648,6 +1648,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   onAddIssues={props.onAddIssues}
                   onAddDevice={props.onAddDevice}
                   onAddFactory={props.onAddFactory}
+                  onAddSideChat={props.onAddSideChat}
                   browserAvailable={props.browserAvailable}
                   terminalAvailable={props.terminalAvailable}
                   diffAvailable={props.diffAvailable}

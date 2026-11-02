@@ -8,7 +8,10 @@ import {
   unknownThreadLinkLabel,
 } from "@t3tools/shared/threadLinks";
 
+import { use } from "react";
+
 import { useThreadRefs, useThreadShell } from "../../state/entities";
+import { UnknownThreadLinkContext } from "../searches/unknownThreadLinkContext";
 import { UnresolvedChip } from "../contextChipParts";
 import { ThreadContextChip } from "../ThreadContextChip";
 
@@ -29,8 +32,15 @@ export function MarkdownThreadLink(props: {
   const refs = useThreadRefs(guess);
   const remote = useThreadShell(guess ? guessThreadLinkRef(props.link, refs) : null);
   const thread = local ?? remote;
+  const renderUnknown = use(UnknownThreadLinkContext);
   if (thread === null) {
     const unknown = unknownThreadLinkLabel(props.link, props.environmentId);
+    if (renderUnknown) {
+      return renderUnknown(
+        scopeThreadRef(environmentId, props.link.threadId),
+        props.label ?? unknown,
+      );
+    }
     return <UnresolvedChip label={props.label ?? unknown} tooltip={unknown} />;
   }
   const ref = { environmentId: thread.environmentId, threadId: thread.id };

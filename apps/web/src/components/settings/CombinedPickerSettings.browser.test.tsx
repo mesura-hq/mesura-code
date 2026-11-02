@@ -398,7 +398,7 @@ describe("combined picker in Settings: background writing", () => {
   it("settings picker writing settings write the model with its effort and no access", async () => {
     await using picker = await renderPicker({ kind: "text-generation" });
     await picker.openPicker();
-    await press(searchInput(), "ArrowDown");
+    // Upstream's picker opens on the current model, so no ArrowDown is needed to reach it.
     await press(searchInput(), "ArrowLeft");
 
     await press(searchInput(), "Enter");

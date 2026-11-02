@@ -12,6 +12,11 @@ vi.mock("@effect/atom-react", async (original) => ({
   useAtomValue: (atom: unknown) =>
     atom === primaryServerKeybindingsAtom ? DEFAULT_RESOLVED_KEYBINDINGS : [],
 }));
+// Mesura: the icon discovery host reads its own atom, which the stub above answers with [].
+vi.mock("./projects/ProjectIconDiscoveryDialog", () => ({
+  openProjectIconDiscoveryDialog: () => undefined,
+  ProjectIconDiscoveryDialogHost: () => null,
+}));
 vi.mock("../hooks/useTheme", () => ({
   useRenderedAppearance: () => "light",
   useTheme: () => ({ theme: "t3-chat", resolvedTheme: "light", appearanceMode: "light" }),
