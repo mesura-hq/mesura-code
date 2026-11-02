@@ -28,10 +28,11 @@ it("watches the open file from the file panel", () => {
 it("keeps the mutation heuristic and the refresh button beside the watcher", () => {
   const panel = read("apps/web/src/components/files/FilePreviewPanel.tsx");
 
-  assert.include(
+  // Upstream reads the open file under the workspace mutation id, so each mutation refetches it.
+  assert.match(
     panel,
-    "useWorkspaceMutationRefresh({",
-    "the workspace mutation refresh was removed in favour of the watcher, but it also refreshes the tree",
+    /revisionedQuery\(\s*getProjectFileQueryAtom\(environmentId, cwd, relativePath\),\s*workspaceMutationId,/,
+    "the workspace mutation refetch was removed in favour of the watcher, but it also catches what the watcher misses",
   );
   assert.match(
     panel,
