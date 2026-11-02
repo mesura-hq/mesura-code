@@ -2,7 +2,9 @@
 export const FILE_MANAGER_ROOT_ATTRIBUTE = "data-mesura-file-manager";
 
 type Page = ParentNode | null;
-const currentPage = (): Page => (typeof document === "undefined" ? null : document);
+// A partial `document` (a test stub, a worker shim) has no file manager in it.
+const currentPage = (): Page =>
+  typeof document !== "undefined" && typeof document.querySelector === "function" ? document : null;
 
 function findFileManagerRoot(page: Page): HTMLElement | null {
   return page?.querySelector<HTMLElement>(`[${FILE_MANAGER_ROOT_ATTRIBUTE}]`) ?? null;

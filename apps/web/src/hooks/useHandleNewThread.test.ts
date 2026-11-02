@@ -37,6 +37,9 @@ const testState = vi.hoisted(() => {
         ? null
         : {
             logicalProjectKey: "remote-project",
+            // Mesura: the open draft is reused only for its own project.
+            environmentId: "environment-ssh",
+            projectId: "project-remote",
             promotedTo: null,
             threadId: "thread-open",
             createdAt: "2026-01-01T00:00:00.000Z",
@@ -365,10 +368,13 @@ describe("useNewThreadHandler", () => {
       .mockReturnValueOnce(raced as never);
     testState.giveUserText("draft-raced");
 
-    const opened = await useNewThreadHandler()(
+    const pendingOpen = useNewThreadHandler()(
       { environmentId: "environment-ssh", projectId: "project-remote" } as never,
       { prompt: "Read the playbook. " },
     );
+    // Mesura: a new draft waits for the repository defaults read.
+    testState.completeProjectFileRead(null);
+    const opened = await pendingOpen;
 
     expect(opened?.draftId).toBe("draft-raced");
     expect(testState.draftStore.setPrompt).not.toHaveBeenCalled();

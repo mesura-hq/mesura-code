@@ -288,7 +288,13 @@ export function findLastMatchingBinding(
   const platform = resolvePlatform(options);
   const context = resolveContext(options);
   if (options?.context?.editableFocus === undefined && typeof document !== "undefined") {
-    context.editableFocus = isEditableFocused(event.target ?? document.activeElement);
+    // Mesura: read on demand like the pane keys in `resolveContext`, so a key no rule claims reads no DOM.
+    let editable: boolean | undefined;
+    Object.defineProperty(context, "editableFocus", {
+      get: () => (editable ??= isEditableFocused(event.target ?? document.activeElement)),
+      enumerable: true,
+      configurable: true,
+    });
   }
 
   for (let index = bindings.length - 1; index >= 0; index -= 1) {

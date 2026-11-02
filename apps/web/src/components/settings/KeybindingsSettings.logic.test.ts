@@ -58,7 +58,7 @@ describe("KeybindingsSettings.logic", () => {
       }),
     );
   });
-  it.each(["pu", "pull request", "copy link", "thread id"])(
+  it.each(["pu", "pull request", "copy link", "or thread"])(
     "finds the copy link shortcut with %s",
     (query) => {
       const rows = filterKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS), query);

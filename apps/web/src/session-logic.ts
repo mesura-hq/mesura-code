@@ -642,6 +642,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
   for (const row of input.visibleTurnItems) {
     const { item } = row;
     if (turnItemIsWorkspacePreparation(item) && !item.deferredWork) continue;
+    if (item.type === "checkpoint") continue;
     if (item.type === "factory_card") {
       factoryRunsById ??= deriveFactoryRunItemsByIdFromTurnItems(input.visibleTurnItems);
       const factoryItem = factoryTimelineItemFromCard(item, factoryRunsById);
@@ -662,7 +663,6 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       }
       continue;
     }
-    // Task progress belongs in the composer, not between conversation entries.
     if (
       item.type === "user_message" &&
       item.inputIntent === "queued_turn" &&
