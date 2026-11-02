@@ -43,6 +43,9 @@ const BRIDGED: ReadonlyArray<CommandEntry & { readonly command: KeybindingComman
   { keys: "<leader>ty", command: "thread.copyReference", title: "Copy reference" },
   { keys: "<leader>tq", command: "thread.steerQueuedMessage", title: "Steer queued message" },
   { keys: "<leader>tw", command: "sidebar.toggleWorking", title: "Working section" },
+  { keys: "<leader>zz", command: "thread.snooze", title: "Snooze…" },
+  { keys: "<leader>zs", command: "sidebar.toggleSnoozed", title: "Snoozed section" },
+  { keys: "<leader>zu", command: "thread.unsnooze", title: "Wake thread" },
   { keys: "]t", command: "thread.next", title: "Next thread" },
   { keys: "[t", command: "thread.previous", title: "Previous thread" },
   // The panel's launcher: surfaces and panel actions by letter (`lib/panelLauncher.ts`).
@@ -89,6 +92,7 @@ const GROUPS: readonly KeyGroup[] = [
   { keys: "<leader>f", label: "find" },
   { keys: "<leader>t", label: "thread" },
   { keys: "<leader>m", label: "composer" },
+  { keys: "<leader>z", label: "snooze" },
   { keys: "]", label: "next" },
   { keys: "[", label: "previous" },
 ];

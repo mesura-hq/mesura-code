@@ -1,7 +1,21 @@
 import { snoozeWakeLabel } from "@t3tools/client-runtime/state/thread-settled";
 import type { ReactNode } from "react";
+import * as Schema from "effect/Schema";
+import { writeLocalStorageValue } from "../../hooks/useLocalStorage";
 
 import { SidebarSeparateSection } from "./SidebarSeparateSection";
+
+export const SNOOZED_SECTION_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
+
+/** Shares the existing shelf state and notifies the mounted Sidebar in this tab. */
+export function toggleSnoozedSection(reveal: boolean): void {
+  writeLocalStorageValue(
+    SNOOZED_SECTION_EXPANDED_KEY,
+    (expanded) => reveal || !expanded,
+    false,
+    Schema.Boolean,
+  );
+}
 
 /** Mesura: a compact Snoozed entry immediately before the separate Working section. */
 export function SidebarSnoozedSection(props: {

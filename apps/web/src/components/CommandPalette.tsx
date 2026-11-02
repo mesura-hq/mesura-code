@@ -24,6 +24,8 @@ import { parseIssueSearch, someEnvironmentHasIssues } from "./issues/issues.logi
 import { useDiffPanelStore } from "../diffPanelStore";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { buildProjectActionItems, findJumpTargetItem } from "./CommandPalette.logic";
+// Mesura: snooze palette rows use the shared command registry.
+import { buildSnoozeActionItems } from "./CommandPalette.logic";
 import {
   Columns3Icon,
   CircleDotIcon,
@@ -1788,6 +1790,14 @@ function OpenCommandPaletteDialog(props: {
         runRegisteredCommand("sidebar.toggleWorking");
       },
     });
+
+  // Mesura: available with or without Vim mode.
+  actionItems.push(
+    ...buildSnoozeActionItems({
+      icon: <ListCollapseIcon className={ITEM_ICON_CLASS} />,
+      runCommand: runRegisteredCommand,
+    }),
+  );
 
   actionItems.push(changeThemeItem);
   actionItems.push(changeAppearanceItem);

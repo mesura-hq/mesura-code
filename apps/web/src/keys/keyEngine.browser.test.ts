@@ -179,8 +179,8 @@ describe("key engine leader in the chat", () => {
     byTestId("chat-focus").focus();
 
     press(" ", "Space");
-    expect(press("z")).toEqual({ prevented: true, reachedLater: false });
-    expect(readKeyEngineSnapshot().notice).toBe("<Space>z is not mapped");
+    expect(press("q")).toEqual({ prevented: true, reachedLater: false });
+    expect(readKeyEngineSnapshot().notice).toBe("<Space>q is not mapped");
     expect(readKeyEngineSnapshot().pending).toEqual([]);
   });
 });

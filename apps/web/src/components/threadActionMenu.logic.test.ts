@@ -75,3 +75,21 @@ describe("buildThreadActionMenuItems", () => {
     expect(items.find((item) => item.id === "turn-into-project")?.disabled).toBe(true);
   });
 });
+
+// Phase 2 must retain the upstream snooze submenu and its reverse action.
+it("snooze keys phase 2 guard action menu: presets precede Custom and snoozed threads offer Wake", () => {
+  const submenu = buildThreadActionMenuItems(baseState).find((item) => item.id === "snooze");
+  expect(submenu).toMatchObject({ label: "Snooze", disabled: false });
+  expect(submenu?.children).toEqual([
+    { id: "snooze:hour", label: "In 1 hour (3:00 PM)" },
+    { id: "snooze:custom", label: "Custom…", separatorBefore: true },
+  ]);
+  expect(
+    buildThreadActionMenuItems({ ...baseState, canSnoozeNow: false }).find(
+      (item) => item.id === "snooze",
+    )?.disabled,
+  ).toBe(true);
+  const waking = buildThreadActionMenuItems({ ...baseState, isSnoozed: true });
+  expect(waking.find((item) => item.id === "unsnooze")).toMatchObject({ label: "Wake thread" });
+  expect(waking.some((item) => item.id === "snooze")).toBe(false);
+});

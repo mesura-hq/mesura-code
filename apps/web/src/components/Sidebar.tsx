@@ -11,7 +11,12 @@ import { useThreadJumpTargets } from "./sidebar/threadJumpTargets";
 import { sortActiveThreadsForSidebar } from "./sidebar/activeThreadOrder";
 import { SidebarWorkingSection } from "./sidebar/SidebarWorkingSection";
 // Mesura: the Snoozed entry shares upstream's shelf state and thread rows.
-import { SidebarSnoozedSection } from "./sidebar/SidebarSnoozedSection";
+import {
+  SidebarSnoozedSection,
+  SNOOZED_SECTION_EXPANDED_KEY,
+} from "./sidebar/SidebarSnoozedSection";
+// Mesura: commands reuse the row's snooze guard and forward navigation.
+import { registerSnoozeAndAdvance } from "./sidebar/snoozeAndAdvance";
 import { createWorkingSectionOrder, WORKING_SECTION_EXPANDED_KEY } from "./sidebar/workingSection";
 import { liveShellEnvironmentIdsAtom } from "../state/shell";
 import { attachSidebarTree, SIDEBAR_TREE_PROPS } from "../lib/sidebarTree";
@@ -344,7 +349,7 @@ const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
-const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
+const SNOOZED_SHELF_EXPANDED_KEY = SNOOZED_SECTION_EXPANDED_KEY; // Mesura: shared with the command.
 
 const inboxReturns = createInboxReturnTracker();
 // Mesura: module scope for the same reason as `inboxReturns` (workingSection.ts).
@@ -2457,6 +2462,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       })();
     },
   );
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Mesura: publishes the mounted row snooze path to keyboard and palette commands
+  useEffect(() => registerSnoozeAndAdvance(attemptSnooze), [attemptSnooze]);
 
   const handleMultiSelectContextMenu = useStableCallback(
     async (position: { x: number; y: number }) => {
