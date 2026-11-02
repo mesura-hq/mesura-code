@@ -10,6 +10,8 @@ import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../config.ts";
 import { DeviceService } from "../device/DeviceService.ts";
 import { ServerEnvironment } from "../environment/ServerEnvironment.ts";
+import { FactoryRunTracker } from "../factory/FactoryRunTracker.ts";
+import { FactorySnapshotStore } from "../factory/FactorySnapshotStore.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import { PreviewAutomationBroker } from "../mcp/PreviewAutomationBroker.ts";
@@ -19,6 +21,7 @@ import {
 } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { OrchestratorV2 } from "../orchestration-v2/Orchestrator.ts";
 import { ProviderAdapterRegistryV2 } from "../orchestration-v2/ProviderAdapterRegistry.ts";
+import { ProviderSessionManagerV2 } from "../orchestration-v2/ProviderSessionManager.ts";
 import { ThreadLaunchService } from "../orchestration-v2/ThreadLaunchService.ts";
 import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
 import { ThreadSearch } from "../orchestration-v2/ThreadSearch.ts";
@@ -30,6 +33,7 @@ import { PreviewManager } from "../preview/Manager.ts";
 import { PreviewBrowser } from "../preview/PreviewBrowser.ts";
 import { ManagedProjectFolders } from "../project/ManagedProjectFolders.ts";
 import { ProjectCloneTracker } from "../project/ProjectCloneTracker.ts";
+import { ProjectFaviconResolver } from "../project/ProjectFaviconResolver.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { ProjectSetupScriptRunner } from "../project/ProjectSetupScriptRunner.ts";
 import { PullRequestReviewGuideService } from "../pullRequest/PullRequestReviewGuideService.ts";
@@ -77,6 +81,11 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(ThreadSearch)({}),
   Layer.mock(VcsStatusBroadcaster)({}),
+  // Mesura: the Software Factory, project icon and compact-then-continue tools.
+  Layer.mock(FactoryRunTracker)({}),
+  Layer.mock(FactorySnapshotStore)({}),
+  Layer.mock(ProjectFaviconResolver)({}),
+  Layer.mock(ProviderSessionManagerV2)({}),
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");

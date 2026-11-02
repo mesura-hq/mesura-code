@@ -102,8 +102,6 @@ export const SYMMETRIA_SURFACE_PRESENCE_EXCLUDED_UPSTREAM_FIELDS = [
   "rpcClientId",
   // Device telemetry about the person at the surface.
   "lowPowerMode",
-  "batteryState",
-  "networkType",
   "appState",
   // The raw scope union, of which only the thread member is projected.
   "scopes",

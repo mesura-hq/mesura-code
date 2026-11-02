@@ -51,7 +51,6 @@ import {
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import {
-  defaultProjectIcon,
   hasDefaultProjectIcon,
   projectGroupTitleNeedsUpdate,
   SCRATCH_PROJECT_TITLE,

@@ -34,7 +34,12 @@ import {
   type CommandPaletteUiState,
 } from "./CommandPalette.logic";
 
-const closedState: CommandPaletteUiState = { open: false, mode: "command", openIntent: null };
+const closedState: CommandPaletteUiState = {
+  open: false,
+  mode: "command",
+  openIntent: null,
+  session: 0,
+};
 
 describe("linked pull request thread navigation", () => {
   it("keeps archived relations searchable and routes them through the PR environment", async () => {
@@ -117,11 +122,13 @@ describe("reduceCommandPaletteUiState", () => {
       open: true,
       mode: "command",
       openIntent: { kind: "add-project" },
+      session: 1,
     });
     expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenNewThreadIn" })).toEqual({
       open: true,
       mode: "command",
       openIntent: { kind: "new-thread-in" },
+      session: 1,
     });
   });
 
@@ -135,11 +142,13 @@ describe("reduceCommandPaletteUiState", () => {
       open: false,
       mode: "files",
       openIntent: null,
+      session: 0,
     });
     expect(reduceCommandPaletteUiState(filesOpen, { _tag: "SetOpen", open: true })).toEqual({
       open: true,
       mode: "command",
       openIntent: null,
+      session: 0,
     });
   });
 });
@@ -249,6 +258,8 @@ describe("enumerateCommandPaletteItems", () => {
       "thread.jump.10",
       undefined,
     ]);
+  });
+
   it("keeps the session across mode switches so only intents start the palette over", () => {
     let state: CommandPaletteUiState = {
       open: false,

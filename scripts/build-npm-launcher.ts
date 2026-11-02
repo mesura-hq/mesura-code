@@ -36,11 +36,6 @@ export function npmLauncherPackageManifest(version: string, databaseMigration: n
   return {
     name: NPM_LAUNCHER_PACKAGE_NAME,
     version,
-    // The standalone launcher cannot import workspace modules at runtime.
-    t3code: {
-      stateHomeDirectory: DEFAULT_STATE_HOME_DIR_NAME,
-      releaseBaseUrl: PUBLISHED_RELEASE_BASE_URL,
-    },
     description:
       "T3 Code CLI. Downloads the self-contained executable for this platform from the GitHub Release.",
     license: serverPackageJson.license,
@@ -48,7 +43,12 @@ export function npmLauncherPackageManifest(version: string, databaseMigration: n
     bin: { t3: "./bin/t3.mjs" },
     files: ["bin", "dist"],
     engines: { node: ">=20.11" },
-    t3code: { databaseMigration },
+    // Mesura: the standalone launcher cannot import workspace modules at runtime.
+    t3code: {
+      stateHomeDirectory: DEFAULT_STATE_HOME_DIR_NAME,
+      releaseBaseUrl: PUBLISHED_RELEASE_BASE_URL,
+      databaseMigration,
+    },
   };
 }
 

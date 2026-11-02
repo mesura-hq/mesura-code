@@ -255,6 +255,9 @@ describe("external editor setting", () => {
     expect((await menuShortcutLabels()).some((label) => label.includes("Alt"))).toBe(true);
     expect((await pressAltO()).defaultPrevented).toBe(true);
     expect(state.run).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("remote editor links", () => {
   it("opens the link from the fallback when the picker is not mounted", async () => {
     await using fixture = await setup();

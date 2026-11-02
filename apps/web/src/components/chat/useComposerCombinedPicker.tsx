@@ -238,7 +238,7 @@ export function useOpenCombinedPickerOnEffortShortcut(input: {
   openPicker: () => void;
 }) {
   const { enabled, openOnMoreOptions, openPicker } = input;
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the traits picker action while the picker is closed
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: subscribes to the traits picker action while the picker is closed
   useEffect(() => {
     if (!enabled) return;
     return subscribePickerAction("traits", () => {

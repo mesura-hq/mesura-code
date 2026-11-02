@@ -10,7 +10,7 @@ import { Badge } from "../ui/badge";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
-import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
+import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
 import { CombinedModelPickerContent } from "./CombinedModelPickerContent";
 import type { CombinedPickerConfig } from "./combinedPickerState";
@@ -125,7 +125,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const getTriggerRect = () => triggerRef.current?.getBoundingClientRect() ?? null;
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement | null>(null);
   const size = props.size ?? "sm";
   const docked = props.effortColumn !== undefined;
@@ -405,7 +404,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             </Tooltip>
           )}
           {props.triggerSuffix}
-            {props.triggerAccessory}
+          {props.triggerAccessory}
           {selectedModel?.isUnavailable && !selectedEntries && props.triggerLabel === undefined ? (
             <Badge variant="outline" size="sm">
               Unavailable
@@ -440,7 +439,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             environmentId={props.environmentId}
             activeInstanceId={activeInstanceId}
             model={props.model}
-            {...(props.selectedModels !== undefined ? { selectedModels: props.selectedModels } : {})}
+            {...(props.selectedModels !== undefined
+              ? { selectedModels: props.selectedModels }
+              : {})}
             {...(props.onToggleModel
               ? {
                   onToggleModel: (instanceId: ProviderInstanceId, model: string) => {
@@ -455,7 +456,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             modelOptionsByInstance={props.modelOptionsByInstance}
             terminalOpen={props.terminalOpen ?? false}
             onRequestClose={() => setIsMenuOpen(false)}
-            {...(props.onOpenProviderSetup ? { onOpenProviderSetup: props.onOpenProviderSetup } : {})}
+            {...(props.onOpenProviderSetup
+              ? { onOpenProviderSetup: props.onOpenProviderSetup }
+              : {})}
             getModelDisabledReason={(instanceId, model) =>
               props.disabled
                 ? "Model picker is disabled"

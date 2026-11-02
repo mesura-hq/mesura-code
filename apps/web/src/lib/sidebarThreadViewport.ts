@@ -144,14 +144,14 @@ export function useViewportThreadKeys(active: boolean): readonly string[] | null
   const [keys, setKeys] = useState<readonly string[] | null>(null);
   // No dependency list on purpose; compares with this render's `keys`. A functional update
   // here queued a no-op update per commit and hit "Maximum update depth exceeded".
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the committed DOM after every commit, which render cannot read
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: measures the committed DOM after every commit, which render cannot read
   useLayoutEffect(() => {
     if (!active) return;
     const next = readViewportThreadKeys();
     // oxlint-disable-next-line react/set-state-in-effect -- The rows on screen come from measuring the committed DOM, which render cannot read.
     if (!sameKeys(keys, next)) setKeys(next);
   });
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the thread list's scroll events while the jump hints show
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: subscribes to the thread list's scroll events while the jump hints show
   useLayoutEffect(() => {
     if (!active) return;
     const scroller = threadListScroller();
@@ -225,7 +225,7 @@ export function moveThreadListFocus(key: "ArrowDown" | "ArrowUp"): boolean {
  * or Down in the empty Search field, which enters the list at its top.
  */
 export function useThreadRowArrowKeys(): void {
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: window keydown listener for thread-row arrow navigation, removed on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: window keydown listener for thread-row arrow navigation, removed on unmount
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;

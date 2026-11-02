@@ -656,7 +656,7 @@ describe("composerDraftStore terminal contexts", () => {
   it.each(["replace", "remove", "clear"])("removes terminal links on %s", (operation) => {
     const store = useComposerDraftStore.getState();
     store.setPrompt(threadRef, "Explain");
-    store.addTerminalContext(threadRef, makeTerminalContext({ id: "ctx-1" }));
+    store.addTerminalContexts(threadRef, [makeTerminalContext({ id: "ctx-1" })]);
     if (operation === "replace") store.setTerminalContexts(threadRef, []);
     else if (operation === "remove") store.removeTerminalContext(threadRef, "ctx-1");
     else store.clearTerminalContexts(threadRef);
@@ -668,7 +668,7 @@ describe("composerDraftStore terminal contexts", () => {
     const store = useComposerDraftStore.getState();
     const dictation = "[Transcribing](t3-context://v1/dictation/job-1)";
     store.setPrompt(threadRef, `Explain ${dictation}`);
-    store.addTerminalContext(threadRef, makeTerminalContext({ id: "ctx-1" }));
+    store.addTerminalContexts(threadRef, [makeTerminalContext({ id: "ctx-1" })]);
     store.setTerminalContexts(threadRef, []);
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe(`Explain ${dictation}`);
   });
@@ -692,7 +692,7 @@ describe("composerDraftStore terminal contexts", () => {
   it("clears terminal contexts when clearing composer content", () => {
     useComposerDraftStore
       .getState()
-      .addTerminalContext(threadRef, makeTerminalContext({ id: "ctx-1" }));
+      .addTerminalContexts(threadRef, [makeTerminalContext({ id: "ctx-1" })]);
 
     useComposerDraftStore.getState().clearComposerContent(threadRef);
 

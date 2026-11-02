@@ -1,6 +1,5 @@
 import {
   resolveAdjacentThreadId,
-  isContextMenuPointerDown,
   filterSidebarProjectScopeItems,
   reduceSidebarProjectScopeMenuState,
 } from "./Sidebar.logic";
@@ -361,38 +360,6 @@ describe("resolveAdjacentThreadId", () => {
         }),
       ).toBeNull();
     });
-  });
-});
-
-describe("isContextMenuPointerDown", () => {
-  it("treats secondary-button presses as context menu gestures on all platforms", () => {
-    expect(
-      isContextMenuPointerDown({
-        button: 2,
-        ctrlKey: false,
-        isMac: false,
-      }),
-    ).toBe(true);
-  });
-
-  it("treats ctrl+primary-click as a context menu gesture on macOS", () => {
-    expect(
-      isContextMenuPointerDown({
-        button: 0,
-        ctrlKey: true,
-        isMac: true,
-      }),
-    ).toBe(true);
-  });
-
-  it("does not treat ctrl+primary-click as a context menu gesture off macOS", () => {
-    expect(
-      isContextMenuPointerDown({
-        button: 0,
-        ctrlKey: true,
-        isMac: false,
-      }),
-    ).toBe(false);
   });
 });
 

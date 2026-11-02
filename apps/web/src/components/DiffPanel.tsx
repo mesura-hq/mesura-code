@@ -468,12 +468,12 @@ export default function DiffPanel({
     : isTreeDiffMode
       ? "Tree diff"
       : selectedRunId === null
-      ? selectedCommitSha !== null
-        ? (selectedCommitSubject ?? "Commit")
-        : selectedGitScopeLabel
-      : selectedTurn?.runId === latestTurn?.runId
-        ? "Latest turn"
-        : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
+        ? selectedCommitSha !== null
+          ? (selectedCommitSubject ?? "Commit")
+          : selectedGitScopeLabel
+        : selectedTurn?.runId === latestTurn?.runId
+          ? "Latest turn"
+          : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
   const reviewSectionTitle = toolCallSelection
     ? "Tool call"
     : selectedTurn
@@ -821,10 +821,10 @@ export default function DiffPanel({
     : isTreeDiffMode
       ? "tree"
       : selectedRunId === null
-      ? selectedCommitValue || selectedGitScope
-      : selectedTurn?.runId === latestTurn?.runId
-        ? "latest"
-        : selectedTurnValue;
+        ? selectedCommitValue || selectedGitScope
+        : selectedTurn?.runId === latestTurn?.runId
+          ? "latest"
+          : selectedTurnValue;
   const selectScopeValue = (value: string) => {
     if (value === "unstaged" || value === "branch" || value === "tree") {
       selectGitScope(value);

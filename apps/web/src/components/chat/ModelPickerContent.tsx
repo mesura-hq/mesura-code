@@ -798,6 +798,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   };
   const extensionHidden = props.extension?.hidden === true;
   const onVisibleModelsChange = props.extension?.onVisibleModelsChange;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: publishes the filtered model list to the combined picker's extension, which lives outside this list
   useEffect(() => {
     onVisibleModelsChange?.((modelKey) => filteredModelByKey.has(modelKey));
   }, [filteredModelByKey, onVisibleModelsChange]);
@@ -809,7 +810,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       event.isComposing ||
       event.keyCode === 229 ||
       isCommandPaletteOpen() ||
-        extensionHidden
+      extensionHidden
     ) {
       return;
     }

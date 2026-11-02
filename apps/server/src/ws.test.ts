@@ -1083,9 +1083,8 @@ it.effect(
               scopes: [],
             },
             {},
-            {},
-            yield* PreviewAutomationBroker.PreviewAutomationBroker,
             yield* ServerBrowser.ServerBrowser,
+            () => Effect.void,
           ).pipe(
             Layer.provide(
               Layer.mergeAll(
@@ -1101,6 +1100,7 @@ it.effect(
                 }),
                 Layer.mock(ServerEnvironment.ServerEnvironment)({}),
                 Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+                Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
                 Layer.mock(BrowserTakeoverRequests.BrowserTakeoverRequests)({
                   answer: (input) =>
                     Effect.sync(() => answers.push(input)).pipe(

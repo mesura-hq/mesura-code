@@ -1,9 +1,10 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
+  type ProviderInstanceId,
   type WorktreeSubmodules,
-  managedRuntimeModeDenial,
 } from "@t3tools/contracts";
+import { createModelSelection } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -19,10 +20,11 @@ import {
   resolveProjectDefaultProviderModelSelection,
 } from "../../providerInstances";
 import { useEnvironmentProviders, useEnvironments } from "../../state/environments";
-import { firstManagedDenial } from "../../state/managedPolicy";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { runtimeModeConfig } from "../chat/runtimeModeConfig";
+import { TraitsPicker } from "../chat/TraitsPicker";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
@@ -31,7 +33,12 @@ import { CombinedPickerSettings, type SettingsPickerChange } from "./CombinedPic
 import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SETTINGS_PICKER_TRIGGER_CLASSNAME,
+  SettingResetButton,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import {
   useScopedSettings,

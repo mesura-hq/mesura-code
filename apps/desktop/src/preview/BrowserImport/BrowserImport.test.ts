@@ -221,6 +221,7 @@ const withZenImporter = Effect.fnUntraced(function* (
     Effect.provide(
       BrowserImport.layer.pipe(
         Layer.provide(layerBrowserSession),
+        Layer.provide(DesktopManagedPolicy.layerTest()),
         Layer.provide(Layer.succeed(HostProcess.Environment, { HOME: home })),
         Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
         Layer.provide(Layer.succeed(HostProcess.ExecutablePath, "/usr/bin/mesura-code")),

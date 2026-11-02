@@ -246,7 +246,7 @@ export function BranchToolbarBranchSelector({
   // dependency: those two flags change with every query transition, and
   // resubscribing that often would be churn for nothing.
   const branchTriggerDisabledRef = useRef(false);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the external picker-shortcut bus
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: subscribes to the external picker-shortcut bus
   useEffect(() => {
     // With the drawer, the run context controller answers the branch shortcut.
     if (isDrawer) return;
@@ -366,7 +366,7 @@ export function BranchToolbarBranchSelector({
         ? queriedActiveBranch.isRemote === true
         : null;
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: mirrors the trigger's disabled state for the shortcut subscription above
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: mirrors the trigger's disabled state for the shortcut subscription above
   useEffect(() => {
     branchTriggerDisabledRef.current = isInitialBranchesLoadPending || isBranchActionPending;
   }, [isInitialBranchesLoadPending, isBranchActionPending]);

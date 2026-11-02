@@ -62,7 +62,7 @@ vi.mock(import("../state/use-atom-command"), async (original) => {
           ? state.link
           : command === threadEnvironment.unlinkPullRequest
             ? state.unlink
-          : state.openEditor) as never,
+            : state.openEditor) as never,
   };
 });
 vi.mock(import("../state/session"), async (original) => {

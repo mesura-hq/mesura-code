@@ -10,7 +10,7 @@ import type {
   RuntimeSessionExitKind,
   RuntimeSessionState,
   RuntimeThreadState,
-} from "@t3tools/contracts";
+} from "#upstream-runtime-vocabulary";
 
 /**
  * Mesura: upstream stopped exporting the event-type vocabulary as its own type.

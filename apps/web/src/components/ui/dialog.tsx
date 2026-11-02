@@ -91,7 +91,7 @@ function DialogPopup({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
   bottomStickOnMobile?: boolean;
-  /** `workspace`: a large panel that fills the screen below `md`, where `useIsMobile` switches. */
+  /** `workspace`: a large panel that fills the screen below `md`, where `useMediaQuery("max-md")` switches. */
   variant?: "default" | "media" | "workspace";
 }) {
   const workspace = variant === "workspace";

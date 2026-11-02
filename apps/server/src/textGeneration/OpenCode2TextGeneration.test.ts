@@ -385,6 +385,9 @@ it.layer(layer)("OpenCode2TextGeneration", (it) => {
         })
         .pipe(Effect.flip, Effect.timeout("10 seconds"));
       assert.equal(failure._tag, "TextGenerationError");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("times out when the prompt request and its interrupt never answer", () =>
     Effect.gen(function* () {
       const [subscribe, connected, create, created] = OPENCODE2_TITLE_GENERATION;

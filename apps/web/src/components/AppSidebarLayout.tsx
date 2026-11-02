@@ -499,11 +499,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         {children}
         <BackgroundThreadAnnouncer />
         <SidebarControl />
-        <SidebarCommandHost
-          surface={
-            isAppModalPage(pathname) ? "settings" : legacySidebarEnabled ? "legacy" : "threads"
-          }
-        />
+        <SidebarCommandHost surface={isAppModalPage(pathname) ? "settings" : "threads"} />
         <AgentSearchHost />
         {isElectron ? <HistorySwipeNavigation /> : null}
       </SidebarProvider>

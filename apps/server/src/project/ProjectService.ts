@@ -612,7 +612,7 @@ export const make = Effect.gen(function* () {
     function* ({ cursor, limit }) {
       // Mesura: agents never see the hidden search project (ADR-010).
       const rows = (yield* listRows).filter(
-        (project) => project.deletedAt === null && !isThreadSearchProject(project.id),
+        (project) => project.deletedAt === null && !isThreadSearchProject(project.projectId),
       );
       const projects = yield* Effect.forEach(
         rows.slice(cursor, cursor + limit),

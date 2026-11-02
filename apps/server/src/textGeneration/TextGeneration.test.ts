@@ -10,6 +10,7 @@ import { createModelSelection } from "@t3tools/shared/model";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as TextGeneration from "./TextGeneration.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as Layer from "effect/Layer";
 
@@ -105,7 +106,7 @@ describe("TextGeneration.make", () => {
           ProviderInstanceRegistry.ProviderInstanceRegistry,
           makeStubRegistry([defaultInstance, smallInstance]),
         ),
-        Effect.provide(noLinkLookupLayer),
+        Effect.provide(Layer.merge(noLinkLookupLayer, ServerSettings.layerTest({}))),
       );
 
       const modelSelection = createModelSelection(smallId, "openai/gpt-5-mini");
@@ -126,7 +127,7 @@ describe("TextGeneration.make", () => {
           ProviderInstanceRegistry.ProviderInstanceRegistry,
           makeStubRegistry([]),
         ),
-        Effect.provide(noLinkLookupLayer),
+        Effect.provide(Layer.merge(noLinkLookupLayer, ServerSettings.layerTest({}))),
       );
 
       const error = yield* generation

@@ -126,16 +126,18 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import {
+  blockedImportOutcome,
   formatPaymentDomainsText,
   importFailureReason,
   importIntoServerProfile,
+  importPolicyRefusal,
   paymentDomainsPatch,
   serverImportTargetNotice,
   serverImportTargetProfiles,
   type ImportOutcome,
 } from "./browserImportWizard.logic";
 
-export { importFailureReason };
+export { importFailureReason, importPolicyRefusal };
 
 const FILL_VALUE = "fill";
 const RESPONSIVE_VALUE = "responsive";
@@ -197,26 +199,6 @@ class ProfileLimitReachedError extends Error {
     this.name = "ProfileLimitReachedError";
   }
 }
-
-export const importFailureReason = (cause: unknown): BrowserImportFailureReason => {
-  const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
-  return (
-    BrowserImportFailureReason.literals.find((reason) => message.includes(`failed: ${reason}.`)) ??
-    "readFailed"
-  );
-};
-
-/**
- * The desktop's refusal when the machine's managed policy forbids cookie import. IPC wraps the
- * message in its own prefixes, so the sentence is matched on the contract's wording.
- */
-export const importPolicyRefusal = (cause: unknown): string | undefined => {
-  const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
-  return (
-    /The managed policy at .* importing browser cookies is not allowed\./u.exec(message)?.[0] ??
-    /(?:^|: )([^:]*'s policy does not allow importing browser cookies\.)/u.exec(message)?.[1]
-  );
-};
 
 async function importBrowserCookiesIntoTarget(
   bridge: NonNullable<typeof previewBridge>,
@@ -292,10 +274,7 @@ async function importBrowserCookiesIntoTarget(
       targetName,
     };
   } catch (cause) {
-    const policyRefusal = importPolicyRefusal(cause);
-    return policyRefusal !== undefined
-      ? { kind: "blocked", reason: "readFailed", message: policyRefusal }
-      : { kind: "blocked", reason: importFailureReason(cause) };
+    return blockedImportOutcome(cause);
   }
 }
 

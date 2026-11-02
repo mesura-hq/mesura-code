@@ -53,7 +53,9 @@
         "lib/mesura-panel.launcher.fixture.mjs",
         "lib/mesura-timeline.find.fixture.mjs",
       ],
-      "ignoreDependencies": ["esbuild"],
+      // Mesura: upstream's scripts/mobile-behavior imports @t3tools/contracts; this fork
+      // deletes that directory (ADR-008), and the manifest line stays upstream's.
+      "ignoreDependencies": ["esbuild", "@t3tools/contracts"],
       // The `t3` npm package's files: copied into the package, never imported.
       // knip-schemas.test.ts writes a throwaway project to .knip-test-*, which a
       // knip run beside it in check:changed must not report.

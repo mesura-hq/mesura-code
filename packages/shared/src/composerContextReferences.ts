@@ -311,12 +311,6 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
         `environmentId: ${record.environmentId}`,
         "The user means this machine. Not linked here yet: call t3_environment_link with this environmentId. Linked: pass it as environmentId, or target.environmentId for delegate_task.",
       ].join("\n");
-    case "environment":
-      return [
-        `label: ${record.label}`,
-        `environmentId: ${record.environmentId}`,
-        "The user means this Mesura Code environment (a machine). If it is not linked here yet, call t3_environment_link with this environmentId; once linked, pass the environmentId to delegate_task / t3_thread_launch and the other tools.",
-      ].join("\n");
   }
 }
 

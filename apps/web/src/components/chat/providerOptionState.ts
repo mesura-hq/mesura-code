@@ -20,11 +20,12 @@ import { withImplicitFastModeDefault } from "./composerProviderState";
 import {
   buildTraitsTriggerDisplay,
   replaceDescriptorCurrentValue,
-  ULTRATHINK_PROMPT_PREFIX,
 } from "@t3tools/client-runtime/model-traits";
 import { buildUnavailableModelOptionDescriptors } from "./TraitsPicker";
 
-export { ULTRATHINK_PROMPT_PREFIX } from "@t3tools/client-runtime/model-traits";
+// Upstream dropped this prefix when its pickers stopped offering Ultrathink; the combined
+// picker still offers it, by writing this prefix into the prompt.
+export const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
 
 /**
  * Provider option rules for the combined model picker. The selection and prompt rules mirror

@@ -83,7 +83,10 @@ describe("T3 device instructions", () => {
       t3AcpPromptWithInstructions({ prompt: "Again.", state, previousState: state }),
       "Again.",
     );
-    assert.notInclude(t3AcpPromptWithInstructions({ prompt: "Hi.", state }), "## Mesura Code devices");
+    assert.notInclude(
+      t3AcpPromptWithInstructions({ prompt: "Hi.", state }),
+      "## Mesura Code devices",
+    );
   });
 });
 

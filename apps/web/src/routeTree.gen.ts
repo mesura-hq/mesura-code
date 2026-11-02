@@ -37,8 +37,8 @@ import { Route as ChatSettingsLabsRouteImport } from './routes/_chat.settings.la
 import { Route as ChatSettingsKeybindingsRouteImport } from './routes/_chat.settings.keybindings'
 import { Route as ChatSettingsIntegrationsRouteImport } from './routes/_chat.settings.integrations'
 import { Route as ChatSettingsGeneralRouteImport } from './routes/_chat.settings.general'
-import { Route as ChatSettingsDictationRouteImport } from './routes/_chat.settings.dictation'
 import { Route as ChatSettingsDiffsRouteImport } from './routes/_chat.settings.diffs'
+import { Route as ChatSettingsDictationRouteImport } from './routes/_chat.settings.dictation'
 import { Route as ChatSettingsDiagnosticsRouteImport } from './routes/_chat.settings.diagnostics'
 import { Route as ChatSettingsDevicesRouteImport } from './routes/_chat.settings.devices'
 import { Route as ChatSettingsConnectionsRouteImport } from './routes/_chat.settings.connections'
@@ -195,12 +195,14 @@ const ChatSettingsGeneralRoute = ChatSettingsGeneralRouteImport.update({
   path: '/general',
   getParentRoute: () => ChatSettingsRoute,
 } as any)
-const ChatSettingsDictationRoute = ChatSettingsDictationRouteImport.update({
-  id: '/dictation',
-  path: '/dictation',
 const ChatSettingsDiffsRoute = ChatSettingsDiffsRouteImport.update({
   id: '/diffs',
   path: '/diffs',
+  getParentRoute: () => ChatSettingsRoute,
+} as any)
+const ChatSettingsDictationRoute = ChatSettingsDictationRouteImport.update({
+  id: '/dictation',
+  path: '/dictation',
   getParentRoute: () => ChatSettingsRoute,
 } as any)
 const ChatSettingsDiagnosticsRoute = ChatSettingsDiagnosticsRouteImport.update({
@@ -737,16 +739,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatSettingsGeneralRouteImport
       parentRoute: typeof ChatSettingsRoute
     }
-    '/_chat/settings/dictation': {
-      id: '/_chat/settings/dictation'
-      path: '/dictation'
-      fullPath: '/settings/dictation'
-      preLoaderRoute: typeof ChatSettingsDictationRouteImport
     '/_chat/settings/diffs': {
       id: '/_chat/settings/diffs'
       path: '/diffs'
       fullPath: '/settings/diffs'
       preLoaderRoute: typeof ChatSettingsDiffsRouteImport
+      parentRoute: typeof ChatSettingsRoute
+    }
+    '/_chat/settings/dictation': {
+      id: '/_chat/settings/dictation'
+      path: '/dictation'
+      fullPath: '/settings/dictation'
+      preLoaderRoute: typeof ChatSettingsDictationRouteImport
       parentRoute: typeof ChatSettingsRoute
     }
     '/_chat/settings/diagnostics': {

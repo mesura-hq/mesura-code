@@ -2,6 +2,9 @@
   "name": "@symmetria/broker-contract",
   "private": true,
   "type": "module",
+  "imports": {
+    "#upstream-runtime-vocabulary": "./src/retiredUpstreamVocabulary.ts"
+  },
   "exports": {
     ".": {
       "types": "./src/index.ts",

@@ -54,7 +54,6 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
-  useEffect,
   useEffectEvent,
   useRef,
   useState,
@@ -778,6 +777,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const viewportRef = useRef<TimelineViewport | null>(null);
   const navigateTimeline = () => viewportRef.current?.navigate({ releasesFollow: true });
   // Mesura: the question keybinding scrolls to the first pending question and focuses it.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: subscribes to the question keybinding bus while the timeline is mounted
   useEffect(() => {
     const revealQuestion = () => {
       const index = rows.findIndex((row) => row.kind === "pending-user-input");
@@ -1320,6 +1320,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     factoryContext,
   };
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: subscribes to the turn-jump request bus while the timeline is mounted
   useEffect(
     () =>
       subscribeTurnJumpRequest((request) => {
@@ -1337,7 +1338,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
       }),
     [minimapCurrentIndex, minimapItems, navigateTimeline, listRef],
   );
-  const listExtraData = { identity: listIdentityKey, rowCount: rows.length, sharedState };
   const timelineListFooter = (
     <TimelineListFooter
       composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment}

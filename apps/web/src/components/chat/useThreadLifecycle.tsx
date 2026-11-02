@@ -671,7 +671,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
       <ThreadAgentSignalEnd
         entry={{
           signal: activeAgentSignal,
-          settleSupported: supportsSettlement,
+          settleSupported: serverConfigLoaded,
           actionsDisabled: !canOperateThread,
           onDismiss: clearActiveAgentSignalStable,
           onSettle: settleActiveThreadStable,

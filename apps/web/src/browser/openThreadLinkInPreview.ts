@@ -23,11 +23,7 @@ import {
 } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { recordVisitForThread } from "~/browserHistoryStore";
-import {
-  browserDefaultOpenProfileId,
-  browserDefaultOpenViewport,
-  resolveBrowserDefaults,
-} from "./browserDefaults";
+import { resolveBrowserDefaults } from "./browserDefaults";
 import {
   canOpenLinksInApp,
   readLinkClient,
@@ -185,8 +181,8 @@ export async function openThreadLinkInPreview<E>(input: {
         environmentId: ref.environmentId,
         input: {
           threadId: ref.threadId,
-          profileId: browserDefaultOpenProfileId(defaults),
-          viewport: browserDefaultOpenViewport(defaults),
+          profileId: defaults.profileId,
+          viewport: defaults.viewport,
         },
       }),
       action.signal,

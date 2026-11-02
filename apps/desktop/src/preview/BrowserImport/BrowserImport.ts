@@ -113,7 +113,7 @@ export class BrowserImport extends Context.Service<
     /** Parses a source profile's cookies without touching any Electron session. */
     readonly readCookies: (
       input: DesktopPreviewReadCookiesInput,
-    ) => Effect.Effect<CookieReadResult, BrowserImportFailedError>;
+    ) => Effect.Effect<CookieReadResult, BrowserImportFailedError | BrowserImportPolicyError>;
     readonly importCookies: (input: {
       readonly input: BrowserImportInput;
       readonly scope: string;

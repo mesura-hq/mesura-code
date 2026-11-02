@@ -134,6 +134,7 @@ it.effect("resolves only the requested active project page in creation order", (
       Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
         invalidate: () => Effect.void,
         resolvePath: (workspaceRoot) => note(workspaceRoot).pipe(Effect.as(null)),
+        resolveEffectiveImage: () => Effect.die("unused"),
       }),
     );
     yield* Effect.gen(function* () {

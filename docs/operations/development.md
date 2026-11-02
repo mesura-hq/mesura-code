@@ -107,6 +107,7 @@ paths open, so keep none of them. Before the copy's first start:
 
 Before starting, read `settings.json` back and refuse to start unless `providerInstances` holds
 exactly the stubbed entries above.
+
 ### Replay provider
 
 `vp run dev` registers `Replay (dev)`, a local ACP agent at

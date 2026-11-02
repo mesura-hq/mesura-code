@@ -143,6 +143,7 @@ const makeHarness = Effect.fn("BackgroundSyncTest.makeHarness")(function* () {
     ready: Effect.void,
     probe: Effect.void,
     closed: Effect.never,
+    inboundFrames: Effect.succeed(0),
   };
   const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
     target: TARGET,
@@ -170,7 +171,7 @@ const makeHarness = Effect.fn("BackgroundSyncTest.makeHarness")(function* () {
     networkStatus: yield* SubscriptionRef.make<NetworkStatus>("online"),
     start: Effect.void,
     register: unexpected("environment registration"),
-    registerPlatform: unexpected("environment registration"),
+    assertKnownAddress: unexpected("address check"),
     reconcilePlatform: unexpected("environment reconciliation"),
     remove: unexpected("environment removal"),
     removeRoute: unexpected("route removal"),

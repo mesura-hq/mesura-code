@@ -175,27 +175,27 @@ export function ComposerControlsBar(props: {
   // Mesura: with the combined picker, access lives in the picker, not the resting strip.
   const restingBlockDefs = (
     showModeBlock
-    ? [
-        {
-          id: "mode",
-          content: (
-            <ComposerFooterModeControls
-              showInteractionModeToggle={planModeUiEnabled}
-              showRuntimeMode={combinedPicker === undefined}
-              interactionMode={interactionMode}
-              runtimeMode={compatibleRuntimeMode}
-              runtimeModeOptions={compatibleRuntimeModeOptions}
-              size={controlSize}
-              hidden={composerControlsHidden || restingHiddenBlockCount > 0}
-              accessDisplay={accessDisplay}
-              emphasized={!accessMatchesDefault}
-              onToggleInteractionMode={toggleInteractionMode}
-              onRuntimeModeChange={handleRuntimeModeChange}
-            />
-          ),
-        },
-      ]
-    : []
+      ? [
+          {
+            id: "mode",
+            content: (
+              <ComposerFooterModeControls
+                showInteractionModeToggle={planModeUiEnabled}
+                showRuntimeMode={combinedPicker === undefined}
+                interactionMode={interactionMode}
+                runtimeMode={compatibleRuntimeMode}
+                runtimeModeOptions={compatibleRuntimeModeOptions}
+                size={controlSize}
+                hidden={composerControlsHidden || restingHiddenBlockCount > 0}
+                accessDisplay={accessDisplay}
+                emphasized={!accessMatchesDefault}
+                onToggleInteractionMode={toggleInteractionMode}
+                onRuntimeModeChange={handleRuntimeModeChange}
+              />
+            ),
+          },
+        ]
+      : []
   ).filter((def) => isComposerRestingBlockShown(def.id, { planModeUiEnabled }));
   // Its own element, so typing (which rebuilds the controls around it) leaves it cached.
   const composerModelPicker = (

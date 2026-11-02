@@ -15,7 +15,6 @@ import {
   findInlinedExternalPackages,
   selectCliRuntimeExternalDependencies,
   shouldBundleCliDependency,
-  selectCliRuntimeExternalDependencies,
 } from "./cli-external-packages.ts";
 
 // Native bindings live in optionalDependencies; checking dependencies alone misses them.

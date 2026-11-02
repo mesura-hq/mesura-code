@@ -79,7 +79,7 @@ export function useMesuraPendingThreadRequests(input: {
   );
   const activePendingApproval = pendingApprovals[0] ?? null;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
-  // oxlint-disable-next-line t3code/react-effect-budget -- prunes external draft stores when the server's pending set changes; no handler owns that change
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- prunes external draft stores when the server's pending set changes; no handler owns that change
   useEffect(() => {
     if (!activeThread) return;
     const questionThread = activeThread;
@@ -260,7 +260,7 @@ export function useMesuraPendingThreadRequests(input: {
   };
 
   // A dictated answer that submits itself goes through this thread's own respond while shown.
-  // oxlint-disable-next-line t3code/react-effect-budget -- registers with an external registry for the thread's lifetime and unregisters on cleanup
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers with an external registry for the thread's lifetime and unregisters on cleanup
   useEffect(
     () =>
       activeThreadId

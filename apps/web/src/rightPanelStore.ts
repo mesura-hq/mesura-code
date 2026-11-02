@@ -832,6 +832,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               surface,
             );
           }),
+        ),
       openSideChat: (ref, threadId) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) =>

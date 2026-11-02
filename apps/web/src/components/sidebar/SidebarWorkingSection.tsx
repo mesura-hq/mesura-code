@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { type KeyboardEvent, type ReactNode, useRef } from "react";
 
-import { useClientSettings } from "../../hooks/useSettings";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
@@ -23,7 +22,6 @@ export function SidebarWorkingSection(props: {
   const { count, expanded } = props;
   const sectionRef = useRef<HTMLDivElement>(null);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const redesign = useClientSettings((settings) => settings.redesignEnabled);
   const seen = useSeenOnScreen(sectionRef);
   useWorkingSweep(sectionRef, expanded && seen && count > 0);
   const shortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggleWorking");
@@ -55,11 +53,7 @@ export function SidebarWorkingSection(props: {
                 data-working-section-header=""
                 data-mesura-nav-stop=""
                 data-testid="sidebar-working-shelf-toggle"
-                accessory={
-                  redesign || !expanded ? (
-                    <span className="font-normal tabular-nums">{count}</span>
-                  ) : null
-                }
+                accessory={<span className="font-normal tabular-nums">{count}</span>}
               />
             }
           >

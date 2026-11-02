@@ -429,7 +429,7 @@ function ManagedCodexSetup({
     importedAttempt.current = attemptId;
     void transferFinishedProfile(handoffQuery.data.profile);
   }, [handoff, handoffQuery.data]);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: imports finished handoff data before disposing a failed query (WORKAROUND below)
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: imports finished handoff data before disposing a failed query (WORKAROUND below)
   useEffect(() => {
     if (
       handoff &&

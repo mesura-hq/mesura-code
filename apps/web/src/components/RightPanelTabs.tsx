@@ -477,6 +477,7 @@ function RightPanelEmptyState(props: {
     panelActions,
     panelOpen: props.panelOpen,
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- latest-ref: the window listener reads the newest actions without re-subscribing
   useLayoutEffect(() => {
     shortcutActionsRef.current = { actions, runAction, panelActions, panelOpen: props.panelOpen };
   });
@@ -581,6 +582,7 @@ function RightPanelEmptyState(props: {
   });
   // Mesura: `Space p` or `Ctrl+T` on an empty panel finds the launcher
   // already mounted; it takes the keys again.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: focuses the already-mounted launcher when a keyboard request reopens it
   useEffect(() => {
     if (launcherOpen) rootRef.current?.focus({ preventScroll: true });
   }, [launcherOpen]);
@@ -599,6 +601,7 @@ function RightPanelEmptyState(props: {
 
   return (
     <div
+      ref={focusOnMount}
       data-workspace-focus-default
       tabIndex={0}
       onKeyDown={handleKeyDown}
@@ -1019,10 +1022,6 @@ function PullRequestSurfaceIcon({
     isDraft: status.isDraft ?? detail?.isDraft ?? seed?.isDraft ?? false,
   });
   return <presentation.Icon className={cn("size-3 shrink-0", presentation.toneClassName)} />;
-}
-
-export function focusOnMount(node: HTMLDivElement | null) {
-  node?.focus();
 }
 
 function SortableTabList(props: {
@@ -1657,6 +1656,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   pullRequestsAvailable={props.pullRequestsAvailable}
                   deviceAvailable={props.deviceAvailable}
                   panelActions={panelActions}
+                  sideChatAvailable={props.sideChatAvailable === true}
+                  sideChatDisabledReason={props.sideChatDisabledReason ?? null}
                 />
               </div>
             ) : null}

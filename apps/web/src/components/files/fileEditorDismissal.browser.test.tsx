@@ -51,7 +51,12 @@ describe("installFileEditorDismissal", () => {
     using _dismissal = {
       [Symbol.dispose]: installFileEditorDismissal({
         root: screen.getByTestId("file-surface").element() as HTMLElement,
-        editor: editor!,
+        // Mesura: the dismissal takes the Monaco surface's editor shape; this drives pierre's.
+        editor: {
+          hasTextFocus: () => false,
+          collapseSelection: () => editor!.setSelections([]),
+          blur: () => {},
+        },
         isBlocked: () => false,
         onDismiss: () => {},
       }),

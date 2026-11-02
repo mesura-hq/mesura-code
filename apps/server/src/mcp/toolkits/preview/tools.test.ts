@@ -43,6 +43,8 @@ it("preview_open tells agents the profile holds the operator's logins and that t
   expect(description).toMatch(/operator'?s? logins/i);
   expect(description).toMatch(/\bnever\b[^.]*\bbuy\b/i);
   expect(description).toMatch(/\bnever\b[^.]*\bpay\b/i);
+});
+
 it("preview_open accepts a target while preserving open input constraints", () => {
   const decode = Schema.decodeUnknownSync(PreviewToolkit.tools.preview_open.parametersSchema);
   const target = { kind: "environment-port", port: 3000 };

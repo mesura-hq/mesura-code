@@ -778,6 +778,7 @@ it.effect.each([
             runNow: () => Effect.fail(error),
           }),
         ),
+        Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
       ),
     ),
   ),

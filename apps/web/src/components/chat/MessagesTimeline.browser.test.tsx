@@ -1439,6 +1439,8 @@ it("follows the end when new rows arrive before pending cards and a plan returns
       2,
     );
   });
+});
+
 function TimelineChangedFilesCard() {
   const [expanded, setExpanded] = useState(true);
   return (

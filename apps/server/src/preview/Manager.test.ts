@@ -187,15 +187,6 @@ it.layer(layer)("PreviewManager", (it) => {
         expect(yield* collector.drain).toEqual([]);
         expect(
           yield* manager
-            .navigate({
-              threadId,
-              tabId: reused.selectedTabId,
-              url: "https://example.com/forbidden",
-            })
-            .pipe(Effect.flip),
-        ).toMatchObject({ _tag: "PreviewControlRequiredError" });
-        expect(
-          yield* manager
             .reportStatus({
               threadId,
               tabId: reused.selectedTabId,

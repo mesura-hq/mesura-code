@@ -853,32 +853,6 @@ export const OrchestrationV2SubagentWorkflow = Schema.Struct({
 export type OrchestrationV2SubagentWorkflow = typeof OrchestrationV2SubagentWorkflow.Type;
 
 /**
- * Where an app-owned task runs when it runs in a linked environment instead
- * of in a child thread here: that environment and the ordinary thread it runs
- * as there. Such a task has no `childThreadId`.
- */
-export const OrchestrationV2RemoteTaskChild = Schema.Struct({
-  environmentId: EnvironmentId,
-  threadId: ThreadId,
-  label: Schema.String,
-  /** The run there that carries the task; absent on tasks recorded before it was kept. */
-  runId: Schema.optional(RunId),
-  /**
-   * Set when nothing is left to stop there: a stop reached the thread, the other side refused it
-   * for good, the thread or its link is gone, or the run ended by itself on a task not cancelled or
-   * stopped here. `false` is a stop owed by a Stop here on a task that already had its result.
-   * While a stop is owed, the follower keeps sending it, across restarts.
-   */
-  stoppedThere: Schema.optional(Schema.Boolean),
-  /**
-   * Stops asked for here once the task had its result. The count names the
-   * one owed, so each reaches the thread there once however often it is sent.
-   */
-  stopCount: Schema.optional(NonNegativeInt),
-});
-export type OrchestrationV2RemoteTaskChild = typeof OrchestrationV2RemoteTaskChild.Type;
-
-/**
  * Wire-only, for clients that opted in with `acceptDedupedBodies` or `dedupeBodies=1`: the field
  * was blanked because an earlier record on the same response or stream holds the same value.
  * Restore with `@t3tools/shared/orchestrationV2DedupedBodies`; never store or forward a marked

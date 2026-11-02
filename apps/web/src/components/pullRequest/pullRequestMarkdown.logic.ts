@@ -67,6 +67,7 @@ export function sameRepositoryReferenceAutolinker(
     (find?.(text, repositoryUrl) ?? []).filter(
       (link) => link.kind === "reference" && link.text.startsWith("#"),
     );
+}
 
 const NO_AUTOLINK_PLUGINS: PluggableList = [];
 const autolinkPlugins = new Map<string, PluggableList>();

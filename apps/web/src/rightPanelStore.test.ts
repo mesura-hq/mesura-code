@@ -64,6 +64,8 @@ describe("rightPanelStore", () => {
     state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
     expect(state.isOpen).toBe(true);
     expect(state.activeSurfaceId).toBe("issues");
+  });
+
   it("opens a hosted side chat's panel actions in its parent's panel until unhosted", () => {
     const store = useRightPanelStore.getState();
     const unhost = hostRightPanel(refB, refA);

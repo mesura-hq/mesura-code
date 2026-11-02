@@ -160,9 +160,9 @@ export function RunContextDrawer(props: RunContextDrawerProps) {
       rootRef.current?.querySelector<HTMLButtonElement>("[data-run-context-panel] button");
     option?.focus({ preventScroll: true });
   }, [activeTab, selectedHost, selectedWorkspace]);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: moves DOM focus to the active tab's selected option before paint
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: moves DOM focus to the active tab's selected option before paint
   useLayoutEffect(focusActiveTab, [focusActiveTab]);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: document focusin listener for the WORKAROUND above, removed on cleanup
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: document focusin listener for the WORKAROUND above, removed on cleanup
   useEffect(() => {
     const handler = (event: FocusEvent) => {
       if (performance.now() > reclaimFocusUntilRef.current) return;
@@ -482,7 +482,7 @@ function RunContextOptionRow(props: {
  * drawer makes the strip taller, so the shell has to learn the real height.
  */
 function useStripExtension(rootRef: React.RefObject<HTMLDivElement | null>) {
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the strip height into the composer shell's CSS variable before paint
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: measures the strip height into the composer shell's CSS variable before paint
   useLayoutEffect(() => {
     const strip = rootRef.current?.closest<HTMLElement>('[data-slot="composer-context-strip"]');
     const shell = strip?.closest<HTMLElement>('[data-slot="composer-shell"]');
@@ -510,7 +510,7 @@ function useCloseOnOutsidePress(
   rootRef: React.RefObject<HTMLDivElement | null>,
   onClose: (options: { focusComposer: boolean }) => void,
 ) {
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: document pointerdown listener that closes the drawer on an outside press
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: document pointerdown listener that closes the drawer on an outside press
   useEffect(() => {
     const handler = (event: PointerEvent) => {
       const strip = rootRef.current?.closest('[data-slot="composer-context-strip"]');

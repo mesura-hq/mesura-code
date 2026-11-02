@@ -55,7 +55,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   // new thread made the control editable again.
   const workspaceLocked = envLocked || forceNewWorktree;
   if (workspaceLocked && isOpen) setIsOpen(false);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the composer's workspace picker shortcut while the control is editable
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: subscribes to the composer's workspace picker shortcut while the control is editable
   useEffect(() => {
     if (workspaceLocked) return;
     return subscribePickerAction("workspace", () => {

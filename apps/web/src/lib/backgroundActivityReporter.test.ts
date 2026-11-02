@@ -1,8 +1,14 @@
+import { EnvironmentRegistry } from "@t3tools/client-runtime/connection";
 import { EnvironmentId, ThreadId, WS_METHODS } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as SubscriptionRef from "effect/SubscriptionRef";
+import * as TestClock from "effect/testing/TestClock";
 
 import {
+  layer,
   observeBackgroundActivitySubscription,
   retainBackgroundScope,
   retainedBackgroundScopes,

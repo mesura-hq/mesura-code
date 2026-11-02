@@ -231,9 +231,13 @@ const serveBox = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) =>
       Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
       Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
       Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
-      Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
-      // Mesura: the compact-then-continue tool.
-      Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(PeerLinks.PeerLinks)({}),
+          // Mesura: the compact-then-continue tool.
+          Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({}),
+        ),
+      ),
     ),
   );
 

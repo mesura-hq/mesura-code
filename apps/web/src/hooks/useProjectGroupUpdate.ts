@@ -175,23 +175,23 @@ export function useProjectGroupImageUpdate(group: SidebarProjectSnapshot) {
   const readEffectiveIcons = async (
     targets: ReadonlyArray<ProjectGroupWriteTarget>,
   ): Promise<ReadonlyArray<EffectiveIconReport>> => {
-      const reports: EffectiveIconReport[] = [];
-      const environmentIds = new Set(targets.map((target) => target.environmentId));
-      for (const environmentId of environmentIds) {
-        const inEnvironment = targets.filter((target) => target.environmentId === environmentId);
-        const result = await previewProjectIcons({
-          environmentId,
-          input: { projectIds: inEnvironment.map((target) => target.id) },
-        });
-        if (result._tag !== "Success") return [];
-        for (const preview of result.value) {
-          const target = inEnvironment.find((candidate) => candidate.id === preview.projectId);
-          if (target && preview.effectiveSource !== undefined) {
-            reports.push({ target, source: preview.effectiveSource });
-          }
+    const reports: EffectiveIconReport[] = [];
+    const environmentIds = new Set(targets.map((target) => target.environmentId));
+    for (const environmentId of environmentIds) {
+      const inEnvironment = targets.filter((target) => target.environmentId === environmentId);
+      const result = await previewProjectIcons({
+        environmentId,
+        input: { projectIds: inEnvironment.map((target) => target.id) },
+      });
+      if (result._tag !== "Success") return [];
+      for (const preview of result.value) {
+        const target = inEnvironment.find((candidate) => candidate.id === preview.projectId);
+        if (target && preview.effectiveSource !== undefined) {
+          reports.push({ target, source: preview.effectiveSource });
         }
       }
-      return reports;
+    }
+    return reports;
   };
 
   /**
@@ -204,29 +204,27 @@ export function useProjectGroupImageUpdate(group: SidebarProjectSnapshot) {
     faviconPath: string | null,
     targets: ReadonlyArray<ProjectGroupWriteTarget> = captureProjectGroupWriteTargets(group),
   ): Promise<AtomCommandResult<void, unknown>> => {
-      const result = await updateProjectGroup(
-        targets,
-        (target) => ({
-          ...(faviconPath === null
-            ? defaultProjectIcon(target)
-            : { faviconPath, projectIcon: null }),
-          expectedWorkspaceRoot: target.workspaceRoot,
-        }),
-        "Failed to update project icon",
-      );
-      if (result._tag !== "Success") return result;
-      const change = faviconPath === null ? "reset" : "saved";
-      const confirmation = describeGroupImageChange(
-        change,
-        await readEffectiveIcons(targets),
-        group.displayName,
-      );
-      toastManager.add({
-        type: confirmation.type,
-        title: change === "saved" ? "Project icon saved" : "Saved project icon cleared",
-        description: confirmation.description,
-      });
-      return result;
+    const result = await updateProjectGroup(
+      targets,
+      (target) => ({
+        ...(faviconPath === null ? defaultProjectIcon(target) : { faviconPath, projectIcon: null }),
+        expectedWorkspaceRoot: target.workspaceRoot,
+      }),
+      "Failed to update project icon",
+    );
+    if (result._tag !== "Success") return result;
+    const change = faviconPath === null ? "reset" : "saved";
+    const confirmation = describeGroupImageChange(
+      change,
+      await readEffectiveIcons(targets),
+      group.displayName,
+    );
+    toastManager.add({
+      type: confirmation.type,
+      title: change === "saved" ? "Project icon saved" : "Saved project icon cleared",
+      description: confirmation.description,
+    });
+    return result;
   };
 
   return { updateProjectImage };

@@ -27,12 +27,11 @@ export function RightPanelResizeHandle({
       aria-label={label}
       aria-orientation="vertical"
       {...separatorProps}
-      {...paneEdgeProps}
       className={cn(
         "group absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize select-none outline-none",
         className,
       )}
-      {...separatorProps}
+      {...paneEdgeProps}
       {...handlers}
     >
       <span

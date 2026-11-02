@@ -273,6 +273,7 @@ export function PreviewView({
   const { environmentId: threadEnvironmentId, threadId } = threadRef;
   const linkEpoch = previewState.serverEpoch;
   const designatedLinkTarget = snapshot?.purpose === "thread-link" && snapshot.runtime === "server";
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: registers this visible server tab as the thread link target in a module registry, removed on cleanup
   useEffect(() => {
     if (!designatedLinkTarget || !linkEpoch || !tabId || !visible) return;
     const target = {

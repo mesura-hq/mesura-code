@@ -773,6 +773,7 @@ export default function ChatView(props: ChatViewProps) {
           providers: providersByEnvironment.get(environmentId) ?? EMPTY_PROVIDERS,
         })
       : resolveProjectSettings(settings, fallbackDraftProject?.id ?? null, fallbackDraftProject))();
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: applies the repository defaults read from `.t3/project.json` to the draft store once they arrive
   useEffect(() => {
     if (serverThread || !draftId || !draftRepository.defaults) return;
     const store = useComposerDraftStore.getState();
@@ -803,6 +804,7 @@ export default function ChatView(props: ChatViewProps) {
       },
     );
   }, [serverThread, draftId, draftRepository.defaults, draftProjectSettings]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: logs a repository default model that no provider offers, once per warning
   useEffect(() => {
     if (!serverThread && draftId && draftProjectSettings.modelDefaultWarning) {
       console.warn(draftProjectSettings.modelDefaultWarning);
@@ -2840,9 +2842,11 @@ export default function ChatView(props: ChatViewProps) {
       // The chord and Vim must share capability checks, unsettle, and sidebar advancement.
       threadLifecycleShortcuts["thread.settle"]();
     },
-    "thread.pin": () => {
-      threadLifecycleShortcuts["thread.pin"]();
-    },
+    "thread.pin": () =>
+      threadLifecycleShortcuts["thread.pin"]({
+        event: new KeyboardEvent("keydown"),
+        terminalFocusOwner: null,
+      }),
     "chat.scrollHalfPageUp": () => scrollTimelineForReading("up"),
     "chat.scrollHalfPageDown": () => scrollTimelineForReading("down"),
     "thread.steerQueuedMessage": () => {
@@ -3960,6 +3964,7 @@ export default function ChatView(props: ChatViewProps) {
                               onResume={onComposerResumeStable}
                               onInterrupt={onInterruptStable}
                               onImplementPlanInNewThread={onImplementPlanInNewThreadStable}
+                              onRespondToApproval={onRespondToApprovalStable}
                               onSelectActivePendingUserInputOption={
                                 onSelectActivePendingUserInputOptionStable
                               }

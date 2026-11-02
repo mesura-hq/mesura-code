@@ -1,4 +1,4 @@
-import type { StartThreadTurnInput } from "@t3tools/client-runtime/state/threads";
+import type { StartThreadTurnInput } from "@t3tools/client-runtime/operations";
 import {
   PlanId,
   type CommandId,
@@ -16,7 +16,6 @@ import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import { deriveLatestThreadRun } from "@t3tools/client-runtime/state/thread-execution";
 import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
-import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
 
 import {
   useComposerDraftStore,
@@ -30,7 +29,6 @@ import { environmentProjects } from "../state/projects";
 import { readThread } from "../state/entities";
 import { threadEnvironment } from "../state/threads";
 import { buildMessageContext } from "../lib/composerContextRecords";
-import { environmentServerConfigsAtom } from "../state/server";
 import { findLatestProposedPlan, hasActionableProposedPlan } from "../session-logic";
 import { resolvePlanFollowUpSubmission } from "../proposedPlan";
 import {
@@ -68,18 +66,8 @@ export type DirectedComposerSubmission = {
   readonly attachments: StartThreadTurnInput["message"]["attachments"];
   readonly bootstrap: DirectedTurnStartBootstrap | undefined;
   readonly pendingAction: DirectedComposerPendingAction;
-  /**
-   * Terminal picks, review comments and preview annotations that travel with
-   * the message, and whether this server takes them inline. A server from
-   * before inline context drops the records, so for those the same content is
-   * serialized into the text instead.
-   */
-  readonly messageContext?:
-    | {
-        readonly inline: boolean;
-        readonly context: OrchestrationMessageContext | undefined;
-      }
-    | undefined;
+  /** Terminal picks, review comments and preview annotations that travel with the message. */
+  readonly messageContext?: OrchestrationMessageContext | undefined;
 };
 
 export type DirectedSubmissionContext = {
@@ -208,23 +196,7 @@ export function buildDirectedTurnStartInput(
       : null;
   const interactionMode = planFollowUp?.interactionMode ?? submission.interactionMode;
   const text = planFollowUp?.text ?? submission.prompt;
-  const messageContext = submission.messageContext;
-  // The legacy text is built from `text`, not from the raw prompt: a plan
-  // follow-up rewrites the message, and serializing the prompt would send the
-  // pre-rewrite words to exactly the servers that cannot read the records.
-  const contextFields =
-    messageContext === undefined
-      ? {}
-      : messageContext.inline
-        ? messageContext.context
-          ? { context: messageContext.context }
-          : {}
-        : {
-            text: serializeLegacyContextMessage({
-              text,
-              records: messageContext.context?.records ?? [],
-            }),
-          };
+  const contextFields = submission.messageContext ? { context: submission.messageContext } : {};
   return {
     commandId: submission.commandId,
     threadId: submission.threadId,
@@ -488,12 +460,7 @@ export async function submitDirectedDictation(input: {
     attachments,
     bootstrap,
     pendingAction,
-    messageContext: {
-      inline:
-        appAtomRegistry.get(environmentServerConfigsAtom).get(threadRef.environmentId)?.environment
-          .capabilities.inlineMessageContext === true,
-      context: messageContext,
-    },
+    messageContext,
   });
   if (result.kind !== "turn-dispatched") restoreDirectedComposerDraft(input.composerTarget, draft);
   return result;

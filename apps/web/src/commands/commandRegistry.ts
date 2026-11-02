@@ -68,14 +68,20 @@ export function registerCommandsWithLeaderKeys(
 ): () => void {
   const unregisterChords = registerCommands(commands, options);
   const leaderHandlers: CommandHandlers = Object.fromEntries(
-    Object.entries(commands).map(([command, handler]) => [
-      command,
-      () => {
-        const event = new KeyboardEvent("keydown");
-        if (options.when && !options.when(event)) return false;
-        return handler(event) !== false;
-      },
-    ]),
+    Object.entries(commands).flatMap(([command, handler]) =>
+      handler === undefined
+        ? []
+        : [
+            [
+              command,
+              () => {
+                const event = new KeyboardEvent("keydown");
+                if (options.when && !options.when(event)) return false;
+                return handler(event) !== false;
+              },
+            ],
+          ],
+    ),
   );
   const unregisterLeaderKeys = registerCommandHandlers(leaderHandlers);
   return () => {
@@ -91,7 +97,7 @@ export function registerCommandsWithLeaderKeys(
  */
 export function useCommandHandlers(entries: CommandHandlers): void {
   const latest = useRef(entries);
-  // oxlint-disable-next-line t3code/react-effect-budget -- latest-ref: the registered closures read the newest handlers without re-registering
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- latest-ref: the registered closures read the newest handlers without re-registering
   useLayoutEffect(() => {
     latest.current = entries;
   });
@@ -107,6 +113,6 @@ export function useCommandHandlers(entries: CommandHandlers): void {
     ) as CommandHandlers;
   }, [commandsKey]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- registers in the module-level registry while mounted; cleanup unregisters
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers in the module-level registry while mounted; cleanup unregisters
   useEffect(() => registerCommandHandlers(stable), [stable]);
 }

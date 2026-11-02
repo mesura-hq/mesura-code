@@ -41,7 +41,7 @@ export function useShortcutModifierState(
   const stateRef = useRef(EMPTY_SHORTCUT_MODIFIER_STATE);
   const enabledRef = useRef(enabled);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: on enable, publishes the modifiers the listener tracked while disabled
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: on enable, publishes the modifiers the listener tracked while disabled
   useEffect(() => {
     enabledRef.current = enabled;
     if (enabled) setState(stateRef.current);

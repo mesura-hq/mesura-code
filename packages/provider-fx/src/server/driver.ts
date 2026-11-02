@@ -57,6 +57,8 @@ const unsupportedTextGeneration: ProviderTextGeneration = (() => {
     generateBranchName: () => unsupported("generateBranchName"),
     generateThreadTitle: () => unsupported("generateThreadTitle"),
     generateReviewGuide: () => unsupported("generateReviewGuide"),
+    // Mesura: the agent search step is a fork text generation operation.
+    generateThreadSearchStep: () => unsupported("generateThreadSearchStep"),
   };
 })();
 

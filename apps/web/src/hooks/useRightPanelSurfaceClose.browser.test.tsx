@@ -92,6 +92,8 @@ function setup() {
     const { closeSurface } = useRightPanelSurfaceClose({
       threadRef,
       terminalLabelsById: new Map(),
+      scheduleComposerFocus: () => {},
+      isCurrentThread: (ref) => ref.threadId === threadRef.threadId,
     });
     return <button onClick={() => closeSurface(surface)}>Close original terminal</button>;
   }

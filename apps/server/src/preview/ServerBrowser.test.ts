@@ -140,8 +140,8 @@ function makeSession(
       events.on(name, listener),
     ),
     emit: (name: string, ...args: unknown[]) => events.emit(name, ...args),
-    emit: (name: string, ...args: unknown[]) => events.emit(name, ...args),
     emitAsync: (name: string, ...args: unknown[]) =>
+      Promise.all(events.listeners(name).map((listener) => listener(...args))),
     detach: vi.fn(async () => {}),
     fetchPatterns: null as ReadonlyArray<Record<string, unknown>> | null,
     fetchDecisions: [] as Array<{ url: string; method: FetchDecision; errorReason?: unknown }>,
@@ -1548,7 +1548,7 @@ it.live("a restarted server removes the previous run's downloads and keeps its p
       expect(yield* fs.exists(previousTab)).toBe(false);
       expect(yield* fs.readFileString(path.join(profile, "Preferences"))).toBe("{}");
     }),
-  ).pipe(Effect.provide(dependencies)),
+  ).pipe(Effect.provide(dependenciesAt({ prefix: "t3-server-browser-restart-" }))),
 );
 
 it.live("a page's file picker goes to the controller and takes its uploaded files", () =>
@@ -3058,6 +3058,8 @@ it.live(
         expect(result.status).toBe("done");
       }),
     ).pipe(Effect.provide(layer)),
+);
+
 it.live("profiles reported by one client survive another client's report", () =>
   Effect.scoped(
     Effect.gen(function* () {

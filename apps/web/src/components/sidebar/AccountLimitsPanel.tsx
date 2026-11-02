@@ -272,7 +272,7 @@ export function AccountLimitsDock(props: { readonly controller: AccountLimitsPan
   const view = useAccountLimits();
   const { refresh } = view;
   const wasOpen = useRef(false);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: refreshes the external usage reading on the controller's closed-to-open transition
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: refreshes the external usage reading on the controller's closed-to-open transition
   useEffect(() => {
     if (controller.open && !wasOpen.current) refresh();
     wasOpen.current = controller.open;

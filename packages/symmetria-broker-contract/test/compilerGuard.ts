@@ -50,7 +50,7 @@ export const compileVocabularyLock = (
     `${JSON.stringify(
       {
         extends: NodePath.join(repositoryRoot, "tsconfig.base.json"),
-        compilerOptions: { noEmit: true, paths: { "@t3tools/contracts": [shimPath] } },
+        compilerOptions: { noEmit: true, paths: { "#upstream-runtime-vocabulary": [shimPath] } },
         files: [lockModulePath],
       },
       null,

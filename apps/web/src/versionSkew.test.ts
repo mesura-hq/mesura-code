@@ -205,7 +205,6 @@ describe("versionSkew", () => {
     expect(supportsDesktopAppUpdate(null)).toBe(false);
   });
 
-
   // Regression guard: a hardcoded `npx t3@<version>` installed upstream's server over the fork's.
   // Do not restore one: while Mesura publishes nothing, the honest answer is no command.
   it("offers no update command while Mesura Code publishes no package", () => {

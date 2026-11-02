@@ -19,7 +19,7 @@ import {
 } from "./sidebar/SidebarCommandHost";
 import { activeComposerHandle } from "./searches/conversationShortcutOwner";
 import { requestSidebarDockPin } from "./sidebar/sidebarDockController";
-import { useIsMobile } from "../hooks/useMediaQuery";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { parseIssueSearch, someEnvironmentHasIssues } from "./issues/issues.logic";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -335,7 +335,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     [],
   );
 
-
   return (
     <>
       <ComposerHandleContext value={composerHandleRef}>
@@ -383,7 +382,7 @@ function CommandPaletteDialog(props: {
 }) {
   const composerHandleRef = useComposerHandleContext();
   const mountedRef = useRef(false);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: finalFocus's microtask must not restore focus after this dialog unmounts
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: finalFocus's microtask must not restore focus after this dialog unmounts
   useLayoutEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -531,7 +530,7 @@ function OpenCommandPaletteDialog(props: {
   const paletteRouteTarget = useThreadRouteTarget();
   const routeThreadRef =
     paletteRouteTarget?.kind === "server" ? paletteRouteTarget.threadRef : null;
-  const isMobileViewport = useIsMobile();
+  const isMobileViewport = useMediaQuery("max-md");
   const workingSectionEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
   const projects = useProjects();
   const referenceThreadRef =

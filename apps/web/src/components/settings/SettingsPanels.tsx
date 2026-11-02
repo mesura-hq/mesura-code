@@ -894,8 +894,6 @@ export function LegacyFeaturesSection() {
           />
         }
       />
-        }
-      />
     </SettingsSection>
   );
 }

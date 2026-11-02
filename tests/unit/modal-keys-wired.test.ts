@@ -498,7 +498,10 @@ it("modal keys seam guard: the composer registers attach and stash", () => {
 });
 
 it("modal keys seam guard: the sidebar registers thread traversal", () => {
-  assertRegistersCommands("apps/web/src/components/Sidebar.tsx", ["thread.next", "thread.previous"]);
+  assertRegistersCommands("apps/web/src/components/Sidebar.tsx", [
+    "thread.next",
+    "thread.previous",
+  ]);
 });
 
 it("modal keys seam guard: the sidebar control registers sidebar.toggle", () => {

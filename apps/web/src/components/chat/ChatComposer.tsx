@@ -36,6 +36,7 @@ import type {
   PreviewAnnotationPayload,
   ThreadContextRecord,
   EnvironmentContextRecord,
+  ProviderApprovalDecision,
   ProviderInteractionMode,
   ResolvedKeybindingsConfig,
   RuntimeMode,
@@ -72,6 +73,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -399,6 +401,11 @@ export interface ChatComposerProps {
   bannerItems: readonly ComposerBannerStackItem[];
   /** Mesura: when set, the pinned action dock replaces the top drawer above the input. */
   pinnedActions?: boolean;
+  /** Mesura: the pinned action dock answers approvals; upstream answers them on the timeline row. */
+  onRespondToApproval: (
+    requestId: RuntimeRequestId,
+    decision: ProviderApprovalDecision,
+  ) => Promise<unknown>;
   resumeCompactionTokens: number | null;
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
@@ -608,6 +615,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onResume,
     onInterrupt,
     onImplementPlanInNewThread,
+    onRespondToApproval,
     onSelectActivePendingUserInputOption,
     onAdvanceActivePendingUserInput,
     onDismissActivePendingUserInput,

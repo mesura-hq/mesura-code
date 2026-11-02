@@ -19,7 +19,7 @@ export function useThreadRenameShortcut(input: {
 }): void {
   const { keybindings, enabled, onStartRename } = input;
   const ownsShortcuts = useConversationOwnsShortcuts();
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: capture-phase keydown listener for the thread.rename shortcut, removed on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: capture-phase keydown listener for the thread.rename shortcut, removed on unmount
   useEffect(() => {
     if (!enabled) return;
     const handler = (event: KeyboardEvent) => {

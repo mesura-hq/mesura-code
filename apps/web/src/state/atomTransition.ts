@@ -10,7 +10,7 @@ import { startTransition, useContext, useEffect, useState } from "react";
 export function useAtomValueInTransition<A>(atom: Atom.Atom<A>): A {
   const registry = useContext(RegistryContext);
   const [value, setValue] = useState(() => registry.get(atom));
-  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes to the atom registry so each update can be wrapped in startTransition
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the atom registry so each update can be wrapped in startTransition
   useEffect(
     () =>
       registry.subscribe(atom, (next) => startTransition(() => setValue(() => next)), {

@@ -722,6 +722,7 @@ export const BranchToolbar = memo(function BranchToolbar({
     onComposerFocusRequest,
   });
   const openRunContext = runContext.open;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-ref the branch picker command reads to open the run context drawer
   useEffect(() => {
     openRunContextAtBranchRef.current = () => openRunContext("branch");
   }, [openRunContext]);

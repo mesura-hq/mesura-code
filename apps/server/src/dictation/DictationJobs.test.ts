@@ -29,6 +29,7 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as ServerSettingsModule from "../serverSettings.ts";
 import * as DictationJobsModule from "./DictationJobs.ts";
 
@@ -105,6 +106,7 @@ const startDictationJobs = (options: HarnessOptions = {}) =>
 
     const settingsLayer = ServerSettingsModule.layer.pipe(
       Layer.provide(ServerSecretStore.layer),
+      Layer.provide(ManagedPolicy.layerTest()),
       Layer.provideMerge(Layer.fresh(SqlitePersistence.layerMemory)),
       Layer.provideMerge(Layer.fresh(ServerConfig.layerTest(process.cwd(), baseDir))),
     );

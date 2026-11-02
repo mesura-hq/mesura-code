@@ -219,6 +219,7 @@ import {
   sidebarListItemId,
   sidebarThreadKeyAtY,
   sortPinnedThreadsForSidebar,
+  sortWorkingThreadsBySend,
   useSnoozeWakeClock,
   type SidebarListItem,
   type SidebarSection,
@@ -409,6 +410,56 @@ function resolveDraggedOrders(input: {
     // Mesura: the active list keeps its own order beside the Working section (workingSection.ts).
     activeOrder: undefined,
   };
+}
+
+// WORKAROUND: keeps the strategy's identity, which the compiler recreates on title updates and
+// so re-renders every drag wrapper. Its own hook: inside Sidebar this memo made the compiler skip
+// the whole component. Remove once the compiler keeps the identity and the render-cost fence passes.
+function useSidebarSortingStrategy(input: {
+  readonly items: readonly SidebarListItem[];
+  readonly enabled: boolean;
+  readonly settledOrder: readonly string[];
+  readonly activeOrder: readonly string[] | undefined;
+  readonly settledExpanded: boolean;
+  readonly settledVisibleCount: number;
+  readonly routeThreadKey: string | null;
+  readonly snoozedThreadCount: number;
+}) {
+  const {
+    items,
+    enabled,
+    settledOrder,
+    activeOrder,
+    settledExpanded,
+    settledVisibleCount,
+    routeThreadKey,
+    snoozedThreadCount,
+  } = input;
+  // oxlint-disable-next-line t3code/no-manual-memo -- see the WORKAROUND above
+  return useMemo(
+    () =>
+      createSidebarSortingStrategy({
+        items,
+        enabled,
+        boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
+        settledOrder,
+        ...(activeOrder === undefined ? {} : { activeOrder }),
+        settledExpanded,
+        settledVisibleCount,
+        routeThreadKey,
+        snoozedThreadCount,
+      }),
+    [
+      items,
+      enabled,
+      settledOrder,
+      activeOrder,
+      settledExpanded,
+      settledVisibleCount,
+      routeThreadKey,
+      snoozedThreadCount,
+    ],
+  );
 }
 
 function routeThreadOnly(
@@ -1552,7 +1603,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   // Resolve queued keys against their committed query. Waiting for a remote result
   // here caused late navigation, unlike Enter after commit, so consume the action now.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: bridge input events to committed search results.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: bridge input events to committed search results.
   useEffect(() => {
     const pending = pendingSearchAction.current;
     if (
@@ -2152,34 +2203,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           threadByKey,
           settledThreads,
         });
-  // WORKAROUND: retain the strategy because the compiler recreates this factory
-  // result and re-renders every drag wrapper on title updates. Remove when the
-  // compiler preserves the factory identity and the editor render-cost fence passes.
-  // oxlint-disable-next-line t3code/no-manual-memo
-  const sidebarSortingStrategy = useMemo(
-    () =>
-      createSidebarSortingStrategy({
-        items: sidebarListItems,
-        enabled: !isContextDrag,
-        boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
-        settledOrder: draggedSettledOrder,
-        ...(draggedActiveOrder === undefined ? {} : { activeOrder: draggedActiveOrder }),
-        settledExpanded: settledShelfExpanded,
-        settledVisibleCount,
-        routeThreadKey: routeRowThreadKey,
-        snoozedThreadCount: snoozedThreads.length,
-      }),
-    [
-      sidebarListItems,
-      isContextDrag,
-      draggedSettledOrder,
-      draggedActiveOrder,
-      settledShelfExpanded,
-      settledVisibleCount,
-      routeRowThreadKey,
-      snoozedThreads.length,
-    ],
-  );
+  const sidebarSortingStrategy = useSidebarSortingStrategy({
+    items: sidebarListItems,
+    enabled: !isContextDrag,
+    settledOrder: draggedSettledOrder,
+    activeOrder: draggedActiveOrder,
+    settledExpanded: settledShelfExpanded,
+    settledVisibleCount,
+    routeThreadKey: routeRowThreadKey,
+    snoozedThreadCount: snoozedThreads.length,
+  });
   const draggedThreadKey = dragState?.activeKey;
   const draggedFromSection = dragState?.activeSection;
   const dragActivationY = dragState?.activationY;

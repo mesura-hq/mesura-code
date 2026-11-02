@@ -3,7 +3,7 @@ import type { KeybindingCommand } from "@t3tools/contracts";
 import { type RefObject, useEffect } from "react";
 import { create } from "zustand";
 
-import { isCommandPaletteOpen, openCommandPalette } from "../../commandPaletteBus";
+import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { useCommandHandlers } from "../../commands/commandRegistry";
 import { resolveShortcutCommand } from "../../keybindings";
 import { captureComposerFocusReturn } from "../../keys/composer/composerSurface";
@@ -161,12 +161,8 @@ function isSidebarCommand(command: KeybindingCommand | null): command is Sidebar
   );
 }
 
-/**
- * Mounted once in the app layout, outside the phone drawer, on every page. The `legacy` sidebar
- * has neither a Search field nor a project filter, so both focus commands open the command
- * palette instead; the scope toggle writes the store whatever shows.
- */
-export function SidebarCommandHost(props: { readonly surface: "threads" | "settings" | "legacy" }) {
+/** Mounted once in the app layout, outside the phone drawer, on every page. */
+export function SidebarCommandHost(props: { readonly surface: "threads" | "settings" }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMobile, open, openMobile, setOpen, setOpenMobile } = useSidebar();
   const closeAppModal = useCloseAppModal();
@@ -199,10 +195,6 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
       // A hidden sidebar opens on its Working section rather than flipping a state nobody sees.
       setWorkingSectionExpanded((expanded) => sidebarHidden || !expanded);
       if (sidebarHidden) (isMobile ? setOpenMobile : setOpen)(true);
-      return;
-    }
-    if (props.surface === "legacy") {
-      openCommandPalette();
       return;
     }
     if (command === "threadSearch.toggle") {

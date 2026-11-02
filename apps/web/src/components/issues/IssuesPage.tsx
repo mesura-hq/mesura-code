@@ -11,6 +11,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PluggableList } from "unified";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
@@ -24,6 +25,7 @@ import {
   PullRequestMarkdown,
   PullRequestMarkdownContext,
 } from "../pullRequest/PullRequestMarkdown";
+import { remarkPullRequestAutolinks } from "../pullRequest/pullRequestMarkdown.logic";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { RefreshIcon } from "../ui/refresh-icon";
@@ -183,7 +185,7 @@ export function IssuesPage({
   const query = typedQuery.source === querySource ? typedQuery.value : search.q;
   const setQuery = (value: string) => setTypedQuery({ source: querySource, value });
   const searchInputRef = useRef<HTMLInputElement>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- debounces the typed query into the URL; the timer dies with the draft
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- debounces the typed query into the URL; the timer dies with the draft
   useEffect(() => {
     if (query === search.q) return;
     const timeout = window.setTimeout(() => onSearchChange({ q: query, limit: 100 }, true), 350);
@@ -209,7 +211,7 @@ export function IssuesPage({
   // The issue whose detail was just closed: its row takes focus back once the list is visible
   // again, so keyboard and screen-reader users land where they left the list.
   const returnFocusToIssueRef = useRef<number | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- focus needs the list rows mounted, which happens after the commit that closes the detail
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- focus needs the list rows mounted, which happens after the commit that closes the detail
   useEffect(() => {
     const number = returnFocusToIssueRef.current;
     if (search.issue !== undefined || number === null) return;
@@ -531,14 +533,18 @@ function IssueDetailPane({
   );
   const issue = detail.data ?? summary;
   const markdownContext = useMemo(() => {
-    const findAutolinks = sourceControlClients.get("github").referenceAutolinks;
-    return {
-      autolinks:
-        repositoryUrl !== null && findAutolinks !== undefined
-          ? (text: string) => findAutolinks(text, repositoryUrl)
-          : null,
-      threadRef: null,
-    };
+    const github = sourceControlClients.get("github");
+    const findAutolinks = github.referenceAutolinks;
+    const remarkPlugins: PluggableList =
+      repositoryUrl !== null && findAutolinks !== undefined
+        ? [
+            [
+              remarkPullRequestAutolinks,
+              { autolinks: (text: string) => findAutolinks(text, repositoryUrl) },
+            ],
+          ]
+        : [];
+    return { remarkPlugins, lineBreaks: github.hardLineBreaks ?? false, threadRef: null };
   }, [repositoryUrl]);
   // A detail opens because the reader chose an issue, so it takes focus: on a narrow pane the
   // row that was clicked is hidden, and keys must still reach this view. `key` remounts the

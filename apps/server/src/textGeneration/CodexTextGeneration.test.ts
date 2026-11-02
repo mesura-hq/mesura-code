@@ -33,6 +33,7 @@ import {
 
 import * as ServerConfig from "../config.ts";
 import { makeProcessProbe, processProbeSource } from "../testUtils/processProbe.ts";
+import * as TextGeneration from "./TextGeneration.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import {
@@ -970,6 +971,7 @@ it.effect.each([false, true])("text generation preflight: exhausted=%s", (exhaus
           generatePrContent: () => Effect.die("unused"),
           generateBranchName: () => Effect.die("unused"),
           generateReviewGuide: () => Effect.die("unused"),
+          generateThreadSearchStep: () => Effect.die("unused"),
           generateThreadTitle: (input) =>
             Effect.sync(() => {
               calls.push(input.modelSelection);

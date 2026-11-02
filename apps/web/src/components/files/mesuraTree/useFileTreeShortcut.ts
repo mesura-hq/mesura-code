@@ -32,12 +32,12 @@ export function useFileTreeShortcut(routeThreadRef: ScopedThreadRef | null): voi
       : false,
   );
   const latest = useRef({ routeThreadRef, keybindings, terminalOpen, previewOpen });
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref so the window listener attaches once
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref so the window listener attaches once
   useEffect(() => {
     latest.current = { routeThreadRef, keybindings, terminalOpen, previewOpen };
   });
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: window capture-phase keydown subscription
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: window capture-phase keydown subscription
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isCommandPaletteOpen()) return;

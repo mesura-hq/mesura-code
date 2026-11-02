@@ -168,9 +168,12 @@ function dismissibleNotice(onDismiss: () => void) {
 
 it("phase6 dock guard the banner stack X dismisses its notice once, after the 220 ms exit", async () => {
   const onDismiss = vi.fn();
-  await using screen = await render(<ComposerBannerStack items={[dismissibleNotice(onDismiss)]} />, {
-    router: false,
-  });
+  await using screen = await render(
+    <ComposerBannerStack items={[dismissibleNotice(onDismiss)]} />,
+    {
+      router: false,
+    },
+  );
   using _timers = fakeTimers();
   const dismiss = screen.container.querySelector<HTMLButtonElement>(
     'button[aria-label="Dismiss the guard notice"]',

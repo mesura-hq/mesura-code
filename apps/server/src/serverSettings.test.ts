@@ -2079,6 +2079,9 @@ it.layer(NodeServices.layer)("Mesura dictation secrets", (it) => {
         assert.equal(cleared.dictation.openAiApiKey, "");
         assert.isTrue(Option.isNone(yield* secrets.get("dictation-openai-api-key")));
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+});
+
 it.layer(NodeServices.layer)("server settings under a managed policy", (it) => {
   const policy: ManagedPolicyDocument = {
     schemaVersion: 1,
