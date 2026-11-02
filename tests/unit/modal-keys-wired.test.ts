@@ -641,10 +641,17 @@ it("modal keys seam guard round 2: arrows move over the sidebar rows and only En
   // both hand their keys to the row handler below.
   const rowFile = "apps/web/src/components/sidebar/SidebarThreadRow.tsx";
   const rowSource = read(rowFile);
-  // Mesura: Working section rows mount the same row outside the sortable items.
+  // Mesura: separate Working and Snoozed sections mount rows outside the sortable items.
   assert.include(
     sidebar.text,
-    tokens('const ThreadRow = section === "working" ? UnsortableThreadRow : SortableThreadRow;'),
+    tokens('const isSnoozedEntry = workingShelfEnabled && section === "snoozed";'),
+    "Sidebar no longer restricts the separate Snoozed entry to the Working layout",
+  );
+  assert.include(
+    sidebar.text,
+    tokens(
+      'const ThreadRow = section === "working" || isSnoozedEntry ? UnsortableThreadRow : SortableThreadRow;',
+    ),
     "Sidebar no longer picks its row component per section",
   );
   assert.isTrue(

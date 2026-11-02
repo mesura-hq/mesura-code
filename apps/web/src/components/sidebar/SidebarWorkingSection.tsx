@@ -3,9 +3,8 @@ import { type ReactNode, useRef } from "react";
 
 import { shortcutLabelForCommand } from "../../keybindings";
 import { primaryServerKeybindingsAtom } from "../../state/server";
-import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { Kbd } from "../ui/kbd";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { SidebarSeparateSection } from "./SidebarSeparateSection";
 import { setWorkingSectionExpanded } from "./workingSection";
 import { useSeenOnScreen, useWorkingSweep } from "./workingSweep";
 
@@ -32,30 +31,19 @@ export function SidebarWorkingSection(props: {
       {/* Sticky inside its own block on desktop: it rides the top while working rows scroll under
           it, then leaves with them. The phone drawer's surface sits outside `[data-app-sidebar]`,
           whose `--sidebar` differs, so a sticky background there shows as a dark bar. */}
-      <div
-        data-thread-selection-safe
-        className="mx-0.5 h-8 md:sticky md:top-0 md:z-20 md:bg-sidebar md:surface-grain"
-      >
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <CollapsibleSectionHeader
-                expanded={expanded}
-                onClick={() => setWorkingSectionExpanded(!expanded)}
-                role="treeitem"
-                tabIndex={-1}
-                // Upstream's tree (`sidebarTree.ts`) owns the arrows, Left and Right included.
-                data-sidebar-row="shelf:working"
-                data-working-section-header=""
-                data-mesura-nav-stop=""
-                data-testid="sidebar-working-shelf-toggle"
-                accessory={<span className="font-normal tabular-nums">{count}</span>}
-              />
-            }
-          >
-            Working
-          </TooltipTrigger>
-          <TooltipPopup side="right">
+      <SidebarSeparateSection
+        rowId="shelf:working"
+        label="Working"
+        expanded={expanded}
+        onToggle={() => setWorkingSectionExpanded(!expanded)}
+        headerWrapperClassName="md:sticky md:top-0 md:z-20 md:bg-sidebar md:surface-grain"
+        headerAttributes={{
+          "data-working-section-header": "",
+          "data-testid": "sidebar-working-shelf-toggle",
+        }}
+        accessory={<span className="font-normal tabular-nums">{count}</span>}
+        tooltip={
+          <>
             {action}
             {shortcutLabel === null ? null : (
               <>
@@ -63,12 +51,11 @@ export function SidebarWorkingSection(props: {
                 <Kbd size="compact">{shortcutLabel}</Kbd>
               </>
             )}
-          </TooltipPopup>
-        </Tooltip>
-      </div>
-      <ul role="presentation" className="flex flex-col gap-px">
+          </>
+        }
+      >
         {props.children}
-      </ul>
+      </SidebarSeparateSection>
       <div aria-hidden className="mx-2 my-1 h-px bg-sidebar-border/60" />
     </div>
   );
