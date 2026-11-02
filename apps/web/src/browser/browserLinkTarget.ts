@@ -62,7 +62,7 @@ export function canOpenLinksInApp(threadRef: ScopedThreadRef | null | undefined)
   if (!threadRef || threadRef.threadId.length === 0) return false;
   const capabilities = appAtomRegistry
     .get(environmentServerConfigsAtom)
-    .get(threadRef.environmentId)?.environment.capabilities;
+    .get(threadRef.environmentId)?.environment?.capabilities;
   return (
     capabilities?.serverBrowser === true &&
     capabilities.threadLinkPreview === true &&

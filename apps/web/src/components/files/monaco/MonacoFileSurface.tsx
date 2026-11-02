@@ -11,7 +11,11 @@ import { NvimStatusStrip } from "./nvim/NvimStatusStrip";
 import { useNvimFileEditor } from "./nvim/useNvimFileEditor";
 import { installFileEditorDismissal } from "../fileEditorDismissal";
 import { getProjectFileContents, setProjectFileQueryData } from "../projectFilesQueryState";
-import { useFileSaveCoordinator } from "../useFileSaveCoordinator";
+import {
+  changeFileSaveSession,
+  flushFileSaveSession,
+  useFileSaveSession,
+} from "../fileSaveSessions";
 import { minimalTextEdit, type MinimalTextEdit } from "./monacoFileEdit";
 import { ensureMonacoEnvironment } from "./monacoEnvironment";
 import { useMonacoFileComments } from "./monacoFileComments";
@@ -89,7 +93,7 @@ export function MonacoFileSurface({
   // The editor is created once and torn down from a layout effect, which cannot
   // depend on a prop, so the cache is reached through a ref there.
   const modelsRef = useRef(models);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref for the layout-effect teardown of the once-created editor
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref for the layout-effect teardown of the once-created editor
   useEffect(() => {
     modelsRef.current = models;
   }, [models]);
@@ -98,7 +102,7 @@ export function MonacoFileSurface({
   const fontSizeCode = useClientSettings((settings) => settings.fontSizeCode);
   const initialOptionsRef = useRef({ resolvedTheme, modalEditing, wordWrap });
   const contentsRef = useRef(contents);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref read by the once-created editor's listeners
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref read by the once-created editor's listeners
   useLayoutEffect(() => {
     contentsRef.current = contents;
   }, [contents]);
@@ -113,17 +117,19 @@ export function MonacoFileSurface({
     id: number;
   } | null>(null);
 
-  const saveCoordinator = useFileSaveCoordinator({
-    environmentId,
-    cwd,
-    relativePath,
-    onPendingChange,
-  });
+  useFileSaveSession({ environmentId, cwd, relativePath }, onPendingChange);
+  const saveCoordinator = useMemo(() => {
+    const target = { environmentId, cwd, relativePath };
+    return {
+      change: (contents: string) => changeFileSaveSession(target, contents),
+      flush: () => flushFileSaveSession(target),
+    };
+  }, [environmentId, cwd, relativePath]);
   // The change handler is rebuilt as its inputs move, but the editor is created
   // once, so the listener reads the current handler through a ref instead of
   // being torn down and reinstalled.
   const saveRef = useRef(saveCoordinator);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref so the once-installed content listener sees the current save handler
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref so the once-installed content listener sees the current save handler
   useEffect(() => {
     saveRef.current = saveCoordinator;
   }, [saveCoordinator]);
@@ -148,7 +154,7 @@ export function MonacoFileSurface({
 
   // Layout effect rather than effect: the editor measures the node, and doing
   // that after paint shows one frame of an unsized editor.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: creates the Monaco editor once on the host node and disposes it on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: creates the Monaco editor once on the host node and disposes it on unmount
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
@@ -220,7 +226,7 @@ export function MonacoFileSurface({
 
   // The open file's model, kept in a cache so leaving a file and coming back
   // finds its undo stack, caret and scroll where they were.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: swaps the open file's cached model into the once-created editor
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: swaps the open file's cached model into the once-created editor
   useEffect(() => {
     const editor = editorRef.current;
     if (editor === null) return;
@@ -258,7 +264,7 @@ export function MonacoFileSurface({
     // rebuild that would discard the undo stack.
   }, [environmentId, cwd, relativePath, retention, models]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: pushes the word-wrap setting into the once-created editor
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: pushes the word-wrap setting into the once-created editor
   useEffect(() => {
     editorRef.current?.updateOptions({ wordWrap: wordWrap ? "on" : "off" });
   }, [wordWrap]);
@@ -266,7 +272,7 @@ export function MonacoFileSurface({
   // Redefined rather than only re-selected: an environment theme changes the
   // code-surface custom properties without changing light or dark, and the
   // colours have to be read off the node again to catch that.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: redefines the Monaco themes from the host's computed colours
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: redefines the Monaco themes from the host's computed colours
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
@@ -275,7 +281,7 @@ export function MonacoFileSurface({
     monaco.editor.setTheme(resolvedTheme === "dark" ? MESURA_MONACO_DARK : MESURA_MONACO_LIGHT);
   }, [resolvedTheme]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: pushes the code font settings into the once-created editor
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: pushes the code font settings into the once-created editor
   useEffect(() => {
     const editor = editorRef.current;
     if (editor === null) return;
@@ -292,7 +298,7 @@ export function MonacoFileSurface({
     appliedFontRef.current = { editor, family: fontFamilyCode, size: fontSizeCode };
   }, [fontFamilyCode, fontSizeCode]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reveals and highlights the requested line in the editor
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: reveals and highlights the requested line in the editor
   useEffect(() => {
     const editor = editorRef.current;
     const decorations = decorationsRef.current;
@@ -351,7 +357,7 @@ export function MonacoFileSurface({
   // driver being active, not the setting, so a fallback plain Monaco has no relative gutter. Set
   // via `updateOptions` because the editor is created once; adding this to the creating hook's
   // dependencies would remount it and drop the undo stack (`monaco-file-surface-wired`).
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: switches the once-created editor's line numbers with the Neovim driver
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: switches the once-created editor's line numbers with the Neovim driver
   useEffect(() => {
     editorRef.current?.updateOptions({ lineNumbers: nvim.active ? "relative" : "on" });
   }, [nvim.active]);
@@ -359,7 +365,7 @@ export function MonacoFileSurface({
   // Through a ref because the effect that applies an external change must not
   // be torn down and re-run every time the driver's mode changes.
   const nvimRef = useRef(nvim.takeExternalEdit);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref so the external-change effect is not re-run on mode changes
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref so the external-change effect is not re-run on mode changes
   useLayoutEffect(() => {
     nvimRef.current = nvim.takeExternalEdit;
   }, [nvim.takeExternalEdit]);
@@ -367,7 +373,7 @@ export function MonacoFileSurface({
   // An external change to the open file: the watcher pushed one, or a save
   // confirmed. Applied as an edit, never `setValue`, because `setValue` clears
   // the undo stack.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: applies an external file change to the model as an undoable edit
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: applies an external file change to the model as an undoable edit
   useEffect(() => {
     const editor = editorRef.current;
     const model = editor?.getModel();
@@ -418,7 +424,7 @@ export function MonacoFileSurface({
   }, [contents, environmentId, cwd, relativePath, retention]);
 
   const hasOpenDraftRef = useRef(comments.hasOpenDraft);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref read by the once-installed dismissal listener
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref read by the once-installed dismissal listener
   useEffect(() => {
     hasOpenDraftRef.current = comments.hasOpenDraft;
   }, [comments.hasOpenDraft]);
@@ -426,19 +432,19 @@ export function MonacoFileSurface({
   // Read through refs because the dismissal listener is installed once, on
   // mount, and must see Neovim as it is now rather than as it was then.
   const nvimActiveRef = useRef(nvim.active);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref read by the once-installed dismissal listener
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref read by the once-installed dismissal listener
   useLayoutEffect(() => {
     nvimActiveRef.current = nvim.active;
   }, [nvim.active]);
   // Layout effect, not render: written after commit and before any later
   // keydown can reach the listener, so it never decides on a stale answer.
   const nvimEscapeRef = useRef(nvim.escapeGoesToNeovim);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref, written after commit so the dismissal listener never reads a stale answer
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref, written after commit so the dismissal listener never reads a stale answer
   useLayoutEffect(() => {
     nvimEscapeRef.current = nvim.escapeGoesToNeovim;
   }, [nvim.escapeGoesToNeovim]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: installs the Escape dismissal listener on the host for its lifetime
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: installs the Escape dismissal listener on the host for its lifetime
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;

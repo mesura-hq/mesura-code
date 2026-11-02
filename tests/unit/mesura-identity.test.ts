@@ -19,6 +19,8 @@ it("leaves no product code defaulting to T3 Code's shared home", () => {
     "--",
     ":(exclude)*.test.ts",
     ":(exclude)docs/",
+    // Upstream's eval harness fakes a remote host's home; it is not product code.
+    ":(exclude)evals/",
     ":(exclude)packaging/",
     ":(exclude)tests/",
     ":(exclude)AGENTS.md",

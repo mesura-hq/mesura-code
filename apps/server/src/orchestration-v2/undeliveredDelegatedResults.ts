@@ -57,10 +57,11 @@ export function withUndeliveredDelegatedResults(input: {
     ...input.pendingBackgroundTasks,
     ...undelivered.map((task) => {
       const description = (task.title ?? task.prompt).trim();
+      // No `providerInstanceId`: a finished task holds no MCP credential, and with one the hold
+      // would keep the parent a live caller (threadAccess.ts `isLiveCallerShell`).
       return {
         taskId: task.id,
         kind: "subagent" as const,
-        providerInstanceId: task.providerInstanceId,
         ...(description.length === 0 ? {} : { description }),
         ...(task.childThreadId === null ? {} : { childThreadId: task.childThreadId }),
       };

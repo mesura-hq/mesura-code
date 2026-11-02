@@ -360,6 +360,7 @@ it("thread link AppRoot guard: forwarded configured close reaches the mounted re
   Object.defineProperty(window, "desktopBridge", {
     configurable: true,
     value: {
+      getWindowZoomFactor: () => 1,
       onMenuAction: (listener: (action: string) => void) => {
         listeners.add(listener);
         return () => {
@@ -514,6 +515,7 @@ it.each(["web shortcut", "forwarded command", "public close"] as const)(
       Object.defineProperty(window, "desktopBridge", {
         configurable: true,
         value: {
+          getWindowZoomFactor: () => 1,
           onMenuAction: (listener: (action: string) => void) => {
             actions.add(listener);
             return () => actions.delete(listener);
@@ -523,7 +525,6 @@ it.each(["web shortcut", "forwarded command", "public close"] as const)(
     designateTarget();
     useRightPanelStore.getState().openFile(ref, "retained.md");
     useRightPanelStore.getState().openBrowser(ref, "layout-target");
-    useRightPanelStore.getState().requestMaximize(ref);
     await mount();
     const editor = composerEditor();
     await act(() => editor.focus());
@@ -531,6 +532,9 @@ it.each(["web shortcut", "forwarded command", "public close"] as const)(
       document.activeElement,
       "the mounted editor accepts real DOM focus before panel entry",
     ).toBe(editor);
+    // The maximized-away chat column is inert, so the editor takes focus before the maximize.
+    await act(() => useRightPanelStore.getState().requestMaximize(ref));
+    expect(maximized()).toBe(true);
     const panel = await focusPanel();
     if (entry === "web shortcut") {
       const event = new KeyboardEvent("keydown", {

@@ -215,7 +215,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Hand the file over whenever the model changes identity, with the model's lines (they may carry
   // edits the `contents` prop lacks). A kept model coming back is reconciled against the session's
   // snapshot, never reset, so its undo stack survives.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: opens the file in the thread's Neovim session when the model changes identity
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: opens the file in the thread's Neovim session when the model changes identity
   useEffect(() => {
     if (!enabled || model === null) return;
 
@@ -270,7 +270,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // service's listener, so `preventDefault` and `stopPropagation` here stop both Monaco's commands
   // and the text insertion. It fires only while Monaco has text focus, so keys typed in the
   // composer, the search box or a comment form never reach it.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: routes editor keydowns to Neovim while the driver is active
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: routes editor keydowns to Neovim while the driver is active
   useEffect(() => {
     if (!enabled || editor === null) return;
     const subscription = editor.onKeyDown((event) => {
@@ -305,7 +305,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // an agent's write is undone locally and sent to Neovim as text; Monaco's undo stack holds only
   // that edit, so the undo is exact. Chromium on a Latin-American layout usually sends `á` as a
   // plain keydown instead, routed as itself.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: sends browser-composed text to Neovim and undoes it locally
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: sends browser-composed text to Neovim and undoes it locally
   useEffect(() => {
     if (!enabled || model === null) return;
     const subscription = model.onDidChangeContent((event) => {
@@ -334,7 +334,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Applied per event from the subscription (see `stateSource`), and once at setup so a changed
   // model, file or activation catches up at once. Reconciles to the absolute state: a `lines`
   // event is a shortcut only when nothing was missed, checked afterwards; else a full reconcile.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to session state outside React so text and caret apply per event
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: subscribes to session state outside React so text and caret apply per event
   useLayoutEffect(() => {
     if (!enabled || editor === null || model === null) return;
     if (reconciledModelRef.current !== model) {
@@ -437,7 +437,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Coalesced to one animation frame because a wheel produces scroll events far
   // faster than a frame, and every one of them would otherwise be a message on
   // the wire and a `winrestview` in Neovim.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: publishes the editor viewport to Neovim, coalesced per animation frame
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: publishes the editor viewport to Neovim, coalesced per animation frame
   useEffect(() => {
     if (!enabled || editor === null || model === null) return;
 
@@ -478,7 +478,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // `:w`: Neovim asks the host to write. Counted, not read off the latest event, because any event
   // in the same render (cursor, mode, the write's own redraw) would hide the request and the save
   // would never flush.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: flushes a save for each write request Neovim sends
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: flushes a save for each write request Neovim sends
   useEffect(() => {
     if (!enabled) return;
     if (state.writeRequests === flushedWriteRequestsRef.current) return;
@@ -492,7 +492,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Only when a key caused it. `shouldEchoViewport` drops a topline that is
   // either the one this client just sent or the one Neovim last sent, which is
   // what stops the two scrolling each other forever.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: follows Neovim's topline when a key moved the view
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: follows Neovim's topline when a key moved the view
   useEffect(() => {
     if (!enabled || editor === null) return;
     if (state.relativePath !== relativePath) return;
@@ -523,7 +523,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 
   // The pointer takes the view the moment it touches it: a wheel, a trackpad
   // swipe, a drag on the scrollbar, a click in the text.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: hands view ownership to the pointer on wheel, scrollbar drag or click
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: hands view ownership to the pointer on wheel, scrollbar drag or click
   useEffect(() => {
     if (!enabled || editor === null) return;
     const container = editor.getContainerDomNode();
@@ -543,7 +543,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 
   // The labels are set in the editor's font when they are made, so a zoom or a
   // font change has to reach the ones already on screen too.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: re-fonts the labels on screen when the editor font changes
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: re-fonts the labels on screen when the editor font changes
   useEffect(() => {
     if (!enabled || editor === null) return;
     const subscription = editor.onDidChangeConfiguration((event) => {
@@ -561,7 +561,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Neovim's drawing as Monaco widgets and decorations, diffed against the screen because a
   // re-added widget flickers. This collection is where it all comes down: file switch, driver off,
   // unmount.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: owns the decorations collection and tears down everything drawn
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: owns the decorations collection and tears down everything drawn
   useEffect(() => {
     if (!enabled || editor === null) return;
     if (model === null) return;
@@ -577,7 +577,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     };
   }, [enabled, editor, model]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: diffs Neovim's overlays into Monaco content widgets and decorations
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: diffs Neovim's overlays into Monaco content widgets and decorations
   useEffect(() => {
     if (!enabled || editor === null) return;
 
@@ -644,7 +644,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Scoped by a class on the editor's own container, because two file panels
   // on two threads are two Neovims and highlight id 7 means something
   // different in each.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: installs the scoped highlight stylesheet on the editor container
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: installs the scoped highlight stylesheet on the editor container
   useEffect(() => {
     if (!enabled || editor === null) return;
     const container = editor.getContainerDomNode();
@@ -662,7 +662,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 
   // flash's backdrop fades while it waits for a label; the rule that fades it
   // is in the highlight stylesheet and keys on this class.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: toggles the flash jumping class on the editor container
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: toggles the flash jumping class on the editor container
   useEffect(() => {
     if (!enabled || editor === null) return;
     const container = editor.getContainerDomNode();
@@ -670,7 +670,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     return () => container.classList.remove(NVIM_JUMPING_CLASS);
   }, [enabled, editor, state.jumping]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: writes Neovim's highlight definitions into the scoped stylesheet node
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: writes Neovim's highlight definitions into the scoped stylesheet node
   useEffect(() => {
     const style = styleRef.current;
     if (style === null) return;
@@ -680,7 +680,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // Visual mode is Monaco's selection, not a decoration. Neovim's own `Visual`
   // group is on the classifier's deny list for the same reason: two things
   // painting one selection disagree about its edges.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: mirrors Neovim's visual selection as Monaco selections
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: mirrors Neovim's visual selection as Monaco selections
   useEffect(() => {
     if (!enabled || editor === null || model === null) return;
     if (state.relativePath !== relativePath) return;
@@ -698,7 +698,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 
   // The mouse is the one place the client tells Neovim where the caret is.
   // Every other cursor movement here is Neovim's own echo coming back.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: sends mouse caret moves to Neovim, the one cursor change the client originates
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: sends mouse caret moves to Neovim, the one cursor change the client originates
   useEffect(() => {
     if (!enabled || editor === null) return;
     const subscription = editor.onDidChangeCursorPosition((event) => {

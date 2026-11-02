@@ -10,6 +10,7 @@ import { readThreadShell, useThreadShell } from "~/state/entities";
 import { buildThreadRouteParams } from "~/threadRoutes";
 import { toastManager } from "../ui/toast";
 import { resolveArchivedResult } from "./agentSearchPopup.logic";
+import { UnknownThreadLinkContext } from "./unknownThreadLinkContext";
 
 const THREAD_ROUTE = /^\/([^/?#]+)\/([^/?#]+)$/u;
 
@@ -60,11 +61,20 @@ export function ArchivedResultLinks({ children }: { children: ReactNode }) {
 
   return (
     <div className="contents" onClickCapture={onClickCapture}>
-      {children}
+      <UnknownThreadLinkContext value={renderThreadRouteLink}>{children}</UnknownThreadLinkContext>
       {opening ? (
         <OpenWhenActive key={`${opening.environmentId}:${opening.threadId}`} thread={opening} />
       ) : null}
     </div>
+  );
+}
+
+/** A thread this client does not hold (an archived result) as the route link the click handler reads. */
+function renderThreadRouteLink(thread: ScopedThreadRef, label: string): ReactNode {
+  return (
+    <a href={`/${encodeURIComponent(thread.environmentId)}/${encodeURIComponent(thread.threadId)}`}>
+      {label}
+    </a>
   );
 }
 
@@ -77,7 +87,7 @@ function OpenWhenActive({ thread }: { thread: ScopedThreadRef }) {
   const shell = useThreadShell(thread);
   const navigate = useNavigate();
   const opened = useRef(false);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: navigates once the unarchived thread's active shell arrives from the server
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: navigates once the unarchived thread's active shell arrives from the server
   useEffect(() => {
     if (opened.current || shell === null || shell.archivedAt !== null) return;
     opened.current = true;

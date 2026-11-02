@@ -51,6 +51,11 @@ export function createReviewEnvironmentAtoms<R, E>(
     });
   });
   return {
+    branchCommits: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:review:branch-commits",
+      tag: WS_METHODS.reviewGetBranchCommits,
+      staleTimeMs: 5_000,
+    }),
     diffPreview,
     // Fork addition: per-file status for Tree diff's refresh button.
     workingTreeChanges: createEnvironmentRpcQueryAtomFamily(runtime, {

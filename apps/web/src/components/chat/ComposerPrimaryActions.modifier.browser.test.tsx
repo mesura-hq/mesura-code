@@ -63,7 +63,6 @@ async function mountActions(isRunning: boolean): Promise<void> {
           promptHasText: true,
           isSendBusy: false,
           sendDisabledReason: null,
-          isConnecting: false,
           isEnvironmentUnavailable: false,
           isPreparingWorktree: false,
           hasSendableContent: true,

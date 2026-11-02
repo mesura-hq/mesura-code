@@ -19,7 +19,7 @@ import {
   hydrateImagesFromPersisted,
   useComposerDraftStore,
 } from "../../composerDraftStore";
-import { type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
+import { type ComposerPromptEditorHandle } from "../ComposerPromptEditorTiptap";
 import {
   MAX_STASH_ENTRIES,
   type PromptStashEntry,
@@ -62,6 +62,7 @@ import {
   useState,
 } from "react";
 import { BackgroundThreadContext } from "./backgroundThread";
+import { isInSideChatPane } from "../../lib/sideChatPane";
 import { useStableCallback } from "../../hooks/useStableCallback";
 
 /**
@@ -696,12 +697,17 @@ export function useComposerStash(input: {
       ).terminalOpen,
     ),
   }));
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the capture-phase stash shortcut with the command registry while the composer is mounted
   useEffect(() => {
     if (backgroundThread) return;
     return registerCommands(
       { "composer.stash": handleStashShortcut },
-      // Mesura: the agent search popup's conversation owns the chord while it is open.
-      { capture: true, context: readShortcutContext, when: ownsShortcuts },
+      {
+        capture: true,
+        context: readShortcutContext,
+        // Mesura: the agent search popup's conversation owns the chord while it is open.
+        when: (event) => ownsShortcuts() && !isInSideChatPane(event.target),
+      },
     );
   }, [backgroundThread, handleStashShortcut, ownsShortcuts, readShortcutContext]);
 

@@ -102,7 +102,7 @@ describe("find_threads client answer", () => {
         });
         expect(match?.reason).toContain(TERM);
         expect(match?.url.startsWith("t3-thread://v1/")).toBe(true);
-        expect(parseThreadLinkHref(match?.url ?? "")).toBe("thread-lantern-archived");
+        expect(parseThreadLinkHref(match?.url ?? "")?.threadId).toBe("thread-lantern-archived");
         expect(result.coverage).toEqual({
           unavailableEnvironments: [],
           budgetExhausted: false,
@@ -124,7 +124,9 @@ describe("find_threads client answer", () => {
         expect(result.status).toBe("matches");
         expect(result.matches.map((match) => match.threadId)).toEqual(["thread-lantern-archived"]);
         expect(result.matches[0]?.archivedAt).toBe("2026-01-02T00:00:00.000Z");
-        expect(parseThreadLinkHref(result.matches[0]?.url ?? "")).toBe("thread-lantern-archived");
+        expect(parseThreadLinkHref(result.matches[0]?.url ?? "")?.threadId).toBe(
+          "thread-lantern-archived",
+        );
         expect(result.matches[0]?.reason).toContain("Configured model");
         // Jev was tried first, then every later step went to the configured model.
         expect(reasoning[0]?.engine).toBe("jev");

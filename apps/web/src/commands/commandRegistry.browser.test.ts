@@ -256,7 +256,11 @@ describe("command registry from the key engine", () => {
 
       const ran: string[] = [];
       for (const other of new Set(OWNED_ROWS.map((entry) => entry.command))) {
-        register({ [other]: () => ran.push(other) });
+        register({
+          [other]: () => {
+            ran.push(other);
+          },
+        });
       }
 
       pressSequence(row.keys);

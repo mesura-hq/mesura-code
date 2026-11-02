@@ -16,7 +16,6 @@ import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
   type MessagesTimelineRow,
-  type MessagesTimelineRowsProjection,
   type StableMessagesTimelineRowsState,
 } from "../components/chat/MessagesTimeline.logic";
 import {
@@ -63,7 +62,7 @@ const sequence = (point: FactoryRunFixturePoint) => [
 ];
 interface Projection {
   timeline: TimelineEntriesProjection | null;
-  rows: MessagesTimelineRowsProjection | null;
+  rows: ReturnType<typeof deriveMessagesTimelineRowsWithState> | null;
   stable: StableMessagesTimelineRowsState;
 }
 const empty = (): Projection => ({

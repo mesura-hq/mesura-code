@@ -31,16 +31,11 @@ export class NpmLauncherCommandFailedError extends Schema.TaggedError<NpmLaunche
   }
 }
 
-/** engines requires import.meta.dirname and fetch. */
-export function npmLauncherPackageManifest(version: string) {
+/** engines requires import.meta.dirname and fetch. `t3code` is read back by npmReleaseDatabaseMigration. */
+export function npmLauncherPackageManifest(version: string, databaseMigration: number) {
   return {
     name: NPM_LAUNCHER_PACKAGE_NAME,
     version,
-    // The standalone launcher cannot import workspace modules at runtime.
-    t3code: {
-      stateHomeDirectory: DEFAULT_STATE_HOME_DIR_NAME,
-      releaseBaseUrl: PUBLISHED_RELEASE_BASE_URL,
-    },
     description:
       "T3 Code CLI. Downloads the self-contained executable for this platform from the GitHub Release.",
     license: serverPackageJson.license,
@@ -48,8 +43,28 @@ export function npmLauncherPackageManifest(version: string) {
     bin: { t3: "./bin/t3.mjs" },
     files: ["bin", "dist"],
     engines: { node: ">=20.11" },
+    // Mesura: the standalone launcher cannot import workspace modules at runtime.
+    t3code: {
+      stateHomeDirectory: DEFAULT_STATE_HOME_DIR_NAME,
+      releaseBaseUrl: PUBLISHED_RELEASE_BASE_URL,
+      databaseMigration,
+    },
   };
 }
+
+/** Highest server migration id, from the `NNN_Name.ts` files the server registers. */
+const latestServerMigrationId = Effect.fn("latestServerMigrationId")(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const dir = yield* path.fromFileUrl(
+    new URL("../apps/server/src/persistence/Migrations/", import.meta.url),
+  );
+  const ids = (yield* fs.readDirectory(dir)).flatMap((name) => {
+    const id = /^(\d+)_\w+\.ts$/.exec(name)?.[1];
+    return id === undefined ? [] : [Number(id)];
+  });
+  return Math.max(0, ...ids);
+});
 
 export const buildNpmLauncher = Effect.fn("buildNpmLauncher")(function* (input: {
   readonly version: string;
@@ -70,7 +85,9 @@ export const buildNpmLauncher = Effect.fn("buildNpmLauncher")(function* (input: 
   yield* fs.makeDirectory(path.join(stageDir, "dist"));
   yield* fs.writeFileString(
     path.join(stageDir, "package.json"),
-    `${yield* encodePackageJson(npmLauncherPackageManifest(input.version))}\n`,
+    `${yield* encodePackageJson(
+      npmLauncherPackageManifest(input.version, yield* latestServerMigrationId()),
+    )}\n`,
   );
   yield* fs.copyFile(path.join(sourceDir, "t3.mjs"), path.join(stageDir, "bin/t3.mjs"));
   yield* fs.chmod(path.join(stageDir, "bin/t3.mjs"), 0o755);

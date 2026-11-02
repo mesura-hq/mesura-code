@@ -32,6 +32,8 @@ function mountList(rows: Array<{ key: string; top: number }>, viewportWidth = 20
     const row = document.createElement("div");
     row.tabIndex = 0;
     row.dataset.mesuraThreadKey = key;
+    // As `SidebarThreadRow` marks it: a row of the sidebar tree, which Up and Down walk.
+    row.dataset.sidebarRow = key;
     Object.assign(row.style, {
       position: "absolute",
       top: `${top}px`,

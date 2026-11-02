@@ -246,7 +246,7 @@ function CombinedPicker(
   // Opening on More options focuses its first control. The model content
   // keeps retrying its search focus for a frame, but its search is hidden.
   const opensOnExtras = combined.initialExtrasExpanded === true;
-  // oxlint-disable-next-line t3code/react-effect-budget -- focus must land after mount and win over the model content's own focus retries
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- focus must land after mount and win over the model content's own focus retries
   useLayoutEffect(() => {
     if (!opensOnExtras) return;
     focusExtras();
@@ -261,7 +261,7 @@ function CombinedPicker(
   // WORKAROUND (see MODEL_PICKER_VIEWPORT_MARGIN_PX): size the picker to the
   // larger side of its trigger. This layout effect runs before Base UI's
   // measurement, because the popup is an ancestor of this content.
-  // oxlint-disable-next-line t3code/react-effect-budget -- WORKAROUND above: writes the fit height before Base UI measures and tracks window resizes
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- WORKAROUND above: writes the fit height before Base UI measures and tracks window resizes
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || !getAnchorRect) return;
@@ -289,7 +289,7 @@ function CombinedPicker(
     if (expanded) setExtrasTargetKey(lastHighlightedModelKeyRef.current);
     pendingExtrasFocusRef.current = expanded ? "extras" : "search";
   };
-  // oxlint-disable-next-line t3code/react-effect-budget -- focus moves into or out of More options only after the render that shows or hides it
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- focus moves into or out of More options only after the render that shows or hides it
   useLayoutEffect(() => {
     const target = pendingExtrasFocusRef.current;
     if (target === null) return;
@@ -297,7 +297,7 @@ function CombinedPicker(
     if (target === "extras") focusExtras();
     else focusSearch();
   });
-  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes to the composer's traits picker action while this picker answers it
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the composer's traits picker action while this picker answers it
   useEffect(() => {
     if (!combined.respondsToShortcut) return;
     return subscribePickerAction("traits", () => setExtras(!extrasExpandedRef.current));
@@ -305,7 +305,7 @@ function CombinedPicker(
   // The traits shortcut toggles More options even where no ChatView dispatches it (Settings). In the
   // composer ChatView may handle the event first; skipping a handled event keeps it to one toggle.
   const terminalOpen = contentProps.terminalOpen;
-  // oxlint-disable-next-line t3code/react-effect-budget -- window keydown listener for the traits shortcut while the picker is open
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window keydown listener for the traits shortcut while the picker is open
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isCommandPaletteOpen()) return;

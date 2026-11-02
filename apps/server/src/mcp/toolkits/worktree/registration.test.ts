@@ -18,6 +18,7 @@ import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import * as ProviderAdapterRegistry from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
+import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
 import * as DocumentText from "../../../provider/DocumentText.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
@@ -81,6 +82,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ProjectFaviconResolver.ProjectFaviconResolver)({}),
   // Mesura: the compact-then-continue tool.
   Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({}),
+  Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
 );
 
 const ToolsListPayload = Schema.fromJsonString(

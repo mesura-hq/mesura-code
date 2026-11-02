@@ -25,12 +25,6 @@ const fixture = vi.hoisted(() => ({
   mobile: false,
 }));
 
-// The sidebar's own mobile test: a phone-width viewport has no docks at all.
-vi.mock("../../hooks/useMediaQuery", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../hooks/useMediaQuery")>()),
-  useIsMobile: () => fixture.mobile,
-}));
-
 vi.mock("../../state/hostStats", () => ({
   useHostStatsSources: (enabled: boolean) => {
     fixture.sourcesEnabled.push(enabled);
@@ -114,7 +108,7 @@ async function setupBrowserFixture0() {
 }
 
 async function mountSidebar(options: { path?: string; sidebarOpen?: boolean } = {}) {
-  // `SidebarProvider` reads the viewport's own media query, not `useIsMobile`.
+  // The sidebar's own mobile test: a phone-width viewport has no docks at all.
   if (fixture.mobile) await page.viewport(412, 915);
   else await page.viewport(1440, 900);
   const rootRoute = createRootRoute({

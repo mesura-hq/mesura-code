@@ -1,6 +1,8 @@
 import type { ThreadContextRecord, UserInputQuestion } from "@t3tools/contracts";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
+// Mesura: answers come from the fork's user-input-answers module, where a choice keeps its note.
+type PendingUserInputAnswer = string | ReadonlyArray<string>;
 
 import { collectInlineContextIds } from "./lib/composerContextReferences";
 
@@ -12,7 +14,7 @@ export function projectPendingUserInputAnswer(
   const recordsById = new Map(threadContexts.map((record) => [record.contextId, record]));
   return replaceComposerContextReferences(answer, (reference) => {
     const record = reference.kind === "thread" ? recordsById.get(reference.contextId) : undefined;
-    return record ? formatThreadLink(record.threadId, reference.label) : reference.source;
+    return record ? formatThreadLink(record, reference.label) : reference.source;
   });
 }
 
@@ -42,9 +44,9 @@ export interface PendingUserInputProgress {
   questionIndex: number;
   activeQuestion: UserInputQuestion | null;
   activeDraft: PendingUserInputDraftAnswer | undefined;
-  selectedOptionValues: string[];
+  selectedOptionValues: ReadonlyArray<string>;
   customAnswer: string;
-  resolvedAnswer: string | string[] | null;
+  resolvedAnswer: PendingUserInputAnswer | null;
   usingCustomAnswer: boolean;
   answeredQuestionCount: number;
   isLastQuestion: boolean;
@@ -91,17 +93,6 @@ function countAnsweredPendingUserInputQuestions(
   }, 0);
 }
 
-export function findFirstUnansweredPendingUserInputQuestionIndex(
-  questions: ReadonlyArray<UserInputQuestion>,
-  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
-): number {
-  const unansweredIndex = questions.findIndex(
-    (question) => resolvePendingUserInputAnswer(question, draftAnswers[question.id]) === null,
-  );
-
-  return unansweredIndex === -1 ? Math.max(questions.length - 1, 0) : unansweredIndex;
-}
-
 export function derivePendingUserInputProgress(
   questions: ReadonlyArray<UserInputQuestion>,
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
@@ -124,7 +115,9 @@ export function derivePendingUserInputProgress(
     questionIndex: normalizedQuestionIndex,
     activeQuestion,
     activeDraft,
-    selectedOptionValues: normalizeSelectedOptionValues(activeDraft?.selectedOptionValues),
+    selectedOptionValues: activeQuestion
+      ? normalizeSelectedOptionValues(activeDraft?.selectedOptionValues)
+      : [],
     customAnswer,
     resolvedAnswer,
     usingCustomAnswer:

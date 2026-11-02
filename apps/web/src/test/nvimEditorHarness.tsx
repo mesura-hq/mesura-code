@@ -246,6 +246,9 @@ function makeTransport() {
         }) => receive("viewport", input.threadId, `${input.topline}:${input.rows}:${input.cols}`),
         [WS_METHODS.editorSessionReplaceText]: (input: { threadId: string }) =>
           receive("replaceText", input.threadId, ""),
+        // The autosave writes through the same runtime (`fileSaveSessions.ts`); the host accepts it.
+        [WS_METHODS.projectsWriteFile]: (input: { relativePath: string }) =>
+          Effect.succeed({ relativePath: input.relativePath }),
       },
     }) as unknown as RpcSession;
 

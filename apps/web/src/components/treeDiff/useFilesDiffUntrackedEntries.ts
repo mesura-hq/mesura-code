@@ -27,7 +27,7 @@ export function useFilesDiffUntrackedEntries(input: {
   );
   const refreshChanges = changes.refresh;
   const lastPreviewRef = useRef(preview);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: re-reads the status when a new patch result arrives from the server
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: re-reads the status when a new patch result arrives from the server
   useEffect(() => {
     const previous = lastPreviewRef.current;
     lastPreviewRef.current = preview;

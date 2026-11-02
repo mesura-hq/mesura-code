@@ -26,7 +26,7 @@ export function useThreadFeed(input: {
 
   const { projects, threads } = input;
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: synchronizes the projected thread list to the Electron main process
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: synchronizes the projected thread list to the Electron main process
   useEffect(() => {
     const publish = window.desktopBridge?.publishThreads;
     // Absent on web and on any build without the publisher. The bar is simply

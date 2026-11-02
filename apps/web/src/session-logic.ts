@@ -7,7 +7,6 @@ import {
   type OrchestrationV2PlanArtifact,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2RunAttempt,
-  type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
   type PlanId,
   type RunId,
@@ -105,17 +104,6 @@ export interface WorkLogEntry {
 
 export type PendingApproval = ThreadPendingApproval;
 export type PendingUserInput = ThreadPendingUserInput;
-
-export interface ActivePlanState {
-  readonly createdAt: string;
-  readonly runId: RunId | null;
-  readonly explanation?: string | null;
-  readonly steps: Array<{
-    readonly step: string;
-    readonly status: "pending" | "inProgress" | "completed";
-    readonly durationMs?: number;
-  }>;
-}
 
 export interface LatestProposedPlanState {
   readonly id: PlanId;
@@ -270,71 +258,6 @@ export function derivePendingUserInputs(
   inputs: ReadonlyArray<ThreadPendingUserInput>,
 ): ThreadPendingUserInput[] {
   return [...inputs].toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
-}
-
-export function deriveActivePlanState(
-  projection: ThreadStructure | null,
-  latestRunId: RunId | undefined,
-): ActivePlanState | null {
-  if (projection === null) return null;
-  const plans = projection.plans
-    .filter((plan) => plan.kind === "todo_list")
-    .filter((plan) => plan.status !== "superseded");
-  const runOrdinals = new Map<RunId | null, number>(
-    projection.runs.map((run) => [run.id, run.ordinal]),
-  );
-  const plan =
-    plans.findLast((candidate) => candidate.runId === latestRunId) ??
-    plans.reduce<(typeof plans)[number] | null>(
-      (latest, candidate) =>
-        latest === null ||
-        (runOrdinals.get(candidate.runId) ?? -1) >= (runOrdinals.get(latest.runId) ?? -1)
-          ? candidate
-          : latest,
-      null,
-    );
-  if (plan === null || plan.steps.length === 0) return null;
-  return {
-    createdAt: planItemTime(projection, plan),
-    runId: plan.runId,
-    explanation: plan.explanation ?? null,
-    steps: plan.steps.map(({ text, status, durationMs }) => ({
-      step: text,
-      status: status === "running" ? "inProgress" : status,
-      ...(durationMs === undefined ? {} : { durationMs }),
-    })),
-  };
-}
-
-// Claude's unfinished tasks belong to the provider session, not just the turn.
-export function selectComposerTasksPlan(
-  projection: ThreadStructure | null,
-  plan: ActivePlanState | null,
-  activeRunId: RunId | null,
-  activeRunSettled: boolean,
-): ActivePlanState | null {
-  if (projection === null || plan === null) return null;
-  if (activeRunId !== null && !activeRunSettled && plan.runId === activeRunId) return plan;
-  if (plan.steps.every((step) => step.status === "completed")) return null;
-  const planProviderThreadId = projection.runs.find(
-    (run) => run.id === plan.runId,
-  )?.providerThreadId;
-  if (planProviderThreadId === undefined || planProviderThreadId === null) return null;
-  const planDriver = projection.providerThreads.find(
-    (providerThread) => providerThread.id === planProviderThreadId,
-  )?.driver;
-  if (planDriver !== "claudeAgent") return null;
-  let latestStartedRun: OrchestrationV2ThreadProjection["runs"][number] | null = null;
-  for (const run of projection.runs) {
-    if (
-      run.startedAt !== null &&
-      run.providerThreadId !== null &&
-      (latestStartedRun === null || run.ordinal > latestStartedRun.ordinal)
-    ) {
-      latestStartedRun = run;
-    }
-  }
-  return latestStartedRun?.providerThreadId === planProviderThreadId ? plan : null;
 }
 
 function planItemTime(
@@ -629,6 +552,17 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
         toolData: { input: item.input, output: item.output },
       };
     }
+    case "todo_list": {
+      // Each todo update is a quiet row where the agent wrote it; it opens to every step.
+      const done = item.steps.filter((step) => step.status === "completed").length;
+      const current =
+        item.steps.find((step) => step.status === "running") ??
+        item.steps.find((step) => step.status === "pending");
+      return {
+        ...common,
+        label: `Tasks ${done}/${item.steps.length}${current ? ` · ${current.text}` : ""}`,
+      };
+    }
     case "approval_request":
       return {
         ...common,
@@ -707,7 +641,8 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
   let factoryRunsById: ReturnType<typeof deriveFactoryRunItemsByIdFromTurnItems> | null = null;
   for (const row of input.visibleTurnItems) {
     const { item } = row;
-    if (turnItemIsWorkspacePreparation(item)) continue;
+    if (turnItemIsWorkspacePreparation(item) && !item.deferredWork) continue;
+    if (item.type === "checkpoint") continue;
     if (item.type === "factory_card") {
       factoryRunsById ??= deriveFactoryRunItemsByIdFromTurnItems(input.visibleTurnItems);
       const factoryItem = factoryTimelineItemFromCard(item, factoryRunsById);
@@ -728,8 +663,12 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       }
       continue;
     }
-    // Task progress belongs in the composer, not between conversation entries.
-    if (item.type === "todo_list" || item.type === "checkpoint") continue;
+    if (
+      item.type === "user_message" &&
+      item.inputIntent === "queued_turn" &&
+      item.status === "pending"
+    )
+      continue;
     if (item.type === "user_message" && foldedAnswerMessageIds.has(item.messageId)) continue;
     const createdAt = projectedItemCreatedAt(row);
     const attempt = resolveAttempt(item);
@@ -832,10 +771,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       continue;
     }
 
-    const mcpApp =
-      item.type === "dynamic_tool" && item.status === "completed"
-        ? mcpAppFromToolItem(item)
-        : undefined;
+    const mcpApp = item.type === "dynamic_tool" ? mcpAppFromToolItem(item) : undefined;
     if (mcpApp !== undefined) {
       entries.push({
         id: item.id,
@@ -1024,6 +960,27 @@ export function isStreamingTurnItemTextUpdate(
   return Equal.equals(previousMetadata, nextMetadata);
 }
 
+/**
+ * A changed tool or work item maps to exactly one entry with the item's id.
+ * Messages and question answers take part in cross-entry dedupe, and anchored
+ * messages are placed by createdAt, so those changes rebuild.
+ */
+function canRederiveInPlace(
+  input: TimelineEntriesInput,
+  previousItem: OrchestrationV2ProjectedTurnItem,
+  item: OrchestrationV2ProjectedTurnItem,
+): boolean {
+  return (
+    item.item.id === previousItem.item.id &&
+    item.item.type === previousItem.item.type &&
+    item.item.type !== "user_message" &&
+    item.item.type !== "assistant_message" &&
+    item.item.type !== "user_input_request" &&
+    ((input.anchoredMessages?.length ?? 0) === 0 ||
+      projectedItemCreatedAt(item) === projectedItemCreatedAt(previousItem))
+  );
+}
+
 function reuseTimelineEntries(
   input: TimelineEntriesInput,
   previous: TimelineEntriesProjection,
@@ -1064,15 +1021,45 @@ function reuseTimelineEntries(
     OrchestrationV2ProjectedTurnItem,
     OrchestrationV2ProjectedTurnItem
   >();
+  const changedItems: OrchestrationV2ProjectedTurnItem[] = [];
   for (let index = 0; index < before.visibleTurnItems.length; index += 1) {
     const previousItem = before.visibleTurnItems[index]!;
     const item = input.visibleTurnItems[index]!;
     if (item === previousItem) continue;
-    if (!isStreamingTurnItemTextUpdate(previousItem, item)) return null;
-    replacements.set(previousItem, item);
+    if (isStreamingTurnItemTextUpdate(previousItem, item)) {
+      replacements.set(previousItem, item);
+      continue;
+    }
+    if (!canRederiveInPlace(input, previousItem, item)) return null;
+    changedItems.push(item);
   }
-  if (replacements.size === 0 && !appended) return previous.entries;
+  // One batch keeps the attempt/node/plan lookups to a single build.
+  const rederived =
+    changedItems.length === 0
+      ? []
+      : deriveTimelineEntriesFromVisibleTurnItems({
+          ...input,
+          visibleTurnItems: changedItems,
+          optimisticMessages: [],
+          anchoredMessages: [],
+        });
+  if (
+    rederived.length !== changedItems.length ||
+    rederived.some((entry, index) => entry.id !== changedItems[index]!.item.id)
+  ) {
+    return null;
+  }
+  const rederivedEntries = new Map(rederived.map((entry) => [entry.id, entry]));
+  if (replacements.size === 0 && rederivedEntries.size === 0 && !appended) {
+    return previous.entries;
+  }
+  let rederivedCount = 0;
   const entries = previous.entries.map((entry): TimelineEntry => {
+    const rederivedEntry = rederivedEntries.get(entry.id);
+    if (rederivedEntry !== undefined) {
+      rederivedCount += 1;
+      return rederivedEntry;
+    }
     const row =
       entry.kind === "message" && entry.projectedItem !== undefined
         ? replacements.get(entry.projectedItem)
@@ -1088,6 +1075,7 @@ function reuseTimelineEntries(
       },
     };
   });
+  if (rederivedCount !== rederivedEntries.size) return null;
   if (appended) {
     entries.push(
       ...deriveTimelineEntriesFromVisibleTurnItems({

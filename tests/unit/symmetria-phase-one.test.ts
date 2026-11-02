@@ -256,7 +256,6 @@ describe("Symmetria broker contract phase-one regression guards", () => {
 
   it("keeps the public entry point composed from upstream schema values", () => {
     const script = [
-      'import * as Schema from "effect/Schema";',
       'import * as BrokerContract from "@symmetria/broker-contract";',
       'import * as UpstreamContract from "@t3tools/contracts";',
       "const sharedSchemas = ['CommandId', 'EnvironmentId', 'ProjectId', 'ThreadId', 'TurnId'];",
@@ -265,12 +264,9 @@ describe("Symmetria broker contract phase-one regression guards", () => {
       "    throw new Error(`${name} is not the upstream schema value`);",
       "  }",
       "}",
+      // Upstream dropped its `ProviderRuntimeTurnStatus` alias; the broker borrows no turn state.
       "if ('RuntimeTurnState' in BrokerContract.BORROWED_RUNTIME_VOCABULARIES) {",
-      '  throw new Error("RuntimeTurnState was copied instead of composed from ProviderRuntimeTurnStatus");',
-      "}",
-      "const turnStateSchema = Schema.toJsonSchemaDocument(UpstreamContract.ProviderRuntimeTurnStatus).schema;",
-      "if (!Array.isArray(turnStateSchema.enum) || turnStateSchema.enum.length === 0) {",
-      '  throw new Error("ProviderRuntimeTurnStatus is not usable as the upstream schema value");',
+      '  throw new Error("RuntimeTurnState was copied into the borrowed vocabularies");',
       "}",
     ].join("\n");
     expectSuccessfulCommand(

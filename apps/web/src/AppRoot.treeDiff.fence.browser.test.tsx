@@ -186,6 +186,11 @@ vi.mock("@t3tools/client-runtime/state/runtime", async (importOriginal) => {
       familyFor(options.label),
   };
 });
+// Upstream wraps the diff preview in a revisioned atom; the fixture atom is the one it wraps.
+vi.mock("./state/revisionedQuery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./state/revisionedQuery")>()),
+  revisionedQuery: <A,>(atom: A) => atom,
+}));
 vi.mock("./state/query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./state/query")>();
   return {
@@ -245,7 +250,10 @@ vi.mock("./hooks/useHandleNewThread", async (importOriginal) => ({
   useNewThreadHandler: () => fixture.noopCommand,
 }));
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 // happy-dom has no module workers, and the highlighting pool is unrelated to the trees under test.
@@ -546,6 +554,8 @@ it("Tree diff fence: the mode menu lists Tree diff, Files diff, Branch changes, 
     "Branch changes",
     "Latest turn",
     "Turn",
+    // Upstream's commit picker.
+    "Commits",
   ]);
   for (const label of labels) {
     expect(label).not.toMatch(/Working tree|Uncommitted/);

@@ -22,11 +22,13 @@ import { requiredScopeForRpcMethod } from "../auth/RpcAuthorization.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as ServerSettingsModule from "../serverSettings.ts";
 
 const makeSettingsLayer = () =>
   ServerSettingsModule.layer.pipe(
     Layer.provide(ServerSecretStore.layer),
+    Layer.provide(ManagedPolicy.layerTest()),
     Layer.provideMerge(Layer.fresh(SqlitePersistence.layerMemory)),
     Layer.provideMerge(
       Layer.fresh(ServerConfig.layerTest(process.cwd(), { prefix: "dictation-rpc-settings-" })),
@@ -39,7 +41,10 @@ const reloadSettings = Effect.gen(function* () {
   return yield* fresh.getSettings;
 }).pipe(
   Effect.provide(
-    Layer.fresh(ServerSettingsModule.layer).pipe(Layer.provide(ServerSecretStore.layer)),
+    Layer.fresh(ServerSettingsModule.layer).pipe(
+      Layer.provide(ServerSecretStore.layer),
+      Layer.provide(ManagedPolicy.layerTest()),
+    ),
   ),
 );
 

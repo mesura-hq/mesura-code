@@ -128,7 +128,12 @@ function registeredCommands(source: string): Set<string> {
     }
   };
   for (let index = 0; index < tokens.length; index += 1) {
-    if (!["useCommandHandlers", "registerCommandHandlers"].includes(tokens[index]!)) continue;
+    const registrations = [
+      "useCommandHandlers",
+      "registerCommandHandlers",
+      "registerCommandsWithLeaderKeys",
+    ];
+    if (!registrations.includes(tokens[index]!)) continue;
     if (tokens[index + 1] !== "(") continue;
     const args = expressionParts(tokens.slice(index + 2, closingToken(tokens, index + 1)));
     if (args[0]) visitMap(args[0]);
@@ -195,12 +200,17 @@ it("modal keys registry guard: the chord replay bridge is gone", () => {
   );
 });
 
-it("modal keys registry guard: no key engine or registry source builds a KeyboardEvent", () => {
+// `registerCommandsWithLeaderKeys` hands a chord scope's handler a keydown it never dispatches, so
+// the guard is on dispatching one: that is the replay.
+it("modal keys registry guard: no key engine or registry source dispatches a KeyboardEvent", () => {
   const offenders = [
     ...sourceFiles(NodePath.join(webSource, "keys")),
     ...sourceFiles(NodePath.join(webSource, "commands")),
   ]
-    .filter((file) => /new KeyboardEvent\(/.test(NodeFS.readFileSync(file, "utf8")))
+    .filter((file) => {
+      const source = NodeFS.readFileSync(file, "utf8");
+      return /new KeyboardEvent\(/.test(source) && /dispatchEvent\(/.test(source);
+    })
     .map((file) => NodePath.relative(repositoryRoot, file));
   assert.deepEqual(offenders, []);
 });

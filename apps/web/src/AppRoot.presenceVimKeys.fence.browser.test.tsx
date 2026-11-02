@@ -14,8 +14,13 @@ vi.mock("./state/primaryEnvironment", async (original) =>
   (await fenceMocks()).mockPrimaryEnvironment(original),
 );
 vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
-vi.mock("./browser/BrowserProfileReporter", () => ({ BrowserProfileReporter: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
+vi.mock("./browser/BrowserProfileReporter", () => ({
+  startBrowserProfileReporting: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 
 import { configureKeyEngine, installKeyEngine } from "./keys/keyEngine";

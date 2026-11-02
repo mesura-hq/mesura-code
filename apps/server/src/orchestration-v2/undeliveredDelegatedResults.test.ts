@@ -9,6 +9,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
+import { isLiveCallerShell } from "../mcp/threadAccess.ts";
 import { withUndeliveredDelegatedResults } from "./undeliveredDelegatedResults.ts";
 
 const at = DateTime.makeUnsafe("2026-10-21T01:08:34.708Z");
@@ -66,5 +67,26 @@ describe("undelivered delegated results", () => {
         pendingBackgroundTasks: [{ taskId: finishedTask.id, kind: "subagent" }],
       }),
     ).toEqual([finishedTask.id]);
+  });
+
+  it("undelivered delegated results guard: a held result does not keep the parent a live MCP caller", () => {
+    const pendingBackgroundTasks = withUndeliveredDelegatedResults({
+      pendingBackgroundTasks: [],
+      subagents: [finishedTask],
+      latestRunStatus: "completed",
+      hasActiveRun: false,
+    });
+    expect(pendingBackgroundTasks.map((task) => task.taskId)).toEqual([finishedTask.id]);
+    expect(
+      isLiveCallerShell(
+        {
+          archivedAt: null,
+          activeRunId: null,
+          providerInstanceId: finishedTask.providerInstanceId,
+          pendingBackgroundTasks,
+        },
+        finishedTask.providerInstanceId,
+      ),
+    ).toBe(false);
   });
 });

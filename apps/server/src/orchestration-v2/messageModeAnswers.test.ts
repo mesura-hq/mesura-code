@@ -38,6 +38,12 @@ describe("messageModeAnswerText", () => {
     }
   });
 
+  it("sends a multi-select question's picks comma-separated and refuses a blank pick", () => {
+    const multiSelect = { multiSelect: true, options: [] };
+    expect(messageModeAnswerText(multiSelect, ["Small", "Large"])).toBe("Small, Large");
+    expect(messageModeAnswerText(multiSelect, ["Small", " "])).toBeNull();
+  });
+
   it("matches a choice by label when the option carries no value", () => {
     const byLabel = { allowCustomAnswer: false, options: [{ label: "Yes", description: "Y" }] };
     expect(messageModeAnswerText(byLabel, "Yes")).toBe("Yes");

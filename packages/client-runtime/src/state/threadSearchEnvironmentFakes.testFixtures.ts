@@ -325,6 +325,7 @@ export const makeFakeEnvironments = Effect.fn("ThreadSearchFakes.makeFakeEnviron
       ready: Effect.void,
       probe: Effect.void,
       closed: Effect.never,
+      inboundFrames: Effect.succeed(0),
     };
     const connected = spec.connected ?? true;
     if (connected) {

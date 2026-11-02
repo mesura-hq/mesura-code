@@ -1,3 +1,5 @@
+// Mesura: upstream deleted this panel when approvals moved to the timeline; the pinned action
+// dock (PinnedActionDock.tsx) still shows it above the composer input.
 import {
   FULL_ACCESS_OVERRIDE_QUESTION,
   fullAccessOverrideExplanation,

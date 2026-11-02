@@ -121,6 +121,7 @@ export const make = Effect.gen(function* () {
       } catch {}
       // Chromium caches portal identity; set it before any asynchronous initialization.
       Electron.app.setDesktopName(linux.linuxDesktopEntryName);
+      // Mesura: X11 and XWayland match the window to mesura-code.desktop by this class.
       Electron.app.commandLine.appendSwitch("class", linux.linuxWmClass);
       if (linux.passwordStore !== null && linuxPasswordStoreCommandLine === null) {
         Electron.app.commandLine.appendSwitch("password-store", linux.passwordStore);

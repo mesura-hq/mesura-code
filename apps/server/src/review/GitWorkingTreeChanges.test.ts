@@ -172,7 +172,7 @@ describe("ReviewService.getWorkingTreeChanges one-shot read", () => {
       assert.strictEqual(error.cwd, repo);
       assert.strictEqual(
         error.detail,
-        "Working tree changes cwd must stay within the configured workspace root.",
+        "Review working tree changes cwd must stay within the configured workspace root.",
       );
     }).pipe(
       Effect.provide(makeReviewLayer(workspaceRoot)),

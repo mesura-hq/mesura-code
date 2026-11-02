@@ -90,7 +90,10 @@ vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadA
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
@@ -98,6 +101,7 @@ vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 // Keep application routing and timeline projection real. Replace the virtual
 // list boundary to keep every pending request mounted during the interaction.
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => undefined,
   LegendList: ({
     data,
     renderItem,

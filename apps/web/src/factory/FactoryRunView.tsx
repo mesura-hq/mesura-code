@@ -27,7 +27,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 /** The client clock, ticking once a second while `live`; frozen otherwise. */
 function useSecondClock(live: boolean): number {
   const [nowMs, setNowMs] = useState(() => Date.now());
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: one-second interval timer while the run is live, cleared on cleanup
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: one-second interval timer while the run is live, cleared on cleanup
   useEffect(() => {
     if (!live) return;
     const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);

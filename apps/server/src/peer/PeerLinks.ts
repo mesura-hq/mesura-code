@@ -21,16 +21,24 @@ import * as Base64Url from "effect/encoding/Base64Url";
 import * as Hex from "effect/encoding/Hex";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
+import * as HttpApi from "effect/http-api/HttpApi";
 import * as HttpApiClient from "effect/http-api/HttpApiClient";
 import { isLocalLoopbackHost, isTailnetHost } from "@t3tools/shared/hostClassification";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ServerSettings from "../serverSettings.ts";
+
+const PeerHttpApi = HttpApi.make(EnvironmentHttpApi.identifier)
+  .add(EnvironmentHttpApi.groups.metadata)
+  .add(EnvironmentHttpApi.groups.mcpOAuth)
+  .annotateMerge(EnvironmentHttpApi.annotations);
 
 /** The redirect registered for a link. Nothing ever listens there: the code comes back in the response. */
 const LINK_REDIRECT_URI = "http://127.0.0.1/t3code-peer-link";
@@ -49,6 +57,9 @@ export interface ResolvedPeerLink {
   readonly token: string;
 }
 
+export const LINKED_ENVIRONMENTS_OFF =
+  "Linked environments is off on this machine. Turn it on in Settings → Labs.";
+
 /**
  * Links from this environment to others. Linking signs this environment in to
  * the peer's `/mcp` as an outside agent with a pairing code from the peer, the
@@ -58,6 +69,8 @@ export interface ResolvedPeerLink {
 export class PeerLinks extends Context.Service<
   PeerLinks,
   {
+    /** Whether the Linked environments beta (Settings → Labs) is on here. */
+    readonly enabled: Effect.Effect<boolean>;
     readonly link: (input: PeerLinkCreateInput) => Effect.Effect<PeerLink, PeerLinkError>;
     /**
      * The environment answering at `url`, or nothing when it is not a usable
@@ -159,6 +172,11 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const httpClient = yield* HttpClient.HttpClient;
   const environment = yield* ServerEnvironment.ServerEnvironment;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const enabled = serverSettings.getSettings.pipe(
+    Effect.map((settings) => settings.linkedEnvironmentsEnabled),
+    Effect.orElseSucceed(() => false),
+  );
 
   /** A fresh name for one link's token; the row records it. */
   const newSecretName = crypto.randomBytes(16).pipe(
@@ -173,7 +191,7 @@ const make = Effect.gen(function* () {
   );
 
   const clientFor = (origin: string) =>
-    HttpApiClient.make(EnvironmentHttpApi, { baseUrl: origin }).pipe(
+    HttpApiClient.make(PeerHttpApi, { baseUrl: origin }).pipe(
       Effect.provideService(HttpClient.HttpClient, peerHttpClient),
     );
 
@@ -192,7 +210,9 @@ const make = Effect.gen(function* () {
       urls: yield* decodeUrls(row.urls_json),
       access: yield* decodeAccess(row.access),
       linkedAt: DateTime.makeUnsafe(row.linked_at),
-      expiresAt: DateTime.makeUnsafe(row.expires_at),
+      // Its token predates link fencing, so the peer would not fence its work:
+      // like an expired link, only a new pairing code brings it back.
+      expiresAt: DateTime.makeUnsafe(row.fenced === 1 ? row.expires_at : row.linked_at),
       lastReachedAt: row.last_reached_at === null ? null : DateTime.makeUnsafe(row.last_reached_at),
       lastError: row.last_error,
     } satisfies PeerLink;
@@ -250,7 +270,7 @@ const make = Effect.gen(function* () {
               redirect_uri: LINK_REDIRECT_URI,
               code_challenge: challenge,
               code_challenge_method: "S256",
-              state,
+              state: Redacted.make(state),
               resource,
             },
             decision: { _tag: "pairing-code", access: input.access, code: input.pairingCode },
@@ -284,10 +304,10 @@ const make = Effect.gen(function* () {
         .token({
           payload: {
             grant_type: "authorization_code",
-            code,
+            code: Redacted.make(code),
             redirect_uri: LINK_REDIRECT_URI,
             client_id: registered.client_id,
-            code_verifier: verifier,
+            code_verifier: Redacted.make(verifier),
             resource,
           },
         })
@@ -386,6 +406,9 @@ const make = Effect.gen(function* () {
   });
 
   const link: PeerLinks["Service"]["link"] = Effect.fn("PeerLinks.link")(function* (input) {
+    if (!(yield* enabled)) {
+      return yield* new PeerLinkError({ reason: "disabled", message: LINKED_ENVIRONMENTS_OFF });
+    }
     const urls = [input.url, ...(input.alternateUrls ?? [])];
     // The user picked a machine: link through the addresses that prove to
     // be it, so a reused LAN address never receives the pairing code.
@@ -428,9 +451,11 @@ const make = Effect.gen(function* () {
     yield* secrets
       .set(secretName, new TextEncoder().encode(issued.access_token))
       .pipe(Effect.catch(failStorage));
-    const urlsJson = yield* encodeUrls(origins).pipe(Effect.catch(failStorage));
-    const previous = yield* readRow(peer.environmentId);
-    yield* sql`
+    // A token no row names could never be removed.
+    const previous = yield* Effect.gen(function* () {
+      const urlsJson = yield* encodeUrls(origins).pipe(Effect.catch(failStorage));
+      const previous = yield* readRow(peer.environmentId);
+      yield* sql`
         INSERT INTO peer_environment_links (
           environment_id, secret_name, label, urls_json, access, linked_at, expires_at,
           last_reached_at, last_error, fenced
@@ -450,6 +475,8 @@ const make = Effect.gen(function* () {
           last_reached_at = excluded.last_reached_at,
           last_error = NULL
       `.pipe(Effect.catch(failStorage));
+      return previous;
+    }).pipe(Effect.onError(() => secrets.remove(secretName).pipe(Effect.ignore)));
     // Linking again replaces the old token. A racing link may leave its own
     // behind; it is unused either way.
     if (Option.isSome(previous) && previous.value.secret_name !== secretName) {
@@ -529,14 +556,6 @@ const make = Effect.gen(function* () {
           message: `The link to ${link.label} expired. Link it again with a new pairing code from ${link.label}.`,
         });
       }
-      // Its token was issued before links were marked as links, so the peer
-      // never fences the work it carries, whatever version it runs now.
-      if (row.value.fenced !== 1) {
-        return yield* new PeerLinkError({
-          reason: "incompatible",
-          message: `The link to ${link.label} was made by an older Mesura Code. Link it again with a new pairing code from ${link.label}.`,
-        });
-      }
       const stored = yield* secrets.get(row.value.secret_name).pipe(Effect.catch(failStorage));
       if (Option.isNone(stored)) {
         return yield* new PeerLinkError({
@@ -593,6 +612,7 @@ const make = Effect.gen(function* () {
     );
 
   return PeerLinks.of({
+    enabled,
     link,
     describe: describeUrl,
     list,

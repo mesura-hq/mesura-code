@@ -11,7 +11,7 @@ import { registerDictationSlotFillHandler } from "../../composerDraftStore";
 import { fillDictationSlotKeepingCaret } from "../../dictation/dictationSlotEdits";
 import { collapseExpandedComposerCursor } from "../../composer-logic";
 import { registerComposerVimAdapter } from "../../keys/composer/composerSurface";
-import type { ComposerPromptEditorHandle } from "../ComposerPromptEditor";
+import type { ComposerPromptEditorHandle } from "../ComposerPromptEditorTiptap";
 import type { ChatComposerHandle } from "./ChatComposer";
 import { useStableCallback } from "../../hooks/useStableCallback";
 
@@ -43,7 +43,7 @@ export function useMesuraComposerInput(input: {
     applyPromptReplacement,
   } = input;
   const setPrompt = useStableCallback(input.setPrompt);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers this composer as the Vim adapter while mounted
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: registers this composer as the Vim adapter while mounted
   useEffect(
     () =>
       registerComposerVimAdapter({
@@ -64,11 +64,11 @@ export function useMesuraComposerInput(input: {
   );
   // Several fills can arrive before the editor commits. The last fill owns the caret until then.
   const lastFillRef = useRef<{ prompt: string; expandedCursor: number } | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: an editor commit ends the last fill's ownership of the caret
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: an editor commit ends the last fill's ownership of the caret
   useLayoutEffect(() => {
     lastFillRef.current = null;
   });
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the dictation slot fill handler for this draft target
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: registers the dictation slot fill handler for this draft target
   useEffect(
     () =>
       registerDictationSlotFillHandler(composerDraftTarget, (jobId, transcript) => {

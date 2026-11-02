@@ -69,7 +69,7 @@ function useSidebarDockRequest(dock: SidebarDockId, enabled: boolean): void {
   const navigate = useNavigate();
   const closeAppModal = useCloseAppModal();
   const modalOpen = useLocation({ select: (location) => isAppModalPage(location.pathname) });
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: carries out a palette request from the external atom once the dock can show
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: carries out a palette request from the external atom once the dock can show
   useEffect(() => {
     if (request !== dock) return;
     if (isMobile) {
@@ -192,7 +192,7 @@ export function useSidebarDockController(input: {
     }),
   );
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: window and document key listeners for the dock chord, disposed on cleanup
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: window and document key listeners for the dock chord, disposed on cleanup
   useEffect(() => {
     if (!enabled) return;
     const platform = navigator.platform;
@@ -240,7 +240,7 @@ export function useSidebarDockController(input: {
   // The pin and the active dock live in module-level atoms that outlive any one
   // sidebar. A dock that unmounts gives up both, so the next sidebar starts
   // closed instead of inheriting a pin nobody saw set.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: releases the module-level pin and active-dock atoms when this dock unmounts
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: releases the module-level pin and active-dock atoms when this dock unmounts
   useEffect(
     () => () => {
       hoverBridgeRef.current?.dispose();
@@ -260,7 +260,7 @@ export function useSidebarDockController(input: {
   // A pinned dock on a phone has no pointer to leave it and no Escape key: a
   // touch outside the dock and its icon is the way out. Mouse clicks keep the
   // desktop behaviour, where only the icon, Escape or the other dock unpin.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: document touch listener that unpins the dock on an outside press
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: document touch listener that unpins the dock on an outside press
   useEffect(() => {
     if (!pinned) return;
     const onPointerDown = (event: PointerEvent) => {
@@ -275,7 +275,7 @@ export function useSidebarDockController(input: {
 
   // A pin only means something where the dock can show. Leaving for a page
   // without it drops the pin, so the dock does not greet the user on return.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: clears the module-level pin when the dock is disabled by a route change
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: clears the module-level pin when the dock is disabled by a route change
   useEffect(() => {
     if (!enabled && pinned) appAtomRegistry.set(pinnedSidebarDockAtom, null);
   }, [enabled, pinned]);
@@ -285,18 +285,18 @@ export function useSidebarDockController(input: {
   // Layout effects, so the dock that opens and the dock that yields change in
   // the same frame instead of one frame apart. They run in this order: the
   // ref is current before the effect below reads it.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-ref, current before the takeover effect below reads it in the same commit
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-ref, current before the takeover effect below reads it in the same commit
   useLayoutEffect(() => {
     wantsOpenRef.current = wantsOpen;
   });
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: claims the module-level active-dock atom in the same frame the dock opens
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: claims the module-level active-dock atom in the same frame the dock opens
   useLayoutEffect(() => {
     if (wantsOpen) appAtomRegistry.set(activeSidebarDockAtom, dock);
   }, [dock, wantsOpen]);
   // Keyed on the active dock alone: this runs when another dock takes over,
   // not when this one starts wanting to open while the atom still names the
   // other.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: closes this dock in the same frame another dock takes the active atom
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: closes this dock in the same frame another dock takes the active atom
   useLayoutEffect(() => {
     if (activeDock !== null && activeDock !== dock && wantsOpenRef.current) closePanel();
   }, [activeDock, closePanel, dock]);

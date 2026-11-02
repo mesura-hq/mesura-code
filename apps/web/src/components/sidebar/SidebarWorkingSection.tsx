@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { type KeyboardEvent, type ReactNode, useRef } from "react";
+import { type ReactNode, useRef } from "react";
 
-import { useClientSettings } from "../../hooks/useSettings";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
@@ -23,18 +22,10 @@ export function SidebarWorkingSection(props: {
   const { count, expanded } = props;
   const sectionRef = useRef<HTMLDivElement>(null);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const redesign = useClientSettings((settings) => settings.redesignEnabled);
   const seen = useSeenOnScreen(sectionRef);
   useWorkingSweep(sectionRef, expanded && seen && count > 0);
   const shortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggleWorking");
   const action = expanded ? "Collapse working threads" : "Show working threads";
-
-  const onHeaderKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    setWorkingSectionExpanded(event.key === "ArrowRight");
-  };
 
   return (
     <div ref={sectionRef} data-working-section="" data-testid="sidebar-working-section">
@@ -51,15 +42,14 @@ export function SidebarWorkingSection(props: {
               <CollapsibleSectionHeader
                 expanded={expanded}
                 onClick={() => setWorkingSectionExpanded(!expanded)}
-                onKeyDown={onHeaderKeyDown}
+                role="treeitem"
+                tabIndex={-1}
+                // Upstream's tree (`sidebarTree.ts`) owns the arrows, Left and Right included.
+                data-sidebar-row="shelf:working"
                 data-working-section-header=""
                 data-mesura-nav-stop=""
                 data-testid="sidebar-working-shelf-toggle"
-                accessory={
-                  redesign || !expanded ? (
-                    <span className="font-normal tabular-nums">{count}</span>
-                  ) : null
-                }
+                accessory={<span className="font-normal tabular-nums">{count}</span>}
               />
             }
           >

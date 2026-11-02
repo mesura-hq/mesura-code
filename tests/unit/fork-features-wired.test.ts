@@ -28,7 +28,7 @@ it("keeps the sidebar project scope on the store the keybinding writes", () => {
   const sidebar = read("apps/web/src/components/Sidebar.tsx");
   assert.include(
     sidebar,
-    "useProjectScopeStore((store) => store.projectScopeKey)",
+    "useProjectScopeStore((store) => store.projectScopeKeys)",
     "the sidebar reads a local project scope again, so projectScope.toggle writes a store nothing reads",
   );
   assert.notInclude(
@@ -271,7 +271,8 @@ it("renders the composer footer controls in one group, in order", () => {
   const composer = read("apps/web/src/components/chat/ChatComposer.tsx");
   // The right-hand footer now owns the order. The extracted primary component
   // supplies send, while the parent supplies context, attach and dictation.
-  const group = between(composer, 'data-chat-composer-actions="right"', "</div>");
+  // The group nests the model controls' own <div>, so it ends inside the send button's props.
+  const group = between(composer, 'data-chat-composer-actions="right"', "onResume={onResume}");
 
   const row = [
     ["context meter", "<ContextWindowMeter"],

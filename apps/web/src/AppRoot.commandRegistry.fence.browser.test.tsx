@@ -51,8 +51,13 @@ vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCom
 vi.mock("./state/use-atom-query-runner", async () => (await fenceMocks()).mockAtomQueryRunner());
 vi.mock("./state/server", async (original) => (await fenceMocks()).mockServer(original));
 vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
-vi.mock("./hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => success }));
+vi.mock("./hooks/useHandleNewThread", () => ({
+  createNewThreadHandler: () => success,
+  resolveDefaultProjectRef: () => null,
+  useNewThreadHandler: () => success,
+}));
 vi.mock("./hooks/useThreadActions", () => ({
+  canTurnThreadIntoProject: () => false,
   useAcknowledgeThreadWoke: () => success,
   useThreadActions: () => ({
     settleThread: (ref: unknown) => {
@@ -74,7 +79,10 @@ vi.mock("./components/LegacySidebar", () => ({ default: () => null }));
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));

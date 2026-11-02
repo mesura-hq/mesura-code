@@ -2,12 +2,15 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { type ExecutionEnvironmentDescriptor, OrchestratorMcpFailure } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as HttpRouter from "effect/http/HttpRouter";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 import { Tool, Toolkit } from "effect/ai";
@@ -19,10 +22,12 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import * as McpToolAccess from "../mcp/McpToolAccess.ts";
 import * as PeerLinks from "./PeerLinks.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import {
   descriptorOf,
   layerLinkingEnvironment,
@@ -73,13 +78,17 @@ const serveB = (descriptor: ExecutionEnvironmentDescriptor) =>
   servePeer(descriptor, McpHttpServer.toolkitRegistration(ProbeToolkit, probeHandlers));
 
 /** Environment A, which links to B. */
-const makeA = (descriptor: ExecutionEnvironmentDescriptor) =>
-  layerLinkingEnvironment(descriptor).pipe(
+const makeA = (
+  descriptor: ExecutionEnvironmentDescriptor,
+  secrets?: typeof ServerSecretStore.layer,
+) =>
+  layerLinkingEnvironment(descriptor, secrets).pipe(
     Layer.build,
     Effect.map((context) => ({
       links: Context.get(context, PeerLinks.PeerLinks),
       peer: Context.get(context, PeerMcpClient.PeerMcpClient),
       sql: Context.get(context, SqlClient.SqlClient),
+      settings: Context.get(context, ServerSettings.ServerSettingsService),
     })),
   );
 
@@ -147,6 +156,83 @@ it.effect("links with a pairing code, and the peer holds its agents to the limit
       // A refusal keeps the peer's reason.
       const notFound = yield* probe(a, undefined, "refuse").pipe(Effect.flip);
       expect(notFound).toMatchObject({ code: "thread_not_found", message: "No such thread." });
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect(
+  "each machine's Linked environments beta gates links, and a link waits while it is off",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const b = yield* serveB(box);
+        const a = yield* makeA(laptop);
+        const pairing = yield* b.auth.issuePairingCredential();
+        const link = a.links.link({ url: b.url, pairingCode: pairing.credential, access: "auto" });
+
+        yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: false });
+        expect(yield* link.pipe(Effect.flip)).toMatchObject({
+          reason: "disabled",
+          message: PeerLinks.LINKED_ENVIRONMENTS_OFF,
+        });
+        expect(yield* Ref.get(b.bearers)).toEqual([]);
+
+        yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: true });
+        yield* b.settings.updateSettings({ linkedEnvironmentsEnabled: false });
+        const refusedThere = yield* link.pipe(Effect.flip);
+        expect(refusedThere.reason).toBe("pairing_rejected");
+        expect(refusedThere.message).toContain("Linked environments is off on that machine");
+        expect(yield* linkedSessions(b)).toEqual([]);
+
+        yield* b.settings.updateSettings({ linkedEnvironmentsEnabled: true });
+        yield* link;
+        yield* b.settings.updateSettings({ linkedEnvironmentsEnabled: false });
+        // Not final, so a task already running there picks up again once it is back on.
+        const waiting = yield* probe(a).pipe(Effect.flip);
+        expect(waiting.code).toBe("orchestration_error");
+        expect(waiting.message).toContain("has Linked environments turned off");
+        yield* b.settings.updateSettings({ linkedEnvironmentsEnabled: true });
+        expect(yield* probe(a)).toEqual({ caller: "Mesura Code · Laptop", modes: "auto/default" });
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a link whose row cannot be stored keeps none of its token", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const b = yield* serveB(box);
+      const held = yield* Ref.make<ReadonlySet<string>>(new Set());
+      const noted = Layer.effect(
+        ServerSecretStore.ServerSecretStore,
+        Effect.map(ServerSecretStore.make, (store) =>
+          ServerSecretStore.ServerSecretStore.of({
+            ...store,
+            set: (name, value) =>
+              store
+                .set(name, value)
+                .pipe(Effect.andThen(Ref.update(held, (names) => new Set([...names, name])))),
+            remove: (name) =>
+              store
+                .remove(name)
+                .pipe(
+                  Effect.andThen(
+                    Ref.update(held, (names) => new Set([...names].filter((at) => at !== name))),
+                  ),
+                ),
+          }),
+        ),
+      );
+      const a = yield* makeA(laptop, noted);
+      yield* a.sql`
+        CREATE TRIGGER refuse_link BEFORE INSERT ON peer_environment_links
+        BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END
+      `;
+      const pairing = yield* b.auth.issuePairingCredential();
+      const failed = yield* a.links
+        .link({ url: b.url, pairingCode: pairing.credential, access: "auto" })
+        .pipe(Effect.flip);
+      expect(failed.reason).toBe("storage");
+      expect(yield* Ref.get(held)).toEqual(new Set());
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
@@ -256,6 +342,57 @@ it.effect("never sends a link's token to an address that stops answering as that
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+it.effect("cancelling a descriptor probe aborts its request and leaves later resolves fresh", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const hold = yield* Ref.make(false);
+      const requests = yield* Ref.make(0);
+      const entered = yield* Deferred.make<void>();
+      const interrupted = yield* Deferred.make<void>();
+      const holdDescriptor = HttpRouter.middleware(
+        (httpEffect) =>
+          Effect.gen(function* () {
+            const request = yield* HttpServerRequest.HttpServerRequest;
+            if (request.url.startsWith("/.well-known/t3/environment")) {
+              yield* Ref.update(requests, (count) => count + 1);
+              if (yield* Ref.get(hold)) {
+                return yield* Deferred.succeed(entered, undefined).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() =>
+                    Deferred.succeed(interrupted, undefined).pipe(Effect.asVoid),
+                  ),
+                  Effect.interruptible,
+                );
+              }
+            }
+            return yield* httpEffect;
+          }),
+        { global: true },
+      );
+      const b = yield* servePeer(
+        box,
+        Layer.merge(McpHttpServer.toolkitRegistration(ProbeToolkit, probeHandlers), holdDescriptor),
+      );
+      const a = yield* makeA(laptop);
+      const pairing = yield* b.auth.issuePairingCredential();
+      yield* a.links.link({ url: b.url, pairingCode: pairing.credential, access: "auto" });
+      yield* Ref.set(b.bearers, []);
+      yield* Ref.set(requests, 0);
+      yield* Ref.set(hold, true);
+
+      const resolving = yield* a.links.resolve(box.environmentId).pipe(Effect.forkScoped);
+      yield* Deferred.await(entered);
+      yield* Fiber.interrupt(resolving);
+      yield* Deferred.await(interrupted);
+
+      yield* Ref.set(hold, false);
+      expect((yield* a.links.resolve(box.environmentId)).url).toBe(b.url);
+      expect(yield* Ref.get(requests)).toBe(2);
+      expect(yield* Ref.get(b.bearers)).toEqual([]);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
 it.effect("reads one stored link without asking the peer", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -306,6 +443,8 @@ it.effect("tells the agent to link again once the peer revokes the link or it ex
       // A link stored before links were marked: its session there is not a
       // link's, so the peer would not fence its work even though it can.
       yield* a.sql`UPDATE peer_environment_links SET fenced = 0`;
+      // Linking again is its only way back, as for an expired link.
+      expect((yield* a.links.list).map((link) => link.status)).toEqual(["expired"]);
       const legacy = yield* probe(a).pipe(Effect.flip);
       expect(legacy.code).toBe("capability_denied");
       expect(legacy.message).toContain("Link it again");

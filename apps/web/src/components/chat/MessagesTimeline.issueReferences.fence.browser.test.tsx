@@ -37,6 +37,7 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => undefined,
   LegendList: (props: {
     data: Array<{ id: string }>;
     keyExtractor: (item: { id: string }) => string;
@@ -269,7 +270,6 @@ function timelineProps(ref: typeof threadRef, entries: Array<ReturnType<typeof a
     isWorking: false,
     activeTurnStartedAt: null,
     listRef: createRef<never>(),
-    activeTurnInProgress: false,
     latestRun: null,
     runningRunId: null,
     emptyPlaceholderInset: 0,
@@ -279,7 +279,6 @@ function timelineProps(ref: typeof threadRef, entries: Array<ReturnType<typeof a
     onOpenTurnDiff: () => {},
     onOpenThread: () => {},
     onForkFromRun: async () => {},
-    onRollbackCheckpoint: () => {},
     supportsConversationRollback: false,
     onRevertToTurnCount: () => {},
     isRevertingCheckpoint: false,

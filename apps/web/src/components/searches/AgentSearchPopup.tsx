@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 import { ComposerHandleContext } from "~/composerHandleContext";
-import { useIsMobile } from "~/hooks/useMediaQuery";
+import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { useThreadActions } from "~/hooks/useThreadActions";
 import { useThreadShell } from "~/state/entities";
 import ChatView from "../ChatView";
@@ -28,7 +28,7 @@ import { useAgentSearchRunning } from "./useAgentSearchActivity";
 export function AgentSearchPopup() {
   const open = useAgentSearchPopupStore((state) => state.open);
   const activeSearch = useAgentSearchPopupStore((state) => state.activeSearch);
-  const isMobile = useIsMobile();
+  const isMobile = useMediaQuery("max-md");
   const [historyOpen, setHistoryOpen] = useState(false);
   const running = useAgentSearchRunning();
   const { confirmAndDeleteThread } = useThreadActions();
@@ -119,7 +119,7 @@ function SearchConversation({ search }: { search: ScopedThreadRef }) {
   // The palette's composer handle belongs to the main conversation; this one
   // has its own, so neither composer overwrites or clears the other's.
   const composerHandle = useRef<ChatComposerHandle | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers this composer handle in the module registry, removed on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: registers this composer handle in the module registry, removed on unmount
   useEffect(() => registerAgentSearchComposer(composerHandle), []);
   if (!shell) {
     return <p className="m-auto text-sm text-muted-foreground">Starting the search…</p>;

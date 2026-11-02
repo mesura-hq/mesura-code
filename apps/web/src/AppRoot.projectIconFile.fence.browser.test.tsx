@@ -148,6 +148,9 @@ vi.mock("./state/environments", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./state/environments")>()),
   useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
   useEnvironment: () => fixture.environments[0],
+  // Upstream's group update reads each member's environment at write time.
+  readEnvironment: (environmentId: string) =>
+    fixture.environments.find((environment) => environment.environmentId === environmentId) ?? null,
   useEnvironmentProviders: () => new Map(),
   usePrimaryEnvironment: () => null,
   usePrimaryEnvironmentId: () => "icon-laptop",
@@ -172,6 +175,7 @@ vi.mock("./hooks/useHandleNewThread", async (importOriginal) => ({
   useNewThreadHandler: () => fixture.noopCommand,
 }));
 vi.mock("./hooks/useThreadActions", () => ({
+  canTurnThreadIntoProject: () => false,
   useThreadActions: () => ({
     settleThread: fixture.noopCommand,
     pinThread: fixture.noopCommand,
@@ -181,7 +185,10 @@ vi.mock("./hooks/useThreadActions", () => ({
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 
 import { openCommandPalette } from "./commandPaletteBus";

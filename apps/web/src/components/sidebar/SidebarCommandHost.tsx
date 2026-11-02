@@ -3,7 +3,7 @@ import type { KeybindingCommand } from "@t3tools/contracts";
 import { type RefObject, useEffect } from "react";
 import { create } from "zustand";
 
-import { isCommandPaletteOpen, openCommandPalette } from "../../commandPaletteBus";
+import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { useCommandHandlers } from "../../commands/commandRegistry";
 import { resolveShortcutCommand } from "../../keybindings";
 import { captureComposerFocusReturn } from "../../keys/composer/composerSurface";
@@ -128,14 +128,19 @@ function returnFocusToOrigin(origin: SearchFocusOrigin | null): void {
 }
 
 function toggleAllProjects(): void {
-  const before = useProjectScopeStore.getState().projectScopeKey;
+  const before = useProjectScopeStore.getState().projectScopeKeys;
   const after = useProjectScopeStore.getState().toggleAllProjects();
   if (after === before) return;
   // A selection made under one scope can hold threads the next scope hides.
   useThreadSelectionStore.getState().clearSelection();
   toastManager.add({
     id: "project-scope-toggle",
-    title: after === null ? "All projects" : (projectScopeLabels.get(after) ?? "Project filter"),
+    title:
+      after.length === 0
+        ? "All projects"
+        : after.length === 1
+          ? (projectScopeLabels.get(after[0]!) ?? "Project filter")
+          : `${after.length} projects`,
     timeout: 1500,
   });
 }
@@ -156,12 +161,8 @@ function isSidebarCommand(command: KeybindingCommand | null): command is Sidebar
   );
 }
 
-/**
- * Mounted once in the app layout, outside the phone drawer, on every page. The `legacy` sidebar
- * has neither a Search field nor a project filter, so both focus commands open the command
- * palette instead; the scope toggle writes the store whatever shows.
- */
-export function SidebarCommandHost(props: { readonly surface: "threads" | "settings" | "legacy" }) {
+/** Mounted once in the app layout, outside the phone drawer, on every page. */
+export function SidebarCommandHost(props: { readonly surface: "threads" | "settings" }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMobile, open, openMobile, setOpen, setOpenMobile } = useSidebar();
   const closeAppModal = useCloseAppModal();
@@ -196,10 +197,6 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
       if (sidebarHidden) (isMobile ? setOpenMobile : setOpen)(true);
       return;
     }
-    if (props.surface === "legacy") {
-      openCommandPalette();
-      return;
-    }
     if (command === "threadSearch.toggle") {
       if (isSidebarSearchFocused()) {
         leaveSearch();
@@ -225,7 +222,7 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
     "sidebar.toggleWorking": () => run("sidebar.toggleWorking"),
   });
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: window keydown and focusout listeners for the sidebar commands and the Search way back, re-bound each render to read the latest run
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: window keydown and focusout listeners for the sidebar commands and the Search way back, re-bound each render to read the latest run
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -281,13 +278,13 @@ export function useSidebarCommandTarget(input: {
   const { searchInputRef, openProjectFilter, projectScopeItems } = input;
   const target = useSidebarFocusRequestStore((store) => store.target);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: publishes the mounted sidebar's project names to the module map the toast reads
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: publishes the mounted sidebar's project names to the module map the toast reads
   useEffect(() => {
     projectScopeLabels.clear();
     for (const item of projectScopeItems) projectScopeLabels.set(item.value, item.label);
   }, [projectScopeItems]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers this mounted sidebar as the module-level focus server, removed on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: registers this mounted sidebar as the module-level focus server, removed on unmount
   useEffect(() => {
     const target = {
       serve: (focusTarget: SidebarFocusTarget) => {
@@ -302,7 +299,7 @@ export function useSidebarCommandTarget(input: {
     };
   });
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: serves a focus request from the external store once the sidebar can take focus
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: serves a focus request from the external store once the sidebar can take focus
   useEffect(() => {
     if (target !== null && !isCommandPaletteOpen()) serveSidebarFocusRequest();
   }, [target]);

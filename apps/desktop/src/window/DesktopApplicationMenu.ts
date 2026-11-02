@@ -211,8 +211,9 @@ export const make = Effect.gen(function* () {
                 },
                 { type: "separator" as const },
               ]),
+          // Cmd/Ctrl+W belongs to the renderer's tab close; it must never close the window.
           environment.platform === "darwin"
-            ? { role: "close" }
+            ? { label: "Close Window", click: (_item, window) => window?.close() }
             : environment.platform === "linux"
               ? // Mesura: no accelerator, so Ctrl+Q reaches the page (DesktopWindow.ts).
                 { label: "Quit", click: () => void runPromise(electronApp.quit) }

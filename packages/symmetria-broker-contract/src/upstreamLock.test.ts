@@ -4,7 +4,7 @@ import type {
   RuntimeSessionExitKind,
   RuntimeSessionState,
   RuntimeThreadState,
-} from "@t3tools/contracts";
+} from "#upstream-runtime-vocabulary";
 import { describe, expect, it } from "vite-plus/test";
 
 // Mesura: upstream no longer exports the vocabulary as its own type.

@@ -2,7 +2,7 @@ import type { RefObject } from "react";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { cancelComposerNormalResume } from "../../keys/composer/composerSurface";
-import type { ComposerPromptEditorHandle } from "../ComposerPromptEditor";
+import type { ComposerPromptEditorHandle } from "../ComposerPromptEditorTiptap";
 import { isInsideRestingComposerControlScope } from "./composerEventScope";
 import { useFileManagerStore } from "../files/mesuraFileManager/fileManagerStore";
 

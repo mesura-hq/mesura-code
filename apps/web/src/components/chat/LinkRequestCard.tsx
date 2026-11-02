@@ -1,3 +1,4 @@
+import { pipe } from "effect/Function";
 import { useAtomValue } from "@effect/atom-react";
 import {
   type LinkableMachine,
@@ -27,8 +28,7 @@ import { useId, useRef, useState } from "react";
 
 import { useEnvironmentScope, usePreparedConnection } from "../../state/session";
 import { mintPairingCodeOn } from "../../state/peerPairingCode";
-import { useLinkableMachines } from "../../state/peerLinks";
-import { serverEnvironment } from "../../state/server";
+import { peerLinkEnvironment, useLinkableMachines } from "../../state/peerLinks";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { accessConfig } from "../auth/ConnectAgentSurface";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
@@ -87,13 +87,13 @@ function PendingLinkRequest(props: {
   const [open, setOpen] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const answer = useAtomCommand(serverEnvironment.answerLinkRequest, {
+  const answer = useAtomCommand(peerLinkEnvironment.answerRequest, {
     label: "decline link request",
     reportFailure: false,
     reportDefect: false,
   });
   const canAnswer = useAtomValue(
-    serverEnvironment.answerLinkRequest.permissionAtom(props.environmentId),
+    peerLinkEnvironment.answerRequest.permissionAtom(props.environmentId),
   );
   const target = linkRequestTargetName(item);
 
@@ -106,7 +106,7 @@ function PendingLinkRequest(props: {
       setDeclining(false),
     );
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      setError(linkRequestFailureMessage(squashAtomCommandFailure(result)));
+      pipe(squashAtomCommandFailure(result), linkRequestFailureMessage, setError);
     }
   };
 
@@ -222,7 +222,7 @@ function LinkRequestDialog(props: {
   const [mintFailed, setMintFailed] = useState<ReadonlySet<EnvironmentId>>(new Set());
   // Enter then a click can both run before a re-render; this guard is synchronous.
   const inFlight = useRef(false);
-  const answer = useAtomCommand(serverEnvironment.answerLinkRequest, {
+  const answer = useAtomCommand(peerLinkEnvironment.answerRequest, {
     label: "answer link request",
     // The failure cause holds the request, and with it the code; keep it out of the console.
     reportFailure: false,
@@ -311,7 +311,7 @@ function LinkRequestDialog(props: {
       // The card switches to its answered row once the item updates.
       close();
     } else if (!isAtomCommandInterrupted(result)) {
-      setError(linkRequestFailureMessage(squashAtomCommandFailure(result)));
+      pipe(squashAtomCommandFailure(result), linkRequestFailureMessage, setError);
     }
   };
 
@@ -390,39 +390,45 @@ function LinkRequestDialog(props: {
                     ) : null}
                   </label>
                 ) : null}
-                {useExisting ? (
-                  <p className="text-xs text-muted-foreground">
-                    This environment is already linked to {targetName}. The agent can use that link
-                    as it is; change its access in Settings → Connections.
-                  </p>
-                ) : null}
               </>
             ) : (
               <>
                 {item.url !== undefined && !pickMachine ? (
                   <p className="truncate text-xs text-muted-foreground">{item.url}</p>
                 ) : null}
-                {canMint ? null : (
-                  <label className="block space-y-1.5">
-                    <span className="block text-xs font-medium text-foreground">Pairing code</span>
-                    <Input
-                      value={pairingCode}
-                      onChange={(event) => setPairingCode(event.target.value)}
-                      placeholder="Paste the code"
-                      disabled={busy}
-                      autoComplete="one-time-code"
-                      nativeInput
-                      spellCheck={false}
-                    />
-                    <span className="block text-xs text-muted-foreground">
-                      Create a link on {targetName}: Settings → Connections → Create link, then
-                      paste its code here.
-                    </span>
-                  </label>
+                {useExisting ? null : (
+                  <>
+                    {canMint ? null : (
+                      <label className="block space-y-1.5">
+                        <span className="block text-xs font-medium text-foreground">
+                          Pairing code
+                        </span>
+                        <Input
+                          value={pairingCode}
+                          onChange={(event) => setPairingCode(event.target.value)}
+                          placeholder="Paste the code"
+                          disabled={busy}
+                          autoComplete="one-time-code"
+                          nativeInput
+                          spellCheck={false}
+                        />
+                        <span className="block text-xs text-muted-foreground">
+                          Create a link on {targetName}: Settings → Connections → Create link, then
+                          paste its code here.
+                        </span>
+                      </label>
+                    )}
+                    <LinkAccessPicker value={access} onChange={setAccess} disabled={busy} />
+                  </>
                 )}
-                <LinkAccessPicker value={access} onChange={setAccess} disabled={busy} />
               </>
             )}
+            {useExisting ? (
+              <p className="text-xs text-muted-foreground">
+                This environment is already linked to {targetName}. The agent can use that link as
+                it is; change its access in Settings → Connections.
+              </p>
+            ) : null}
             {error !== null ? (
               <p role="alert" className="text-xs text-destructive">
                 {error}

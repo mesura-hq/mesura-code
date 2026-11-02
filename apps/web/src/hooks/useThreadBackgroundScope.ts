@@ -13,7 +13,7 @@ export function useThreadBackgroundScope(threadRef: ScopedThreadRef | null): voi
   const environmentId = threadRef?.environmentId ?? null;
   const threadId = threadRef?.threadId ?? null;
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- holds the background-scope retain for as long as the thread route is mounted
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- holds the background-scope retain for as long as the thread route is mounted
   useEffect(() => {
     if (environmentId === null || threadId === null) return;
     return retainBackgroundScope(environmentId, { type: "thread", threadId });

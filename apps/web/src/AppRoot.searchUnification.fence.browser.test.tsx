@@ -30,8 +30,6 @@ const sidebarLists = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   shellReads: new Map<string, number>(),
   messageSearchPending: false,
-  /** What `useLegacySidebarEnabled` answers. */
-  legacySidebar: false,
 }));
 vi.mock("./state/entities", async (original) => {
   const mocks = await fenceMocks();
@@ -133,10 +131,7 @@ vi.mock("./state/server", async (original) => {
     environmentServerConfigsAtom: Atom.make(configs),
   };
 });
-vi.mock("./hooks/useSettings", async (original) => ({
-  ...(await (await fenceMocks()).mockSettings(original)),
-  useLegacySidebarEnabled: () => sidebarLists.legacySidebar,
-}));
+vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/LegacySidebar", async () =>
@@ -218,7 +213,6 @@ async function setupBrowserFixture0() {
       sidebarLists.threads = [];
       sidebarLists.projects = [];
       sidebarLists.messageHits = [];
-      sidebarLists.legacySidebar = false;
       useProjectScopeStore.setState(useProjectScopeStore.getInitialState(), true);
       window.localStorage.clear();
       vi.unstubAllGlobals();
@@ -866,7 +860,7 @@ describe("search unification guards", () => {
       /* @vite-ignore */ `${new URL("./projectScopeStore.ts", import.meta.url).pathname}?reload`
     )) as typeof import("./projectScopeStore");
 
-    expect(reloaded.useProjectScopeStore.getState().projectScopeKey).toBe(null);
+    expect(reloaded.useProjectScopeStore.getState().projectScopeKeys).toEqual([]);
     for (const value of Object.values(window.localStorage)) {
       expect(value).not.toContain(BETA_PROJECT_ID);
     }
@@ -920,7 +914,7 @@ async function openPalette(): Promise<void> {
   await vi.waitFor(() => expect(paletteMode()).toBe("command"));
 }
 
-describe("search unification regression: the commands on Settings and with the legacy sidebar", () => {
+describe("search unification regression: the commands on Settings", () => {
   it("search unification regression: Mod+Alt+K on Settings returns to the thread and focuses the sidebar Search field", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await mountWithThreads(crossProjectThreads());
@@ -964,43 +958,16 @@ describe("search unification regression: the commands on Settings and with the l
     await using _browserFixture0 = await setupBrowserFixture0();
     await mountWithThreads(crossProjectThreads());
     await chooseProjectInFilter(BETA_TITLE);
-    const betaKey = useProjectScopeStore.getState().projectScopeKey;
+    const betaKeys = useProjectScopeStore.getState().projectScopeKeys;
     await act(async () => {
       await router!.navigate({ to: "/settings" });
     });
     await settle();
 
     await press(TOGGLE_ALL_CHORD);
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe(null);
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual([]);
     await press(TOGGLE_ALL_CHORD);
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe(betaKey);
-  });
-
-  it("search unification regression: with the legacy sidebar Mod+Alt+K and Mod+Shift+F open the command palette", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-    sidebarLists.legacySidebar = true;
-    await mountWithThreads(crossProjectThreads());
-
-    await press(THREAD_SEARCH_CHORD);
-    await vi.waitFor(() => expect(paletteMode()).toBe("command"));
-    await press({ key: "Escape", code: "Escape" });
-    await vi.waitFor(() => expect(paletteOpen()).toBe(false));
-    (document.activeElement as HTMLElement | null)?.blur?.();
-
-    await press(PROJECT_SCOPE_CHORD);
-    await vi.waitFor(() => expect(paletteMode()).toBe("command"));
-  });
-
-  it("search unification regression: with the legacy sidebar Mod+Alt+P still flips the project scope store", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-    sidebarLists.legacySidebar = true;
-    await mountWithThreads(crossProjectThreads());
-    useProjectScopeStore.getState().setProjectScopeKey("legacy-fence-scope");
-
-    await press(TOGGLE_ALL_CHORD);
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe(null);
-    await press(TOGGLE_ALL_CHORD);
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe("legacy-fence-scope");
+    expect(useProjectScopeStore.getState().projectScopeKeys).toEqual(betaKeys);
   });
 });
 

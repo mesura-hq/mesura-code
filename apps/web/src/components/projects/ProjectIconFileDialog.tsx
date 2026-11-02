@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import {
   captureProjectGroupWriteTargets,
-  useProjectGroupUpdate,
+  useProjectGroupImageUpdate,
 } from "../../hooks/useProjectGroupUpdate";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
@@ -26,7 +26,7 @@ export function ProjectIconFileDialogHost() {
 }
 
 function ProjectIconFileDialog({ group }: { group: SidebarProjectSnapshot }) {
-  const { updateProjectImage } = useProjectGroupUpdate(group);
+  const { updateProjectImage } = useProjectGroupImageUpdate(group);
   // What the picker browses and what the choice is written to are fixed when
   // it opens; the group can change while the user browses.
   const [opened] = useState(() => ({

@@ -603,7 +603,7 @@ describe("combined picker in the composer: More options", () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(searchInput()));
     await press(searchInput(), "ArrowDown");
     await openMoreOptions();
-    expect(extrasRegion()?.textContent).toContain("Claude Opus 5 · Claude");
+    expect(extrasRegion()?.textContent).toContain("Opus 5 · Claude");
   });
 
   it("combined picker keys inside More options neither cycle providers nor change effort", async () => {

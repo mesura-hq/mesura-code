@@ -178,6 +178,7 @@ const makeLaptop = Effect.gen(function* () {
   const server = Context.get(here, McpServer.McpServer);
   return {
     links: Context.get(linking, PeerLinks.PeerLinks),
+    linksSql: Context.get(linking, SqlClient.SqlClient),
     requests: Context.get(here, PeerLinkRequests.PeerLinkRequests),
     orchestrator: Context.get(here, Orchestrator.OrchestratorV2),
     sink: Context.get(here, EventSink.EventSinkV2),
@@ -494,6 +495,41 @@ it.live("the agent asks without waiting, and the user links the box after its tu
       ).toMatchObject({ kind: "user_input" });
       expect(yield* a.projections.getSettlementCandidates(threadId)).toEqual([]);
 
+      // Once the user writes in the thread again, the card stops asking but stays answerable.
+      const wroteAt = DateTime.add(card.startedAt!, { seconds: 1 });
+      yield* a.sink.write({
+        commandId: CommandId.make("command:user-writes:laptop"),
+        events: [
+          {
+            id: EventId.make("event:user-writes"),
+            type: "message.updated",
+            threadId,
+            occurredAt: wroteAt,
+            payload: {
+              createdBy: "user",
+              creationSource: "web",
+              id: MessageId.make("message:user-writes"),
+              threadId,
+              runId: null,
+              nodeId: null,
+              role: "user",
+              text: "Something else",
+              attachments: [],
+              streaming: false,
+              createdAt: wroteAt,
+              updatedAt: wroteAt,
+            },
+          },
+        ],
+      });
+      expect((yield* a.orchestrator.getThreadShell(threadId))?.pendingRuntimeRequest).toBeNull();
+      expect(
+        ProjectionStore.threadShellFromProjection(
+          yield* a.orchestrator.getThreadProjection(threadId),
+        ).pendingRuntimeRequest,
+      ).toBeNull();
+      expect(yield* cardOf(a)).toMatchObject({ status: "waiting", linkStatus: "pending" });
+
       // The user's client mints a code on the box and picks more than the agent suggested.
       const pairing = yield* b.auth.issuePairingCredential();
       yield* a.requests.answer({
@@ -566,7 +602,7 @@ it.live("a retry of a pending request returns pending and shows no second card",
   ),
 );
 
-it.live("a later provider session reusing a clientRequestId gets a card of its own", () =>
+it.live("a new MCP credential reusing a clientRequestId gets a card of its own", () =>
   withBoth((a, b) =>
     Effect.gen(function* () {
       yield* seedThread(a);
@@ -934,6 +970,19 @@ it.live("a link that expired goes through the card, so the user can link it agai
         .pipe(afterLinksExpire);
       expect(yield* cardOf(a)).toMatchObject({ linkStatus: "failed" });
       expect((yield* outcomeMessages(a)).messages[0]!.text).toContain("expired");
+    }),
+  ),
+);
+
+it.live("a link made before links were fenced goes through the card, as an expired one", () =>
+  withBoth((a, b) =>
+    Effect.gen(function* () {
+      yield* seedThread(a);
+      yield* linkTo(a.links, b);
+      yield* a.linksSql`UPDATE peer_environment_links SET fenced = 0`;
+      const asked = yield* a.call({ environmentId: box.environmentId });
+      expect(asked.structuredContent).toMatchObject({ status: "pending" });
+      yield* pendingCard(a);
     }),
   ),
 );

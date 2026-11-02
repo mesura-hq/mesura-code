@@ -185,7 +185,7 @@ export function usePanelSurfaceKeys(
   panelRef: RefObject<Element | null>,
   activeSurfaceId: string | null,
 ): void {
-  // oxlint-disable-next-line t3code/react-effect-budget -- focus follows an active-surface change from any key path (Ctrl+Tab, close, tree open) after commit
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- focus follows an active-surface change from any key path (Ctrl+Tab, close, tree open) after commit
   useEffect(() => {
     // The empty panel is the launcher, which keeps its own focus.
     if (activeSurfaceId === null || !lastInputWasKey) return;
@@ -198,7 +198,7 @@ export function usePanelSurfaceKeys(
     if (inPanel) focusPanelSurfaceAfterRender(panel);
   }, [panelRef, activeSurfaceId]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes window key and pointer listeners and the pane entry for the panel's lifetime
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes window key and pointer listeners and the pane entry for the panel's lifetime
   useEffect(() => {
     const unregisterEntry = registerPaneEntry("panel", enterPanel);
     // Bind allocates listeners per registration. React Compiler hoists

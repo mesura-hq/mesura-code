@@ -639,7 +639,7 @@ describe("editor keys and the sidebar (phase 4, criterion 2)", () => {
     const firstJumpLabel = shortcutLabelForCommand(await fenceKeybindings(), "thread.jump.1");
     expect(firstJumpLabel, "precondition: thread.jump.1 has a binding").toBeTruthy();
     const jumpHintsShown = () =>
-      [...container.querySelectorAll("span[aria-hidden]")].some(
+      [...container.querySelectorAll("[data-jump-hint]")].some(
         (element) => element.textContent === firstJumpLabel,
       );
     const control = { key: "Control", code: "ControlLeft", ctrlKey: true, keyCode: 17 };

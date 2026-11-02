@@ -199,11 +199,15 @@ vi.mock("./components/LegacySidebar", () => ({ default: () => null }));
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
+vi.mock("./browser/ElectronBrowserHost", () => ({
+  ElectronBrowserHost: () => null,
+  startElectronBrowserHost: () => () => undefined,
+}));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => undefined,
   LegendList: ({
     data,
     renderItem,
@@ -1183,6 +1187,7 @@ interface StartedTurn {
     readonly message: {
       readonly text: string;
       readonly attachments: ReadonlyArray<Record<string, unknown>>;
+      readonly context?: { readonly records: ReadonlyArray<unknown> };
     };
   };
 }
@@ -2088,8 +2093,10 @@ describe("dictation phase 5 rework regressions", () => {
 
     await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
     const text = onlyTurnText();
-    // A server without inline context gets the record serialized: the raw link is replaced.
-    expect(text).not.toContain("t3-context://");
+    // Every server takes the records inline now, so the link resolves against the one sent along.
+    const records = turnStarts()[0]!.input.message.context?.records ?? [];
+    expect(records, "the file's context record travels with the message").toHaveLength(1);
+    expect(JSON.stringify(records)).toContain("notes.txt");
     expect(text).toContain("notes.txt");
   });
 });

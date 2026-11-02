@@ -167,8 +167,11 @@ const NO_PROJECTION_EXTRAS: FactoryProjectionExtras = {};
 function useFactoryFixtureThreadShell(
   fixture: FactoryThreadFixture,
   subscribe: FactoryFixtureSubscribe,
+  ref?: unknown,
 ) {
-  return useSyncExternalStore(subscribe, () => fixture.thread);
+  const thread = useSyncExternalStore(subscribe, () => fixture.thread);
+  // A caller with no thread (a panel tab that is not a side chat) reads none.
+  return ref === null ? null : thread;
 }
 
 function useFactoryFixtureThreadProjection(
@@ -220,6 +223,8 @@ export function factoryThreadFixtureReads(fixture: FactoryThreadFixture) {
     // ChatView reads the quiet thread structure; a full projection is assignable to it.
     useQuietThreadProjection: useThreadProjection,
     useQuietThreadVisibleTurnItems: useThreadVisibleTurnItems,
+    // The timeline reads the same items through its own hook.
+    useTimelineVisibleTurnItems: useThreadVisibleTurnItems,
     readThread: () =>
       fixture.thread === null
         ? null

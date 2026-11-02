@@ -49,7 +49,7 @@ export function useProjectEditorModels(environmentId: string, cwd: string): Proj
   // REGRESSION: releasing and acquiring during render disposed Monaco models under a live editor
   // and released the old key twice (render plus stale cleanup). Do not bring it back.
   const [project] = useState(() => registry.acquire(key));
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: releases the registry entry this mount acquired, on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: releases the registry entry this mount acquired, on unmount
   useEffect(() => () => registry.release(key), [key]);
   return project;
 }

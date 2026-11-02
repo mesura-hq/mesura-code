@@ -40,7 +40,7 @@ export function ThreadJumpHintModifierSync(props: {
     },
   );
   const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reports the delayed hint visibility to the parent after commit
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: reports the delayed hint visibility to the parent after commit
   useEffect(() => {
     onChange(showJumpHints);
   }, [showJumpHints, onChange]);

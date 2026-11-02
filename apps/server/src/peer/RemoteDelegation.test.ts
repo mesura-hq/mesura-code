@@ -1,3 +1,4 @@
+import * as DocumentText from "../provider/DocumentText.ts";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -21,14 +22,15 @@ import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
+import * as Tracer from "effect/Tracer";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import * as TestClock from "effect/testing/TestClock";
 import type * as SqlClient from "effect/sql/SqlClient";
 import { McpSchema, McpServer } from "effect/ai";
 
@@ -48,9 +50,9 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
-import * as DocumentText from "../provider/DocumentText.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
@@ -125,6 +127,8 @@ interface BoxThread {
   readonly releaseStop: Deferred.Deferred<void>;
   /** Messages sent to the thread there after its launch, each starting a later run. */
   readonly sent: Ref.Ref<ReadonlyArray<string>>;
+  /** Runs as the launch there is answered, before the laptop hears back. */
+  readonly afterLaunch: Ref.Ref<Effect.Effect<void>>;
 }
 
 const makeBoxThread = Effect.gen(function* () {
@@ -158,6 +162,7 @@ const makeBoxThread = Effect.gen(function* () {
     stopStarted: yield* Deferred.make<void>(),
     releaseStop: yield* Deferred.make<void>(),
     sent: yield* Ref.make<ReadonlyArray<string>>([]),
+    afterLaunch: yield* Ref.make<Effect.Effect<void>>(Effect.void),
   } satisfies BoxThread;
 });
 
@@ -429,6 +434,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
                 interactionMode: input.interactionMode,
               }),
             ),
+            Effect.andThen(Effect.flatten(Ref.get(thread.afterLaunch))),
             Effect.as({
               threadId: input.threadId,
               projection: {
@@ -459,6 +465,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
     McpHttpServer.layerOrchestratorToolkit,
     McpHttpServer.layerProjectRegistration,
   ).pipe(
+    Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
     Layer.provide(NodeCrypto.layer),
     Layer.provide(layerBoxThreads),
     Layer.provide(layerBoxLaunches),
@@ -476,8 +483,9 @@ const boxToolkitLayer = (thread: BoxThread) => {
         Layer.provide(NodeServices.layer),
       ),
     ),
-    Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
-    Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
+    Layer.provide(
+      Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+    ),
     Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
     Layer.provide(
@@ -491,6 +499,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
           }),
       }),
     ),
+    Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
     Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
     Layer.provide(ServerSettings.layerTest()),
     Layer.provide(NodeServices.layer),
@@ -587,10 +596,10 @@ const makeLaptop = (
       Layer.provide(NodeCrypto.layer),
       Layer.provideMerge(layerThreads),
       Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
-      Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
       Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+      Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
       Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       Layer.provide(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
       Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
@@ -600,6 +609,7 @@ const makeLaptop = (
     const server = Context.get(here, McpServer.McpServer);
     return {
       links: Context.get(linking, PeerLinks.PeerLinks),
+      settings: Context.get(linking, ServerSettings.ServerSettingsService),
       orchestrator: Context.get(here, Orchestrator.OrchestratorV2),
       remote: Context.get(here, RemoteDelegation.RemoteDelegation),
       threads: Context.get(here, ThreadManagement.ThreadManagementService),
@@ -755,6 +765,7 @@ const delegateToBox = (laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>)
           status: string;
           childThreadId: null;
           remoteChild: { environmentId: string; threadId: ThreadId; label: string };
+          link?: string;
         };
       }),
     );
@@ -803,6 +814,10 @@ it.effect("a task delegated to the box wakes the laptop's parent when it ends th
       });
       // The box launched it in the project with the same repository.
       expect(yield* Ref.get(thread.launched)).toBe(delegated.remoteChild.threadId);
+      // Its link opens the thread there, so the parent can mention it like any other.
+      expect(delegated.link).toBe(
+        `<t3-thread://v2/${box.environmentId}/${delegated.remoteChild.threadId}>`,
+      );
       // ...naming the parent here, so the thread there links back to it.
       expect(yield* Ref.get(thread.delegatedFrom)).toEqual({
         environmentId: laptop.environmentId,
@@ -831,13 +846,199 @@ it.effect("a task delegated to the box wakes the laptop's parent when it ends th
       );
       expect(Option.isSome(offered)).toBe(true);
 
-      const status = yield* a.call("task_status", { taskId: delegated.taskId });
+      const messageReads: Array<string> = [];
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options);
+          const end = span.end.bind(span);
+          span.end = (endTime, exit) => {
+            end(endTime, exit);
+            const query = span.attributes.get("db.query.text");
+            if (
+              typeof query === "string" &&
+              /SELECT[\s\S]*FROM orchestration_v2_projection_messages/i.test(query)
+            ) {
+              messageReads.push(query);
+            }
+          };
+          return span;
+        },
+      });
+      const status = yield* a
+        .call("task_status", { taskId: delegated.taskId })
+        .pipe(Effect.withTracer(tracer));
       expect(status.structuredContent).toMatchObject({
         status: "completed",
         summary: "All 412 tests pass on the box.",
       });
+      // Delivery validation still reads messages; choosing the observer does not need another read.
+      expect(messageReads).toHaveLength(2);
+      expect(messageReads.filter((query) => !/\bmessage_id\s+IN\b/i.test(query))).toHaveLength(1);
+      const acknowledged = yield* a.projections.getThreadRecords(parentThreadId, ["subagents"], {
+        subagentIds: [delegated.taskId],
+      });
+      expect(acknowledged.subagents[0]?.completionDelivery).toEqual({
+        state: "acknowledged",
+        observedByRunId: parentRunId,
+      });
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect.each(["no active parent run", "a newer run owned by another provider"] as const)(
+  "preserves remote observation guards with %s",
+  (observer) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const thread = yield* makeBoxThread;
+        const b = yield* serveBox(thread);
+        const offers = yield* SubscriptionRef.make<
+          ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+        >([]);
+        const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+        const a = yield* makeLaptop(database, offers);
+        yield* linkTo(a.links, b, "full-access");
+        yield* seedParent(a);
+        const delegated = yield* delegateToBox(a);
+
+        yield* Ref.set(thread.reply, "Remote result remains available.");
+        yield* Ref.set(thread.status, "completed");
+        yield* Deferred.succeed(thread.finished, undefined);
+        yield* taskResult(a, delegated.taskId);
+        yield* SubscriptionRef.changes(offers).pipe(
+          Stream.filter((seen) => seen.some((offer) => offer.threadId === parentThreadId)),
+          Stream.runHead,
+        );
+
+        const parent = yield* a.projections.getThreadRecords(
+          parentThreadId,
+          ["runs", "subagents"],
+          {
+            subagentIds: [delegated.taskId],
+          },
+        );
+        expect(parent.subagents[0]?.completionDelivery?.state).not.toBe("acknowledged");
+        const parentRun = parent.runs.find((run) => run.id === parentRunId);
+        if (parentRun === undefined) return yield* Effect.die("The parent run was not seeded.");
+        const now = yield* DateTime.now;
+        const otherInstanceId = ProviderInstanceId.make("codex-other");
+        const observingRun: OrchestrationV2Run =
+          observer === "no active parent run"
+            ? { ...parentRun, status: "completed", completedAt: now }
+            : {
+                id: RunId.make("run:laptop-other-provider"),
+                threadId: parentThreadId,
+                ordinal: parentRun.ordinal + 1,
+                providerInstanceId: otherInstanceId,
+                modelSelection: { instanceId: otherInstanceId, model: "gpt-5.4" },
+                providerThreadId: null,
+                userMessageId: MessageId.make("message:laptop-other-provider"),
+                rootNodeId: null,
+                activeAttemptId: null,
+                status: "preparing",
+                requestedAt: now,
+                startedAt: null,
+                completedAt: null,
+                checkpointId: null,
+                contextHandoffId: null,
+              };
+        yield* a.sink.write({
+          commandId: CommandId.make("command:change-remote-result-observer"),
+          events: [
+            {
+              id: EventId.make("event:change-remote-result-observer"),
+              type: "run.updated",
+              threadId: parentThreadId,
+              runId: observingRun.id,
+              providerInstanceId: observingRun.providerInstanceId,
+              occurredAt: now,
+              payload: observingRun,
+            },
+          ],
+        });
+
+        const status = yield* a.call("task_status", { taskId: delegated.taskId });
+        if (observer === "no active parent run") {
+          expect(status.isError).toBe(true);
+          expect(status.content).toEqual([
+            {
+              type: "text",
+              text: JSON.stringify({
+                _tag: "OrchestratorMcpFailure",
+                code: "parent_not_active",
+                message: "The calling provider no longer owns an active thread run.",
+              }),
+            },
+          ]);
+          const unacknowledged = yield* a.projections.getThreadRecords(
+            parentThreadId,
+            ["subagents"],
+            { subagentIds: [delegated.taskId] },
+          );
+          expect(unacknowledged.subagents[0]?.result).toBe("Remote result remains available.");
+          expect(unacknowledged.subagents[0]?.completionDelivery?.state).not.toBe("acknowledged");
+          return;
+        }
+        expect(status.isError, JSON.stringify(status.content)).not.toBe(true);
+        expect(status.structuredContent).toMatchObject({
+          status: "completed",
+          summary: "Remote result remains available.",
+        });
+        const acknowledged = yield* a.projections.getThreadRecords(parentThreadId, ["subagents"], {
+          subagentIds: [delegated.taskId],
+        });
+        expect(acknowledged.subagents[0]?.completionDelivery).toEqual({
+          state: "acknowledged",
+          observedByRunId: null,
+        });
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect(
+  "with the beta off here, a task already running there still ends, and no new one starts",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const thread = yield* makeBoxThread;
+        const b = yield* serveBox(thread);
+        const offers = yield* SubscriptionRef.make<
+          ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+        >([]);
+        const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+        const a = yield* makeLaptop(database, offers);
+        yield* linkTo(a.links, b, "full-access");
+        yield* seedParent(a);
+        const delegated = yield* delegateToBox(a);
+
+        yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: false });
+        const refused = yield* a.call("delegate_task", {
+          task: "Run the linter on the box.",
+          target: {
+            environmentId: box.environmentId,
+            providerInstanceId: instanceId,
+            model: "gpt-5.4",
+          },
+          mode: "async",
+          clientRequestId: "lint-on-box",
+        });
+        expect(refused.isError).toBe(true);
+        expect(JSON.stringify(refused.content)).toContain(
+          PeerForwarding.linkedEnvironmentsOff.message,
+        );
+        expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toHaveLength(
+          1,
+        );
+
+        yield* Ref.set(thread.reply, "All 412 tests pass on the box.");
+        yield* Ref.set(thread.status, "completed");
+        yield* Deferred.succeed(thread.finished, undefined);
+        expect(yield* taskResult(a, delegated.taskId)).toMatchObject({
+          status: "completed",
+          result: "All 412 tests pass on the box.",
+        });
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
 it.effect("a task named only by environment inherits the parent's model, within the link", () =>
@@ -1390,11 +1591,22 @@ it.effect("stopping the parent stops its task there", () =>
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
-/** Waits until the task here records that the `stopCount`th Stop (or any stop) after its result reached there. */
+/** A follower retry schedule the test steps: each failed attempt is offered, then waits for `retry`. */
+const steppedRetries = Effect.gen(function* () {
+  const failed = yield* Queue.unbounded<void>();
+  const retry = yield* Queue.unbounded<void>();
+  const schedule = Schedule.forever.pipe(
+    Schedule.tap(() => Queue.offer(failed, undefined).pipe(Effect.andThen(Queue.take(retry)))),
+  );
+  return { failed, retry, schedule };
+});
+
+/** Waits until the task here records that the `stopCount`th Stop after its result reached there. */
 const stoppedThere = (
   laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>,
   taskId: NodeId,
-  stopCount: number | "any" = 1,
+  // `null` for a cancel's stop, which carries no count.
+  stopCount: number | null = 1,
 ) =>
   laptopEnv.orchestrator
     .streamStoredEventsFrom({
@@ -1408,7 +1620,7 @@ const stoppedThere = (
           stored.event.type === "subagent.updated" &&
           stored.event.payload.id === taskId &&
           stored.event.payload.remoteChild?.stoppedThere === true &&
-          (stopCount === "any" || stored.event.payload.remoteChild.stopCount === stopCount),
+          stored.event.payload.remoteChild.stopCount === (stopCount ?? undefined),
       ),
       Stream.runHead,
       Effect.map((stored) =>
@@ -1570,18 +1782,19 @@ it.effect("a parent stopped while the box is unreachable still stops its task th
         ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
       >([]);
       const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
-      const a = yield* makeLaptop(database, offers);
+      const retries = yield* steppedRetries;
+      const a = yield* makeLaptop(database, offers).pipe(
+        Effect.provideService(RemoteDelegation.FollowRetrySchedule, retries.schedule),
+      );
       yield* linkTo(a.links, b, "full-access");
       yield* seedParent(a);
-      // The box sleeps as soon as the task is there, so its follower backs off.
+      // The box sleeps as soon as the task is there, so its follower's first attempt fails.
+      yield* Ref.set(
+        thread.afterLaunch,
+        Ref.set(b.descriptor, descriptorOf("environment-elsewhere", "Elsewhere")),
+      );
       const delegated = yield* delegateToBox(a);
-      yield* Ref.set(b.descriptor, descriptorOf("environment-elsewhere", "Elsewhere"));
-      // oxlint-disable-next-line t3code/no-polling-loop-in-tests -- A live HTTP peer fails inside PeerMcpClient, which exposes no event to await.
-      for (let attempt = 0; attempt < 50; attempt += 1) {
-        const [link] = yield* a.links.list;
-        if (link?.lastError !== null && link?.lastError !== undefined) break;
-        yield* Effect.sleep(Duration.millis(20)).pipe(TestClock.withLive);
-      }
+      yield* Queue.take(retries.failed);
       // The parent is stopped meanwhile.
       yield* a.threads.stopDelegatedTasks({
         threadId: parentThreadId,
@@ -1591,12 +1804,8 @@ it.effect("a parent stopped while the box is unreachable still stops its task th
 
       // Once the box is back, the follower's next attempt stops the task there.
       yield* Ref.set(b.descriptor, box);
-      // oxlint-disable-next-line t3code/no-polling-loop-in-tests -- The retry delay runs on TestClock while the peer answers on the live clock.
-      for (let attempt = 0; attempt < 12; attempt += 1) {
-        if (yield* Deferred.isDone(thread.interruptedOnce)) break;
-        yield* TestClock.adjust(Duration.minutes(5));
-        yield* Effect.sleep(Duration.millis(50)).pipe(TestClock.withLive);
-      }
+      yield* Queue.offer(retries.retry, undefined);
+      yield* Deferred.await(thread.interruptedOnce);
       expect(yield* Ref.get(thread.interrupted)).toBe(1);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
@@ -1633,7 +1842,7 @@ it.effect("a task cancelled while the box is unreachable is stopped there after 
       yield* after.remote.start();
       yield* Deferred.await(thread.interruptedOnce);
       // Once the stop is recorded, nothing is owed there any more.
-      yield* stoppedThere(after, delegated.taskId, "any");
+      yield* stoppedThere(after, delegated.taskId, null);
       expect(yield* after.projections.getOpenRemoteDelegatedTasks).toEqual([]);
       expect(yield* Ref.get(thread.stops)).toEqual(["thread.stop", "delegated-tasks"]);
       // The result here is still the cancel's.

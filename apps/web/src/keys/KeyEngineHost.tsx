@@ -37,13 +37,13 @@ export function KeyEngineHost() {
   // The engine is global and installed once, but only the chat layout mounts
   // this host: leaving it (Settings, the pull requests page) turns the engine
   // off, so a key there is never read against the chat's remembered scope.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: turns the global key engine on with the vimMode setting and off when the chat layout unmounts
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: turns the global key engine on with the vimMode setting and off when the chat layout unmounts
   useEffect(() => {
     configureKeyEngine({ enabled: vimMode });
     return () => configureKeyEngine({ enabled: false });
   }, [vimMode]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the chat and composer key surfaces for as long as vimMode is on
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: registers the chat and composer key surfaces for as long as vimMode is on
   useEffect(() => {
     if (!vimMode) return;
     const disposeChat = registerKeySurface(chatSurface);
@@ -65,7 +65,7 @@ export function KeyEngineHost() {
 
   // The chat cursor is remembered per thread, keyed by the route's ids.
   const threadKey = useChatThreadKey();
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: pushes the route's thread key into the chat surface, an external store outside React
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: pushes the route's thread key into the chat surface, an external store outside React
   useEffect(() => {
     if (vimMode) setChatThreadKey(threadKey);
   }, [threadKey, vimMode]);
@@ -112,7 +112,7 @@ function useChatThreadKey(): string | null {
 function useMainPanelElement(enabled: boolean): HTMLElement | null {
   const router = useRouter();
   const [element, setElement] = useState<HTMLElement | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the router's onRendered event to find the main panel a lazy route mounts late
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: subscribes to the router's onRendered event to find the main panel a lazy route mounts late
   useEffect(() => {
     if (!enabled) return;
     const find = () =>
@@ -252,7 +252,7 @@ function BlockCursor() {
 function WidenedCursor({ overlay, glyph }: { overlay: CursorOverlay; glyph: CursorGlyph }) {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the anchor's DOM box in the commit, before paint
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: measures the anchor's DOM box in the commit, before paint
   useLayoutEffect(() => {
     const anchor = anchorRef.current?.getBoundingClientRect();
     const cursor = cursorRef.current;
@@ -300,7 +300,7 @@ function ComposerLineNumbers() {
   const expanded = useComposerExpanded();
   const [gutter, setGutter] = useState<{ host: HTMLElement; lines: GutterLine[] } | null>(null);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: measures the editor's line boxes and subscribes to its input, scroll and layout events
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: measures the editor's line boxes and subscribes to its input, scroll and layout events
   useLayoutEffect(() => {
     if (!expanded) return;
     const editor = composerEditorElement();

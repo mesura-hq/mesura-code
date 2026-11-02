@@ -1,7 +1,7 @@
 /**
  * Upstream exports only the types of these vocabularies, so each keeps a local literal tuple
  * locked to its type: an upstream literal change fails this package's typecheck. Add one only
- * when no public schema alias exists (`RuntimeTurnState` has `ProviderRuntimeTurnStatus`).
+ * when no public schema alias exists.
  * No runtime imports: the module typechecks alone against a stand-in for the upstream types.
  */
 import type {
@@ -10,7 +10,7 @@ import type {
   RuntimeSessionExitKind,
   RuntimeSessionState,
   RuntimeThreadState,
-} from "@t3tools/contracts";
+} from "#upstream-runtime-vocabulary";
 
 /**
  * Mesura: upstream stopped exporting the event-type vocabulary as its own type.
