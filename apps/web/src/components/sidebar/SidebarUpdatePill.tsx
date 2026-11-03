@@ -8,6 +8,7 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { cn } from "../../lib/utils";
 import { ensureLocalApi } from "../../localApi";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
+import { useClientSettings } from "~/hooks/useSettings";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   canCheckForUpdate,
@@ -222,7 +223,9 @@ function SidebarUpdateControl() {
   const localUpdateVersion =
     state && action !== "none" ? getDesktopUpdateDownloadedVersion(state) : null;
   const everything = useUpdateEverything(localUpdateVersion);
-  const runsEverything = everything.hasUpdates && !isDownloading;
+  // Mesura: opt-in; a run already in progress still reports through `run`.
+  const updateEverythingButton = useClientSettings((settings) => settings.updateEverythingButton);
+  const runsEverything = updateEverythingButton && everything.hasUpdates && !isDownloading;
   const run = useUpdateEverythingRun();
   const isRunningEverything = run !== null;
   const showCheckIcon = shouldShowDesktopUpdateCheckIcon({

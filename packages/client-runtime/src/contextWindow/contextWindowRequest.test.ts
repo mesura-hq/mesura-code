@@ -58,6 +58,16 @@ describe("context-window token labels (criterion 2)", () => {
     ).toEqual({ used: "65k", max: "1M" });
   });
 
+  it("labels the pill with the auto-compact threshold when one is reported", () => {
+    expect(
+      formatContextWindowIndicatorLabels({
+        usedTokens: 538_000,
+        maxTokens: 1_000_000,
+        autoCompactThreshold: 717_000,
+      }),
+    ).toEqual({ used: "538k", max: "717k" });
+  });
+
   it("gives the pill no max label when the window total is unknown", () => {
     expect(formatContextWindowIndicatorLabels({ usedTokens: 65_000, maxTokens: null })).toEqual({
       used: "65k",
@@ -156,6 +166,16 @@ describe("context-window ring segments (criteria 5 and 6)", () => {
     });
 
     expect(segments.map((segment) => segment.kind)).toEqual(["cacheRead", "uncached", "output"]);
+    const usedShare = segments.reduce((sum, segment) => sum + segment.fraction, 0);
+    expect(usedShare).toBeCloseTo(0.24, 10);
+  });
+
+  it("scales the segments to the auto-compact threshold when one is reported", () => {
+    const segments = deriveContextWindowSegments({
+      ...claudeShapedUsage,
+      maxTokens: 1_000_000,
+      autoCompactThreshold: 200_000,
+    });
     const usedShare = segments.reduce((sum, segment) => sum + segment.fraction, 0);
     expect(usedShare).toBeCloseTo(0.24, 10);
   });

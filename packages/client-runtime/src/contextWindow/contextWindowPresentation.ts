@@ -22,13 +22,13 @@ export function formatContextWindowUsedPercentage(value: number | null): string 
 
 /**
  * The screen-reader label of the composer indicator: the used share when the
- * window total is known, the used token count otherwise.
+ * limit is known, the used token count otherwise.
  */
 export function formatContextWindowAccessibilityLabel(
   usage: Pick<ContextWindowSnapshot, "usedTokens" | "maxTokens" | "usedPercentage">,
 ): string {
   const usedPercentage = formatContextWindowUsedPercentage(usage.usedPercentage);
-  return usage.maxTokens !== null && usedPercentage
+  return usedPercentage
     ? `Context window ${usedPercentage} used`
     : `Context window ${formatContextWindowTokens(usage.usedTokens)} tokens used`;
 }

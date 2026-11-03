@@ -496,6 +496,12 @@ export const ClientSettingsSchema = Schema.Struct({
    * editor from a thread.
    */
   openInExternalEditor: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * Mesura: shows upstream's sidebar "Update everything" button. Off by default:
+   * on this fork's Arch hosts pacman and global npm own the provider CLIs, and
+   * Mesura ships through its own deploy scripts. Version checks keep running.
+   */
+  updateEverythingButton: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Opt-in TeX typesetting in rendered Markdown. Off keeps math parsing and
   // KaTeX out of the render path entirely.
   mathRenderingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1790,6 +1796,7 @@ export const ClientSettingsPatch = Schema.Struct({
   modalEditing: Schema.optionalKey(Schema.Boolean),
   vimMode: Schema.optionalKey(Schema.Boolean),
   openInExternalEditor: Schema.optionalKey(Schema.Boolean),
+  updateEverythingButton: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
   redesignEnabled: Schema.optionalKey(Schema.Boolean),
 });

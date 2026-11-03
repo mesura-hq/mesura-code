@@ -61,8 +61,9 @@ describe("live provider-turn usage (#8144)", () => {
     expect(snapshot).not.toBeNull();
     expect(snapshot?.usedTokens).toBe(42_000);
     expect(snapshot?.maxTokens).toBe(200_000);
-    expect(snapshot?.remainingTokens).toBe(158_000);
-    expect(snapshot?.usedPercentage).toBe(21);
+    // Mesura: the shares measure against the auto-compact threshold, not the model window.
+    expect(snapshot?.remainingTokens).toBe(108_000);
+    expect(snapshot?.usedPercentage).toBeCloseTo(28, 10);
     expect(snapshot?.autoCompactThreshold).toBe(150_000);
     expect(
       formatContextWindowCompactionMessage("Claude Sonnet 4.6", snapshot?.autoCompactThreshold),

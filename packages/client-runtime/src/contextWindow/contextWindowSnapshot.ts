@@ -29,6 +29,37 @@ export type ContextWindowSnapshot = NullableContextWindowUsage & {
   readonly updatedAt: string;
 };
 
+export type ContextWindowLimitSource = Pick<ContextWindowSnapshot, "maxTokens"> & {
+  readonly autoCompactThreshold?: number | null;
+};
+
+/**
+ * Where the context stops growing: the auto-compact threshold when the provider reports
+ * one, otherwise the model's window. The meter's ring, percentage and right label measure
+ * against it, so a 1M model that compacts at 717k reads `538k ◔ 717k`.
+ */
+export function contextWindowLimitTokens(usage: ContextWindowLimitSource): number | null {
+  const threshold = usage.autoCompactThreshold ?? null;
+  if (threshold !== null && threshold > 0) return threshold;
+  const maxTokens = usage.maxTokens ?? null;
+  return maxTokens !== null && maxTokens > 0 ? maxTokens : null;
+}
+
+function contextWindowShares(
+  usedTokens: number,
+  limitTokens: number | null,
+): Pick<ContextWindowSnapshot, "remainingTokens" | "usedPercentage" | "remainingPercentage"> {
+  if (limitTokens === null) {
+    return { remainingTokens: null, usedPercentage: null, remainingPercentage: null };
+  }
+  const usedPercentage = Math.min(100, (usedTokens / limitTokens) * 100);
+  return {
+    remainingTokens: Math.max(0, Math.round(limitTokens - usedTokens)),
+    usedPercentage,
+    remainingPercentage: Math.max(0, 100 - usedPercentage),
+  };
+}
+
 /** Newest usage report across a thread's provider turns. Snapshots order turns
     by provider thread, not time, so pick by timestamp. */
 export function latestProviderTurnTokenUsage(
@@ -70,18 +101,15 @@ export function deriveLatestContextWindowSnapshot(
   if (liveUsage != null) {
     const usedTokens = Math.max(0, liveUsage.usedTokens);
     const maxTokens = liveUsage.maxTokens ?? null;
-    const usedPercentage =
-      maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
-    const remainingTokens =
-      maxTokens !== null ? Math.max(0, Math.round(maxTokens - usedTokens)) : null;
-    const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null;
+    const autoCompactThreshold = liveUsage.autoCompactThreshold ?? null;
     return {
       usedTokens,
       totalProcessedTokens: null,
       maxTokens,
-      remainingTokens,
-      usedPercentage,
-      remainingPercentage,
+      ...contextWindowShares(
+        usedTokens,
+        contextWindowLimitTokens({ maxTokens, autoCompactThreshold }),
+      ),
       inputTokens: liveUsage.inputTokens ?? null,
       cachedInputTokens: liveUsage.cachedInputTokens ?? null,
       cacheCreationTokens: liveUsage.cacheCreationTokens ?? null,
@@ -96,7 +124,7 @@ export function deriveLatestContextWindowSnapshot(
       toolUses: null,
       durationMs: null,
       compactsAutomatically: true,
-      autoCompactThreshold: liveUsage.autoCompactThreshold ?? null,
+      autoCompactThreshold,
       cost: null,
       updatedAt: liveUsage.updatedAt,
     };
@@ -110,15 +138,15 @@ export function deriveLatestContextWindowSnapshot(
   ) {
     const maxTokens = asFiniteNumber(providerUsage.maxTokens);
     const usedTokens = providerUsage.usedTokens;
-    const usedPercentage =
-      maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
+    const autoCompactThreshold = providerUsage.autoCompactThreshold ?? null;
     return {
       usedTokens,
       totalProcessedTokens: asFiniteNumber(providerUsage.totalProcessedTokens),
       maxTokens,
-      remainingTokens: maxTokens === null ? null : Math.max(0, Math.round(maxTokens - usedTokens)),
-      usedPercentage,
-      remainingPercentage: usedPercentage === null ? null : Math.max(0, 100 - usedPercentage),
+      ...contextWindowShares(
+        usedTokens,
+        contextWindowLimitTokens({ maxTokens, autoCompactThreshold }),
+      ),
       inputTokens: asFiniteNumber(providerUsage.inputTokens),
       cachedInputTokens: asFiniteNumber(providerUsage.cachedInputTokens),
       cacheCreationTokens: asFiniteNumber(providerUsage.cacheCreationTokens),
@@ -134,7 +162,7 @@ export function deriveLatestContextWindowSnapshot(
       durationMs: asFiniteNumber(providerUsage.durationMs),
       compactsAutomatically: providerUsage.compactsAutomatically ?? null,
       cost: providerUsage.cost ?? null,
-      autoCompactThreshold: providerUsage.autoCompactThreshold ?? null,
+      autoCompactThreshold,
       updatedAt: DateTime.formatIso(providerUsageUpdatedAt),
     };
   }
@@ -149,20 +177,11 @@ export function deriveLatestContextWindowSnapshot(
       continue;
     }
 
-    const maxTokens = null;
-    const usedPercentage =
-      maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
-    const remainingTokens =
-      maxTokens !== null ? Math.max(0, Math.round(maxTokens - usedTokens)) : null;
-    const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null;
-
     return {
       usedTokens,
       totalProcessedTokens: asFiniteNumber(payload.beforeTokenCount),
-      maxTokens,
-      remainingTokens,
-      usedPercentage,
-      remainingPercentage,
+      maxTokens: null,
+      ...contextWindowShares(usedTokens, null),
       inputTokens: null,
       cachedInputTokens: null,
       cacheCreationTokens: null,

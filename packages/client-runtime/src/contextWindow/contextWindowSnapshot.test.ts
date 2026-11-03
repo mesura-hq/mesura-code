@@ -42,6 +42,37 @@ describe("shared context-window snapshot", () => {
     expect(snapshot?.lastCacheCreationTokens).toBeNull();
   });
 
+  it("measures the used share against the auto-compact threshold, not the model window", () => {
+    const live = deriveLatestContextWindowSnapshot([], {
+      usedTokens: 537_750,
+      maxTokens: 1_000_000,
+      autoCompactThreshold: 717_000,
+      updatedAt: "2026-10-04T00:00:00.000Z",
+    });
+    const persisted = deriveLatestContextWindowSnapshot([], null, {
+      contextUsage: { usedTokens: 537_750, maxTokens: 1_000_000, autoCompactThreshold: 717_000 },
+      updatedAt: UPDATED_AT,
+    });
+
+    for (const snapshot of [live, persisted]) {
+      expect(snapshot?.maxTokens).toBe(1_000_000);
+      expect(snapshot?.usedPercentage).toBe(75);
+      expect(snapshot?.remainingTokens).toBe(179_250);
+      expect(snapshot?.remainingPercentage).toBe(25);
+    }
+  });
+
+  it("falls back to the model window when no threshold is reported", () => {
+    const snapshot = deriveLatestContextWindowSnapshot([], {
+      usedTokens: 250_000,
+      maxTokens: 1_000_000,
+      updatedAt: "2026-10-04T00:00:00.000Z",
+    });
+
+    expect(snapshot?.usedPercentage).toBe(25);
+    expect(snapshot?.remainingTokens).toBe(750_000);
+  });
+
   it("formats millions with a capital M in the shared formatter", () => {
     expect(formatContextWindowTokens(1_000_000)).toBe("1M");
     expect(formatContextWindowTokens(1_500_000)).toBe("1.5M");

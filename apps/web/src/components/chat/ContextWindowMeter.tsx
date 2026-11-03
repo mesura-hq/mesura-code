@@ -1,6 +1,7 @@
 import { Button } from "../ui/button";
 import {
   type ContextWindowSnapshot,
+  contextWindowLimitTokens,
   deriveContextWindowPressureColor,
   deriveContextWindowSegments,
   formatContextWindowAccessibilityLabel,
@@ -34,6 +35,10 @@ export function ContextWindowMeter(props: {
   const totalProcessedTokens = usage.totalProcessedTokens ?? null;
   const showTotalProcessed = totalProcessedTokens !== null && totalProcessedTokens > 0;
   const labels = formatContextWindowIndicatorLabels(usage);
+  const limitTokens = contextWindowLimitTokens(usage);
+  // Mesura: with a compaction limit below the model's window, the window moves to its own row.
+  const maxTokens = usage.maxTokens ?? null;
+  const modelWindowTokens = maxTokens !== limitTokens ? maxTokens : null;
   const segments = deriveContextWindowSegments(usage);
   // mesura: from half full the ring alone takes one pressure colour, yellow to
   // red; the token labels stay muted.
@@ -107,13 +112,13 @@ export function ContextWindowMeter(props: {
         <div className="flex flex-col gap-2 p-(--floating-content-inset)">
           <div className="flex items-center justify-between gap-3">
             <div className="font-medium text-muted-foreground text-xs">Context Window</div>
-            {usage.maxTokens !== null && usedPercentage ? (
+            {limitTokens !== null && usedPercentage ? (
               <div className="text-secondary-label text-2xs tabular-nums">
                 <span>{usedPercentage}</span>
                 <span className="mx-1">·</span>
                 <span>
                   {formatContextWindowTokens(usage.usedTokens)}/
-                  {formatContextWindowTokens(usage.maxTokens ?? null)}
+                  {formatContextWindowTokens(limitTokens)}
                 </span>
               </div>
             ) : (
@@ -125,7 +130,7 @@ export function ContextWindowMeter(props: {
           {segments.length > 0 ? (
             <ContextWindowSegmentedBar segments={segments} scale="window" />
           ) : null}
-          {segments.length === 0 && usage.maxTokens !== null ? (
+          {segments.length === 0 && limitTokens !== null ? (
             <div
               className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
               role="progressbar"
@@ -146,6 +151,14 @@ export function ContextWindowMeter(props: {
               <span className="text-secondary-label">Total processed</span>
               <span className="font-medium tabular-nums text-secondary-label">
                 {formatContextWindowTokens(totalProcessedTokens)}
+              </span>
+            </div>
+          ) : null}
+          {modelWindowTokens !== null ? (
+            <div className="flex items-center justify-between gap-3 text-2xs leading-4">
+              <span className="text-secondary-label">Model window</span>
+              <span className="font-medium tabular-nums text-secondary-label">
+                {formatContextWindowTokens(modelWindowTokens)}
               </span>
             </div>
           ) : null}

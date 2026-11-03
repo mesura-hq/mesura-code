@@ -356,6 +356,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["open in editor zed vscode cursor external editor favorite shortcut"],
   },
   {
+    id: "update-everything-button",
+    title: "Update everything button",
+    to: "/settings/general",
+    searchTerms: ["update everything provider cli upgrade sidebar button pacman npm"],
+  },
+  {
     id: "composer-context",
     title: "Composer context",
     to: "/settings/appearance",
