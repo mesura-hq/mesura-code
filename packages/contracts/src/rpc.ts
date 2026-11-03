@@ -1,3 +1,5 @@
+// Mesura: the latest device zone is separate from the explicit setting.
+import { ClientTimeZoneError, IanaTimeZone } from "./timeZone.ts";
 import { ProjectId } from "./baseSchemas.ts";
 import {
   ProjectIconDiscoverInput,
@@ -651,6 +653,8 @@ export const WS_METHODS = {
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
   serverGetAccountLimits: "server.getAccountLimits",
+  // Mesura: device zone for agent snoozes.
+  serverReportClientTimeZone: "server.reportClientTimeZone",
 
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -2605,6 +2609,13 @@ const UpstreamWsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeCommandOutputRpc,
 );
 
+// Mesura: persist the latest reported device zone.
+const WsReportClientTimeZoneRpc = Rpc.make(WS_METHODS.serverReportClientTimeZone, {
+  payload: Schema.Struct({ timeZone: IanaTimeZone }),
+  success: Schema.Void,
+  error: ClientTimeZoneError,
+});
+
 /**
  * Mesura: the fork's RPCs, in a group of their own. `toLayer` over one group of all RPCs fails with
  * "Type instantiation is excessively deep" (about 190 upstream plus 31 fork RPCs at the v0.0.46
@@ -2612,6 +2623,7 @@ const UpstreamWsRpcGroup = RpcGroup.make(
  * `WsRpcGroup`. The separate list also keeps the fork's RPCs out of upstream's, which conflicts.
  */
 const MesuraWsRpcGroup = RpcGroup.make(
+  WsReportClientTimeZoneRpc,
   WsServerGetAccountLimitsRpc,
   WsIssuesListRpc,
   WsIssuesDetailRpc,

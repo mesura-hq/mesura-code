@@ -131,6 +131,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetAccountLimits]: AuthDiagnosticsReadScope,
   [WS_METHODS.serverSignalProcess]: AuthEnvironmentMaintainScope,
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
+  // Mesura: device zones change snooze resolution and require permission to operate.
+  [WS_METHODS.serverReportClientTimeZone]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.secretsAnswerRequest]: AuthOrchestrationOperateScope,
   // Mesura: a takeover answer resumes the agent that asked, as a secret answer does.

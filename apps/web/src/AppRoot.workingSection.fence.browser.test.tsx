@@ -31,66 +31,9 @@ const sidebarLists = vi.hoisted(() => ({
   /** Every active reorder the sidebar asked for. */
   activeReorders: [] as unknown[],
 }));
-vi.mock("./state/entities", async (original) => {
-  const mocks = await fenceMocks();
-  const { Atom } = await import("effect/reactivity");
-  const { useAtomValue } = await import("@effect/atom-react");
-  const { createEnvironmentThreadShellAtoms } =
-    await import("@t3tools/client-runtime/state/threads");
-  const { PrimaryConnectionTarget } = await import("@t3tools/client-runtime/connection");
-  const { EnvironmentId } = await import("@t3tools/contracts");
-  const Option = await import("effect/Option");
-  const { environmentServerConfigsAtom } = await import("./state/server");
-  const environmentId = EnvironmentId.make(mocks.FENCE_ENVIRONMENT_ID);
-  const catalogValueAtom = Atom.make({
-    isReady: true,
-    entries: new Map([
-      [
-        environmentId,
-        {
-          enabled: true,
-          profile: Option.none(),
-          target: new PrimaryConnectionTarget({
-            environmentId,
-            label: "Search fence",
-            httpBaseUrl: "https://search-fence.invalid",
-            wsBaseUrl: "wss://search-fence.invalid",
-          }),
-        },
-      ],
-    ]),
-  });
-  const snapshotAtom = Atom.family((id: typeof environmentId) =>
-    Atom.make((get) => {
-      const read = (): import("@t3tools/contracts").OrchestrationV2ShellSnapshot => ({
-        schemaVersion: 1,
-        snapshotSequence: 0,
-        threads: sidebarLists.threads
-          .filter((thread) => thread.environmentId === id)
-          .map((thread) => thread.source),
-        archivedThreads: [],
-        projects: [],
-      });
-      const listener = () => get.setSelf(read());
-      sidebarLists.listeners.add(listener);
-      get.addFinalizer(() => sidebarLists.listeners.delete(listener));
-      return read();
-    }).pipe(Atom.setIdleTTL(0)),
-  );
-  const shells = createEnvironmentThreadShellAtoms({ catalogValueAtom, snapshotAtom });
-  const emptyShell = Atom.make(null);
-  return {
-    ...(await mocks.mockEntities(original)),
-    useThreadShells: () => useAtomValue(shells.threadShellsAtom),
-    useQuietThreadShells: () => useAtomValue(shells.quietThreadShellsAtom),
-    useThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) =>
-      useAtomValue(ref === null ? emptyShell : shells.threadShellAtom(ref)),
-    useQuietThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) =>
-      useAtomValue(ref === null ? emptyShell : shells.quietThreadShellAtom(ref)),
-    useServerConfigs: () => useAtomValue(environmentServerConfigsAtom),
-    useProjects: () => sidebarLists.projects,
-  };
-});
+vi.mock("./state/entities", async (original) =>
+  (await fenceMocks()).mockSidebarEntities(original, sidebarLists),
+);
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
@@ -432,14 +375,14 @@ function sidebarLandmarks(): string[] {
     "[data-mesura-thread-search]",
     "[data-working-section-header]",
     "[data-thread-item]",
-    '[data-testid="sidebar-snoozed-header"]',
+    '[data-sidebar-row="shelf:snoozed"]',
     '[data-testid="sidebar-settled-header"]',
   ].join(", ");
   return [...document.querySelectorAll<HTMLElement>(selector)].map((element) => {
     if (element.matches("[data-mesura-thread-search]")) return "Search";
     if (element.matches("[data-working-section-header]")) return "Working";
     if (element.dataset.threadItem) return element.dataset.threadItem.split(":").at(-1)!;
-    return element.dataset.testid === "sidebar-snoozed-header" ? "Snoozed" : "Settled";
+    return element.dataset.sidebarRow === "shelf:snoozed" ? "Snoozed" : "Settled";
   });
 }
 
@@ -507,7 +450,7 @@ describe("working section: place and order", () => {
     },
   );
 
-  it("working section spec: Search, Working, every other thread, Snoozed, then Settled, top to bottom", async () => {
+  it("working section phase 1 amended spec: Search, Snoozed, Working, other threads, then Settled follow the approved order", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await mountWithThreads(
       [
@@ -528,14 +471,16 @@ describe("working section: place and order", () => {
     );
     await vi.waitFor(() => expect(section()).not.toBeNull());
     const landmarks = sidebarLandmarks().filter((entry) => !entry.startsWith(OPEN_THREAD_ID));
-    expect(landmarks.slice(0, 4), "Search, Working, newest start first").toEqual([
+    // Phase 1 moves Snoozed above Working; the active list still keeps its own order.
+    expect(landmarks.slice(0, 5), "Search, Snoozed, Working, newest start first").toEqual([
       "Search",
+      "Snoozed",
       "Working",
       "working-new",
       "working-old",
     ]);
-    expect(landmarks.indexOf("Snoozed")).toBeGreaterThan(landmarks.indexOf("idle-b"));
-    expect(landmarks.indexOf("Snoozed")).toBeGreaterThan(landmarks.indexOf("idle-a"));
+    expect(landmarks.indexOf("Snoozed")).toBeLessThan(landmarks.indexOf("idle-b"));
+    expect(landmarks.indexOf("Snoozed")).toBeLessThan(landmarks.indexOf("idle-a"));
     expect(landmarks.indexOf("Settled")).toBeGreaterThan(landmarks.indexOf("Snoozed"));
     expect(landmarks.filter((entry) => entry.startsWith("working-"))).toHaveLength(2);
   });

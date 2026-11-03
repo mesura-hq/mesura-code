@@ -177,6 +177,10 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // Collapses or expands the sidebar's Working section. The rename warning below applies to this
   // id too.
   "sidebar.toggleWorking",
+  // Mesura: keyboard and palette snooze actions, without default modifier chords.
+  "thread.snooze",
+  "thread.unsnooze",
+  "sidebar.toggleSnoozed",
   "chat.new",
   "chat.newLocal",
   "chat.newWithoutProject",

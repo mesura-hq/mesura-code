@@ -4,6 +4,7 @@ import { type RefObject, useEffect } from "react";
 import { create } from "zustand";
 
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
+import { getCommandPaletteReturnFocus } from "../../commandPaletteStore";
 import { useCommandHandlers } from "../../commands/commandRegistry";
 import { resolveShortcutCommand } from "../../keybindings";
 import { captureComposerFocusReturn } from "../../keys/composer/composerSurface";
@@ -21,14 +22,16 @@ import { toastManager } from "../ui/toast";
 import { useSidebar } from "../ui/sidebar";
 import { useCloseAppModal } from "./mainAppLocation";
 import { setWorkingSectionExpanded } from "./workingSection";
+import { toggleSnoozedSection } from "./SidebarSnoozedSection";
+import { SnoozeCommandHost } from "./SnoozePopup";
 
 /**
  * The keyboard's way into the sidebar (`threadSearch.toggle`, `projectScope.toggle`,
- * `projectScope.toggleAll`, `sidebar.toggleWorking`). The request is a store, not an event, because the target may be
+ * `projectScope.toggleAll`, `sidebar.toggleWorking`, `sidebar.toggleSnoozed`). The request is a store, not an event, because the target may be
  * unmounted (the phone drawer) or inert (the Settings modal, an open command palette):
  * `SidebarCommandHost` opens or closes those, and the sidebar serves the request once it can.
  */
-type SidebarFocusTarget = "search" | "projectFilter";
+type SidebarFocusTarget = "search" | "projectFilter" | "snoozed";
 
 const useSidebarFocusRequestStore = create<{ target: SidebarFocusTarget | null }>()(() => ({
   target: null,
@@ -148,6 +151,7 @@ function toggleAllProjects(): void {
 const FOCUS_TARGET_BY_COMMAND = {
   "threadSearch.toggle": "search",
   "projectScope.toggle": "projectFilter",
+  "sidebar.toggleSnoozed": "snoozed",
 } as const satisfies Partial<Record<KeybindingCommand, SidebarFocusTarget>>;
 
 const STATE_COMMANDS = ["projectScope.toggleAll", "sidebar.toggleWorking"] as const;
@@ -197,6 +201,14 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
       if (sidebarHidden) (isMobile ? setOpenMobile : setOpen)(true);
       return;
     }
+    if (command === "sidebar.toggleSnoozed") {
+      const origin = isCommandPaletteOpen()
+        ? getCommandPaletteReturnFocus()
+        : document.activeElement;
+      const headerFocused =
+        origin instanceof Element && origin.matches('[data-sidebar-row="shelf:snoozed"]');
+      toggleSnoozedSection(sidebarHidden || !headerFocused);
+    }
     if (command === "threadSearch.toggle") {
       if (isSidebarSearchFocused()) {
         leaveSearch();
@@ -220,6 +232,7 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
     "projectScope.toggle": () => run("projectScope.toggle"),
     "projectScope.toggleAll": () => run("projectScope.toggleAll"),
     "sidebar.toggleWorking": () => run("sidebar.toggleWorking"),
+    "sidebar.toggleSnoozed": () => run("sidebar.toggleSnoozed"),
   });
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: window keydown and focusout listeners for the sidebar commands and the Search way back, re-bound each render to read the latest run
@@ -261,12 +274,12 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
     };
   });
 
-  return null;
+  return <SnoozeCommandHost />;
 }
 
 /**
  * The mounted sidebar's half: serves focus requests with its own Search field
- * and project filter, and keeps the project names the toggle's toast shows.
+ * and project filter or Snoozed header, and keeps the project names the toggle's toast shows.
  * A request made while the command palette is open waits for the palette's
  * final focus, because the palette makes the rest of the page inert.
  */
@@ -289,7 +302,11 @@ export function useSidebarCommandTarget(input: {
     const target = {
       serve: (focusTarget: SidebarFocusTarget) => {
         if (focusTarget === "search") searchInputRef.current?.focus();
-        else openProjectFilter();
+        else if (focusTarget === "snoozed") {
+          const header = document.querySelector<HTMLElement>('[data-sidebar-row="shelf:snoozed"]');
+          if (header) header.focus();
+          else toastManager.add({ title: "No snoozed threads" });
+        } else openProjectFilter();
       },
       searchInput: () => searchInputRef.current,
     };

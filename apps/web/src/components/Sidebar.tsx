@@ -10,6 +10,13 @@ import { ThreadJumpHintModifierSync } from "./sidebar/ThreadJumpHintModifierSync
 import { useThreadJumpTargets } from "./sidebar/threadJumpTargets";
 import { sortActiveThreadsForSidebar } from "./sidebar/activeThreadOrder";
 import { SidebarWorkingSection } from "./sidebar/SidebarWorkingSection";
+// Mesura: the Snoozed entry shares upstream's shelf state and thread rows.
+import {
+  SidebarSnoozedSection,
+  SNOOZED_SECTION_EXPANDED_KEY,
+} from "./sidebar/SidebarSnoozedSection";
+// Mesura: commands reuse the row's snooze guard and forward navigation.
+import { registerSnoozeAndAdvance } from "./sidebar/snoozeAndAdvance";
 import { createWorkingSectionOrder, WORKING_SECTION_EXPANDED_KEY } from "./sidebar/workingSection";
 import { liveShellEnvironmentIdsAtom } from "../state/shell";
 import { attachSidebarTree, SIDEBAR_TREE_PROPS } from "../lib/sidebarTree";
@@ -342,7 +349,7 @@ const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
-const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
+const SNOOZED_SHELF_EXPANDED_KEY = SNOOZED_SECTION_EXPANDED_KEY; // Mesura: shared with the command.
 
 const inboxReturns = createInboxReturnTracker();
 // Mesura: module scope for the same reason as `inboxReturns` (workingSection.ts).
@@ -626,12 +633,14 @@ function useSidebarThreads(input: {
           };
         });
   const orderedThreads = [
+    // Mesura: thread navigation follows the separate sections' visual order.
+    ...(workingShelfEnabled ? visibleSnoozedThreads : EMPTY_THREADS),
     ...visibleWorkingThreads,
     ...pinnedThreads,
     ...(projectFolders === null
       ? activeThreads
       : projectFolders.flatMap((folder) => folder.threads)),
-    ...visibleSnoozedThreads,
+    ...(workingShelfEnabled ? EMPTY_THREADS : visibleSnoozedThreads),
     ...renderedSettledThreads,
   ];
   const sectionByThreadKey = new Map<string, SidebarSection>();
@@ -1897,7 +1906,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     };
   };
 
-  const isContextDrag = dragState?.contextDrag === true || dragState?.activeSection === "working";
+  // Mesura: separate sections keep reference drags without participating in shelf moves.
+  const isContextDrag =
+    dragState?.contextDrag === true ||
+    dragState?.activeSection === "working" ||
+    (workingShelfEnabled && dragState?.activeSection === "snoozed");
   const dragTargetSection = isContextDrag ? null : (dragState?.targetSection ?? null);
   const finishThreadDrag = (started: boolean) => {
     dragSensorRef.current = null;
@@ -2121,7 +2134,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const activeRows = rowsOf(activeThreads, "active");
     items.push({ kind: "marker", marker: "active-placeholder" });
     items.push(...activeRows);
-    if (snoozedThreads.length > 0) {
+    // Mesura: the separate entry owns these rows when Working is shown.
+    if (!workingShelfEnabled && snoozedThreads.length > 0) {
       items.push({ kind: "marker", marker: "snoozed-header" });
       items.push(...rowsOf(visibleSnoozedThreads, "snoozed"));
     }
@@ -2151,17 +2165,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       !sidebarListItems.some(
         (item) => item.kind === "thread" && item.key === dragState.activeKey,
       ) &&
-      // Mesura: a Working row drags as a reference from outside the list items.
-      !visibleWorkingThreads.some((thread) => threadShellKey(thread) === dragState.activeKey)
+      // Mesura: separate-section rows drag as references from outside the list items.
+      !visibleWorkingThreads.some((thread) => threadShellKey(thread) === dragState.activeKey) &&
+      !visibleSnoozedThreads.some((thread) => threadShellKey(thread) === dragState.activeKey)
     ) {
       cancelThreadDrag();
     }
-  }, [cancelThreadDrag, dragState, sidebarListItems, visibleWorkingThreads]);
+  }, [cancelThreadDrag, dragState, sidebarListItems, visibleWorkingThreads, visibleSnoozedThreads]);
   // Only order, section, or draft changes need layout reads and motion.
   const listMotionLayoutKey = [
     sidebarListItemsKey,
     // Mesura: the Working section above the rows moves them too.
     visibleWorkingThreads.map(threadShellKey).join(","),
+    // Mesura: the Snoozed entry's presence and visible rows also move the list.
+    workingShelfEnabled
+      ? [snoozedThreads.length > 0, ...visibleSnoozedThreads.map(threadShellKey)].join(",")
+      : "",
     projectFolders
       ?.map((folder) => `${folder.group.projectKey}:${folder.threads.length}`)
       .join("\n") ?? "",
@@ -2251,6 +2270,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const handleThreadDragEnd = (event: DragEndEvent) => {
     const activeKey = String(event.active.id);
     const activeSection = sectionByThreadKey.get(activeKey);
+    // Mesura: reference drags from the new entry must never wake or organize the thread.
+    if (workingShelfEnabled && activeSection === "snoozed") return;
     const target =
       event.over === null
         ? null
@@ -2441,6 +2462,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       })();
     },
   );
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Mesura: publishes the mounted row snooze path to keyboard and palette commands
+  useEffect(() => registerSnoozeAndAdvance(attemptSnooze), [attemptSnooze]);
 
   const handleMultiSelectContextMenu = useStableCallback(
     async (position: { x: number; y: number }) => {
@@ -3516,9 +3540,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           : isCard
                             ? "card"
                             : "slim";
-                        // Mesura: Working rows sit outside the sortable items (workingSection.ts).
+                        // Mesura: separate sections sit outside the sortable items.
+                        const isSnoozedEntry = workingShelfEnabled && section === "snoozed";
                         const ThreadRow =
-                          section === "working" ? UnsortableThreadRow : SortableThreadRow;
+                          section === "working" || isSnoozedEntry
+                            ? UnsortableThreadRow
+                            : SortableThreadRow;
                         return (
                           <ThreadRow
                             key={threadKey}
@@ -3623,6 +3650,21 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       };
                       const from = isContextDrag ? null : (dragState?.activeSection ?? null);
                       const items: ReactNode[] = [
+                        // Mesura: reuse the shelf's state, wake actions and sorted rows above Working.
+                        workingShelfEnabled ? (
+                          <SidebarSnoozedSection
+                            key="snoozed-section"
+                            count={snoozedThreads.length}
+                            nextWakeAt={snoozedThreads[0]?.snoozedUntil ?? null}
+                            expanded={snoozedShelfExpanded}
+                            onToggle={toggleSnoozedShelf}
+                            now={snoozeNow}
+                          >
+                            {visibleSnoozedThreads.map((thread) =>
+                              renderThreadRow(thread, "snoozed"),
+                            )}
+                          </SidebarSnoozedSection>
+                        ) : null,
                         workingShelfEnabled ? (
                           <li key="working-section" className="list-none">
                             <SidebarWorkingSection
@@ -3738,7 +3780,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               <SidebarSectionHeader
                                 key="settled-shelf-header"
                                 marker="settled-header"
-                                className={cn(snoozedThreads.length === 0 && "mt-auto")}
+                                // Mesura: Settled anchors the bottom when Snoozed is above Working.
+                                className={cn(
+                                  (workingShelfEnabled || snoozedThreads.length === 0) && "mt-auto",
+                                )}
                                 label="Settled"
                                 count={settledCount}
                                 dragging={from !== null}

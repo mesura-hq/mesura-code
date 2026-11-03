@@ -67,6 +67,10 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
+// Mesura: capture the reported zone with the thread service dependencies.
+import * as ClientTimeZone from "./ClientTimeZone.ts";
+// Mesura: agent snoozes resolve through the thread service.
+import { makeSnoozeThread } from "./threadSnooze.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -449,6 +453,12 @@ export interface ThreadManagementServiceShape {
     readonly threadId: ThreadId;
     readonly runId: RunId;
   }) => Effect.Effect<void, ThreadManagementFailure>;
+  // Mesura: validate the wake time before dispatching.
+  readonly snoozeThread: ReturnType<
+    typeof makeSnoozeThread<
+      Orchestrator.OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError
+    >
+  >;
   readonly settleThread: (input: {
     readonly threadId: ThreadId;
     readonly commandId: CommandId;
@@ -587,6 +597,8 @@ const make = Effect.gen(function* () {
   const agentScope = yield* AgentScope;
   const legacyImporter = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  // Mesura: operations do not require callers to supply device-zone state.
+  const clientTimeZone = yield* ClientTimeZone.ClientTimeZone;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
 
   const assertProviderInstanceEnabled: ThreadManagementServiceShape["assertProviderInstanceEnabled"] =
@@ -1576,6 +1588,8 @@ const make = Effect.gen(function* () {
     waitForThread,
     settleAfterRun,
     settleThread,
+    // Mesura: use the same dispatch path as the other thread operations.
+    snoozeThread: makeSnoozeThread(dispatch, { serverSettings, clientTimeZone }),
     signalThread,
     interruptThread,
     stopDelegatedTasks,

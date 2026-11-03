@@ -1,6 +1,8 @@
 // @effect-diagnostics globalDate:off -- UI snooze presets use local calendar boundaries and Intl labels.
 import * as DateTime from "effect/DateTime";
 import { DEFAULT_SNOOZE_PRESETS, type SnoozePresetSetting } from "@t3tools/contracts/settings";
+// Mesura: the shared snooze day rule.
+import { snoozeDaysAhead } from "@t3tools/contracts";
 
 import type { EnvironmentThreadShell, PendingSubagentRequest } from "./models.ts";
 
@@ -176,16 +178,6 @@ export function threadWokeAt(
 
 const HOUR_MS = 60 * 60 * 1_000;
 
-const WEEKDAY_INDEX = {
-  sunday: 0,
-  monday: 1,
-  tuesday: 2,
-  wednesday: 3,
-  thursday: 4,
-  friday: 5,
-  saturday: 6,
-} as const;
-
 export interface SnoozePreset {
   readonly id: string;
   readonly label: string;
@@ -230,9 +222,8 @@ function snoozePresetDaysAhead(
   setting: Extract<SnoozePresetSetting, { kind: "at" }>,
   now: Date,
 ): number {
-  if (setting.day === "today") return 0;
-  if (setting.day === "tomorrow") return 1;
-  return (WEEKDAY_INDEX[setting.day] - now.getDay() + 7) % 7 || 7;
+  // Mesura: the day rule is shared with the server's snooze resolver.
+  return snoozeDaysAhead(setting.day, now.getDay());
 }
 
 /** Labels follow the actual day gap, so a Monday option on a Sunday reads "Tomorrow". */

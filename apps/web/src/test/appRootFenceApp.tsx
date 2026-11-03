@@ -34,6 +34,7 @@ import { AppRoot } from "../AppRoot";
 import { AppRouteModal } from "../components/AppRouteModal";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
+import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
 import { Route as ChatLayoutRoute } from "../routes/_chat";
 import {
   appRootFence,
@@ -157,11 +158,14 @@ export function addFenceThread(
 export function createFenceRouter(firstThreadId: ThreadId) {
   const route = createRootRoute({
     component: () => (
-      <CommandPalette>
-        <AppSidebarLayout>
-          <Outlet />
-        </AppSidebarLayout>
-      </CommandPalette>
+      <>
+        <CustomSnoozeDialogHost />
+        <CommandPalette>
+          <AppSidebarLayout>
+            <Outlet />
+          </AppSidebarLayout>
+        </CommandPalette>
+      </>
     ),
   });
   const chatLayout = createRoute({

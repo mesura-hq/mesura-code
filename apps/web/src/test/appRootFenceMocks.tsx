@@ -575,3 +575,71 @@ export function mockLegendList() {
     ),
   };
 }
+
+/** A reactive sidebar over the AppRoot fence's shells, with real shell atoms and row subscriptions. */
+export async function mockSidebarEntities(
+  original: ImportOriginal<typeof import("../state/entities")>,
+  sidebarLists: {
+    readonly threads: ReadonlyArray<EnvironmentThreadShell>;
+    readonly projects: ReadonlyArray<unknown>;
+    readonly listeners: Set<() => void>;
+  },
+) {
+  const { Atom } = await import("effect/reactivity");
+  const { useAtomValue } = await import("@effect/atom-react");
+  const { createEnvironmentThreadShellAtoms } =
+    await import("@t3tools/client-runtime/state/threads");
+  const { PrimaryConnectionTarget } = await import("@t3tools/client-runtime/connection");
+  const { EnvironmentId } = await import("@t3tools/contracts");
+  const Option = await import("effect/Option");
+  const { environmentServerConfigsAtom } = await import("../state/server");
+  const environmentId = EnvironmentId.make(FENCE_ENVIRONMENT_ID);
+  const catalogValueAtom = Atom.make({
+    isReady: true,
+    entries: new Map([
+      [
+        environmentId,
+        {
+          enabled: true,
+          profile: Option.none(),
+          target: new PrimaryConnectionTarget({
+            environmentId,
+            label: "Search fence",
+            httpBaseUrl: "https://search-fence.invalid",
+            wsBaseUrl: "wss://search-fence.invalid",
+          }),
+        },
+      ],
+    ]),
+  });
+  const snapshotAtom = Atom.family((id: typeof environmentId) =>
+    Atom.make((get) => {
+      const read = (): import("@t3tools/contracts").OrchestrationV2ShellSnapshot => ({
+        schemaVersion: 1,
+        snapshotSequence: 0,
+        threads: sidebarLists.threads
+          .filter((thread) => thread.environmentId === id)
+          .map((thread) => thread.source),
+        archivedThreads: [],
+        projects: [],
+      });
+      const listener = () => get.setSelf(read());
+      sidebarLists.listeners.add(listener);
+      get.addFinalizer(() => sidebarLists.listeners.delete(listener));
+      return read();
+    }).pipe(Atom.setIdleTTL(0)),
+  );
+  const shells = createEnvironmentThreadShellAtoms({ catalogValueAtom, snapshotAtom });
+  const emptyShell = Atom.make(null);
+  return {
+    ...(await mockEntities(original)),
+    useThreadShells: () => useAtomValue(shells.threadShellsAtom),
+    useQuietThreadShells: () => useAtomValue(shells.quietThreadShellsAtom),
+    useThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) =>
+      useAtomValue(ref === null ? emptyShell : shells.threadShellAtom(ref)),
+    useQuietThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) =>
+      useAtomValue(ref === null ? emptyShell : shells.quietThreadShellAtom(ref)),
+    useServerConfigs: () => useAtomValue(environmentServerConfigsAtom),
+    useProjects: () => sidebarLists.projects,
+  };
+}
