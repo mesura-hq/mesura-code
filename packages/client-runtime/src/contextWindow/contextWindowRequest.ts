@@ -1,9 +1,14 @@
-import { type ContextWindowSnapshot, formatContextWindowTokens } from "./contextWindowSnapshot.ts";
+import {
+  type ContextWindowLimitSource,
+  type ContextWindowSnapshot,
+  contextWindowLimitTokens,
+  formatContextWindowTokens,
+} from "./contextWindowSnapshot.ts";
 
 /**
- * The two labels around the composer's context ring: `65k ◯ 1M`. `max` is
- * `null` when the provider reports no total for the model, and the trigger then
- * shows the used count alone.
+ * The two labels around the composer's context ring: `65k ◯ 1M`. `max` is the
+ * limit from `contextWindowLimitTokens`, or `null` when the provider reports no
+ * total, and the trigger then shows the used count alone.
  */
 export interface ContextWindowIndicatorLabels {
   readonly used: string;
@@ -11,11 +16,12 @@ export interface ContextWindowIndicatorLabels {
 }
 
 export function formatContextWindowIndicatorLabels(
-  usage: Pick<ContextWindowSnapshot, "usedTokens" | "maxTokens">,
+  usage: Pick<ContextWindowSnapshot, "usedTokens"> & ContextWindowLimitSource,
 ): ContextWindowIndicatorLabels {
+  const limitTokens = contextWindowLimitTokens(usage);
   return {
     used: formatContextWindowTokens(usage.usedTokens),
-    max: usage.maxTokens == null ? null : formatContextWindowTokens(usage.maxTokens),
+    max: limitTokens === null ? null : formatContextWindowTokens(limitTokens),
   };
 }
 
@@ -159,13 +165,13 @@ function scaleContextWindowParts(
  * the window size is unknown.
  */
 export function deriveContextWindowSegments(
-  usage: BreakdownSource & Pick<ContextWindowSnapshot, "usedTokens" | "maxTokens">,
+  usage: BreakdownSource & Pick<ContextWindowSnapshot, "usedTokens"> & ContextWindowLimitSource,
 ): ReadonlyArray<ContextWindowSegment> {
-  const maxTokens = usage.maxTokens ?? null;
-  if (maxTokens === null || maxTokens <= 0) {
+  const limitTokens = contextWindowLimitTokens(usage);
+  if (limitTokens === null) {
     return [];
   }
-  const usedFraction = Math.min(1, Math.max(0, usage.usedTokens / maxTokens));
+  const usedFraction = Math.min(1, Math.max(0, usage.usedTokens / limitTokens));
   const breakdown = deriveContextWindowRequestBreakdown(usage);
   const parts: ReadonlyArray<ContextWindowPart> = breakdown
     ? contextWindowRequestParts(breakdown)

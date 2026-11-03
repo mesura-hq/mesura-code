@@ -2772,6 +2772,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly freshQueueOnReopen?: boolean;
     readonly forkSession?: ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerShape["forkSession"];
     readonly allocateSessionId?: Effect.Effect<string>;
+    readonly autoCompactThreshold?: ClaudeAdapterV2.ClaudeAgentSdkQuerySession["autoCompactThreshold"];
   }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -2915,6 +2916,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 stopTask: options?.stopTask ?? (() => Effect.void),
                 interrupt: options?.interrupt ?? Effect.void,
                 close: options?.close?.(sdkMessages) ?? Effect.void,
+                ...(options?.autoCompactThreshold === undefined
+                  ? {}
+                  : { autoCompactThreshold: options.autoCompactThreshold }),
               };
             }),
           forkSession: options?.forkSession ?? (() => Effect.die("unused forkSession")),
@@ -5826,6 +5830,66 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
       ),
     ),
+  );
+
+  // Mesura: the threshold Claude reports wins over the instance setting, whatever set it.
+  it.effect.each([
+    { reported: 717_000, expected: [717_000, 717_000] },
+    { reported: null, expected: [undefined, undefined] },
+  ])(
+    "reports Claude's own auto-compact threshold $reported over the setting",
+    ({ reported, expected }) =>
+      Effect.gen(function* () {
+        const asked = yield* Deferred.make<void>();
+        const harness = yield* makeWakeHarnessWithOptions({
+          settings: { ...DEFAULT_CLAUDE_SETTINGS, autoCompactWindow: "150000" },
+          autoCompactThreshold: Deferred.succeed(asked, undefined).pipe(Effect.as(reported)),
+        });
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-reported-auto-compact-threshold"),
+            text: "Continue.",
+            attachments: [],
+          }),
+        );
+        yield* Deferred.await(asked);
+        const usage = {
+          input_tokens: 10,
+          output_tokens: 1,
+          cache_creation_input_tokens: 200,
+          cache_read_input_tokens: 1_000,
+        };
+        const frames = [
+          usageStreamFrame({ type: "message_start", message: { id: "msg_native", usage } }),
+          claudeSdkFrame({
+            type: "system",
+            subtype: "compact_boundary",
+            compact_metadata: { trigger: "auto", pre_tokens: 1_075, post_tokens: 400 },
+            uuid: "00000000-0000-4000-8000-000000000692",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+          usageSnapshotFrame("msg_native", "00000000-0000-4000-8000-000000000693", usage),
+          makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000694", result: "Done." }),
+        ];
+        for (const frame of frames) yield* Queue.offer(harness.sdkMessages, frame);
+        const terminal = yield* Queue.take(harness.terminalReceipts);
+        assert.equal(terminal.status, "completed");
+        assert.deepEqual(
+          harness.events.flatMap((event) =>
+            event.type === "provider_turn.updated" && event.providerTurn.tokenUsage
+              ? [event.providerTurn.tokenUsage.autoCompactThreshold]
+              : [],
+          ),
+          expected,
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
   );
 
   it.effect("merges cumulative stream usage into the message_start counts", () =>
