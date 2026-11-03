@@ -31,7 +31,7 @@ const FORK_BINDINGS = [
   // developer's Hyprland when it was chosen (2026-10-26).
   { command: "sidebar.toggleWorking", keys: ["alt+z"] },
   // Upstream ships thread.stop unbound; Escape alone belongs to the composer and vim.
-  { command: "thread.stop", keys: ["alt+escape"] },
+  { command: "thread.stop", keys: ["alt+esc"] },
 ] as const;
 
 describe("fork keybindings", () => {

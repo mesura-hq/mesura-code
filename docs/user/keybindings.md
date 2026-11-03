@@ -528,7 +528,7 @@ a shortcut.
 ## Commands with special behavior
 
 `thread.stop` interrupts the running turn in the focused thread. Mesura Code binds it
-to `alt+escape` outside a focused terminal; Escape alone keeps closing menus and
+to `alt+esc` outside a focused terminal; Escape alone keeps closing menus and
 leaving vim insert mode. Change it in **Settings → Keybindings**.
 
 `thread.undo` (`mod+z` by default) reverses the actions shown in the notice at the

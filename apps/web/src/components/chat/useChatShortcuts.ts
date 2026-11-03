@@ -16,7 +16,7 @@ import type { BranchToolbarHandle } from "../BranchToolbar";
 import { shouldTypeToFocusComposer } from "./composerFocusRedirect";
 import { composerShortcutCommands } from "./composerShortcuts";
 
-// Thread find owns plain Escape only, so a modified chord such as alt+escape still reaches its command.
+// Thread find owns plain Escape only, so a modified chord such as alt+esc still reaches its command.
 function isPlainEscape(event: KeyboardEvent): boolean {
   return (
     event.key === "Escape" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey

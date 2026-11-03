@@ -254,9 +254,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // Fork addition: the sidebar's Working section. alt+z is free in the app and in the developer's
   // Hyprland (checked 2026-10-26), so per-command backfill installs it.
   { key: "alt+z", command: "sidebar.toggleWorking", when: "!terminalFocus" },
-  // Fork: upstream ships thread.stop unbound. Escape alone stays the composer's and vim's; alt+escape is
-  // free in the app and in the developer's Hyprland (checked 2026-11-03), so per-command backfill installs it.
-  { key: "alt+escape", command: "thread.stop", when: "!terminalFocus" },
+  // Fork: upstream ships thread.stop unbound. Escape alone stays the composer's and vim's; alt+esc is free
+  // in the app and in the developer's Hyprland (checked 2026-11-03). Spelled `esc`, as Settings writes it:
+  // its edit and remove match the stored key text, so `alt+escape` could be neither replaced nor removed.
+  { key: "alt+esc", command: "thread.stop", when: "!terminalFocus" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
