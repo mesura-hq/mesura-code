@@ -30,6 +30,8 @@ const FORK_BINDINGS = [
   // The sidebar's Working section. alt+z was free in the app and in the
   // developer's Hyprland when it was chosen (2026-10-26).
   { command: "sidebar.toggleWorking", keys: ["alt+z"] },
+  // Upstream ships thread.stop unbound; Escape alone belongs to the composer and vim.
+  { command: "thread.stop", keys: ["alt+escape"] },
 ] as const;
 
 describe("fork keybindings", () => {
