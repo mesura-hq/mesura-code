@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => {
   const listeners = new Set<() => void>();
   return {
     update: null as DesktopUpdateState | null,
+    hasUpdates: false,
+    updateEverythingButton: false,
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -32,8 +34,24 @@ vi.mock("../../env", async (importOriginal) => ({
   isElectron: true,
 }));
 vi.mock("./useUpdateEverything", () => ({
-  useUpdateEverything: () => ({ hasUpdates: false, summary: "", lines: [], restarts: [] }),
+  useUpdateEverything: () => ({
+    hasUpdates: mocks.hasUpdates,
+    summary: "Update Codex and Claude",
+    lines: [],
+    restarts: [],
+    skipped: [],
+  }),
 }));
+vi.mock("../../hooks/useSettings", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../hooks/useSettings")>();
+  return {
+    ...original,
+    useClientSettings: ((selector: (settings: { updateEverythingButton: boolean }) => unknown) =>
+      selector({
+        updateEverythingButton: mocks.updateEverythingButton,
+      })) as typeof original.useClientSettings,
+  };
+});
 
 function nightlyUpdate(releaseNotes: DesktopUpdateState["releaseNotes"]): DesktopUpdateState {
   return {
@@ -60,8 +78,13 @@ const RELEASE_NOTES: DesktopUpdateState["releaseNotes"] = [
   { version: "0.0.50-nightly.2", items: ["Faster sidebar."], totalItems: 1 },
 ];
 
-function setup(update: DesktopUpdateState | null) {
+function setup(
+  update: DesktopUpdateState | null,
+  { hasUpdates = false, updateEverythingButton = false } = {},
+) {
   mocks.update = update;
+  mocks.hasUpdates = hasUpdates;
+  mocks.updateEverythingButton = updateEverythingButton;
 }
 
 function publish(update: DesktopUpdateState | null) {
@@ -92,5 +115,22 @@ describe("SidebarUpdatePill release notes", () => {
 
     await publish(nightlyUpdate(RELEASE_NOTES));
     await vi.waitFor(() => expect(releaseNotes()).not.toBeNull());
+  });
+});
+
+describe("SidebarUpdatePill update everything", () => {
+  it("does not offer provider updates while the button setting is off", async () => {
+    setup(null, { hasUpdates: true });
+    await using screen = await render(<SidebarUpdatePill />);
+    await expect.element(screen.getByRole("button", { name: /Check for updates/ })).toBeVisible();
+    expect(document.querySelector('[aria-label="Update Codex and Claude"]')).toBeNull();
+  });
+
+  it("offers them once the setting is on", async () => {
+    setup(null, { hasUpdates: true, updateEverythingButton: true });
+    await using screen = await render(<SidebarUpdatePill />);
+    await expect
+      .element(screen.getByRole("button", { name: "Update Codex and Claude" }))
+      .toBeVisible();
   });
 });

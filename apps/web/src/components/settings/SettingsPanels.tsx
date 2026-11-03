@@ -468,6 +468,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.openInExternalEditor !== DEFAULT_UNIFIED_SETTINGS.openInExternalEditor
       ? ["Open in external editor"]
       : []),
+    ...(settings.updateEverythingButton !== DEFAULT_UNIFIED_SETTINGS.updateEverythingButton
+      ? ["Update everything button"]
+      : []),
     ...(settings.neovimConfigDirectory !== DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory
       ? ["Neovim configuration directory"]
       : []),
@@ -605,6 +608,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       modalEditing: DEFAULT_UNIFIED_SETTINGS.modalEditing,
       vimMode: DEFAULT_UNIFIED_SETTINGS.vimMode,
       openInExternalEditor: DEFAULT_UNIFIED_SETTINGS.openInExternalEditor,
+      updateEverythingButton: DEFAULT_UNIFIED_SETTINGS.updateEverythingButton,
       idleCompactionEnabled: DEFAULT_UNIFIED_SETTINGS.idleCompactionEnabled,
       neovimConfigDirectory: DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory,
       ...THREAD_ORDER_DEFAULT_SETTINGS_PATCH,
@@ -753,6 +757,38 @@ function OpenInExternalEditorRow() {
           checked={settings.openInExternalEditor}
           onCheckedChange={(checked) => updateSettings({ openInExternalEditor: Boolean(checked) })}
           aria-label="Open threads in an external editor"
+        />
+      }
+    />
+  );
+}
+
+function UpdateEverythingButtonRow() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("update-everything-button")}
+      description="Show the sidebar button that runs each provider CLI's own updater and updates servers. When off, available updates still show in Settings → Providers."
+      resetAction={
+        settings.updateEverythingButton !== DEFAULT_UNIFIED_SETTINGS.updateEverythingButton ? (
+          <SettingResetButton
+            label="update everything button"
+            onClick={() =>
+              updateSettings({
+                updateEverythingButton: DEFAULT_UNIFIED_SETTINGS.updateEverythingButton,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={settings.updateEverythingButton}
+          onCheckedChange={(checked) =>
+            updateSettings({ updateEverythingButton: Boolean(checked) })
+          }
+          aria-label="Show the update everything button"
         />
       }
     />
@@ -1641,6 +1677,8 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        <UpdateEverythingButtonRow />
 
         <SettingsRow
           {...searchableSetting("continue-threads-after-server-update")}
