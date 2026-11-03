@@ -164,8 +164,9 @@ describe("searchSettings", () => {
   });
 
   it("sends commands without a default binding to the section", () => {
-    expect(searchSettings("thread.stop")[0]).toMatchObject({
-      id: "keybinding-thread.stop",
+    // Mesura binds thread.stop (alt+esc), so the example is a command both ship unbound.
+    expect(searchSettings("rightPanel.toggleMaximized")[0]).toMatchObject({
+      id: "keybinding-rightPanel.toggleMaximized",
       targetId: "keybindings",
     });
     expect(searchSettings("sidebar.toggle")[0]?.targetId).toBeUndefined();
