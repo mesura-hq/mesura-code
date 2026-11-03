@@ -16,6 +16,13 @@ import type { BranchToolbarHandle } from "../BranchToolbar";
 import { shouldTypeToFocusComposer } from "./composerFocusRedirect";
 import { composerShortcutCommands } from "./composerShortcuts";
 
+// Thread find owns plain Escape only, so a modified chord such as alt+escape still reaches its command.
+function isPlainEscape(event: KeyboardEvent): boolean {
+  return (
+    event.key === "Escape" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+  );
+}
+
 /** Returning false lets the key event through untouched. */
 export type ChatShortcutHandler = (context: {
   readonly event: KeyboardEvent;
@@ -55,7 +62,7 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
       event.stopPropagation();
       return;
     }
-    if (input.threadFindActive && event.key === "Escape") return;
+    if (input.threadFindActive && isPlainEscape(event)) return;
     if (isTerminalCloseConfirmPending() && preventTerminalCloseShortcut(event, keybindings)) {
       event.stopPropagation();
       return;
@@ -97,7 +104,7 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
   const dismissFind = useEffectEvent((event: KeyboardEvent) => {
     if (
       !ownsShortcuts() ||
-      event.key !== "Escape" ||
+      !isPlainEscape(event) ||
       !input.threadFindActive ||
       event.defaultPrevented ||
       event.isComposing ||
