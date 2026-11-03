@@ -5892,7 +5892,14 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
   );
 
-  it.effect("waits for a threshold answer that lands after the first usage frame", () =>
+  const reportedThresholds = (events: ReadonlyArray<ProviderAdapter.ProviderAdapterV2Event>) =>
+    events.flatMap((event) =>
+      event.type === "provider_turn.updated" && event.providerTurn.tokenUsage
+        ? [event.providerTurn.tokenUsage.autoCompactThreshold]
+        : [],
+    );
+
+  it.effect("republishes the running turn's usage when the threshold answer lands late", () =>
     Effect.gen(function* () {
       const release = yield* Deferred.make<void>();
       const harness = yield* makeWakeHarnessWithOptions({
@@ -5909,30 +5916,55 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           attachments: [],
         }),
       );
-      yield* Queue.offer(
-        harness.sdkMessages,
+      yield* harness.offerAndWait(
         usageStreamFrame({
           type: "message_start",
           message: { id: "msg_native", usage: { input_tokens: 10, output_tokens: 1 } },
         }),
       );
-      yield* Queue.offer(
-        harness.sdkMessages,
+      yield* Deferred.succeed(release, undefined);
+      yield* harness.until(() => reportedThresholds(harness.events).length >= 2);
+      yield* harness.offerAndWait(
         makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000695", result: "Done." }),
       );
-      // Lets the usage frame reach the adapter, still inside the bounded wait.
-      yield* TestClock.adjust("1 second");
-      yield* Deferred.succeed(release, undefined);
       const terminal = yield* Queue.take(harness.terminalReceipts);
       assert.equal(terminal.status, "completed");
-      assert.deepEqual(
-        harness.events.flatMap((event) =>
-          event.type === "provider_turn.updated" && event.providerTurn.tokenUsage
-            ? [event.providerTurn.tokenUsage.autoCompactThreshold]
-            : [],
-        ),
-        [717_000],
+      assert.deepEqual(reportedThresholds(harness.events), [150_000, 717_000]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
+  it.effect("processes frames while the threshold request is still pending", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarnessWithOptions({
+        settings: { ...DEFAULT_CLAUDE_SETTINGS, autoCompactWindow: "150000" },
+        autoCompactThreshold: Effect.never,
+      });
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-pending-auto-compact-threshold"),
+          text: "Continue.",
+          attachments: [],
+        }),
       );
+      yield* harness.offerAndWait(
+        usageStreamFrame({
+          type: "message_start",
+          message: { id: "msg_native", usage: { input_tokens: 10, output_tokens: 1 } },
+        }),
+      );
+      yield* harness.offerAndWait(
+        makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000696", result: "Done." }),
+      );
+      const terminal = yield* Queue.take(harness.terminalReceipts);
+      assert.equal(terminal.status, "completed");
+      assert.deepEqual(reportedThresholds(harness.events), [150_000]);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),

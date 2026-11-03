@@ -3863,8 +3863,9 @@ interface ClaudeLiveQueryContext {
   permissionMode: PermissionMode;
   stopping: boolean;
   readonly subagentsFromEarlierProcesses: ReadonlySet<ActiveClaudeSubagent>;
-  // Mesura: the latest threshold request; `undefined` in it means Claude did not answer.
-  autoCompactThreshold?: Deferred.Deferred<number | null | undefined>;
+  // Mesura: the current threshold request and its answer, absent until Claude answers it.
+  autoCompactThresholdRequest?: object;
+  autoCompactThreshold?: number | null;
 }
 
 interface ActiveClaudeToolCall {
@@ -4811,31 +4812,34 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         });
 
         // Mesura: each request replaces the previous one, so a model switch drops the old
-        // model's threshold at once and a superseded answer reaches no reader.
+        // model's threshold at once and a superseded answer is ignored. Frames never wait
+        // for it: an answer that lands mid-turn republishes the running turn's usage under
+        // the SDK message lock, and a turn that already settled is corrected by the next.
         const refreshAutoCompactThreshold = Effect.fnUntraced(function* (
           live: ClaudeLiveQueryContext,
         ) {
           const request = live.query.autoCompactThreshold;
           if (request === undefined) return;
-          const answer = yield* Deferred.make<number | null | undefined>();
-          live.autoCompactThreshold = answer;
+          const token = {};
+          live.autoCompactThresholdRequest = token;
+          delete live.autoCompactThreshold;
           yield* request.pipe(
             Effect.timeout("15 seconds"),
-            Effect.exit,
-            Effect.flatMap((exit) =>
-              Deferred.succeed(answer, Exit.isSuccess(exit) ? exit.value : undefined),
+            Effect.flatMap((threshold) =>
+              sdkMessageLock.withPermits(1)(
+                Effect.gen(function* () {
+                  if (live.autoCompactThresholdRequest !== token) return;
+                  live.autoCompactThreshold = threshold;
+                  const active = yield* Ref.get(activeTurn);
+                  const usage = active?.streamUsage?.usage;
+                  if (active === null || usage == null || (yield* Ref.get(queryContext)) !== live)
+                    return;
+                  yield* emitContextUsage(active, usage);
+                }),
+              ),
             ),
+            Effect.ignore,
             Effect.forkIn(sessionScope),
-          );
-        });
-
-        // Mesura: Claude answers within milliseconds of the query opening, before the first
-        // usage frame; the bounded wait keeps that first report from using the fallback.
-        const reportedAutoCompactThreshold = Effect.fnUntraced(function* () {
-          const answer = (yield* Ref.get(queryContext))?.autoCompactThreshold;
-          if (answer === undefined) return undefined;
-          return Option.getOrUndefined(
-            yield* Deferred.await(answer).pipe(Effect.timeoutOption("2 seconds")),
           );
         });
 
@@ -4857,7 +4861,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               adapterOptions.settings.autoCompactWindow,
               context.streamUsage?.requestedAt,
             ),
-            yield* reportedAutoCompactThreshold(),
+            (yield* Ref.get(queryContext))?.autoCompactThreshold,
           );
           if (tokenUsage.inputTokens <= 0) return;
           yield* emitProviderEvent({
@@ -8359,7 +8363,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 : undefined;
             if (afterTokenCount !== undefined) {
               const maxTokens = claudeContextWindow(context.input.modelSelection);
-              const reportedThreshold = yield* reportedAutoCompactThreshold();
+              const reportedThreshold = (yield* Ref.get(queryContext))?.autoCompactThreshold;
               yield* emitProviderEvent({
                 type: "provider_turn.updated",
                 driver: CLAUDE_PROVIDER,
