@@ -4772,7 +4772,19 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const runtimeContext = yield* Effect.context<never>();
         const runPromise = Effect.runPromiseWith(runtimeContext);
 
+        // Mesura: what a late compaction-threshold answer corrects; see refreshAutoCompactThreshold.
+        let latestRunningUsageEvent: Extract<
+          ProviderAdapter.ProviderAdapterV2Event,
+          { type: "provider_turn.updated" }
+        > | null = null;
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) => {
+          if (
+            event.type === "provider_turn.updated" &&
+            event.providerTurn.status === "running" &&
+            event.providerTurn.tokenUsage !== undefined
+          ) {
+            latestRunningUsageEvent = event;
+          }
           if (event.type === "provider_thread.updated") {
             const budget = pdfBudgets.get(event.providerThread.nativeThreadRef?.nativeId ?? "");
             if (budget !== undefined) {
@@ -4811,10 +4823,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           });
         });
 
-        // Mesura: each request replaces the previous one, so a model switch drops the old
-        // model's threshold at once and a superseded answer is ignored. Frames never wait
-        // for it: an answer that lands mid-turn republishes the running turn's usage under
-        // the SDK message lock, and a turn that already settled is corrected by the next.
+        // Mesura: a new request supersedes the last, so a model switch drops the old threshold.
+        // Frames never wait: a mid-turn answer republishes the turn's latest running usage under
+        // the SDK message lock. A settled turn waits for the next one, since replaying its
+        // terminal event would outlive the run's event routing.
         const refreshAutoCompactThreshold = Effect.fnUntraced(function* (
           live: ClaudeLiveQueryContext,
         ) {
@@ -4831,10 +4843,24 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   if (live.autoCompactThresholdRequest !== token) return;
                   live.autoCompactThreshold = threshold;
                   const active = yield* Ref.get(activeTurn);
-                  const usage = active?.streamUsage?.usage;
-                  if (active === null || usage == null || (yield* Ref.get(queryContext)) !== live)
+                  const published = latestRunningUsageEvent;
+                  if (
+                    active === null ||
+                    published?.providerTurn.id !== active.providerTurnId ||
+                    published.providerTurn.tokenUsage === undefined ||
+                    (yield* Ref.get(queryContext)) !== live
+                  )
                     return;
-                  yield* emitContextUsage(active, usage);
+                  yield* emitProviderEvent({
+                    ...published,
+                    providerTurn: {
+                      ...published.providerTurn,
+                      tokenUsage: withClaudeReportedAutoCompactThreshold(
+                        published.providerTurn.tokenUsage,
+                        threshold,
+                      ),
+                    },
+                  });
                 }),
               ),
             ),

@@ -5937,6 +5937,54 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("corrects a running turn's post-compaction usage when the answer lands after it", () =>
+    Effect.gen(function* () {
+      const release = yield* Deferred.make<void>();
+      const harness = yield* makeWakeHarnessWithOptions({
+        settings: { ...DEFAULT_CLAUDE_SETTINGS, autoCompactWindow: "150000" },
+        autoCompactThreshold: Deferred.await(release).pipe(Effect.as(717_000)),
+      });
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-compaction-auto-compact-threshold"),
+          text: "Continue.",
+          attachments: [],
+        }),
+      );
+      yield* harness.offerAndWait(
+        usageStreamFrame({
+          type: "message_start",
+          message: { id: "msg_native", usage: { input_tokens: 1_000, output_tokens: 1 } },
+        }),
+      );
+      yield* harness.offerAndWait(
+        claudeSdkFrame({
+          type: "system",
+          subtype: "compact_boundary",
+          compact_metadata: { trigger: "auto", pre_tokens: 1_001, post_tokens: 400 },
+          uuid: "00000000-0000-4000-8000-000000000697",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+      );
+      yield* Deferred.succeed(release, undefined);
+      yield* harness.until(() => reportedThresholds(harness.events).length >= 3);
+      yield* harness.offerAndWait(
+        makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000698", result: "Done." }),
+      );
+      const terminal = yield* Queue.take(harness.terminalReceipts);
+      assert.equal(terminal.status, "completed");
+      assert.deepEqual(reportedThresholds(harness.events), [150_000, 150_000, 717_000]);
+      assert.deepEqual(reportedContextTokens(harness.events).slice(-1), [400]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
   it.effect("processes frames while the threshold request is still pending", () =>
     Effect.gen(function* () {
       const harness = yield* makeWakeHarnessWithOptions({

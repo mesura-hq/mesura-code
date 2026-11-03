@@ -26,7 +26,7 @@ export function claudeReportedAutoCompactThreshold(
  * has not answered yet, so the settings value stays; `null` removes the threshold.
  */
 export function withClaudeReportedAutoCompactThreshold<
-  Usage extends { readonly autoCompactThreshold?: number },
+  Usage extends { readonly autoCompactThreshold?: number | undefined },
 >(usage: Usage, reported: number | null | undefined): Usage {
   if (reported === undefined) return usage;
   const { autoCompactThreshold: _settingsThreshold, ...rest } = usage;
