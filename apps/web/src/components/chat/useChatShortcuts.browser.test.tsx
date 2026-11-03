@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
@@ -54,7 +55,11 @@ function Launcher(props: { keys: string; received: string[] }) {
 
 // The chat's shortcut listener registers when the chat mounts, so a launcher that opens
 // later registers after it. Tests mount the chat first and add the launcher by rerendering.
-function Chat(props: { composerKeys: string[]; launcher?: { keys: string; received: string[] } }) {
+function Chat(props: {
+  composerKeys: string[];
+  launcher?: { keys: string; received: string[] };
+  threadFind?: { stops: string[]; closes: string[] };
+}) {
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const focusAtEnd = () => {
     const editor = editorRef.current;
@@ -63,10 +68,10 @@ function Chat(props: { composerKeys: string[]; launcher?: { keys: string; receiv
   };
   useChatShortcuts({
     enabled: true,
-    keybindings: [],
+    keybindings: props.threadFind ? DEFAULT_RESOLVED_KEYBINDINGS : [],
     scriptKeybindings: [],
     getShortcutContext: () => shortcutContext,
-    threadFindActive: false,
+    threadFindActive: props.threadFind !== undefined,
     // The insertion contract moves native focus into the composer as the real handle does.
     composerRef: {
       current: {
@@ -81,8 +86,8 @@ function Chat(props: { composerKeys: string[]; launcher?: { keys: string; receiv
       } as Partial<ChatComposerHandle> as ChatComposerHandle,
     },
     branchToolbarRef: { current: null },
-    closeThreadFind: () => {},
-    commands: {},
+    closeThreadFind: () => props.threadFind?.closes.push("find"),
+    commands: { "thread.stop": () => void props.threadFind?.stops.push("stop") },
     fallback: () => undefined,
   });
   return (
@@ -120,4 +125,15 @@ it("still types other letters into the composer while the launcher is open", asy
   expect(received).toEqual([]);
   await expect.element(screen.getByRole("textbox", { name: "Composer" })).toHaveValue("a");
   await expect.element(screen.getByRole("textbox", { name: "Composer" })).toHaveFocus();
+});
+
+it("stops the turn on Alt+Escape while thread find is open, and leaves plain Escape to find", async () => {
+  const threadFind = { stops: [] as string[], closes: [] as string[] };
+  await using _screen = await render(<Chat composerKeys={[]} threadFind={threadFind} />, options);
+
+  await userEvent.keyboard("{Alt>}{Escape}{/Alt}");
+  expect(threadFind).toEqual({ stops: ["stop"], closes: [] });
+
+  await userEvent.keyboard("{Escape}");
+  expect(threadFind).toEqual({ stops: ["stop"], closes: ["find"] });
 });

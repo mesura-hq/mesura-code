@@ -1144,6 +1144,12 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("q", { altKey: true }), true), null);
   });
 
+  it("stops the running turn on Alt+Escape and leaves plain Escape and the terminal alone", () => {
+    assert.strictEqual(resolve(press("Escape", { altKey: true })), "thread.stop");
+    assert.strictEqual(resolve(press("Escape")), null);
+    assert.strictEqual(resolve(press("Escape", { altKey: true }), true), null);
+  });
+
   it("leaves AltGr+Q free to type the character it produces", () => {
     // Chromium on Linux reports AltGr as ctrl+alt; a Latin American layout types "@" there.
     // `code` must be set: resolveEventKeys falls back to the physical letter for a non-Latin
