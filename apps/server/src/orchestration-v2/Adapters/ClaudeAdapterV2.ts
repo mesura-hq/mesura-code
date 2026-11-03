@@ -3863,8 +3863,8 @@ interface ClaudeLiveQueryContext {
   permissionMode: PermissionMode;
   stopping: boolean;
   readonly subagentsFromEarlierProcesses: ReadonlySet<ActiveClaudeSubagent>;
-  // Mesura: `undefined` until Claude answers; see claudeReportedAutoCompactThreshold.ts.
-  autoCompactThreshold?: number | null;
+  // Mesura: the latest threshold request; `undefined` in it means Claude did not answer.
+  autoCompactThreshold?: Deferred.Deferred<number | null | undefined>;
 }
 
 interface ActiveClaudeToolCall {
@@ -4810,21 +4810,34 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           });
         });
 
-        // Mesura: forked, so a slow answer never holds up the turn.
-        const refreshAutoCompactThreshold = (live: ClaudeLiveQueryContext) =>
-          live.query.autoCompactThreshold === undefined
-            ? Effect.void
-            : live.query.autoCompactThreshold.pipe(
-                Effect.tap((threshold) =>
-                  Effect.sync(() => {
-                    live.autoCompactThreshold = threshold;
-                  }),
-                ),
-                Effect.timeout("15 seconds"),
-                Effect.ignore,
-                Effect.forkIn(sessionScope),
-                Effect.asVoid,
-              );
+        // Mesura: each request replaces the previous one, so a model switch drops the old
+        // model's threshold at once and a superseded answer reaches no reader.
+        const refreshAutoCompactThreshold = Effect.fnUntraced(function* (
+          live: ClaudeLiveQueryContext,
+        ) {
+          const request = live.query.autoCompactThreshold;
+          if (request === undefined) return;
+          const answer = yield* Deferred.make<number | null | undefined>();
+          live.autoCompactThreshold = answer;
+          yield* request.pipe(
+            Effect.timeout("15 seconds"),
+            Effect.exit,
+            Effect.flatMap((exit) =>
+              Deferred.succeed(answer, Exit.isSuccess(exit) ? exit.value : undefined),
+            ),
+            Effect.forkIn(sessionScope),
+          );
+        });
+
+        // Mesura: Claude answers within milliseconds of the query opening, before the first
+        // usage frame; the bounded wait keeps that first report from using the fallback.
+        const reportedAutoCompactThreshold = Effect.fnUntraced(function* () {
+          const answer = (yield* Ref.get(queryContext))?.autoCompactThreshold;
+          if (answer === undefined) return undefined;
+          return Option.getOrUndefined(
+            yield* Deferred.await(answer).pipe(Effect.timeoutOption("2 seconds")),
+          );
+        });
 
         // Usage without input is a placeholder, not a context measurement.
         const emitContextUsage = Effect.fnUntraced(function* (
@@ -4844,7 +4857,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               adapterOptions.settings.autoCompactWindow,
               context.streamUsage?.requestedAt,
             ),
-            (yield* Ref.get(queryContext))?.autoCompactThreshold,
+            yield* reportedAutoCompactThreshold(),
           );
           if (tokenUsage.inputTokens <= 0) return;
           yield* emitProviderEvent({
@@ -8346,7 +8359,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 : undefined;
             if (afterTokenCount !== undefined) {
               const maxTokens = claudeContextWindow(context.input.modelSelection);
-              const reportedThreshold = (yield* Ref.get(queryContext))?.autoCompactThreshold;
+              const reportedThreshold = yield* reportedAutoCompactThreshold();
               yield* emitProviderEvent({
                 type: "provider_turn.updated",
                 driver: CLAUDE_PROVIDER,

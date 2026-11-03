@@ -5892,6 +5892,124 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
   );
 
+  it.effect("waits for a threshold answer that lands after the first usage frame", () =>
+    Effect.gen(function* () {
+      const release = yield* Deferred.make<void>();
+      const harness = yield* makeWakeHarnessWithOptions({
+        settings: { ...DEFAULT_CLAUDE_SETTINGS, autoCompactWindow: "150000" },
+        autoCompactThreshold: Deferred.await(release).pipe(Effect.as(717_000)),
+      });
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-late-auto-compact-threshold"),
+          text: "Continue.",
+          attachments: [],
+        }),
+      );
+      yield* Queue.offer(
+        harness.sdkMessages,
+        usageStreamFrame({
+          type: "message_start",
+          message: { id: "msg_native", usage: { input_tokens: 10, output_tokens: 1 } },
+        }),
+      );
+      yield* Queue.offer(
+        harness.sdkMessages,
+        makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000695", result: "Done." }),
+      );
+      // Lets the usage frame reach the adapter, still inside the bounded wait.
+      yield* TestClock.adjust("1 second");
+      yield* Deferred.succeed(release, undefined);
+      const terminal = yield* Queue.take(harness.terminalReceipts);
+      assert.equal(terminal.status, "completed");
+      assert.deepEqual(
+        harness.events.flatMap((event) =>
+          event.type === "provider_turn.updated" && event.providerTurn.tokenUsage
+            ? [event.providerTurn.tokenUsage.autoCompactThreshold]
+            : [],
+        ),
+        [717_000],
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
+  it.effect("drops the previous model's threshold when a live model switch cannot ask", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let requests = 0;
+        const harness = yield* makeWakeHarnessWithOptions({
+          settings: { ...DEFAULT_CLAUDE_SETTINGS, autoCompactWindow: "150000" },
+          autoCompactThreshold: Effect.suspend(() =>
+            ++requests === 1
+              ? Effect.succeed(717_000)
+              : Effect.fail(
+                  new ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError({
+                    method: "getContextUsage",
+                    cause: new Error("unavailable"),
+                  }),
+                ),
+          ),
+        });
+        const now = yield* DateTime.now;
+        const opus = {
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          model: "claude-opus-5-5",
+        } satisfies ModelSelection;
+        const turn = (ordinal: number, modelSelection: ModelSelection) =>
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make(`attempt-threshold-switch:${ordinal}`),
+            text: `Request ${ordinal}`,
+            attachments: [],
+            providerTurnOrdinal: ordinal,
+            modelSelection,
+          });
+        const usageTurn = (messageId: string) =>
+          Effect.gen(function* () {
+            yield* harness.offerAndWait(
+              usageStreamFrame({
+                type: "message_start",
+                message: { id: messageId, usage: { input_tokens: 10, output_tokens: 1 } },
+              }),
+            );
+            yield* harness.offerAndWait(turnOneResult);
+            yield* Queue.take(harness.terminalReceipts);
+          });
+        yield* harness.runtime.startTurn(turn(1, opus));
+        yield* harness.offerAndWait(wakeTaskStarted);
+        yield* usageTurn("msg_opus");
+        yield* harness.runtime.startTurn(turn(2, { ...opus, model: "claude-sonnet-4-6" }));
+        yield* usageTurn("msg_sonnet");
+
+        assert.deepEqual(harness.liveSelectionChanges.slice(0, 1), [
+          { model: "claude-sonnet-4-6" },
+        ]);
+        assert.equal(requests, 2);
+        assert.deepEqual(
+          harness.events.flatMap((event) =>
+            event.type === "provider_turn.updated" && event.providerTurn.tokenUsage
+              ? [event.providerTurn.tokenUsage.autoCompactThreshold]
+              : [],
+          ),
+          [717_000, 150_000],
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
   it.effect("merges cumulative stream usage into the message_start counts", () =>
     Effect.gen(function* () {
       const harness = yield* makeWakeHarnessWithOptions({
