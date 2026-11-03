@@ -42,7 +42,7 @@ When the user asks you to compact yourself and then continue with more work, use
   // Mesura: resolve agent snoozes in the user's time zone on the server.
   `### Snooze
 
-When the user asks to snooze a thread, call \`t3_thread_organize\` with action \`snooze\`. Use \`snoozeForMinutes\` for relative times and \`snoozeUntilLocal\` (YYYY-MM-DDTHH:MM) for clock times. Pass \`timeZone\` only when the user names a zone. Never convert clock times to UTC yourself. Report the wake time from \`snoozedUntilLocal\` and its \`timeZone\` back to the user.`,
+When the user asks to snooze a thread, call \`t3_thread_organize\` with action \`snooze\`. Use \`snoozeForMinutes\` for relative times. For today, tomorrow or a weekday at a clock time, pass \`snoozeDay\` with \`snoozeAt\` (HH:MM) and let the server pick the date. Use \`snoozeUntilLocal\` (YYYY-MM-DDTHH:MM) only for a clock time on a date the user names. Pass \`timeZone\` only when the user names a zone. Never convert clock times to UTC yourself. Report the wake time from \`snoozedUntilLocal\` and its \`timeZone\` back to the user.`,
   `### Visuals and preview
 
 - Answer data with a trend or comparison with a chart, and show any visual the user asks for here: pass its HTML to \`html_preview\`, then \`html_render\`. If the visual is a file, pass that file's HTML. A screenshot on disk or a text description does not show it. Never start a server for it. Tools a web page exposes give data only. Never use them to show results. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.

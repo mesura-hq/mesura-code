@@ -22,6 +22,7 @@ import {
   ThreadAgentSignalNote,
   ProjectId,
   MAX_SNOOZE_PRESET_MINUTES, // Mesura: one duration bound for UI and agents.
+  SnoozePresetDay, // Mesura: the snooze day words agents pass.
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
@@ -40,7 +41,7 @@ const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
     // Mesura: the server resolves clock times in the user zone.
     "Pin, snooze, settle, archive, or mark a thread unread. Omit `threadId` for this thread. `snooze` needs exactly one of `snoozedUntil`, `snoozeForMinutes` (integer 1–" +
     MAX_SNOOZE_PRESET_MINUTES +
-    ", relative minutes), or `snoozeUntilLocal` (YYYY-MM-DDTHH:MM, local clock time). Settling this thread applies at turn end. A failed turn or queued message leaves it active. `timeZone` is an IANA name, only with `snoozeUntilLocal` when the user names a zone; otherwise the server uses the snooze setting, latest device zone, or server zone.",
+    ", relative minutes), or `snoozeUntilLocal` (YYYY-MM-DDTHH:MM, local clock time). For today, tomorrow or a weekday, pass `snoozeDay` with `snoozeAt` (HH:MM) instead of a date. Settling this thread applies at turn end. A failed turn or queued message leaves it active. `timeZone` is an IANA name, only with `snoozeUntilLocal` or `snoozeDay` when the user names a zone; otherwise the server uses the snooze setting, latest device zone, or server zone.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),
@@ -59,6 +60,8 @@ const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
     // Mesura: the service validates bounds and cross-field rules with readable failures.
     snoozeForMinutes: Schema.optional(Schema.Number),
     snoozeUntilLocal: Schema.optional(Schema.String),
+    snoozeDay: Schema.optional(SnoozePresetDay),
+    snoozeAt: Schema.optional(Schema.String),
     timeZone: Schema.optional(Schema.String),
   }),
   success: Schema.Union([

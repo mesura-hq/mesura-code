@@ -182,3 +182,21 @@ it("snooze-zone AC6 spec: the injected snooze rule resolves user times through t
   expect(text).toContain("wake time from `snoozedUntilLocal`");
   expect(T3_CODE_ORCHESTRATION_INSTRUCTIONS).toContain(text);
 });
+
+it("snooze-day AC7 spec: the snooze rule sends relative days to snoozeDay and dates to snoozeUntilLocal", () => {
+  const section = T3_CODE_ORCHESTRATION_SECTIONS.find((text) => /^### Snooze\b/m.test(text)) ?? "";
+  const sentences = section.split(/\.(?:\s|$)/);
+  const daySentence = sentences.find((sentence) => sentence.includes("`snoozeDay`"));
+  expect(daySentence, "the Snooze rule needs a snoozeDay sentence").toBeDefined();
+  expect(daySentence).toContain("`snoozeAt`");
+  for (const word of [/today/i, /tomorrow/i, /weekday/i]) expect(daySentence).toMatch(word);
+  expect(
+    sentences.some((sentence) =>
+      /`snoozeUntilLocal`[^\n]*only[^\n]*date|only[^\n]*date[^\n]*`snoozeUntilLocal`/i.test(
+        sentence,
+      ),
+    ),
+    "the Snooze rule keeps snoozeUntilLocal for an explicit date only",
+  ).toBe(true);
+  expect(T3_CODE_ORCHESTRATION_INSTRUCTIONS).toContain(section);
+});

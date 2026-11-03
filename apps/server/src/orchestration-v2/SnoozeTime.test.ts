@@ -175,3 +175,230 @@ it.effect("snooze-zone rework P3-2: duration validation uses the shared preset b
     );
   }),
 );
+
+// 2026-03-08T02:00Z is Saturday 2026-03-07 21:00 in New York and already Sunday in UTC.
+const newYorkEvening = {
+  ...context,
+  now: DateTime.toEpochMillis(DateTime.makeUnsafe("2026-03-08T02:00:00.000Z")),
+  deviceTimeZone: "America/New_York",
+};
+
+it.effect(
+  "snooze-day AC1 resolver spec: tomorrow 09:00 is the New York tomorrow when UTC is a day ahead",
+  () =>
+    Effect.gen(function* () {
+      const result = yield* resolveSnoozeTime(
+        { snoozeDay: "tomorrow", snoozeAt: "09:00" },
+        newYorkEvening,
+      );
+      expect(result).toEqual({
+        snoozedUntil: "2026-03-08T13:00:00.000Z",
+        snoozedUntilLocal: "2026-03-08T09:00",
+        timeZone: "America/New_York",
+        timeZoneSource: "device",
+      });
+    }),
+);
+
+it.effect("snooze-day AC2 resolver spec: today at a time still ahead wakes later today", () =>
+  Effect.gen(function* () {
+    const result = yield* resolveSnoozeTime(
+      { snoozeDay: "today", snoozeAt: "22:30" },
+      newYorkEvening,
+    );
+    expect(result).toMatchObject({
+      snoozedUntil: "2026-03-08T03:30:00.000Z",
+      snoozedUntilLocal: "2026-03-07T22:30",
+      timeZone: "America/New_York",
+    });
+  }),
+);
+
+it.effect.each(["09:00", "21:00"])(
+  "snooze-day AC2 resolver spec: today at %s already passed names the zone's local time",
+  (snoozeAt) =>
+    Effect.gen(function* () {
+      const error = yield* resolveSnoozeTime({ snoozeDay: "today", snoozeAt }, newYorkEvening).pipe(
+        Effect.flip,
+      );
+      expect(error).toBeInstanceOf(SnoozeTimeError);
+      expect(error.reason).toBe("dayPassed");
+      expect(error.message).toContain(snoozeAt);
+      expect(error.message).toContain("America/New_York");
+      expect(error.message).toContain("21:00");
+      expect(error.message).toMatch(/tomorrow/i);
+    }),
+);
+
+it.effect.each([
+  // New York is Saturday while UTC is already Sunday.
+  {
+    zone: "America/New_York",
+    now: "2026-03-08T02:00:00.000Z",
+    day: "sunday",
+    until: "2026-03-08T13:00:00.000Z",
+    local: "2026-03-08T09:00",
+  },
+  {
+    zone: "America/New_York",
+    now: "2026-03-08T02:00:00.000Z",
+    day: "saturday",
+    until: "2026-03-14T13:00:00.000Z",
+    local: "2026-03-14T09:00",
+  },
+  {
+    zone: "America/New_York",
+    now: "2026-03-08T02:00:00.000Z",
+    day: "monday",
+    until: "2026-03-09T13:00:00.000Z",
+    local: "2026-03-09T09:00",
+  },
+  // Tokyo is already Sunday while UTC is still Saturday.
+  {
+    zone: "Asia/Tokyo",
+    now: "2026-03-07T18:15:00.000Z",
+    day: "sunday",
+    until: "2026-03-15T00:00:00.000Z",
+    local: "2026-03-15T09:00",
+  },
+  {
+    zone: "Asia/Tokyo",
+    now: "2026-03-07T18:15:00.000Z",
+    day: "saturday",
+    until: "2026-03-14T00:00:00.000Z",
+    local: "2026-03-14T09:00",
+  },
+] as const)(
+  "snooze-day AC3 resolver spec: $day from $now in $zone uses the zone's weekday",
+  ({ zone, now, day, until, local }) =>
+    Effect.gen(function* () {
+      const result = yield* resolveSnoozeTime(
+        { snoozeDay: day, snoozeAt: "09:00" },
+        {
+          ...context,
+          now: DateTime.toEpochMillis(DateTime.makeUnsafe(now)),
+          settingTimeZone: zone,
+        },
+      );
+      expect(result).toMatchObject({
+        snoozedUntil: until,
+        snoozedUntilLocal: local,
+        timeZone: zone,
+        timeZoneSource: "setting",
+      });
+    }),
+);
+
+it.effect("snooze-day AC4 resolver spec: timeZone is accepted with snoozeDay", () =>
+  Effect.gen(function* () {
+    const result = yield* resolveSnoozeTime(
+      { snoozeDay: "tomorrow", snoozeAt: "09:00", timeZone: "Asia/Tokyo" },
+      newYorkEvening,
+    );
+    // Tokyo is already Sunday 2026-03-08 11:00, so tomorrow is Monday 2026-03-09.
+    expect(result).toEqual({
+      snoozedUntil: "2026-03-09T00:00:00.000Z",
+      snoozedUntilLocal: "2026-03-09T09:00",
+      timeZone: "Asia/Tokyo",
+      timeZoneSource: "argument",
+    });
+  }),
+);
+
+const dayRefusals = [
+  [
+    "day without clock time",
+    { snoozeDay: "tomorrow" },
+    /snoozeDay[^.]*snoozeAt|snoozeAt[^.]*snoozeDay/i,
+  ],
+  [
+    "clock time without day",
+    { snoozeAt: "09:00" },
+    /snoozeDay[^.]*snoozeAt|snoozeAt[^.]*snoozeDay/i,
+  ],
+  [
+    "clock time without day plus zone",
+    { snoozeAt: "09:00", timeZone: "UTC" },
+    /snoozeDay[^.]*snoozeAt|snoozeAt[^.]*snoozeDay/i,
+  ],
+  ["single-digit hour", { snoozeDay: "tomorrow", snoozeAt: "9:00" }, /HH:MM/],
+  ["hour 24", { snoozeDay: "tomorrow", snoozeAt: "24:00" }, /HH:MM/],
+  ["minute 60", { snoozeDay: "tomorrow", snoozeAt: "09:60" }, /HH:MM/],
+  ["clock time with seconds", { snoozeDay: "tomorrow", snoozeAt: "09:00:00" }, /HH:MM/],
+  ["clock time without colon", { snoozeDay: "tomorrow", snoozeAt: "0900" }, /HH:MM/],
+  [
+    "day plus minutes",
+    { snoozeDay: "tomorrow", snoozeAt: "09:00", snoozeForMinutes: 60 },
+    /exactly one[^.]*snoozeDay/i,
+  ],
+  [
+    "day plus absolute",
+    { snoozeDay: "tomorrow", snoozeAt: "09:00", snoozedUntil: "2026-03-09T13:00:00Z" },
+    /exactly one[^.]*snoozeDay/i,
+  ],
+  [
+    "day plus local",
+    { snoozeDay: "tomorrow", snoozeAt: "09:00", snoozeUntilLocal: "2026-03-09T09:00" },
+    /exactly one[^.]*snoozeDay/i,
+  ],
+  [
+    "day with unknown zone",
+    { snoozeDay: "tomorrow", snoozeAt: "09:00", timeZone: "Mars/Olympus" },
+    /zone|IANA/i,
+  ],
+] as const;
+
+it.effect.each(dayRefusals.map(([title, input, message]) => ({ title, input, message })))(
+  "snooze-day AC4 resolver spec: refuses $title",
+  ({ input, message }) =>
+    Effect.gen(function* () {
+      const error = yield* resolveSnoozeTime(input, newYorkEvening).pipe(Effect.flip);
+      expect(error).toBeInstanceOf(SnoozeTimeError);
+      expect(error.message).toMatch(message);
+    }),
+);
+
+it.effect.each([
+  // Saturday 2027-03-13 15:00 EST; 2027-03-14 02:30 does not exist and moves forward by the gap.
+  {
+    title: "spring-forward gap",
+    now: "2027-03-13T20:00:00.000Z",
+    snoozeAt: "02:30",
+    asked: "2027-03-14T02:30",
+    until: "2027-03-14T07:30:00.000Z",
+    local: "2027-03-14T03:30",
+  },
+  // Saturday 2027-11-06 16:00 EDT; 2027-11-07 01:30 occurs twice and takes the earlier one.
+  {
+    title: "fall-back overlap",
+    now: "2027-11-06T20:00:00.000Z",
+    snoozeAt: "01:30",
+    asked: "2027-11-07T01:30",
+    until: "2027-11-07T05:30:00.000Z",
+    local: "2027-11-07T01:30",
+  },
+  // Saturday 2027-03-13 23:30 EST; a 24-hour step would land on Monday 00:30 EDT.
+  {
+    title: "calendar step over a 23-hour day",
+    now: "2027-03-14T04:30:00.000Z",
+    snoozeAt: "23:00",
+    asked: "2027-03-14T23:00",
+    until: "2027-03-15T03:00:00.000Z",
+    local: "2027-03-14T23:00",
+  },
+] as const)(
+  "snooze-day AC5 resolver spec: tomorrow across the $title in New York",
+  ({ now, snoozeAt, asked, until, local }) =>
+    Effect.gen(function* () {
+      const result = yield* resolveSnoozeTime(
+        { snoozeDay: "tomorrow", snoozeAt, timeZone: "America/New_York" },
+        { ...context, now: DateTime.toEpochMillis(DateTime.makeUnsafe(now)) },
+      );
+      expect(result).toMatchObject({ snoozedUntil: until, snoozedUntilLocal: local });
+      const viaLocal = yield* resolveSnoozeTime(
+        { snoozeUntilLocal: asked, timeZone: "America/New_York" },
+        { ...context, now: DateTime.toEpochMillis(DateTime.makeUnsafe(now)) },
+      );
+      expect(result.snoozedUntil).toBe(viaLocal.snoozedUntil);
+    }),
+);
