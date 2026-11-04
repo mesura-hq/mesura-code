@@ -112,7 +112,7 @@ effectIt.layer(NodeServices.layer)("readClaudeResetCredits", (it) => {
         Effect.provideService(HostProcess.Platform, "linux"),
         Effect.provideService(HttpClient.HttpClient, client),
       );
-      expect(credits).toEqual({ availableCount: 1, nextCreditId: "grant_a" });
+      expect(credits).toEqual({ availableCount: 1, nextCreditId: "grant_a", expiries: [] });
     }),
   );
 

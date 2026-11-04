@@ -277,6 +277,8 @@ interface AccountLimitsCandidate {
   readonly accentColor?: string | undefined;
   readonly snapshot: AccountLimitsSnapshot | null;
   readonly resetCredits?: ServerProviderResetCredits | undefined;
+  /** Age of the provider probe that carried `resetCredits`, which the dock's window reading does not date. */
+  readonly resetCreditsAgeMs?: number | null;
   readonly state: AccountLimitsRowState;
   /** The account the provider named, when it named one. */
   readonly accountName: string | null;
@@ -319,6 +321,26 @@ function freshestWindows(
     }
   }
   return [...chosen.values()];
+}
+
+/**
+ * Credits come from the provider probe, not the dock's window reading, so they are dated by the
+ * probe: a fresh window says nothing about the count beside it. An explicit zero is a reading too.
+ * `checkedAt` also advances on window-only events, which carry the earlier credits forward.
+ */
+function freshestResetCredits(
+  candidates: ReadonlyArray<AccountLimitsCandidate>,
+): AccountLimitsCandidate | undefined {
+  let freshest: AccountLimitsCandidate | undefined;
+  for (const candidate of candidates) {
+    if (candidate.resetCredits === undefined) continue;
+    const age = candidate.resetCreditsAgeMs ?? null;
+    const incumbentAge = freshest?.resetCreditsAgeMs ?? null;
+    if (freshest === undefined || (age !== null && (incumbentAge === null || age < incumbentAge))) {
+      freshest = candidate;
+    }
+  }
+  return freshest;
 }
 
 function smallestAge(ages: ReadonlyArray<number | null>): number | null {
@@ -396,10 +418,11 @@ export function projectAccountLimits(
         ? snapshot.subscription
         : null;
       const presentation = subscriptionPresentation(snapshot.subscription);
-      const resetCredits =
+      const readerLimits =
         reader === undefined
           ? undefined
-          : providersByInstance.get(String(reader.providerInstanceId))?.usageLimits?.resetCredits;
+          : providersByInstance.get(String(reader.providerInstanceId))?.usageLimits;
+      const resetCredits = readerLimits?.resetCredits;
       const partial = {
         groupKey: foldable?.key ?? `#env:${environment.environmentId}:${snapshot.subscription.key}`,
         environmentId: environment.environmentId,
@@ -410,7 +433,12 @@ export function projectAccountLimits(
         displayName: presentation.title,
         ...(entry?.accentColor ? { accentColor: entry.accentColor } : {}),
         snapshot,
-        ...(resetCredits ? { resetCredits } : {}),
+        ...(resetCredits
+          ? {
+              resetCredits,
+              resetCreditsAgeMs: ageMillis(readerLimits?.checkedAt, currentEnvironmentTime),
+            }
+          : {}),
         state: rowState(snapshot, currentEnvironmentTime),
         accountName: presentation.accountName,
       } satisfies Omit<AccountLimitsCandidate, "windows" | "readingAgeMs">;
@@ -458,9 +486,7 @@ export function projectAccountLimits(
   const rows = [...groups].map(([key, candidates]) => {
     const lead = leadCandidate(candidates);
     const windows = freshestWindows(candidates);
-    const creditsSource = lead.resetCredits
-      ? lead
-      : candidates.find((candidate) => candidate.resetCredits !== undefined);
+    const creditsSource = freshestResetCredits(candidates);
     return {
       key,
       driver: lead.driver,

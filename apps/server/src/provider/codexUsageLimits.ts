@@ -113,7 +113,8 @@ function codexResetCreditsToContract(
   return {
     availableCount: Math.max(0, summary.availableCount),
     ...(nextExpiresAt ? { nextExpiresAt } : {}),
-    ...(expiryList.length > 0 ? { expiries: expiryList } : {}),
+    // Empty, not absent, when no credit is dated: absent means a server that predates the list.
+    ...(summary.availableCount > 0 ? { expiries: expiryList } : {}),
   };
 }
 

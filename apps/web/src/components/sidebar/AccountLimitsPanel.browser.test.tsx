@@ -77,6 +77,20 @@ describe("AccountLimitsPanel reset credits", () => {
     expect(list.getByRole("listitem").elements()).toHaveLength(1);
   });
 
+  it("counts resets that carry no expiry instead of opening an empty list", async () => {
+    await using _screen = await render(
+      <AccountLimitsPanelContent
+        open
+        shortcutLabel={null}
+        view={view({ credits: { availableCount: 2, expiries: [] }, environmentNowMs: NOW })}
+      />,
+    );
+
+    await userEvent.hover(page.getByRole("button", { name: "2 resets", exact: true }));
+    const list = page.getByRole("dialog", { name: "2 resets saved" });
+    await expect.element(list.getByText("2 without an expiry")).toBeVisible();
+  });
+
   it("says when the agent reports banked resets but none are left", async () => {
     await using _screen = await render(
       <AccountLimitsPanelContent

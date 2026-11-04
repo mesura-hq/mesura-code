@@ -27,7 +27,20 @@ describe("codexRateLimitsToLimits reset credits", () => {
     });
   });
 
-  it("omits the list when no credit carries an expiry", () => {
+  it("sends an empty list when available credits carry no expiry", () => {
+    const limits = codexRateLimitsToLimits({
+      snapshot: { limitId: "codex" },
+      checkedAt: CHECKED_AT,
+      resetCredits: {
+        availableCount: 2,
+        credits: [{ status: "available", expiresAt: null }, { status: "available" }],
+      },
+    });
+
+    expect(limits.resetCredits).toEqual({ availableCount: 2, expiries: [] });
+  });
+
+  it("omits the list when no credit is available", () => {
     const limits = codexRateLimitsToLimits({
       snapshot: { limitId: "codex" },
       checkedAt: CHECKED_AT,

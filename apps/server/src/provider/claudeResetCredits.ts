@@ -128,7 +128,8 @@ export function claudeResetCreditsToContract(
     ...(Option.isSome(nextExpiresAt)
       ? { nextExpiresAt: DateTime.formatIso(nextExpiresAt.value) }
       : {}),
-    ...(expiries.length > 0 ? { expiries } : {}),
+    // Empty, not absent, when no credit is dated: absent means a server that predates the list.
+    ...(next ? { expiries } : {}),
     ...(next ? { nextCreditId: next.id } : {}),
   };
 }

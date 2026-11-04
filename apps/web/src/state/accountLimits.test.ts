@@ -29,6 +29,7 @@ function provider(input: {
   readonly installed?: boolean;
   readonly status?: ServerProviderState;
   readonly resetCredits?: ServerProviderResetCredits;
+  readonly resetCreditsCheckedAt?: string;
 }): ServerProvider {
   return {
     instanceId: ProviderInstanceId.make(input.instanceId),
@@ -47,7 +48,7 @@ function provider(input: {
     ...(input.resetCredits
       ? {
           usageLimits: {
-            checkedAt: "2026-08-22T12:00:00.000Z",
+            checkedAt: input.resetCreditsCheckedAt ?? "2026-08-22T12:00:00.000Z",
             windows: [],
             resetCredits: input.resetCredits,
           },
@@ -1163,5 +1164,56 @@ describe("projectAccountLimits, one row per subscription", () => {
     expect(
       view.rows.find((row) => row.key === "anthropic:me@example.com")?.resetCredits,
     ).toBeNull();
+  });
+
+  it("dates banked resets by the probe that read them, not by the freshest window", () => {
+    const reading = (input: {
+      readonly id: string;
+      readonly observedAt: string;
+      readonly credits: ServerProviderResetCredits;
+      readonly checkedAt: string;
+    }) =>
+      environment({
+        id: input.id,
+        label: input.id,
+        providers: [
+          provider({
+            instanceId: "codex",
+            driver: "codex",
+            resetCredits: input.credits,
+            resetCreditsCheckedAt: input.checkedAt,
+          }),
+        ],
+        summary: summary([
+          snapshot({
+            instanceId: "codex",
+            driver: "codex",
+            usedPercent: 40,
+            observedAt: input.observedAt,
+            accountKey: "openai:me@example.com",
+          }),
+        ]),
+      });
+    const view = projectAccountLimits(
+      [
+        // The freshest window, beside a count read an hour ago.
+        reading({
+          id: "laptop",
+          observedAt: "2026-08-22T12:09:59.000Z",
+          credits: { availableCount: 1 },
+          checkedAt: "2026-08-22T11:10:00.000Z",
+        }),
+        // An older window, beside a count read just now: the reset was spent.
+        reading({
+          id: "server",
+          observedAt: "2026-08-22T12:09:00.000Z",
+          credits: { availableCount: 0 },
+          checkedAt: "2026-08-22T12:09:50.000Z",
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows[0]?.resetCredits?.credits).toEqual({ availableCount: 0 });
   });
 });
