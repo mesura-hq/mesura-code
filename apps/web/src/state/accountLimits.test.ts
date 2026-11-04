@@ -7,6 +7,7 @@ import {
   type AccountLimitsSummary,
   type AccountLimitsWindow,
   type ServerProvider,
+  type ServerProviderResetCredits,
   type ServerProviderState,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -27,6 +28,8 @@ function provider(input: {
   readonly accentColor?: string;
   readonly installed?: boolean;
   readonly status?: ServerProviderState;
+  readonly resetCredits?: ServerProviderResetCredits;
+  readonly resetCreditsCheckedAt?: string;
 }): ServerProvider {
   return {
     instanceId: ProviderInstanceId.make(input.instanceId),
@@ -42,6 +45,15 @@ function provider(input: {
     models: [],
     slashCommands: [],
     skills: [],
+    ...(input.resetCredits
+      ? {
+          usageLimits: {
+            checkedAt: input.resetCreditsCheckedAt ?? "2026-08-22T12:00:00.000Z",
+            windows: [],
+            resetCredits: input.resetCredits,
+          },
+        }
+      : {}),
   };
 }
 
@@ -1090,5 +1102,164 @@ describe("projectAccountLimits, one row per subscription", () => {
       "home@example.com",
       "work@example.com",
     ]);
+  });
+
+  it("takes banked resets from the agent that read the subscription, on any environment", () => {
+    const credits: ServerProviderResetCredits = {
+      availableCount: 2,
+      nextExpiresAt: "2026-08-25T00:00:00.000Z",
+      expiries: ["2026-08-25T00:00:00.000Z", "2026-09-20T00:00:00.000Z"],
+    };
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "laptop",
+          label: "Laptop",
+          providers: [provider({ instanceId: "codex", driver: "codex", resetCredits: credits })],
+          summary: summary([
+            snapshot({
+              instanceId: "codex",
+              driver: "codex",
+              usedPercent: 40,
+              observedAt: "2026-08-22T12:00:00.000Z",
+              accountKey: "openai:me@example.com",
+            }),
+          ]),
+        }),
+        // Fresher, so it leads the row, but its agent reports no banked resets.
+        environment({
+          id: "server",
+          label: "Server",
+          providers: [provider({ instanceId: "codex", driver: "codex" })],
+          summary: summary([
+            snapshot({
+              instanceId: "codex",
+              driver: "codex",
+              usedPercent: 41,
+              observedAt: "2026-08-22T12:09:30.000Z",
+              accountKey: "openai:me@example.com",
+            }),
+          ]),
+        }),
+        environment({
+          id: "other",
+          label: "Other",
+          providers: [provider({ instanceId: "claude", driver: "claudeAgent" })],
+          summary: summary([
+            snapshot({
+              instanceId: "claude",
+              driver: "claudeAgent",
+              usedPercent: 10,
+              accountKey: "anthropic:me@example.com",
+            }),
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    const chatGpt = view.rows.find((row) => row.key === "openai:me@example.com");
+    expect(percentOf(chatGpt)).toBe(41);
+    expect(chatGpt?.resetCredits).toEqual({ credits, environmentNowMs: NOW });
+    expect(
+      view.rows.find((row) => row.key === "anthropic:me@example.com")?.resetCredits,
+    ).toBeNull();
+  });
+
+  it("dates banked resets by the probe that read them, not by the freshest window", () => {
+    const reading = (input: {
+      readonly id: string;
+      readonly observedAt: string;
+      readonly credits: ServerProviderResetCredits;
+      readonly checkedAt: string;
+    }) =>
+      environment({
+        id: input.id,
+        label: input.id,
+        providers: [
+          provider({
+            instanceId: "codex",
+            driver: "codex",
+            resetCredits: input.credits,
+            resetCreditsCheckedAt: input.checkedAt,
+          }),
+        ],
+        summary: summary([
+          snapshot({
+            instanceId: "codex",
+            driver: "codex",
+            usedPercent: 40,
+            observedAt: input.observedAt,
+            accountKey: "openai:me@example.com",
+          }),
+        ]),
+      });
+    const view = projectAccountLimits(
+      [
+        // The freshest window, beside a count read an hour ago.
+        reading({
+          id: "laptop",
+          observedAt: "2026-08-22T12:09:59.000Z",
+          credits: { availableCount: 1 },
+          checkedAt: "2026-08-22T11:10:00.000Z",
+        }),
+        // An older window, beside a count read just now: the reset was spent.
+        reading({
+          id: "server",
+          observedAt: "2026-08-22T12:09:00.000Z",
+          credits: { availableCount: 0 },
+          checkedAt: "2026-08-22T12:09:50.000Z",
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows[0]?.resetCredits?.credits).toEqual({ availableCount: 0 });
+  });
+
+  it("dates banked resets by their own read time when a window event advanced the probe", () => {
+    const reading = (input: {
+      readonly id: string;
+      readonly credits: ServerProviderResetCredits;
+      readonly checkedAt: string;
+    }) =>
+      environment({
+        id: input.id,
+        label: input.id,
+        providers: [
+          provider({
+            instanceId: "codex",
+            driver: "codex",
+            resetCredits: input.credits,
+            resetCreditsCheckedAt: input.checkedAt,
+          }),
+        ],
+        summary: summary([
+          snapshot({
+            instanceId: "codex",
+            driver: "codex",
+            usedPercent: 40,
+            accountKey: "openai:me@example.com",
+          }),
+        ]),
+      });
+    const view = projectAccountLimits(
+      [
+        // A window event just advanced this probe, carrying an hour-old count forward.
+        reading({
+          id: "laptop",
+          credits: { availableCount: 1, readAt: "2026-08-22T11:10:00.000Z" },
+          checkedAt: "2026-08-22T12:09:59.000Z",
+        }),
+        reading({
+          id: "server",
+          credits: { availableCount: 0, readAt: "2026-08-22T12:09:50.000Z" },
+          checkedAt: "2026-08-22T12:09:50.000Z",
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows[0]?.resetCredits?.credits.availableCount).toBe(0);
   });
 });

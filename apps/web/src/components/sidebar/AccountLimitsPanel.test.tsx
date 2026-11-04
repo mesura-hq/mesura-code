@@ -56,6 +56,7 @@ function view(): AccountLimitsView {
           },
         ],
         state: "current",
+        resetCredits: null,
         readingAgeMs: 60_000,
       },
     ],

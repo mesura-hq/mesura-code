@@ -111,11 +111,26 @@ export function claudeResetCreditsToContract(
     );
   const next = live.find((grant) => grant.id === parsed.value.next_grant_id);
   const nextExpiresAt = next?.ends_at ? DateTime.make(next.ends_at) : Option.none();
+  // A grant holds `resets_left` credits that all end with it.
+  const expiries = next
+    ? live
+        .flatMap((grant) => {
+          const endsAt = grant.ends_at ? DateTime.make(grant.ends_at) : Option.none();
+          return Option.isSome(endsAt)
+            ? Array.from({ length: grant.resets_left }, () => endsAt.value)
+            : [];
+        })
+        .toSorted((left, right) => DateTime.toEpochMillis(left) - DateTime.toEpochMillis(right))
+        .map((endsAt) => DateTime.formatIso(endsAt))
+    : [];
   return {
     availableCount: next ? live.reduce((sum, grant) => sum + grant.resets_left, 0) : 0,
     ...(Option.isSome(nextExpiresAt)
       ? { nextExpiresAt: DateTime.formatIso(nextExpiresAt.value) }
       : {}),
+    // Empty, not absent, when no credit is dated: absent means a server that predates the list.
+    ...(next ? { expiries } : {}),
+    readAt: DateTime.formatIso(DateTime.makeUnsafe(nowMs)),
     ...(next ? { nextCreditId: next.id } : {}),
   };
 }
