@@ -56,6 +56,7 @@ import {
   workEntryIconName,
 } from "./TimelineWorkEntryRow.logic";
 import { formatWorkingTimerNow } from "./TimelineWorkGroupRows.logic";
+import { CapacityRetryWorkEntry, isCapacityRetryWorkEntry } from "./CapacityRetryWorkRow";
 
 export const WorkGroupSection = memo(function WorkGroupSection({
   anchorKey,
@@ -490,6 +491,8 @@ export function LiveWorkEntryTimelineRow({
 }) {
   const ctx = use(TimelineRowCtx);
   const threadTarget = useThreadReadTarget(row.entry, ctx.activeThreadEnvironmentId);
+  // Mesura: a waiting capacity retry shows its countdown and Retry now, not a one-line preview.
+  if (isCapacityRetryWorkEntry(row.entry)) return <CapacityRetryWorkEntry workEntry={row.entry} />;
   const questionHeading = row.entry.questionAnswer
     ? getQuestionTextPreview(row.entry.questionAnswer)
     : "";

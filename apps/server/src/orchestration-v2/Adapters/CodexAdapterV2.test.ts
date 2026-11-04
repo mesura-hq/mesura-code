@@ -60,6 +60,10 @@ import * as ProviderReplayHarness from "../testkit/ProviderReplayHarness.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
+import {
+  CODEX_CAPACITY_MAX_RETRIES,
+  codexCapacityRetryDelayMs,
+} from "@t3tools/shared/codexCapacityRetrySchedule";
 import { makeReplayServerConfig, withCodexReplayChildMetadata } from "./CodexAdapterV2.testkit.ts";
 import * as CodexAdapterV2Testkit from "./CodexAdapterV2.testkit.ts";
 
@@ -2226,6 +2230,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     "new-run",
     "steer",
     "start-fails",
+    "retry-now",
   ] as const)("handles terminal Codex capacity failures when retries %s", (outcome) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -2273,7 +2278,8 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           ...(outcome === "completion-only" ? failureEntries(0).slice(1) : failureEntries(0)),
         );
         if (outcome === "completion-only") entries.push(...failureEntries(0).slice(1));
-        const retries = outcome === "exhaust" ? 5 : outcome === "stop" ? 0 : 1;
+        const retries =
+          outcome === "exhaust" ? CODEX_CAPACITY_MAX_RETRIES : outcome === "stop" ? 0 : 1;
         const steeredText = "Use the smaller change.";
         for (let attempt = 1; attempt <= retries; attempt++) {
           const start = codexReplayPreamble({
@@ -2370,7 +2376,8 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             outcome === "recover" ||
             outcome === "completion-only" ||
             outcome === "started-first" ||
-            outcome === "stop-starting"
+            outcome === "stop-starting" ||
+            outcome === "retry-now"
           ) {
             entries.push({
               type: "emit_inbound",
@@ -2460,8 +2467,8 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           if (providerTurnId === null) return;
           assert.deepEqual(milestone.turnItem.retry, {
             attempt,
-            maxAttempts: 5,
-            retryDelayMs: Math.min(2_000 * 2 ** (attempt - 1), 30_000),
+            maxAttempts: CODEX_CAPACITY_MAX_RETRIES,
+            retryDelayMs: codexCapacityRetryDelayMs(attempt),
           });
           assert.isEmpty(harness.terminalEvents());
           if (outcome === "stop") {
@@ -2480,7 +2487,26 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                   })
                   .pipe(Effect.forkScoped)
               : undefined;
-          yield* TestClock.adjust(Math.min(2_000 * 2 ** (attempt - 1), 30_000));
+          // Mesura: Retry now and a steer start the retry without waiting out the delay.
+          if (outcome === "retry-now") {
+            assert.isTrue(
+              yield* harness.runtime.retryProviderNow!({
+                providerThread: harness.providerThread,
+                providerTurnId,
+              }),
+            );
+            yield* Deferred.await(retryStarted);
+            assert.isFalse(
+              yield* harness.runtime.retryProviderNow!({
+                providerThread: harness.providerThread,
+                providerTurnId,
+              }),
+            );
+          } else if (steering !== undefined) {
+            yield* Fiber.join(steering);
+          } else {
+            yield* TestClock.adjust(codexCapacityRetryDelayMs(attempt));
+          }
           if (outcome === "stop-starting") {
             yield* Deferred.await(retryStarted);
             const stopping = yield* harness.runtime
@@ -2522,6 +2548,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         assert.equal(
           terminal?.status,
           outcome === "recover" ||
+            outcome === "retry-now" ||
             outcome === "completion-only" ||
             outcome === "steer" ||
             outcome === "started-first" ||
@@ -2612,7 +2639,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               Stream.runHead,
               Effect.forkChild({ startImmediately: true }),
             );
-            yield* TestClock.adjust("2 seconds");
+            yield* TestClock.adjust(codexCapacityRetryDelayMs(1));
             yield* Fiber.join(completed);
             yield* worker.drain();
             const projection = yield* orchestrator.getThreadProjection(threadId);
@@ -5553,7 +5580,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             }),
           );
           yield* Deferred.await(retrying);
-          yield* TestClock.adjust("2 seconds");
+          yield* TestClock.adjust(codexCapacityRetryDelayMs(1));
           if (parentStatus === "interrupted") assert.isEmpty(harness.terminalEvents());
           else {
             yield* harness.awaitTerminal(1);
@@ -5676,7 +5703,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         const root = harness.events.find((event) => event.type === "provider_turn.updated");
         assert.equal(root?.type, "provider_turn.updated");
         if (root?.type !== "provider_turn.updated") return;
-        yield* TestClock.adjust("2 seconds");
+        yield* TestClock.adjust(codexCapacityRetryDelayMs(1));
         yield* Deferred.await(starting);
         const stopping = yield* harness.runtime
           .interruptTurn({

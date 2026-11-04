@@ -62,6 +62,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.peerLinksAnswerRequest]: AuthAccessWriteScope,
   // Mesura: answering a takeover card resumes the agent that asked, as a secret answer does.
   [WS_METHODS.previewAnswerTakeoverRequest]: AuthOrchestrationOperateScope,
+  // Mesura: Retry now restarts a waiting provider turn, as Stop and steering operate one.
+  [WS_METHODS.providerRetryNow]: AuthOrchestrationOperateScope,
   // Mesura: starting an agent search creates a thread that runs a model (ADR-010).
   [THREAD_SEARCH_WS_METHODS.startThreadSearchChat]: AuthOrchestrationOperateScope,
   // Mesura: Web Push. Subscribing is a device setting, so it takes the bar the

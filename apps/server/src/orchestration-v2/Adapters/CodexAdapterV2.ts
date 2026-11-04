@@ -152,9 +152,12 @@ import {
 } from "@t3tools/provider-core/server/subagentProjection";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import {
+  CODEX_CAPACITY_MAX_RETRIES,
+  codexCapacityRetryDelayMs,
+} from "@t3tools/shared/codexCapacityRetrySchedule";
 
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
-const CODEX_CAPACITY_MAX_RETRIES = 5;
 export const CODEX_DRIVER_KIND = CODEX_PROVIDER;
 export const CODEX_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(CODEX_DRIVER_KIND);
 
@@ -1114,6 +1117,7 @@ function withCodexManagedFailure(
 interface ActiveCodexTurnContext {
   capacityRetryAttempt?: number;
   capacityRetryPending?: Deferred.Deferred<ActiveCodexTurnContext | undefined>;
+  capacityRetryWake?: Deferred.Deferred<void>;
   closedCommandItemIds?: ReadonlySet<string>;
   latestProviderFailure?: {
     readonly nativeMessage: string;
@@ -6182,7 +6186,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               context.capacityRetryAttempt = attempt;
               const pending = yield* Deferred.make<ActiveCodexTurnContext | undefined>();
               context.capacityRetryPending = pending;
-              const retryDelayMs = Math.min(2_000 * 2 ** (attempt - 1), 30_000);
+              const wake = yield* Deferred.make<void>();
+              context.capacityRetryWake = wake;
+              const retryDelayMs = codexCapacityRetryDelayMs(attempt);
               const now = yield* DateTime.now;
               const previous = (yield* Ref.get(providerRetries)).get(context.providerTurnId);
               const state: ActiveCodexProviderRetry = {
@@ -6216,7 +6222,14 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 driver: CODEX_PROVIDER,
                 turnItem: codexRetryTurnItem(context, state, "running", now),
               });
-              yield* Effect.sleep(retryDelayMs).pipe(
+              // Mesura: a steer ends the wait early, so a message never waits up to an hour.
+              yield* Deferred.await(wake).pipe(
+                Effect.timeoutOrElse({ duration: retryDelayMs, orElse: () => Effect.void }),
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    if (context.capacityRetryWake === wake) delete context.capacityRetryWake;
+                  }),
+                ),
                 Effect.andThen(
                   Effect.gen(function* () {
                     const nativeThreadId = yield* getNativeThreadId(context.providerThread);
@@ -6973,6 +6986,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               if (activeTurn === undefined && startingRetry?.providerTurnId === providerTurnId) {
                 activeTurn = startingRetry;
               }
+              if (activeTurn?.capacityRetryWake !== undefined) {
+                yield* Deferred.succeed(activeTurn.capacityRetryWake, undefined);
+              }
               while (activeTurn?.capacityRetryPending !== undefined) {
                 activeTurn = yield* Deferred.await(activeTurn.capacityRetryPending);
               }
@@ -7023,6 +7039,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ),
               ),
           ),
+          retryProviderNow: Effect.fn("CodexAdapterV2.retryProviderNow")(function* (input) {
+            const providerTurnId = latestRunTurnId(input.providerTurnId);
+            const waiting = Array.from((yield* Ref.get(activeTurns)).values()).find(
+              (candidate) =>
+                candidate.providerTurnId === providerTurnId &&
+                candidate.providerThread.id === input.providerThread.id,
+            )?.capacityRetryWake;
+            return waiting === undefined ? false : yield* Deferred.succeed(waiting, undefined);
+          }),
           interruptTurn: Effect.fn("CodexAdapterV2.interruptTurn")(
             function* (requestedInput) {
               const nativeThreadId = requestedInput.providerThread.nativeThreadRef?.nativeId;

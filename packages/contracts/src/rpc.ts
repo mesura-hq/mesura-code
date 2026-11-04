@@ -425,6 +425,11 @@ import {
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import { BrowserTakeoverAnswerInput, BrowserTakeoverError } from "./browserTakeover.ts";
 import {
+  ProviderRetryNowError,
+  ProviderRetryNowInput,
+  ProviderRetryNowResult,
+} from "./providerRetryNow.ts";
+import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
   ProjectCloneListEvent,
@@ -732,6 +737,8 @@ export const WS_METHODS = {
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
   // Mesura: the hosts dock's per-host stats stream.
   subscribeHostStats: "subscribeHostStats",
+  // Mesura: the retry row's "Retry now" ends a provider retry wait early.
+  providerRetryNow: "orchestration.providerRetryNow",
 } as const;
 
 const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -2318,6 +2325,12 @@ const WsSubscribeHostStatsRpc = Rpc.make(WS_METHODS.subscribeHostStats, {
   stream: true,
 });
 
+const WsProviderRetryNowRpc = Rpc.make(WS_METHODS.providerRetryNow, {
+  payload: ProviderRetryNowInput,
+  success: ProviderRetryNowResult,
+  error: Schema.Union([ProviderRetryNowError, EnvironmentAuthorizationError]),
+});
+
 // Mesura: agent thread search reads (threadSearchEvidence.ts).
 const WsOrchestrationListThreadSearchCatalogRpc = Rpc.make(
   THREAD_SEARCH_WS_METHODS.listThreadSearchCatalog,
@@ -2634,6 +2647,7 @@ const MesuraWsRpcGroup = RpcGroup.make(
   WsStartThreadSearchChatRpc,
   WsThreadSearchToolConnectRpc,
   WsThreadSearchToolRespondRpc,
+  WsProviderRetryNowRpc,
 );
 
 /** Every RPC, as clients and the server's router see them. */

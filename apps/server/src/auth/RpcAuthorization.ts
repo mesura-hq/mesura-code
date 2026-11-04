@@ -198,6 +198,8 @@ export const RPC_REQUIRED_SCOPES = {
   // Mesura: the hosts dock reads what server.getHostResources reads, and more
   // of it; the same scope, so a client that may see one may see the other.
   [WS_METHODS.subscribeHostStats]: AuthOrchestrationReadScope,
+  // Mesura: Retry now restarts a waiting provider turn, as Stop and steering operate one.
+  [WS_METHODS.providerRetryNow]: AuthOrchestrationOperateScope,
   [WS_METHODS.assetsCreateUrl]: AuthOrchestrationReadScope,
   [WS_METHODS.assetsPersistChatAttachments]: AuthOrchestrationOperateScope,
   [WS_METHODS.attachmentsCreateUploadUrl]: AuthOrchestrationOperateScope,

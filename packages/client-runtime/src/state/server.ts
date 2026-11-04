@@ -1556,6 +1556,16 @@ export function createServerEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.threadId, input.turnItemId]),
       },
     }),
+    // Mesura: a retry row's "Retry now", one per provider turn at a time.
+    retryProviderNow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:provider-retry-now",
+      tag: WS_METHODS.providerRetryNow,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.providerTurnId]),
+      },
+    }),
     // Like a secret card's answer: off the config lane, one per card at a time.
     answerLinkRequest: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:peer-links:answer-request",

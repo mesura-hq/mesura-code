@@ -53,6 +53,7 @@ import {
   type TimelineWorkEntry,
 } from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, TimelineRowTimestamp } from "./TimelineRowParts";
+import { CapacityRetryWorkEntry, isCapacityRetryWorkEntry } from "./CapacityRetryWorkRow";
 import {
   failedToolIconClassName,
   toolIconAcceptsTint,
@@ -198,6 +199,8 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     setExpanded(next);
   };
   const failureItem = workEntry.projectedItem?.item;
+  // Mesura: Codex capacity retries get their countdown, Retry now and schedule.
+  if (isCapacityRetryWorkEntry(workEntry)) return <CapacityRetryWorkEntry workEntry={workEntry} />;
   if (failureItem?.type === "error" && failureItem.status === "failed") {
     const warning = failureItem.failure.class === "usage_limit";
     const resetAt = failureItem.failure.resetAt;
