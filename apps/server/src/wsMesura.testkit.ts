@@ -19,6 +19,7 @@ import * as FactorySnapshotStore from "./factory/FactorySnapshotStore.ts";
 import * as FileManagerHost from "./fileManager/FileManagerHost.ts";
 import { HostStatsService } from "./hostStats/HostStatsService.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
+import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadManagementService from "./orchestration-v2/ThreadManagementService.ts";
 import * as ThreadSearchEvidence from "./orchestration-v2/ThreadSearchEvidence.ts";
 import * as ProjectService from "./project/ProjectService.ts";
@@ -26,6 +27,7 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import { ClientPresence } from "./push/ClientPresence.ts";
 import { PushSubscriptions } from "./push/PushSubscriptions.ts";
 import * as ReviewService from "./review/ReviewService.ts";
+import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { AccountLimitsService } from "./usage/AccountLimitsService.ts";
@@ -63,6 +65,8 @@ export const makeMesuraServerScope = Effect.fn("WsMesuraTestFixtures.makeServerS
       dispatch: () => Effect.succeed({ sequence: 1, storedEvents: [] }),
     }),
     Layer.succeed(VcsProvisioningService, { initRepository: () => Effect.void }),
+    Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({}),
+    SqlitePersistence.layerMemory,
     ServerSettings.layerTest({
       textGenerationModelSelection: {
         instanceId: ProviderInstanceId.make("codex"),

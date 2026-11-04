@@ -26,6 +26,7 @@ import * as GitHubIssueCli from "./issues/GitHubIssueCli.ts";
 import { listIssues, readIssueDetail, resolveIssueReference } from "./issues/readIssues.ts";
 import * as ThreadSearchBroker from "./mcp/ThreadSearchBroker.ts";
 import { RpcInstrumentation } from "./observability/RpcInstrumentation.ts";
+import * as ProviderRetryNow from "./orchestration-v2/ProviderRetryNow.ts";
 import * as ThreadSearchEvidence from "./orchestration-v2/ThreadSearchEvidence.ts";
 import { ProjectIconDiscovery } from "./project/ProjectIconDiscovery.ts";
 import { ClientPresence } from "./push/ClientPresence.ts";
@@ -45,15 +46,18 @@ import { projectFileFailureContext } from "./ws.ts";
 export const layerMesuraServerScope = Layer.mergeAll(
   ThreadSearchBroker.layer,
   StartThreadSearchChat.layer,
+  ProviderRetryNow.layer,
 );
 
 /** The server-scope instances, as a layer to provide to one connection's handlers. */
 export const captureMesuraServerScope = Effect.gen(function* () {
   const broker = yield* ThreadSearchBroker.ThreadSearchBroker;
   const starter = yield* StartThreadSearchChat.StartThreadSearchChat;
+  const providerRetryNow = yield* ProviderRetryNow.ProviderRetryNow;
   return Layer.mergeAll(
     Layer.succeed(ThreadSearchBroker.ThreadSearchBroker, broker),
     Layer.succeed(StartThreadSearchChat.StartThreadSearchChat, starter),
+    Layer.succeed(ProviderRetryNow.ProviderRetryNow, providerRetryNow),
   );
 });
 
@@ -81,6 +85,7 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
     const hostStats = yield* HostStatsService;
     const accountLimits = yield* AccountLimitsService;
     const review = yield* ReviewService.ReviewService;
+    const providerRetryNow = yield* ProviderRetryNow.ProviderRetryNow;
 
     return ServerWsRpcGroupMesura.of({
       // Agent thread search reads (threadSearchEvidence.ts contracts) and one
@@ -117,6 +122,11 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
         threadSearchBroker.respond(connectionIdentity, input),
 
       [WS_METHODS.serverGetAccountLimits]: (_input) => accountLimits.readSummary(),
+
+      [WS_METHODS.providerRetryNow]: (input) =>
+        Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+          Effect.andThen(providerRetryNow.retry(input)),
+        ),
 
       [WS_METHODS.issuesList]: (input) =>
         listIssues(input).pipe(Effect.provide(GitHubIssueCli.layer)),

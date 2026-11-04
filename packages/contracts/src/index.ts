@@ -80,6 +80,7 @@ export * from "./worktreeMcp.ts";
 export * from "./resourceTelemetry.ts";
 export * from "./secretRequest.ts";
 export * from "./browserTakeover.ts";
+export * from "./providerRetryNow.ts";
 export * from "./clientRpcPermissions.ts";
 export * from "./threadSearchEvidence.ts";
 export * from "./threadSearchTools.ts";

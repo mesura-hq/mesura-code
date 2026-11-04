@@ -267,6 +267,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.reviewSubscribeWorkingTreeChanges]: "review",
   [WS_METHODS.serverGetAccountLimits]: "server",
   [WS_METHODS.subscribeHostStats]: "server",
+  [WS_METHODS.providerRetryNow]: "orchestration",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";
