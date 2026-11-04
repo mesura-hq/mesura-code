@@ -5,14 +5,19 @@ import { accountLimitsWindowKey } from "@t3tools/contracts";
 import { RotateCcwIcon } from "lucide-react";
 import { useEffect, useId, useRef } from "react";
 
+import { usePrimarySettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import {
   useAccountLimits,
   type AccountLimitsRow,
+  type AccountLimitsRowResetCredits,
   type AccountLimitsView,
 } from "../../state/accountLimits";
+import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { SUBSCRIPTION_ICON_BY_NAMESPACE } from "../chat/providerIconUtils";
+import { InlineButton } from "../ui/button";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { ScrollArea } from "../ui/scroll-area";
 import { formatCompactDuration } from "@t3tools/client-runtime/host-stats/view";
 import { useSidebarDockController, type SidebarDockController } from "./sidebarDockController";
@@ -58,6 +63,60 @@ function readingAgeLabel(readingAgeMs: number | null): string | null {
   if (readingAgeMs === null) return null;
   if (readingAgeMs < 60_000) return "Updated just now";
   return `Updated ${formatCompactDuration(readingAgeMs)} ago`;
+}
+
+function expiryCountdown(expiresAt: string, environmentNowMs: number | null): string | null {
+  const expiresAtMs = Date.parse(expiresAt);
+  if (environmentNowMs === null || !Number.isFinite(expiresAtMs)) return null;
+  const remaining = expiresAtMs - environmentNowMs;
+  return remaining > 0 ? `in ${formatCompactDuration(remaining)}` : null;
+}
+
+/** The count and the nearest expiry; hovering or tapping lists every dated reset. */
+function ResetCreditsLine(props: { readonly resetCredits: AccountLimitsRowResetCredits }) {
+  const { credits, environmentNowMs } = props.resetCredits;
+  const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
+  const count = credits.availableCount;
+  if (count === 0) {
+    return (
+      <div className="mt-2 font-mono text-caption text-muted-foreground/45">No resets saved</div>
+    );
+  }
+  // Unknown environment time falls back to the formatter's own clock for "today" and "tomorrow".
+  const nowMs = environmentNowMs ?? undefined;
+  // An environment older than the `expiries` list reports only the nearest date.
+  const expiries = credits.expiries ?? (credits.nextExpiresAt ? [credits.nextExpiresAt] : []);
+  const undatedCount = credits.expiries ? count - expiries.length : 0;
+  const summary = `${count} ${count === 1 ? "reset" : "resets"}`;
+  const next = expiries[0];
+  return (
+    // The sidebar is narrow: the summary wraps rather than scrolling the dock sideways.
+    <div className="mt-2 flex font-mono text-caption [--inline-button-text-align:start] [--inline-button-white-space:normal]">
+      <Popover>
+        <PopoverTrigger openOnHover render={<InlineButton tone="muted" />}>
+          {summary}
+          {next ? ` · next expires ${formatUpcomingTimestamp(next, timestampFormat, nowMs)}` : ""}
+        </PopoverTrigger>
+        <PopoverPopup aria-label={`${summary} saved`} side="top" tooltipStyle>
+          <ul className="space-y-0.5 font-mono tabular-nums">
+            {expiries.map((expiresAt, index) => {
+              const countdown = expiryCountdown(expiresAt, environmentNowMs);
+              return (
+                // oxlint-disable-next-line react/no-array-index-key -- two credits can expire at the same instant
+                <li className="flex justify-between gap-4" key={`${expiresAt}:${index}`}>
+                  <span>Expires {formatUpcomingTimestamp(expiresAt, timestampFormat, nowMs)}</span>
+                  {countdown ? <span className="text-muted-foreground">{countdown}</span> : null}
+                </li>
+              );
+            })}
+            {undatedCount > 0 ? (
+              <li className="text-muted-foreground">{undatedCount} without an expiry</li>
+            ) : null}
+          </ul>
+        </PopoverPopup>
+      </Popover>
+    </div>
+  );
 }
 
 function AccountLimitRowView(props: {
@@ -166,6 +225,8 @@ function AccountLimitRowView(props: {
           {row.state === "missing" ? "No reading yet" : "No visible limits reported"}
         </div>
       )}
+
+      {row.resetCredits ? <ResetCreditsLine resetCredits={row.resetCredits} /> : null}
 
       {row.state === "stale" || row.state === "stale-refresh-failed" ? (
         <div className="mt-2 text-caption text-muted-foreground/65">Reading may be stale</div>

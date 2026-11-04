@@ -107,9 +107,13 @@ function codexResetCreditsToContract(
     .filter((value): value is number => typeof value === "number");
   const nextExpiresAt =
     expiries.length > 0 ? isoFromEpochSeconds(Math.min(...expiries)) : undefined;
+  const expiryList = expiries
+    .toSorted((left, right) => left - right)
+    .flatMap((value) => isoFromEpochSeconds(value) ?? []);
   return {
     availableCount: Math.max(0, summary.availableCount),
     ...(nextExpiresAt ? { nextExpiresAt } : {}),
+    ...(expiryList.length > 0 ? { expiries: expiryList } : {}),
   };
 }
 
