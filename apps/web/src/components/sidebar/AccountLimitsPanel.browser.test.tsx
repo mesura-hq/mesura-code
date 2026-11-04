@@ -59,6 +59,24 @@ describe("AccountLimitsPanel reset credits", () => {
     await expect.element(list.getByText("1 without an expiry")).toBeVisible();
   });
 
+  it("lists only the nearest date from an environment that predates the expiry list", async () => {
+    await using _screen = await render(
+      <AccountLimitsPanelContent
+        open
+        shortcutLabel={null}
+        view={view({
+          credits: { availableCount: 2, nextExpiresAt: "2026-11-06T23:17:53.000Z" },
+          environmentNowMs: NOW,
+        })}
+      />,
+    );
+
+    await userEvent.hover(page.getByRole("button", { name: /^2 resets · next expires/ }));
+    const list = page.getByRole("dialog", { name: "2 resets saved" });
+    await expect.element(list.getByText("in 2d 22h")).toBeVisible();
+    expect(list.getByRole("listitem").elements()).toHaveLength(1);
+  });
+
   it("says when the agent reports banked resets but none are left", async () => {
     await using _screen = await render(
       <AccountLimitsPanelContent
