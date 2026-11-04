@@ -32,6 +32,11 @@ describe("claudeResetCreditsToContract expiries", () => {
         },
         NOW,
       ),
-    ).toEqual({ availableCount: 2, nextCreditId: "a", expiries: [] });
+    ).toEqual({
+      availableCount: 2,
+      nextCreditId: "a",
+      expiries: [],
+      readAt: "2026-09-22T12:00:00.000Z",
+    });
   });
 });

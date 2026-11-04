@@ -99,6 +99,7 @@ function codexRateLimitsToWindows(
 
 function codexResetCreditsToContract(
   summary: CodexResetCreditsSummary | null | undefined,
+  readAt: string,
 ): ServerProviderResetCredits | undefined {
   if (!summary) return undefined;
   const expiries = (summary.credits ?? [])
@@ -115,6 +116,7 @@ function codexResetCreditsToContract(
     ...(nextExpiresAt ? { nextExpiresAt } : {}),
     // Empty, not absent, when no credit is dated: absent means a server that predates the list.
     ...(summary.availableCount > 0 ? { expiries: expiryList } : {}),
+    readAt,
   };
 }
 
@@ -127,7 +129,7 @@ export function codexRateLimitsToLimits(input: {
   readonly resetCredits?: CodexResetCreditsSummary | null | undefined;
   readonly checkedAt: string;
 }): ServerProviderUsageLimits {
-  const resetCredits = codexResetCreditsToContract(input.resetCredits);
+  const resetCredits = codexResetCreditsToContract(input.resetCredits, input.checkedAt);
   const windows = codexRateLimitsToWindows(input.rateLimitsByLimitId?.codex ?? input.snapshot);
   return {
     ...makeUsageLimits({

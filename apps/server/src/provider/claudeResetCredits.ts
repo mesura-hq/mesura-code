@@ -130,6 +130,7 @@ export function claudeResetCreditsToContract(
       : {}),
     // Empty, not absent, when no credit is dated: absent means a server that predates the list.
     ...(next ? { expiries } : {}),
+    readAt: DateTime.formatIso(DateTime.makeUnsafe(nowMs)),
     ...(next ? { nextCreditId: next.id } : {}),
   };
 }

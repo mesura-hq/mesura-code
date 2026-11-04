@@ -277,7 +277,7 @@ interface AccountLimitsCandidate {
   readonly accentColor?: string | undefined;
   readonly snapshot: AccountLimitsSnapshot | null;
   readonly resetCredits?: ServerProviderResetCredits | undefined;
-  /** Age of the provider probe that carried `resetCredits`, which the dock's window reading does not date. */
+  /** Age of the `resetCredits` reading, which the dock's window reading does not date. */
   readonly resetCreditsAgeMs?: number | null;
   readonly state: AccountLimitsRowState;
   /** The account the provider named, when it named one. */
@@ -324,9 +324,8 @@ function freshestWindows(
 }
 
 /**
- * Credits come from the provider probe, not the dock's window reading, so they are dated by the
- * probe: a fresh window says nothing about the count beside it. An explicit zero is a reading too.
- * `checkedAt` also advances on window-only events, which carry the earlier credits forward.
+ * Credits are read apart from the dock's windows, so a fresh window says nothing about the count
+ * beside it: the freshest credit reading wins. An explicit zero is a reading too.
  */
 function freshestResetCredits(
   candidates: ReadonlyArray<AccountLimitsCandidate>,
@@ -436,7 +435,12 @@ export function projectAccountLimits(
         ...(resetCredits
           ? {
               resetCredits,
-              resetCreditsAgeMs: ageMillis(readerLimits?.checkedAt, currentEnvironmentTime),
+              // An environment that predates `readAt` dates them by the probe, which window
+              // events advance; it can overstate how fresh the count is.
+              resetCreditsAgeMs: ageMillis(
+                resetCredits.readAt ?? readerLimits?.checkedAt,
+                currentEnvironmentTime,
+              ),
             }
           : {}),
         state: rowState(snapshot, currentEnvironmentTime),

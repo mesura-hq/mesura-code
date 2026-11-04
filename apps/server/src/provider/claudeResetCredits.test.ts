@@ -63,6 +63,7 @@ describe("claudeResetCreditsToContract", () => {
       nextCreditId: "grant_a",
       nextExpiresAt: "2026-10-01T00:00:00.000Z",
       expiries: ["2026-10-01T00:00:00.000Z", "2026-10-01T00:00:00.000Z"],
+      readAt: "2026-09-22T12:00:00.000Z",
     });
   });
 
@@ -72,11 +73,12 @@ describe("claudeResetCreditsToContract", () => {
         { eligible: true, next_grant_id: "grant_a", grants: [grant({ usable_now: false })] },
         NOW,
       ),
-    ).toEqual({ availableCount: 0 });
+    ).toEqual({ availableCount: 0, readAt: "2026-09-22T12:00:00.000Z" });
     expect(
       ClaudeResetCredits.claudeResetCreditsToContract({ eligible: true, grants: [grant({})] }, NOW),
     ).toEqual({
       availableCount: 0,
+      readAt: "2026-09-22T12:00:00.000Z",
     });
     expect(
       ClaudeResetCredits.claudeResetCreditsToContract(
@@ -112,7 +114,12 @@ effectIt.layer(NodeServices.layer)("readClaudeResetCredits", (it) => {
         Effect.provideService(HostProcess.Platform, "linux"),
         Effect.provideService(HttpClient.HttpClient, client),
       );
-      expect(credits).toEqual({ availableCount: 1, nextCreditId: "grant_a", expiries: [] });
+      expect(credits).toEqual({
+        availableCount: 1,
+        nextCreditId: "grant_a",
+        expiries: [],
+        readAt: expect.any(String),
+      });
     }),
   );
 

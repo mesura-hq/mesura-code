@@ -1216,4 +1216,50 @@ describe("projectAccountLimits, one row per subscription", () => {
 
     expect(view.rows[0]?.resetCredits?.credits).toEqual({ availableCount: 0 });
   });
+
+  it("dates banked resets by their own read time when a window event advanced the probe", () => {
+    const reading = (input: {
+      readonly id: string;
+      readonly credits: ServerProviderResetCredits;
+      readonly checkedAt: string;
+    }) =>
+      environment({
+        id: input.id,
+        label: input.id,
+        providers: [
+          provider({
+            instanceId: "codex",
+            driver: "codex",
+            resetCredits: input.credits,
+            resetCreditsCheckedAt: input.checkedAt,
+          }),
+        ],
+        summary: summary([
+          snapshot({
+            instanceId: "codex",
+            driver: "codex",
+            usedPercent: 40,
+            accountKey: "openai:me@example.com",
+          }),
+        ]),
+      });
+    const view = projectAccountLimits(
+      [
+        // A window event just advanced this probe, carrying an hour-old count forward.
+        reading({
+          id: "laptop",
+          credits: { availableCount: 1, readAt: "2026-08-22T11:10:00.000Z" },
+          checkedAt: "2026-08-22T12:09:59.000Z",
+        }),
+        reading({
+          id: "server",
+          credits: { availableCount: 0, readAt: "2026-08-22T12:09:50.000Z" },
+          checkedAt: "2026-08-22T12:09:50.000Z",
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows[0]?.resetCredits?.credits.availableCount).toBe(0);
+  });
 });
