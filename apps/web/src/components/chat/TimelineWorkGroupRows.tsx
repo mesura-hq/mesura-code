@@ -492,7 +492,17 @@ export function LiveWorkEntryTimelineRow({
   const ctx = use(TimelineRowCtx);
   const threadTarget = useThreadReadTarget(row.entry, ctx.activeThreadEnvironmentId);
   // Mesura: a waiting capacity retry shows its countdown and Retry now, not a one-line preview.
-  if (isCapacityRetryWorkEntry(row.entry)) return <CapacityRetryWorkEntry workEntry={row.entry} />;
+  if (isCapacityRetryWorkEntry(row.entry)) {
+    return (
+      <CapacityRetryWorkEntry
+        workEntry={row.entry}
+        disclosure={{
+          expanded: row.expanded,
+          onToggle: () => ctx.onToggleWorkGroup(row.groupId, row.id),
+        }}
+      />
+    );
+  }
   const questionHeading = row.entry.questionAnswer
     ? getQuestionTextPreview(row.entry.questionAnswer)
     : "";

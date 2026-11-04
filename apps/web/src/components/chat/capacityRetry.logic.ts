@@ -18,6 +18,7 @@ export interface CapacityRetryView {
   readonly maxAttempts: number | null;
   /** Set only while a retry is scheduled. */
   readonly nextAttemptAtMs: number | null;
+  readonly retryDelayMs: number | null;
   /** Only while waiting, and only for the schedule this client knows. */
   readonly steps: ReadonlyArray<{ readonly label: string; readonly state: CapacityRetryStepState }>;
 }
@@ -40,7 +41,13 @@ export function capacityRetryView(item: ErrorTurnItem): CapacityRetryView | null
           state: stepState(index, retry.attempt),
         }))
       : [];
-  const base = { attempt: retry.attempt, maxAttempts: retry.maxAttempts, nextAttemptAtMs, steps };
+  const base = {
+    attempt: retry.attempt,
+    maxAttempts: retry.maxAttempts,
+    nextAttemptAtMs,
+    retryDelayMs: retry.retryDelayMs,
+    steps,
+  };
   switch (item.status) {
     case "running":
       return { ...base, label: "Model at capacity", detail: null };
@@ -74,6 +81,17 @@ function stepState(index: number, attempt: number): CapacityRetryStepState {
 
 function formatRetryStep(delayMs: number): string {
   return delayMs < 60_000 ? `${delayMs / 1_000}s` : `${delayMs / 60_000}m`;
+}
+
+/**
+ * Time left on the wait. The deadline is server time and `nowMs` is this device's clock, which
+ * NTP keeps within a second on the developer's devices; the cap keeps a slow clock from
+ * showing more than the scheduled delay.
+ */
+export function capacityRetryRemainingMs(view: CapacityRetryView, nowMs: number): number {
+  if (view.nextAttemptAtMs === null) return 0;
+  const remainingMs = Math.max(0, view.nextAttemptAtMs - nowMs);
+  return view.retryDelayMs === null ? remainingMs : Math.min(remainingMs, view.retryDelayMs);
 }
 
 /** "0:40", "12:05", "1:00:00": whole seconds left, never negative. */

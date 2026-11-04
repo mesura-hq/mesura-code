@@ -10,6 +10,7 @@ import {
   ProviderThreadId,
   ProviderTurnId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
 import * as DateTime from "effect/DateTime";
@@ -56,15 +57,24 @@ const NOW_MS =
 type TimelineProps = ComponentProps<typeof MessagesTimeline>;
 type ProjectedItem = ReturnType<typeof makeStreamingTimelineFixture>["visibleTurnItems"][number];
 
-/** The live run's user message, then a capacity retry whose 40-second wait started at the fixture's time. */
-function waitingCapacityRetry(): ReadonlyArray<ProjectedItem> {
+/**
+ * The live run's user message, optionally a finished tool call, then a capacity retry whose
+ * 40-second wait started at the fixture's time.
+ */
+function waitingCapacityRetry(
+  options: { precedingWork?: boolean } = {},
+): ReadonlyArray<ProjectedItem> {
   const fixture = makeStreamingTimelineFixture().visibleTurnItems;
   const work = fixture[4]!;
   const updatedAt = work.item.updatedAt;
   const retry = {
     ...work,
+    position: work.position + 1,
+    sourceItemId: TurnItemId.make("capacity-retry-item"),
     item: {
       ...work.item,
+      id: TurnItemId.make("capacity-retry-item"),
+      ordinal: work.item.ordinal + 1,
       threadId: THREAD_ID,
       providerThreadId: PROVIDER_THREAD_ID,
       providerTurnId: PROVIDER_TURN_ID,
@@ -83,7 +93,7 @@ function waitingCapacityRetry(): ReadonlyArray<ProjectedItem> {
       retry: { attempt: 3, maxAttempts: 10, retryDelayMs: 40_000 },
     },
   } as ProjectedItem;
-  return [fixture[3]!, retry];
+  return options.precedingWork ? [fixture[3]!, work, retry] : [fixture[3]!, retry];
 }
 
 async function renderTimeline(
@@ -170,7 +180,10 @@ it("capacity retry: the waiting row counts down, shows the schedule, and Retry n
     },
   ]);
   await expect.element(screen.getByText(/Retry 3\/10 starting…/)).toBeVisible();
-  expect(row!.querySelector("button"), "one request per attempt").toBeNull();
+  expect(
+    [...row!.querySelectorAll("button")].some((button) => button.textContent === "Retry now"),
+    "one request per attempt",
+  ).toBe(false);
 });
 
 it("capacity retry: a client that may only read sees the countdown without Retry now", async () => {
@@ -187,5 +200,51 @@ it("capacity retry: a client that may only read sees the countdown without Retry
       /in 0:35/,
     ),
   );
-  expect(screen.container.querySelector('[data-capacity-retry="running"] button')).toBeNull();
+  expect(
+    [...screen.container.querySelectorAll('[data-capacity-retry="running"] button')].some(
+      (button) => button.textContent === "Retry now",
+    ),
+  ).toBe(false);
+});
+
+it("capacity retry: the work group stays reachable from the waiting row", async () => {
+  setup();
+  using _now = vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
+  appRootFence.sessions.set(ENVIRONMENT_ID, makeFenceSession([AuthOrchestrationOperateScope]));
+  await using screen = await renderTimeline(waitingCapacityRetry({ precedingWork: true }));
+
+  await expect.element(screen.getByText("Model at capacity")).toBeVisible();
+  const row = screen.container.querySelector<HTMLElement>('[data-capacity-retry="running"]')!;
+  const disclosure = row.querySelector<HTMLButtonElement>("button[aria-expanded]");
+  expect(disclosure, "the live row keeps its group disclosure").not.toBeNull();
+  expect(disclosure!.getAttribute("aria-expanded")).toBe("false");
+  expect(disclosure!.textContent, "Retry now sits beside the disclosure").not.toContain(
+    "Retry now",
+  );
+
+  disclosure!.click();
+  await vi.waitFor(() => expect(screen.container.textContent).toMatch(/index\.ts/));
+  const reopened = screen.container.querySelector<HTMLButtonElement>(
+    '[data-capacity-retry="running"] button[aria-expanded]',
+  )!;
+  expect(reopened.getAttribute("aria-expanded")).toBe("true");
+  reopened.click();
+  await vi.waitFor(() =>
+    expect(
+      screen.container
+        .querySelector('[data-capacity-retry="running"] button[aria-expanded]')!
+        .getAttribute("aria-expanded"),
+    ).toBe("false"),
+  );
+});
+
+it("capacity retry: a device clock past the deadline still offers Retry now", async () => {
+  setup();
+  // Ten minutes ahead of the server: the wait looks over here while the server still waits.
+  using _now = vi.spyOn(Date, "now").mockReturnValue(NOW_MS + 600_000);
+  appRootFence.sessions.set(ENVIRONMENT_ID, makeFenceSession([AuthOrchestrationOperateScope]));
+  await using screen = await renderTimeline(waitingCapacityRetry());
+
+  await expect.element(screen.getByText(/Retry 3\/10 due now/)).toBeVisible();
+  await expect.element(screen.getByRole("button", { name: "Retry now" })).toBeVisible();
 });

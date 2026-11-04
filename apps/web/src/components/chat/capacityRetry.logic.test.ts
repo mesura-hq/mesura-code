@@ -2,7 +2,11 @@ import { type OrchestrationV2TurnItem, RunId, ThreadId, TurnItemId } from "@t3to
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { capacityRetryView, formatCountdown } from "./capacityRetry.logic";
+import {
+  capacityRetryRemainingMs,
+  capacityRetryView,
+  formatCountdown,
+} from "./capacityRetry.logic";
 
 type ErrorTurnItem = Extract<OrchestrationV2TurnItem, { readonly type: "error" }>;
 
@@ -105,5 +109,17 @@ describe("formatCountdown", () => {
     expect(formatCountdown(725_000)).toBe("12:05");
     expect(formatCountdown(3_600_000)).toBe("1:00:00");
     expect(formatCountdown(-5_000)).toBe("0:00");
+  });
+});
+
+describe("capacityRetryRemainingMs", () => {
+  it("never shows more than the scheduled delay or less than zero", () => {
+    const view = capacityRetryView(capacityItem())!;
+    const deadline = DateTime.toEpochMillis(updatedAt) + 40_000;
+    expect(capacityRetryRemainingMs(view, deadline - 15_000)).toBe(15_000);
+    // A device clock an hour behind the server's.
+    expect(capacityRetryRemainingMs(view, deadline - 3_600_000)).toBe(40_000);
+    // A device clock ahead of the server's.
+    expect(capacityRetryRemainingMs(view, deadline + 600_000)).toBe(0);
   });
 });

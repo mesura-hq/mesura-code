@@ -14,7 +14,12 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { Button } from "../ui/button";
-import { type CapacityRetryView, capacityRetryView, formatCountdown } from "./capacityRetry.logic";
+import {
+  type CapacityRetryView,
+  capacityRetryRemainingMs,
+  capacityRetryView,
+  formatCountdown,
+} from "./capacityRetry.logic";
 import { TimelineRowCtx, type TimelineWorkEntry } from "./timelineRowContext";
 import { TimelineRowTimestamp } from "./TimelineRowParts";
 import { WorkLogRow } from "./WorkLog";
@@ -28,13 +33,26 @@ interface CapacityRetryWorkRowProps {
   readonly timestampFormat: TimestampFormat;
   readonly createdAt: string;
   readonly visibility: string | undefined;
+  /** The live line's work group disclosure, kept so the group stays reachable while waiting. */
+  readonly disclosure?: CapacityRetryDisclosure | undefined;
+}
+
+export interface CapacityRetryDisclosure {
+  readonly expanded: boolean;
+  readonly onToggle: () => void;
 }
 
 /**
  * Mesura: a Codex capacity retry in the work log and in the live line, with its
  * countdown, Retry now and schedule. Null for any other entry.
  */
-export function CapacityRetryWorkEntry({ workEntry }: { readonly workEntry: TimelineWorkEntry }) {
+export function CapacityRetryWorkEntry({
+  workEntry,
+  disclosure,
+}: {
+  readonly workEntry: TimelineWorkEntry;
+  readonly disclosure?: CapacityRetryDisclosure;
+}) {
   const ctx = use(TimelineRowCtx);
   const item = workEntry.projectedItem?.item;
   const view = item?.type === "error" ? capacityRetryView(item) : null;
@@ -46,6 +64,7 @@ export function CapacityRetryWorkEntry({ workEntry }: { readonly workEntry: Time
     timestampFormat: ctx.timestampFormat,
     createdAt: workEntry.createdAt,
     visibility: workEntry.projectedItem?.visibility,
+    disclosure,
   };
   return view.nextAttemptAtMs === null ? (
     <SettledCapacityRetryRow {...props} />
@@ -86,7 +105,8 @@ function SettledCapacityRetryRow(props: CapacityRetryWorkRowProps) {
 }
 
 function WaitingCapacityRetryRow(props: CapacityRetryWorkRowProps & { nextAttemptAtMs: number }) {
-  const { item, view, nextAttemptAtMs } = props;
+  const { nextAttemptAtMs } = props;
+  const { item, view } = props;
   const nowMs = useNowSecond();
   const retryNow = useAtomCommand(serverEnvironment.retryProviderNow, {
     label: "retry provider now",
@@ -103,8 +123,9 @@ function WaitingCapacityRetryRow(props: CapacityRetryWorkRowProps & { nextAttemp
 
   const progress =
     view.maxAttempts === null ? `${view.attempt}` : `${view.attempt}/${view.maxAttempts}`;
-  const remainingMs = nextAttemptAtMs - nowMs;
-  const starting = remainingMs <= 0 || requestedAttempt === view.attempt;
+  const remainingMs = capacityRetryRemainingMs(view, nowMs);
+  // Only a press hides the button: a device clock ahead of the server's reaches zero early.
+  const requested = requestedAttempt === view.attempt;
   const target =
     item.providerThreadId === null || item.providerTurnId === null
       ? null
@@ -136,8 +157,10 @@ function WaitingCapacityRetryRow(props: CapacityRetryWorkRowProps & { nextAttemp
       {...props}
       icon={<CircleAlertIcon className="size-4 text-warning" />}
       detail={
-        starting ? (
+        requested ? (
           `Retry ${progress} starting…`
+        ) : remainingMs === 0 ? (
+          `Retry ${progress} due now`
         ) : (
           <>
             Retry <span className="font-mono tabular-nums">{progress}</span> at{" "}
@@ -153,7 +176,7 @@ function WaitingCapacityRetryRow(props: CapacityRetryWorkRowProps & { nextAttemp
         )
       }
       action={
-        canRetryNow && !starting && target !== null ? (
+        canRetryNow && !requested && target !== null ? (
           <Button size="micro" variant="outline" onClick={() => void onRetryNow()}>
             Retry now
           </Button>
@@ -172,58 +195,79 @@ function CapacityRetryRowFrame(
     readonly error?: string | null;
   },
 ) {
-  const { item, view } = props;
+  const { item, view, disclosure } = props;
+  const line = {
+    wrapLabel: true,
+    icon: props.icon,
+    label: (
+      <span className="text-sm">
+        <span className="font-medium text-foreground/90">{view.label}</span>
+        {props.detail === null ? null : (
+          <span className="text-muted-foreground"> · {props.detail}</span>
+        )}
+      </span>
+    ),
+    trailing: (
+      <TimelineRowTimestamp
+        createdAt={props.createdAt}
+        timestampFormat={props.timestampFormat}
+        alwaysVisible
+      />
+    ),
+  };
+  const strip =
+    view.steps.length > 0 || props.action || props.error ? (
+      <div className="ms-7 flex flex-wrap items-center gap-x-2 gap-y-1 pb-1">
+        {view.steps.length > 0 ? (
+          <span className="flex flex-wrap items-center gap-0.5" aria-hidden>
+            {view.steps.map((step, index) => (
+              <span
+                // oxlint-disable-next-line react/no-array-index-key -- a fixed schedule; labels can repeat
+                key={index}
+                data-capacity-retry-step={step.state}
+                className={cn(
+                  "rounded border border-transparent px-1 font-mono text-3xs text-muted-foreground/50",
+                  step.state === "done" && "line-through",
+                  step.state === "current" && "border-warning/45 text-warning",
+                )}
+              >
+                {step.label}
+              </span>
+            ))}
+          </span>
+        ) : null}
+        {props.action}
+        {props.error ? (
+          <span role="alert" className="text-xs text-destructive">
+            {props.error}
+          </span>
+        ) : null}
+      </div>
+    ) : null;
+  const rowData = {
+    "data-v2-item-type": "error",
+    "data-v2-item-visibility": props.visibility,
+    "data-capacity-retry": item.status,
+  };
+  if (disclosure === undefined) {
+    return (
+      <WorkLogRow {...rowData} {...line}>
+        {strip}
+      </WorkLogRow>
+    );
+  }
+  // Retry now stays outside the disclosure button: a button may not contain another.
   return (
-    <WorkLogRow
-      data-v2-item-type="error"
-      data-v2-item-visibility={props.visibility}
-      data-capacity-retry={item.status}
-      wrapLabel
-      icon={props.icon}
-      label={
-        <span className="text-sm">
-          <span className="font-medium text-foreground/90">{view.label}</span>
-          {props.detail === null ? null : (
-            <span className="text-muted-foreground"> · {props.detail}</span>
-          )}
-        </span>
-      }
-      trailing={
-        <TimelineRowTimestamp
-          createdAt={props.createdAt}
-          timestampFormat={props.timestampFormat}
-          alwaysVisible
-        />
-      }
-    >
-      {view.steps.length > 0 || props.action || props.error ? (
-        <div className="ms-7 flex flex-wrap items-center gap-x-2 gap-y-1 pb-1">
-          {view.steps.length > 0 ? (
-            <span className="flex flex-wrap items-center gap-0.5" aria-hidden>
-              {view.steps.map((step, index) => (
-                <span
-                  // oxlint-disable-next-line react/no-array-index-key -- a fixed schedule; labels can repeat
-                  key={index}
-                  data-capacity-retry-step={step.state}
-                  className={cn(
-                    "rounded border border-transparent px-1 font-mono text-3xs text-muted-foreground/50",
-                    step.state === "done" && "line-through",
-                    step.state === "current" && "border-warning/45 text-warning",
-                  )}
-                >
-                  {step.label}
-                </span>
-              ))}
-            </span>
-          ) : null}
-          {props.action}
-          {props.error ? (
-            <span role="alert" className="text-xs text-destructive">
-              {props.error}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-    </WorkLogRow>
+    <div {...rowData}>
+      <button
+        type="button"
+        className="group/live-work flex min-h-6 w-full max-w-full cursor-pointer items-center rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        aria-expanded={disclosure.expanded}
+        onClick={disclosure.onToggle}
+      >
+        <WorkLogRow {...line} />
+      </button>
+      {strip}
+    </div>
   );
 }
