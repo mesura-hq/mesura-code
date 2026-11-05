@@ -56,7 +56,10 @@ export function getProviderSlashCommandsForSlashMenu(
   visibleSkills: ReadonlyArray<ServerProviderSkill>,
 ): ServerProviderSlashCommand[] {
   const skillNames = new Set(visibleSkills.map((skill) => skill.name.trim().toLowerCase()));
-  return slashCommands.filter((command) => !skillNames.has(command.name.trim().toLowerCase()));
+  return slashCommands.filter((command) => {
+    const name = command.name.trim().toLowerCase();
+    return name !== "autocompact" && !skillNames.has(name);
+  });
 }
 
 export function resolveProviderSkillSourceKind(

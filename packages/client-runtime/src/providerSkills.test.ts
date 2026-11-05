@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   createProviderWorkspaceSnapshotRefreshAtomFamily,
   getProviderSkillsForSlashMenu,
+  getProviderSlashCommandsForSlashMenu,
   hasCompleteProviderWorkspaceSnapshot,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
@@ -91,6 +92,22 @@ describe("getProviderSkillsForSlashMenu", () => {
     ];
 
     expect(getProviderSkillsForSlashMenu(skills, true)).toEqual([enabledSkill]);
+  });
+});
+
+describe("getProviderSlashCommandsForSlashMenu", () => {
+  it("hides autocompact while keeping compact and other provider commands", () => {
+    const commands = [
+      { name: "compact" },
+      { name: "autocompact" },
+      { name: "model" },
+      { name: " AUTOCOMPACT " },
+    ];
+
+    expect(getProviderSlashCommandsForSlashMenu(commands, [])).toEqual([
+      { name: "compact" },
+      { name: "model" },
+    ]);
   });
 });
 
