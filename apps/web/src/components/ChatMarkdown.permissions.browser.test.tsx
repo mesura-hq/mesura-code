@@ -327,7 +327,7 @@ it("removes host actions after revocation while keeping file preview and copying
   using _setup = setup();
   await using screen = await renderMarkdown("[Readme](docs/readme.md)");
   await screen.openContextMenu();
-  expect(offeredActions()).toEqual(["open", "reveal", "copy-relative", "copy-full"]);
+  expect(offeredActions()).toEqual(["reveal", "copy-relative", "copy-full"]);
   await setAllowed(false);
   state.choose.mockResolvedValue("copy-full");
   await screen.openContextMenu();
@@ -338,24 +338,11 @@ it("removes host actions after revocation while keeping file preview and copying
   expect(state.openEditor).not.toHaveBeenCalled();
 });
 
-it("does not launch an editor after revocation during a native context menu", async () => {
+it("opens a Ctrl-clicked file link in the file panel, never in an external editor", async () => {
   using _setup = setup();
-  let choose: (action: string) => void = () => {
-    throw new Error("Menu not opened");
-  };
-  state.choose.mockImplementationOnce(
-    () =>
-      new Promise<string>((resolve) => {
-        choose = resolve;
-      }),
-  );
   await using screen = await renderMarkdown("[Readme](docs/readme.md)");
-  await screen.openContextMenu();
-  expect(offeredActions()).toContain("open");
-  await act(async () => {
-    state.allowed = false;
-    choose("open");
-  });
+  await activateAnchor(screen.anchor(), { ctrlKey: true });
+  expect(state.openFile).toHaveBeenCalledWith(threadRef, "docs/readme.md", undefined);
   expect(state.openEditor).not.toHaveBeenCalled();
 });
 

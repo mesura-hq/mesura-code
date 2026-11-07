@@ -9,7 +9,8 @@ interface OpenDiffFilePrimaryActionInput {
   readonly filePath: string;
   readonly activeCwd: string | undefined;
   readonly repositoryRoot?: string | undefined;
-  readonly openInEditor: (targetPath: string) => void;
+  /** Mesura passes none: without a thread there is no file panel, and no external editor opens instead. */
+  readonly openInEditor?: (targetPath: string) => void;
 }
 
 function normalizedRelativePathSegments(filePath: string): ReadonlyArray<string> | null {
@@ -96,5 +97,7 @@ export function openDiffFilePrimaryAction({
     return;
   }
 
-  openInEditor(activeCwd ? resolvePathLinkTarget(workspaceFilePath, activeCwd) : workspaceFilePath);
+  openInEditor?.(
+    activeCwd ? resolvePathLinkTarget(workspaceFilePath, activeCwd) : workspaceFilePath,
+  );
 }

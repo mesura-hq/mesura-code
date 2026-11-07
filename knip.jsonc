@@ -135,6 +135,8 @@
         "src/components/files/fileTreePathReconciliation.ts",
         "src/components/BranchToolbarEnvironmentSelector.tsx",
         "src/components/BranchToolbarEnvModeSelector.tsx",
+        // Upstream's "Open in <editor>" picker decides its visibility here; files open in this fork's own editor.
+        "src/components/chat/OpenInPicker.logic.ts",
       ],
     },
     "apps/marketing": {

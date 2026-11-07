@@ -569,10 +569,6 @@ it("modal keys seam guard: the sidebar control registers sidebar.toggle", () => 
   assertRegistersCommands("apps/web/src/components/AppSidebarLayout.tsx", ["sidebar.toggle"]);
 });
 
-it("modal keys seam guard: the open-in picker registers editor.openFavorite", () => {
-  assertRegistersCommands("apps/web/src/components/chat/OpenInPicker.tsx", ["editor.openFavorite"]);
-});
-
 it("modal keys seam guard: the pull requests page registers its panel commands", () => {
   const routeFile = "apps/web/src/routes/_chat.pull-requests.tsx";
   assert.include(

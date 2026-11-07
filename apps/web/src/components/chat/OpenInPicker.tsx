@@ -18,7 +18,6 @@ import {
   useRemoteOpenState,
 } from "../../remoteOpen";
 import { useEnvironment } from "../../state/environments";
-import { useClientSettings } from "../../hooks/useSettings";
 import { ChevronDownIcon, FolderClosedIcon, SquareArrowOutUpRightIcon } from "lucide-react";
 
 import { Group, GroupSeparator } from "../ui/group";
@@ -60,7 +59,6 @@ import {
   RustRoverIcon,
   WebStormIcon,
 } from "../JetBrainsIcons";
-import { useCommandHandlers } from "~/commands/commandRegistry";
 import { announce } from "~/lib/announce";
 import { cn, isMacPlatform, isWindowsPlatform } from "~/lib/utils";
 import { shellEnvironment } from "~/state/shell";
@@ -235,9 +233,6 @@ export const OpenInPicker = memo(function OpenInPicker({
   const canOperateHost = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const isHostEditorDenied = remote.mode === "local-exec" && !canOperateHost;
   const canOpenEditor = remote.mode !== "remote-unavailable" && !isHostEditorDenied;
-  // Mesura: every picker's favorite-editor shortcut follows the external-editor setting; its menu does not.
-  const openInExternalEditor = useClientSettings((settings) => settings.openInExternalEditor);
-  const shortcutArmed = enableShortcut && openInExternalEditor;
   const [menuOpen, setMenuOpen] = useComposerMenuState(isHostEditorDenied);
   const remoteCapableEditors = useRemoteCapableEditors();
   const [remoteHintSeen, markRemoteHintSeen] = useRemoteOpenHint();
@@ -280,14 +275,14 @@ export const OpenInPicker = memo(function OpenInPicker({
     return (await result)._tag === "Success";
   };
 
-  // Mesura: a disarmed chord shows no label, so the menu never offers a key that does nothing.
-  const openFavoriteEditorShortcutLabel = shortcutArmed
-    ? shortcutLabelForCommand(keybindings, "editor.openFavorite")
-    : null;
+  const openFavoriteEditorShortcutLabel = shortcutLabelForCommand(
+    keybindings,
+    "editor.openFavorite",
+  );
 
   const backgroundThread = use(BackgroundThreadContext);
   useEffect(() => {
-    if (!shortcutArmed || !canOpenEditor || backgroundThread) return;
+    if (!enableShortcut || !canOpenEditor || backgroundThread) return;
     const handler = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented || !isOpenFavoriteEditorShortcut(e, keybindings)) return;
       if (!openInCwd) return;
@@ -309,23 +304,14 @@ export const OpenInPicker = memo(function OpenInPicker({
   }, [
     backgroundThread,
     canOpenEditor,
+    enableShortcut,
     environmentId,
     keybindings,
     openInCwd,
     openInEditor,
     preferredEditor,
     remote.mode,
-    shortcutArmed,
   ]);
-  // Mesura: the command palette and leader keys reach the favorite editor through the registry.
-  useCommandHandlers({
-    "editor.openFavorite":
-      shortcutArmed && canOpenEditor && !backgroundThread
-        ? () => {
-            if (openInCwd && preferredEditor) void openInEditor(preferredEditor);
-          }
-        : undefined,
-  });
   // Derive after the shortcut effect to preserve the editor list's compiler cache.
   const options = resolveOpenInOptions(navigator.platform, effectiveEditors);
   const primaryOption = options.find(({ value }) => value === preferredEditor) ?? null;

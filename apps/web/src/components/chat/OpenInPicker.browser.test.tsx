@@ -1,11 +1,30 @@
-import { AuthOrchestrationOperateScope, EnvironmentId, type EditorId } from "@t3tools/contracts";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import {
+  AuthOrchestrationOperateScope,
+  EnvironmentId,
+  type EditorId,
+  type ResolvedKeybindingsConfig,
+} from "@t3tools/contracts";
 import { Cause } from "effect";
 import { AsyncResult } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { act, fakeTimers, render as renderUi } from "../../../test/render";
 import type { RemoteOpenState } from "../../remoteOpen";
+
+// Mesura: no default chord opens an external editor, so this spec binds upstream's mod+o itself.
+const DEFAULT_RESOLVED_KEYBINDINGS: ResolvedKeybindingsConfig = [
+  {
+    command: "editor.openFavorite",
+    shortcut: {
+      key: "o",
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      modKey: true,
+    },
+  },
+];
 
 const state = vi.hoisted(() => ({
   allowed: new Set<string>(),
@@ -15,7 +34,6 @@ const state = vi.hoisted(() => ({
   openUrl: vi.fn(),
   setPreferred: vi.fn(),
   markHintSeen: vi.fn(),
-  openInExternalEditor: true,
   listeners: new Set<() => void>(),
 }));
 
@@ -58,25 +76,6 @@ vi.mock(import("../../editorPreferences"), async (importOriginal) => {
     },
   };
 });
-vi.mock(import("../../hooks/useSettings"), async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
-  return {
-    ...(await importOriginal()),
-    useClientSettings: ((select: (settings: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
-      select(
-        useSyncExternalStore(
-          (listener) => {
-            state.listeners.add(listener);
-            return () => state.listeners.delete(listener);
-          },
-          () => state.openInExternalEditor,
-        )
-          ? { ...DEFAULT_CLIENT_SETTINGS, openInExternalEditor: true }
-          : DEFAULT_CLIENT_SETTINGS,
-      )) as never,
-  };
-});
 vi.mock(import("../../remoteOpen"), async (importOriginal) => ({
   ...(await importOriginal()),
   useRemoteOpenState: () => state.remote,
@@ -100,7 +99,6 @@ async function setup() {
   state.openUrl.mockReset().mockResolvedValue(true);
   state.setPreferred.mockReset();
   state.markHintSeen.mockReset();
-  state.openInExternalEditor = true;
   state.listeners.clear();
   window.localStorage.clear();
 
@@ -145,11 +143,11 @@ async function setup() {
     await act(async () => element.click());
   }
 
-  // Mesura moves editor.openFavorite to alt+o; mod+o opens the command palette.
-  async function pressOpenFavorite() {
+  async function pressOpenFavorite(mac = false) {
     const event = new KeyboardEvent("keydown", {
       key: "o",
-      altKey: true,
+      ctrlKey: !mac,
+      metaKey: mac,
       bubbles: true,
       cancelable: true,
     });
@@ -201,54 +199,6 @@ describe("host editor access", () => {
     expect(primaryButton().disabled).toBe(true);
     expect(byLabel("Choose editor").disabled).toBe(true);
     expect((await pressOpenFavorite()).defaultPrevented).toBe(false);
-  });
-});
-
-describe("external editor setting", () => {
-  it("arms the favorite-editor chord of a mounted picker only while the setting is on", async () => {
-    await using fixture = await setup();
-    const { renderPicker } = fixture;
-    state.allowed.add(selected);
-    const pressAltO = async () => {
-      const event = new KeyboardEvent("keydown", {
-        key: "o",
-        altKey: true,
-        bubbles: true,
-        cancelable: true,
-      });
-      await act(async () => document.body.dispatchEvent(event));
-      return event;
-    };
-
-    const menuShortcutLabels = async () => {
-      await fixture.click(fixture.byLabel("Choose editor"));
-      const labels = fixture.menuItems().map((item) => item.textContent ?? "");
-      await act(async () => {
-        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      });
-      return labels;
-    };
-
-    state.openInExternalEditor = false;
-    await renderPicker(editors, false, { openInCwd: "/work/project/README.md" });
-    expect((await pressAltO()).defaultPrevented).toBe(false);
-    expect(state.run).not.toHaveBeenCalled();
-    expect((await menuShortcutLabels()).some((label) => label.includes("Alt"))).toBe(false);
-    await fixture.click(fixture.byLabel("Choose editor"));
-    const editorItem = fixture.menuItems().find((item) => item.textContent?.includes("VS Code"));
-    expect(editorItem, "VS Code menu item").toBeDefined();
-    // The split button's menu picks the preferred editor; its primary button opens it.
-    await fixture.click(editorItem!);
-    expect(state.setPreferred).toHaveBeenCalledWith("vscode");
-    await fixture.click(fixture.primaryButton());
-    expect(state.run).toHaveBeenCalledTimes(1);
-    state.run.mockClear();
-
-    state.openInExternalEditor = true;
-    await renderPicker(editors, false, { openInCwd: "/work/project/README.md" });
-    expect((await menuShortcutLabels()).some((label) => label.includes("Alt"))).toBe(true);
-    expect((await pressAltO()).defaultPrevented).toBe(true);
-    expect(state.run).toHaveBeenCalledTimes(1);
   });
 });
 
