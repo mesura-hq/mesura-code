@@ -19,7 +19,6 @@ const UNRENDERED_UPSTREAM_FILES = new Set([
   "apps/web/src/components/chat/OpenInPicker.tsx",
   "apps/web/src/components/chat/OpenInPicker.logic.ts",
   "apps/web/src/components/chat/OpenInPickerShortcut.ts",
-  "apps/web/src/components/GitActionsControl.tsx",
 ]);
 
 // These open host files outside any project, so they use the host's default app.

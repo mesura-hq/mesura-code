@@ -338,13 +338,21 @@ it("removes host actions after revocation while keeping file preview and copying
   expect(state.openEditor).not.toHaveBeenCalled();
 });
 
-it("opens a Ctrl-clicked file link in the file panel, never in an external editor", async () => {
-  using _setup = setup();
-  await using screen = await renderMarkdown("[Readme](docs/readme.md)");
-  await activateAnchor(screen.anchor(), { ctrlKey: true });
-  expect(state.openFile).toHaveBeenCalledWith(threadRef, "docs/readme.md", undefined);
-  expect(state.openEditor).not.toHaveBeenCalled();
-});
+it.each([
+  { label: "a source file", href: "docs/readme.md" },
+  { label: "a PDF, which a plain click sends to the integrated browser", href: "docs/spec.pdf" },
+])(
+  "opens a Ctrl-clicked file link in the file panel, never elsewhere: $label",
+  async ({ href }) => {
+    using _setup = setup();
+    state.previewAvailable = true;
+    await using screen = await renderMarkdown(`[File](${href})`);
+    await activateAnchor(screen.anchor(), { ctrlKey: true });
+    expect(state.openFile).toHaveBeenCalledWith(threadRef, href, undefined);
+    expect(state.allocate).not.toHaveBeenCalled();
+    expect(state.openEditor).not.toHaveBeenCalled();
+  },
+);
 
 it("does not reveal a file after revocation during its workspace lookup", async () => {
   using _setup = setup();

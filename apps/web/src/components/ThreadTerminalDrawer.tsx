@@ -459,6 +459,8 @@ interface TerminalViewportProps {
   terminalLabel: string;
   cwd: string;
   worktreePath?: string | null;
+  /** Mesura: the thread's file panel root; path links resolve against `cwd`, then open relative to it. */
+  fileWorkspaceRoot?: string | undefined;
   runtimeEnv?: Record<string, string>;
   providerInstanceId?: ProviderInstanceId;
   onSessionExited: () => void;
@@ -495,6 +497,7 @@ function TerminalSessionViewport({
   terminalLabel,
   cwd,
   worktreePath,
+  fileWorkspaceRoot,
   runtimeEnv,
   providerInstanceId,
   onSessionExited,
@@ -518,9 +521,11 @@ function TerminalSessionViewport({
       isTerminalUrl(text) || readEnvironmentScope(environmentId, AuthOrchestrationOperateScope),
   );
   // Mesura: a path link opens in the file panel's editor, not in an external editor.
-  const openTerminalPath = useEffectEvent((text: string) => {
-    const target = terminalPathPanelTarget(text, cwd, worktreePath ?? cwd);
+  const openTerminalPath = useEffectEvent((text: string): boolean => {
+    const target = terminalPathPanelTarget(text, { cwd, worktreePath, fileWorkspaceRoot });
+    if (target === null) return false;
     useRightPanelStore.getState().openFile(threadRef, target.path, target.line);
+    return true;
   });
   const allocateLinkTarget = useAtomCommand(previewEnvironment.openLinkTarget, {
     reportFailure: false,
@@ -1006,7 +1011,7 @@ function TerminalSessionViewport({
           openTerminalPreviewLink(text, event.metaKey || event.ctrlKey, fallbackToBrowser);
           return;
         }
-        openTerminalPath(text);
+        if (!openTerminalPath(text)) writeSystemMessage(latestTerminal, "Unable to open path");
       }
 
       function handleData(data: string): void {
@@ -1147,6 +1152,8 @@ interface ThreadTerminalDrawerProps {
   threadId: ThreadId;
   cwd: string;
   worktreePath?: string | null;
+  /** Mesura: the thread's file panel root, which terminal path links open relative to. */
+  fileWorkspaceRoot?: string | undefined;
   runtimeEnv?: Record<string, string>;
   visible?: boolean;
   height: number;
@@ -1227,6 +1234,7 @@ function TerminalSplitPanes({
   advancedTypography,
   threadRef,
   threadId,
+  fileWorkspaceRoot,
   onAddTerminalContext,
   visible,
   keybindings,
@@ -1241,6 +1249,7 @@ function TerminalSplitPanes({
   advancedTypography: boolean;
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
+  fileWorkspaceRoot: string | undefined;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
   visible: boolean;
   keybindings: ResolvedKeybindingsConfig;
@@ -1282,6 +1291,7 @@ function TerminalSplitPanes({
                 terminalId={terminalId}
                 terminalLabel={terminalLabelById.get(terminalId) ?? "Terminal"}
                 cwd={terminalLaunchLocation.cwd}
+                fileWorkspaceRoot={fileWorkspaceRoot}
                 {...(terminalLaunchLocation.worktreePath !== undefined
                   ? { worktreePath: terminalLaunchLocation.worktreePath }
                   : {})}
@@ -1404,6 +1414,7 @@ export default function ThreadTerminalDrawer({
   threadId,
   cwd,
   worktreePath,
+  fileWorkspaceRoot,
   runtimeEnv,
   visible = true,
   height,
@@ -1860,6 +1871,7 @@ export default function ThreadTerminalDrawer({
               advancedTypography={advancedTypography}
               threadRef={threadRef}
               threadId={threadId}
+              fileWorkspaceRoot={fileWorkspaceRoot}
               onAddTerminalContext={onAddTerminalContext}
               visible={visible}
               keybindings={keybindings}

@@ -9,6 +9,7 @@ import { memo, type CSSProperties, type MouseEvent as ReactMouseEvent } from "re
 
 import { readLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
+import { shouldOpenMarkdownFileLinkInEditor } from "../../markdown-links";
 import type { markdownFileCopyPaths } from "../../markdownFileHostPath";
 import { documentIconColorForFileName } from "../../pierre-icons";
 import { ContextChip } from "../ContextChip";
@@ -284,6 +285,11 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                // Mesura: the modifier click upstream sends to an external editor opens the file panel.
+                if (canOpenInPanel && shouldOpenMarkdownFileLinkInEditor(event)) {
+                  handleOpenInFilePreview();
+                  return;
+                }
                 if (useBrowserPrimaryAction) {
                   handleOpenInBrowser();
                   return;

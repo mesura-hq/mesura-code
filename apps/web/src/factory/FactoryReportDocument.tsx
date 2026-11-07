@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import {
   factoryCriterionResultLabel,
   type FactoryReportSection,
@@ -149,13 +149,15 @@ export const FactoryReportDocument = memo(function FactoryReportDocument({
   view,
   environmentId,
   cwd,
+  threadRef,
 }: {
   view: FactoryReportView;
   environmentId: EnvironmentId;
   cwd: string | undefined;
+  threadRef?: ScopedThreadRef | undefined;
 }) {
   const { resolvedTheme } = useTheme();
-  const scope = useMemo(() => ({ environmentId, cwd }), [environmentId, cwd]);
+  const scope = useMemo(() => ({ environmentId, cwd, threadRef }), [environmentId, cwd, threadRef]);
   const sectionKeys = occurrenceKeys(view.sections.map((section) => section.heading));
 
   return (

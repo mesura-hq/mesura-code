@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import type { FactoryReportTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
 import { deriveFactoryReportCard } from "@t3tools/client-runtime/factory/report-view";
 import { splitFactoryDocument } from "@t3tools/shared/factoryDocument";
@@ -22,11 +22,14 @@ export const FactoryReportCard = memo(function FactoryReportCard({
   factoryReport,
   environmentId,
   cwd,
+  threadRef,
   onOpen,
 }: {
   factoryReport: FactoryReportTimelineItem;
   environmentId: EnvironmentId;
   cwd: string | undefined;
+  /** The thread whose file panel opens the report's file links. */
+  threadRef: ScopedThreadRef | null;
   onOpen: ((runId: string) => void) | null;
 }) {
   const { report } = factoryReport;
@@ -69,13 +72,19 @@ export const FactoryReportCard = memo(function FactoryReportCard({
         ) : (
           <>
             {card.context === null ? null : (
-              <ChatMarkdown text={card.context} cwd={cwd} environmentId={environmentId} />
+              <ChatMarkdown
+                text={card.context}
+                cwd={cwd}
+                environmentId={environmentId}
+                threadRef={threadRef ?? undefined}
+              />
             )}
             {card.built === null || card.built.bullets.length === 0 ? null : (
               <ChatMarkdown
                 text={card.built.bullets.map((bullet) => `- ${bullet}`).join("\n")}
                 cwd={cwd}
                 environmentId={environmentId}
+                threadRef={threadRef ?? undefined}
               />
             )}
           </>
