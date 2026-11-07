@@ -969,6 +969,17 @@ it("Tree diff keys fence: Alt+G with the panel closed opens the Diff surface on 
   expect(selectedMode()).toBe("Tree diff");
 });
 
+it("Open in editor fence: Alt+O opens the workspace in the file explorer", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  await mountApp();
+  expect(panelState().isOpen).toBe(false);
+
+  await pressAlt("o");
+  await waitFor(() => activeSurface()?.kind === "files");
+  expect(panelState().isOpen).toBe(true);
+});
+
 it("Tree diff keys fence: Alt+G on the Diff surface in another mode switches it to Tree diff", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
 

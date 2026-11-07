@@ -2791,8 +2791,13 @@ export default function ChatView(props: ChatViewProps) {
     "runContext.cycleMachine": chatPickerCommands["runContext.cycleMachine"],
     "runContext.toggleWorkspace": chatPickerCommands["runContext.toggleWorkspace"],
   };
+  // Mesura: upstream's favorite-editor command opened the workspace in Zed; it opens this app's explorer.
+  const openWorkspaceInFilePanel = () => {
+    if (activeThreadRef) useRightPanelStore.getState().openFile(activeThreadRef, ".");
+  };
   useCommandHandlers({
     ...mesuraPickerCommands,
+    "editor.openFavorite": openWorkspaceInFilePanel,
     "thread.copyReference": copyActiveThreadReference,
     "thread.settle": () => {
       // The chord and Vim must share capability checks, unsettle, and sidebar advancement.
@@ -2837,6 +2842,7 @@ export default function ChatView(props: ChatViewProps) {
     },
     commands: {
       ...mesuraPickerCommands,
+      "editor.openFavorite": openWorkspaceInFilePanel,
       ...terminalShortcuts,
       ...rightPanelShortcuts,
       "treeDiff.toggle": toggleTreeDiff,
