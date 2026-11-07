@@ -90,7 +90,8 @@ import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { useOpenInPreferredEditor } from "~/editorPreferences";
+import { changedFilePanelPath } from "~/filePanelPath";
+import { useRightPanelStore } from "~/rightPanelStore";
 import {
   useGitStackedAction,
   useSourceControlActionRunning,
@@ -101,13 +102,11 @@ import {
 import { useThreadProjection, useQuietThreadShell } from "~/state/entities";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useEnvironmentQuery } from "~/state/query";
-import { serverEnvironment } from "~/state/server";
 import { sourceControlEnvironment } from "~/state/sourceControl";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "~/state/vcs";
 import { randomUUID } from "~/lib/utils";
-import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
@@ -978,11 +977,6 @@ export default function GitActionsControl({
     AuthSourceControlWriteScope,
   );
   const canOperateThread = useEnvironmentScope(activeEnvironmentId, AuthOrchestrationOperateScope);
-  const serverConfig = useAtomValue(serverEnvironment.configValueAtom(activeEnvironmentId));
-  const openInPreferredEditor = useOpenInPreferredEditor(
-    activeEnvironmentId,
-    serverConfig?.availableEditors ?? [],
-  );
   const threadToastData = activeThreadRef ? { threadRef: activeThreadRef } : undefined;
   const activeServerThreadShell = useQuietThreadShell(activeThreadRef);
   const openPrLink = useOpenPrLink(activeThreadRef ?? undefined);
@@ -1498,31 +1492,16 @@ export default function GitActionsControl({
     });
   };
 
+  // Mesura: a changed file opens in the file panel; the dialog steps aside and keeps its draft.
   const openChangedFileInEditor = (filePath: string) => {
-    if (workingTreeRoot === null) {
-      toastManager.add({
-        type: "error",
-        title: "Editor opening is unavailable.",
-        data: threadToastData,
-      });
-      return;
-    }
-    const target = resolvePathLinkTarget(filePath, workingTreeRoot);
-    void (async () => {
-      const result = await openInPreferredEditor(target);
-      if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
-        return;
-      }
-      const error = squashAtomCommandFailure(result);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Unable to open file",
-          description: error instanceof Error ? error.message : "An error occurred.",
-          ...(threadToastData !== undefined ? { data: threadToastData } : {}),
-        }),
+    if (activeThreadRef === null || workingTreeRoot === null) return;
+    useRightPanelStore
+      .getState()
+      .openFile(
+        activeThreadRef,
+        changedFilePanelPath(filePath, workingTreeRoot, gitCwd ?? workingTreeRoot),
       );
-    })();
+    setIsCommitDialogOpen(false);
   };
 
   const canPublishRepository =

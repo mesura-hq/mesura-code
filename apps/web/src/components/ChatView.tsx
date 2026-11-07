@@ -240,11 +240,7 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "~/state/session";
-import {
-  primaryServerAvailableEditorsAtom,
-  primaryServerKeybindingsAtom,
-  serverEnvironment,
-} from "../state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../state/server";
 import { threadEnvironment, useThreadFamily } from "../state/threads";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
@@ -292,9 +288,6 @@ import {
   resolveScrollToEndClearance,
 } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
-import { useRemoteOpenState } from "~/remoteOpen";
-import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
-import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
 import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
@@ -1181,7 +1174,6 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().reconcileFileSurfaces(activeThreadRef, activeProject !== null);
   }, [activeEnvironmentBootstrapComplete, activeProject, activeThreadRef]);
 
-  const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
   const activeEnvironment =
     activeThread == null ? null : (environmentById.get(activeThread.environmentId) ?? null);
   const activeEnvironmentUnavailable =
@@ -1668,25 +1660,6 @@ export default function ChatView(props: ChatViewProps) {
   const scriptKeybindings =
     useAtomValue(serverEnvironment.configValueAtom(environmentId))?.keybindings ??
     DEFAULT_RESOLVED_KEYBINDINGS;
-  const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
-  const remoteOpenState = useRemoteOpenState(activeThread?.environmentId ?? environmentId);
-  // Mesura: the picker and its shortcut stay hidden unless the setting asks for them.
-  const openInExternalEditor = useClientSettings((settings) => settings.openInExternalEditor);
-  const showOpenInPicker =
-    openInExternalEditor &&
-    shouldShowOpenInPicker({
-      activeProjectName: activeProject?.title,
-      activeThreadEnvironmentId: activeThread?.environmentId ?? environmentId,
-      primaryEnvironmentId,
-      remoteOpenMode: remoteOpenState.mode,
-    });
-  useOpenFavoriteEditorShortcut({
-    enabled: showOpenInPicker && !backgroundThread,
-    environmentId: activeThread?.environmentId ?? environmentId,
-    keybindings,
-    availableEditors,
-    openInCwd: gitCwd,
-  });
   const manualCompactionProviderAvailable = hasAvailableCompactionProvider({
     providers: providerInstanceEntries,
     driverKind: selectedProvider,
@@ -2818,8 +2791,13 @@ export default function ChatView(props: ChatViewProps) {
     "runContext.cycleMachine": chatPickerCommands["runContext.cycleMachine"],
     "runContext.toggleWorkspace": chatPickerCommands["runContext.toggleWorkspace"],
   };
+  // Mesura: upstream's favorite-editor command opened the workspace in Zed; it opens this app's explorer.
+  const openWorkspaceInFilePanel = () => {
+    if (activeThreadRef) useRightPanelStore.getState().openFile(activeThreadRef, ".");
+  };
   useCommandHandlers({
     ...mesuraPickerCommands,
+    "editor.openFavorite": openWorkspaceInFilePanel,
     "thread.copyReference": copyActiveThreadReference,
     "thread.settle": () => {
       // The chord and Vim must share capability checks, unsettle, and sidebar advancement.
@@ -2864,6 +2842,7 @@ export default function ChatView(props: ChatViewProps) {
     },
     commands: {
       ...mesuraPickerCommands,
+      "editor.openFavorite": openWorkspaceInFilePanel,
       ...terminalShortcuts,
       ...rightPanelShortcuts,
       "treeDiff.toggle": toggleTreeDiff,
@@ -3313,7 +3292,6 @@ export default function ChatView(props: ChatViewProps) {
       environmentId={activeThread.environmentId}
       visible={rightPanelOpen}
       composerDraftTarget={composerDraftTarget}
-      keybindings={keybindings}
       configuredPreviewUrls={configuredPreviewUrls}
       workspaceMutationId={workspaceMutationId}
       getShortcutContext={getShortcutContextStable}
@@ -3348,7 +3326,6 @@ export default function ChatView(props: ChatViewProps) {
       files={{
         projectName: activeProject?.title ?? null,
         workspaceRoot: activeWorkspaceRoot,
-        availableEditors,
         pendingSurfaceIds: pendingFileSurfaceIds,
         onOpenFile: openFileSurfaceStable,
         onPendingChange: handleFilePendingChangeStable,
@@ -4046,16 +4023,6 @@ export default function ChatView(props: ChatViewProps) {
               activeProjectScripts={activeProject ? activeProjectScripts : undefined}
               preferredScriptId={
                 activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-              }
-              keybindings={keybindings}
-              availableEditors={availableEditors}
-              showOpenInPicker={showOpenInPicker}
-              openInShortcutEnabled={
-                !(
-                  rightPanelOpen &&
-                  renderedRightPanelSurface?.kind === "file" &&
-                  renderedRightPanelSurface.attachment === undefined
-                )
               }
               gitCwd={gitCwd}
               isGitRepo={isGitRepo}

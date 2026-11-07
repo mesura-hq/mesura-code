@@ -465,9 +465,6 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...getChangedThreadOrderSettingLabels(settings.sidebarThreadSortOrder),
     ...(settings.modalEditing !== DEFAULT_UNIFIED_SETTINGS.modalEditing ? ["Modal editing"] : []),
     ...(settings.vimMode !== DEFAULT_UNIFIED_SETTINGS.vimMode ? ["Vim mode"] : []),
-    ...(settings.openInExternalEditor !== DEFAULT_UNIFIED_SETTINGS.openInExternalEditor
-      ? ["Open in external editor"]
-      : []),
     ...(settings.updateEverythingButton !== DEFAULT_UNIFIED_SETTINGS.updateEverythingButton
       ? ["Update everything button"]
       : []),
@@ -607,7 +604,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       modalEditing: DEFAULT_UNIFIED_SETTINGS.modalEditing,
       vimMode: DEFAULT_UNIFIED_SETTINGS.vimMode,
-      openInExternalEditor: DEFAULT_UNIFIED_SETTINGS.openInExternalEditor,
       updateEverythingButton: DEFAULT_UNIFIED_SETTINGS.updateEverythingButton,
       idleCompactionEnabled: DEFAULT_UNIFIED_SETTINGS.idleCompactionEnabled,
       neovimConfigDirectory: DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory,
@@ -727,36 +723,6 @@ function VimModeRow() {
           checked={settings.vimMode}
           onCheckedChange={(checked) => updateSettings({ vimMode: Boolean(checked) })}
           aria-label="Use Vim mode across the app"
-        />
-      }
-    />
-  );
-}
-
-function OpenInExternalEditorRow() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-  return (
-    <SettingsRow
-      {...searchableSetting("open-in-external-editor")}
-      description="Show the Open in editor button in a thread's details and let the favorite-editor shortcut open Zed, VS Code or another installed editor."
-      resetAction={
-        settings.openInExternalEditor !== DEFAULT_UNIFIED_SETTINGS.openInExternalEditor ? (
-          <SettingResetButton
-            label="open in external editor"
-            onClick={() =>
-              updateSettings({
-                openInExternalEditor: DEFAULT_UNIFIED_SETTINGS.openInExternalEditor,
-              })
-            }
-          />
-        ) : null
-      }
-      control={
-        <Switch
-          checked={settings.openInExternalEditor}
-          onCheckedChange={(checked) => updateSettings({ openInExternalEditor: Boolean(checked) })}
-          aria-label="Open threads in an external editor"
         />
       }
     />
@@ -2039,7 +2005,6 @@ export function GeneralSettingsPanel() {
       <SettingsSection id="editing" title="Editing">
         <ModalEditingRow />
         <VimModeRow />
-        <OpenInExternalEditorRow />
         <NeovimConfigDirectoryRow />
         <SettingsRow
           {...searchableSetting("context-window-indicator")}

@@ -1,4 +1,4 @@
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 
 import { Spinner } from "../components/ui/spinner";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
@@ -39,20 +39,25 @@ function PaneMessage({ children }: { children: string }) {
 
 function FactoryPlanTab({
   plan,
-  environmentId,
+  threadRef,
   cwd,
 }: {
   plan: FactoryPlanTimelineItem;
-  environmentId: EnvironmentId;
+  threadRef: ScopedThreadRef;
   cwd: string | undefined;
 }) {
-  const snapshot = useFactorySnapshot(environmentId, plan.plan.digest);
+  const snapshot = useFactorySnapshot(threadRef.environmentId, plan.plan.digest);
   if (snapshot.status === "loading") return <PaneSpinner />;
   if (snapshot.status === "failed") {
     return <PaneMessage>The plan's text could not be loaded.</PaneMessage>;
   }
   return (
-    <FactoryPlanDocument markdown={snapshot.markdown} environmentId={environmentId} cwd={cwd} />
+    <FactoryPlanDocument
+      markdown={snapshot.markdown}
+      environmentId={threadRef.environmentId}
+      cwd={cwd}
+      threadRef={threadRef}
+    />
   );
 }
 
@@ -99,7 +104,14 @@ function FactoryReportTab({
     return <PaneMessage>The run's record could not be loaded.</PaneMessage>;
   }
   if (view === null) return <PaneSpinner />;
-  return <FactoryReportDocument view={view} environmentId={threadRef.environmentId} cwd={cwd} />;
+  return (
+    <FactoryReportDocument
+      view={view}
+      environmentId={threadRef.environmentId}
+      cwd={cwd}
+      threadRef={threadRef}
+    />
+  );
 }
 
 /**
@@ -178,12 +190,7 @@ export default function FactoryPane({
             <FactoryRunView key={runId} threadRef={threadRef} runId={runId} cwd={cwd} />
           ) : null
         ) : plan ? (
-          <FactoryPlanTab
-            key={plan.plan.digest}
-            plan={plan}
-            environmentId={threadRef.environmentId}
-            cwd={cwd}
-          />
+          <FactoryPlanTab key={plan.plan.digest} plan={plan} threadRef={threadRef} cwd={cwd} />
         ) : (
           <PaneMessage>No plan has been presented in this thread.</PaneMessage>
         )}

@@ -1728,6 +1728,7 @@ function FactoryReportTimelineRow({
         factoryReport={row.factoryReport}
         environmentId={ctx.activeThreadEnvironmentId}
         cwd={ctx.markdownCwd}
+        threadRef={ctx.threadRef}
         onOpen={ctx.onOpenFactoryReport}
       />
     </div>

@@ -102,7 +102,8 @@ export function useFileContextMenu(environmentId: EnvironmentId | null) {
           : revealInFileExplorerLabelForKind(serverConfig.shellRevealInFileManagerKind)
         : undefined,
     canOpenDefault: availableEditors.includes("file-manager"),
-    editorIds: availableEditors,
+    // Mesura: no "Open with" editor list; files open in Mesura Code's own editor.
+    editorIds: [],
   };
 
   const activate = async (

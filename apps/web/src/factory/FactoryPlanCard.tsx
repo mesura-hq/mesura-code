@@ -27,10 +27,12 @@ function FactoryPlanContext({
   environmentId,
   digest,
   cwd,
+  threadRef,
 }: {
   environmentId: EnvironmentId;
   digest: string;
   cwd: string | undefined;
+  threadRef: ScopedThreadRef | null;
 }) {
   const snapshot = useFactorySnapshot(environmentId, digest);
   // Keyed to the body itself: only a new plan text reparses it.
@@ -52,7 +54,14 @@ function FactoryPlanContext({
     return <p className="text-xs text-muted-foreground">The plan's text could not be loaded.</p>;
   }
   if (context === null) return null;
-  return <ChatMarkdown text={context} cwd={cwd} environmentId={environmentId} />;
+  return (
+    <ChatMarkdown
+      text={context}
+      cwd={cwd}
+      environmentId={environmentId}
+      threadRef={threadRef ?? undefined}
+    />
+  );
 }
 
 /**
@@ -169,7 +178,12 @@ export const FactoryPlanCard = memo(function FactoryPlanCard({
         </div>
       </div>
       <div className="mt-4">
-        <FactoryPlanContext environmentId={environmentId} digest={plan.digest} cwd={cwd} />
+        <FactoryPlanContext
+          environmentId={environmentId}
+          digest={plan.digest}
+          cwd={cwd}
+          threadRef={threadRef}
+        />
       </div>
       <div className="mt-4 border-t border-border/60 pt-3">
         <p className="text-xs font-medium text-muted-foreground">{summary.phaseCountLabel}</p>

@@ -36,10 +36,8 @@ interface MarkdownFileLinkProps {
   copyMarkdown: string;
   theme: "light" | "dark";
   threadRef?: ScopedThreadRef | undefined;
-  onOpen?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenInPanel: (panelPath: string, line: number | undefined) => void;
   resolveCopyPaths: () => Promise<ReturnType<typeof markdownFileCopyPaths>>;
-  openInEditorMenuLabel: string;
   onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onOpenMedia?: (() => void) | undefined;
   onReveal?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
@@ -60,63 +58,19 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   copyMarkdown,
   theme,
   threadRef,
-  onOpen,
   onOpenInPanel,
-  openInEditorMenuLabel,
   onOpenInBrowser,
   onOpenMedia,
   onReveal,
   revealLabel,
   resolveCopyPaths,
 }: MarkdownFileLinkProps) {
-  const handleOpenInEditor = () => {
-    if (!onOpen) {
-      return;
-    }
-    void (async () => {
-      try {
-        const result = await onOpen();
-        if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
-          return;
-        }
-        reportMarkdownActionFailure(
-          { operation: "open-file-in-editor", target: targetPath },
-          result.cause,
-        );
-        const error = squashAtomCommandFailure(result);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Unable to open file",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      } catch (cause) {
-        reportMarkdownActionFailure(
-          { operation: "open-file-in-editor", target: targetPath },
-          cause,
-        );
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Unable to open file",
-            description: cause instanceof Error ? cause.message : "An error occurred.",
-          }),
-        );
-      }
-    })();
-  };
-
   const handleOpenInFilePreview = () => {
     if (threadRef && panelPath) {
       onOpenInPanel(panelPath, line);
       return;
     }
-    if (onOpenMedia) {
-      onOpenMedia();
-      return;
-    }
-    handleOpenInEditor();
+    onOpenMedia?.();
   };
 
   const handleOpenInBrowser = () => {
@@ -250,7 +204,6 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
       const clicked = await api.contextMenu.show(
         [
           ...(onOpenMedia ? ([{ id: "preview-media", label: "Preview media" }] as const) : []),
-          ...(onOpen ? ([{ id: "open", label: openInEditorMenuLabel }] as const) : []),
           ...(onOpenInBrowser
             ? ([{ id: "open-in-browser", label: "Open in integrated browser" }] as const)
             : []),
@@ -262,10 +215,6 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
 
       if (clicked === "preview-media") {
         onOpenMedia?.();
-        return;
-      }
-      if (clicked === "open") {
-        handleOpenInEditor();
         return;
       }
       if (clicked === "open-in-browser") {
@@ -306,18 +255,15 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     void showFileContextMenu(position);
   };
 
-  const canOpenInEditor = onOpen !== undefined;
   const canOpenInBrowser = onOpenInBrowser !== undefined;
   const canOpenInPanel = threadRef !== undefined && Boolean(panelPath);
   const hasPrimaryAction = hasMarkdownFilePrimaryAction({
-    canOpenInEditor,
     canOpenInBrowser,
     canOpenInPanel,
     canOpenMedia: onOpenMedia !== undefined,
   });
   const useBrowserPrimaryAction = shouldUseMarkdownFileBrowserPrimaryAction({
     iconPath,
-    canOpenInEditor,
     canOpenInBrowser,
     canOpenInPanel,
   });
@@ -339,8 +285,9 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                if (onOpen && shouldOpenMarkdownFileLinkInEditor(event)) {
-                  handleOpenInEditor();
+                // Mesura: the modifier click upstream sends to an external editor opens the file panel.
+                if (canOpenInPanel && shouldOpenMarkdownFileLinkInEditor(event)) {
+                  handleOpenInFilePreview();
                   return;
                 }
                 if (useBrowserPrimaryAction) {
@@ -406,9 +353,7 @@ function areMarkdownFileLinkPropsEqual(
     previous.copyMarkdown === next.copyMarkdown &&
     previous.theme === next.theme &&
     previous.threadRef === next.threadRef &&
-    previous.onOpen === next.onOpen &&
     previous.onOpenInPanel === next.onOpenInPanel &&
-    previous.openInEditorMenuLabel === next.openInEditorMenuLabel &&
     previous.onOpenInBrowser === next.onOpenInBrowser &&
     previous.onOpenMedia === next.onOpenMedia &&
     previous.onReveal === next.onReveal &&

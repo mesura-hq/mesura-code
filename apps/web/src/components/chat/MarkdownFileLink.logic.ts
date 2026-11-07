@@ -16,17 +16,11 @@ export function canUseMarkdownFileShellActions(
 }
 
 export function hasMarkdownFilePrimaryAction(input: {
-  canOpenInEditor: boolean;
   canOpenInBrowser: boolean;
   canOpenInPanel: boolean;
   canOpenMedia?: boolean;
 }): boolean {
-  return (
-    input.canOpenInEditor ||
-    input.canOpenInBrowser ||
-    input.canOpenInPanel ||
-    input.canOpenMedia === true
-  );
+  return input.canOpenInBrowser || input.canOpenInPanel || input.canOpenMedia === true;
 }
 
 export function markdownFileCopyMenuItems({
@@ -50,13 +44,11 @@ export function markdownFileCopyMenuItems({
 
 export function shouldUseMarkdownFileBrowserPrimaryAction(input: {
   iconPath: string;
-  canOpenInEditor: boolean;
   canOpenInBrowser: boolean;
   canOpenInPanel: boolean;
 }): boolean {
   return (
     input.canOpenInBrowser &&
-    (shouldOpenMarkdownFileLinkInBrowserByDefault(input.iconPath) ||
-      (!input.canOpenInEditor && !input.canOpenInPanel))
+    (shouldOpenMarkdownFileLinkInBrowserByDefault(input.iconPath) || !input.canOpenInPanel)
   );
 }

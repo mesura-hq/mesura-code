@@ -57,7 +57,6 @@ const BRIDGED: ReadonlyArray<CommandEntry & { readonly command: KeybindingComman
   { keys: "<leader>mw", command: "workspacePicker.toggle", title: "Workspace" },
   { keys: "<leader>mb", command: "branchPicker.toggle", title: "Branch" },
   { keys: "<leader>mq", command: "question.toggleCollapse", title: "Question" },
-  { keys: "<leader>o", command: "editor.openFavorite", title: "Open in editor" },
 ];
 
 const NATIVE: ReadonlyArray<CommandEntry & { readonly command: EngineCommand }> = [

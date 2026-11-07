@@ -84,9 +84,6 @@ export function MesuraRightPanelSurfaceContent(
           projectName={files.projectName ?? ""}
           threadRef={threadRef}
           composerDraftTarget={props.composerDraftTarget}
-          keybindings={props.keybindings}
-          availableEditors={files.availableEditors}
-          openInShortcutEnabled={props.visible}
           relativePath={surface.kind === "file" ? surface.relativePath : null}
           {...(attachment ? { attachment } : {})}
           revealLine={surface.kind === "file" ? (surface.revealLine ?? null) : null}

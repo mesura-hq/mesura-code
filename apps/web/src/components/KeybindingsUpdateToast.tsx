@@ -1,6 +1,7 @@
 import { appAtomRegistry, subscribeAtomChanges } from "../rpc/atomRegistry";
 import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { primaryServerConfigAtom, primaryServerConfigEventAtom } from "../state/server";
+import { systemDefaultAppOnly } from "../systemDefaultApp";
 import { KeybindingsConfigWarning } from "./KeybindingsConfigWarning";
 import { createKeybindingsUpdateToastController } from "./KeybindingsUpdateToast.logic";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -31,7 +32,7 @@ export function startKeybindingsUpdateToasts(): () => void {
             message={decision.message}
             environmentId={appAtomRegistry.get(primaryEnvironmentIdAtom)}
             configPath={serverConfig?.keybindingsConfigPath ?? null}
-            availableEditors={serverConfig?.availableEditors ?? []}
+            availableEditors={systemDefaultAppOnly(serverConfig?.availableEditors ?? [])}
           />
         ),
       }),

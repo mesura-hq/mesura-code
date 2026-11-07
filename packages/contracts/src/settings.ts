@@ -490,13 +490,6 @@ export const ClientSettingsSchema = Schema.Struct({
    */
   vimMode: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /**
-   * Mesura: shows upstream's "Open in <editor>" picker in the thread details
-   * panel and arms its favorite-editor shortcut. Off by default, because this
-   * fork's developer edits inside Mesura Code and never opens an external
-   * editor from a thread.
-   */
-  openInExternalEditor: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  /**
    * Mesura: shows upstream's sidebar "Update everything" button. Off by default:
    * on this fork's Arch hosts pacman and global npm own the provider CLIs, and
    * Mesura ships through its own deploy scripts. Version checks keep running.
@@ -1795,7 +1788,6 @@ export const ClientSettingsPatch = Schema.Struct({
   wordWrap: Schema.optionalKey(Schema.Boolean),
   modalEditing: Schema.optionalKey(Schema.Boolean),
   vimMode: Schema.optionalKey(Schema.Boolean),
-  openInExternalEditor: Schema.optionalKey(Schema.Boolean),
   updateEverythingButton: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
   redesignEnabled: Schema.optionalKey(Schema.Boolean),

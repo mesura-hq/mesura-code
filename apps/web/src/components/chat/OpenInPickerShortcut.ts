@@ -1,4 +1,3 @@
-import { useConversationOwnsShortcuts } from "../searches/conversationShortcutOwner";
 import type { EditorId, EnvironmentId, ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { useEffect } from "react";
 
@@ -26,13 +25,11 @@ export function useOpenFavoriteEditorShortcut({
   const openInEditorMutation = useAtomCommand(shellEnvironment.openInEditor, "open in editor");
   const [preferredEditor] = usePreferredEditor(availableEditors);
   const remote = useRemoteOpenState(environmentId);
-  const ownsShortcuts = useConversationOwnsShortcuts();
 
   useEffect(() => {
     if (!enabled || remote.mode !== "local-exec") return;
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || !isOpenFavoriteEditorShortcut(event, keybindings)) return;
-      if (!ownsShortcuts()) return;
       if (!openInCwd || !preferredEditor) return;
 
       event.preventDefault();
@@ -55,7 +52,6 @@ export function useOpenFavoriteEditorShortcut({
     keybindings,
     openInCwd,
     openInEditorMutation,
-    ownsShortcuts,
     preferredEditor,
     remote.mode,
   ]);

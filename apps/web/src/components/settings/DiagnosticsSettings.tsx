@@ -23,6 +23,7 @@ import * as Option from "effect/Option";
 import { cn } from "../../lib/utils";
 import { ensureLocalApi } from "../../localApi";
 import { useOpenInPreferredEditor } from "../../editorPreferences";
+import { systemDefaultAppOnly } from "../../systemDefaultApp";
 import { useRelativeTimeState } from "../../hooks/useRelativeTimeState";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
@@ -738,7 +739,10 @@ function DiagnosticsSettingsBody() {
   const signalServerProcess = useAtomCommand(serverEnvironment.signalProcess, {
     reportFailure: false,
   });
-  const openInEditor = useOpenInPreferredEditor(environmentId, availableEditors ?? []);
+  const openInEditor = useOpenInPreferredEditor(
+    environmentId,
+    systemDefaultAppOnly(availableEditors ?? []),
+  );
   const [resourceWindowMs, setResourceWindowMs] = useState(15 * 60_000);
   const selectedResourceWindow =
     RESOURCE_HISTORY_WINDOWS.find((option) => option.windowMs === resourceWindowMs) ??

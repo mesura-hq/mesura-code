@@ -1,9 +1,7 @@
 import type {
-  EditorId,
   EnvironmentId,
   PreviewAnnotationPayload,
   ProjectId,
-  ResolvedKeybindingsConfig,
   ScopedThreadRef,
   ThreadLinkedPullRequest,
   ThreadPullRequestLink,
@@ -50,7 +48,6 @@ export interface RightPanelPullRequestProps {
 export interface RightPanelFileProps {
   readonly projectName: string | null;
   readonly workspaceRoot: string | undefined;
-  readonly availableEditors: ReadonlyArray<EditorId>;
   readonly pendingSurfaceIds: ReadonlySet<string>;
   readonly onOpenFile: (relativePath: string) => void;
   readonly onPendingChange: (relativePath: string, pending: boolean) => void;
@@ -63,7 +60,6 @@ export function RightPanelSurfaceContent(props: {
   readonly environmentId: EnvironmentId;
   readonly visible: boolean;
   readonly composerDraftTarget: ScopedThreadRef | DraftId;
-  readonly keybindings: ResolvedKeybindingsConfig;
   readonly configuredPreviewUrls: ReadonlyArray<string>;
   readonly workspaceMutationId: string | null;
   readonly getShortcutContext: () => ShortcutMatchContext;
@@ -197,9 +193,6 @@ export function RightPanelSurfaceContent(props: {
             projectName={files.projectName ?? ""}
             threadRef={threadRef}
             composerDraftTarget={props.composerDraftTarget}
-            keybindings={props.keybindings}
-            availableEditors={files.availableEditors}
-            openInShortcutEnabled={visible}
             relativePath={surface.kind === "file" ? surface.relativePath : null}
             {...(attachment ? { attachment } : {})}
             revealLine={surface.kind === "file" ? (surface.revealLine ?? null) : null}

@@ -1,14 +1,11 @@
 import { joinPath } from "@symmetria/fm-core/pane";
-import { useAtomValue } from "@effect/atom-react";
 import { DownloadIcon, CopyIcon, CheckIcon } from "lucide-react";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { Spinner } from "~/components/ui/spinner";
 import { useFileSurfacePending } from "./fileSurfacePendingStore";
 import {
   AuthPreviewOperateScope,
-  type EditorId,
   type EnvironmentId,
-  type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { filePreviewDelimiter } from "@t3tools/shared/delimitedPreview";
@@ -36,11 +33,9 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
-import { OpenInPicker } from "~/components/chat/OpenInPicker";
 import { MediaVideoPlayer } from "~/components/media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "~/components/media/MediaActions";
 import { MorphIcon } from "~/components/MorphIcon";
-import { useRemoteOpenState } from "~/remoteOpen";
 import { useClientSettings, updateClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -55,9 +50,8 @@ import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { type DraftId } from "~/composerDraftStore";
 import { assetEnvironment } from "~/state/assets";
 import { usePreviewAvailable } from "~/browser/previewRuntime";
-import { useEnvironmentHttpBaseUrl, usePrimaryEnvironmentId } from "~/state/environments";
+import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
-import { serverEnvironment } from "~/state/server";
 import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
@@ -108,9 +102,6 @@ interface FilePreviewPanelProps {
   attachment?: ChatFileAttachment;
   threadRef: ScopedThreadRef;
   composerDraftTarget: ScopedThreadRef | DraftId;
-  keybindings: ResolvedKeybindingsConfig;
-  availableEditors: ReadonlyArray<EditorId>;
-  openInShortcutEnabled: boolean;
   revealLine: number | null;
   revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
@@ -629,9 +620,6 @@ export default function FilePreviewPanel({
   attachment,
   threadRef,
   composerDraftTarget,
-  keybindings,
-  availableEditors,
-  openInShortcutEnabled,
   revealLine,
   revealRequestId,
   onOpenFile,
@@ -661,9 +649,6 @@ export default function FilePreviewPanel({
   // model, and this panel unmounts on route changes (opening Settings, switching to a thread
   // in another project), which no component survives.
   const { models, retention } = useProjectEditorModels(environmentId, cwd);
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const remoteOpenState = useRemoteOpenState(environmentId);
-  const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
   const previewAvailable = usePreviewAvailable(environmentId);
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
@@ -708,12 +693,6 @@ export default function FilePreviewPanel({
     attachment === undefined &&
     (file.isNotFile || (folderTrail !== undefined && file.data === null && file.error === null));
   const hostFolderPath = isFolder && isHostFile ? relativePath : null;
-  // A chat-linked folder reads as a file until its read settles, and revealing a
-  // folder selects it in its parent instead of opening it, so reveal waits.
-  const revealsInFileManager =
-    !isFolder &&
-    (file.data !== null || file.error !== null) &&
-    serverConfig?.shellRevealInFileManager === true;
   // Everything preview-related keys off previewPath; a folder has no preview.
   const previewPath = isFolder ? null : relativePath;
   // The explorer's open state stays in the file tree store rather than in local
@@ -956,19 +935,6 @@ export default function FilePreviewPanel({
               />
             </div>
           </ScrollArea>
-          {absolutePath &&
-          (environmentId === primaryEnvironmentId || remoteOpenState.mode !== "local-exec") ? (
-            <OpenInPicker
-              environmentId={environmentId}
-              keybindings={keybindings}
-              availableEditors={availableEditors}
-              enableShortcut={openInShortcutEnabled}
-              openInCwd={absolutePath}
-              openInCwdIsFile={file.isFile}
-              compact
-              revealFileManager={revealsInFileManager}
-            />
-          ) : null}
           {canToggleRendered && renderedMode ? (
             <FileSurfaceAction
               label={renderedToggleLabel(renderedMode, rendered)}
