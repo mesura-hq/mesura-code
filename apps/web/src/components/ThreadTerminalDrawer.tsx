@@ -58,7 +58,7 @@ import {
 } from "~/terminal/ghostty/surface";
 import { type GhosttyColor, type GhosttyTheme } from "~/terminal/ghostty/core";
 import { useRightPanelStore } from "../rightPanelStore";
-import { terminalPathPanelTarget } from "../terminalPathPanelTarget";
+import { terminalPathPanelTarget } from "../filePanelPath";
 import { isTerminalUrl } from "../terminal-links";
 import {
   isDiffToggleShortcut,

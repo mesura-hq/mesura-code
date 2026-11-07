@@ -90,7 +90,8 @@ import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { openDiffFilePrimaryAction } from "~/diffFileActions";
+import { changedFilePanelPath } from "~/filePanelPath";
+import { useRightPanelStore } from "~/rightPanelStore";
 import {
   useGitStackedAction,
   useSourceControlActionRunning,
@@ -1493,12 +1494,13 @@ export default function GitActionsControl({
 
   // Mesura: a changed file opens in the file panel; the dialog steps aside and keeps its draft.
   const openChangedFileInEditor = (filePath: string) => {
-    openDiffFilePrimaryAction({
-      threadRef: activeThreadRef,
-      filePath,
-      activeCwd: gitCwd ?? undefined,
-      repositoryRoot: workingTreeRoot ?? undefined,
-    });
+    if (activeThreadRef === null || workingTreeRoot === null) return;
+    useRightPanelStore
+      .getState()
+      .openFile(
+        activeThreadRef,
+        changedFilePanelPath(filePath, workingTreeRoot, gitCwd ?? workingTreeRoot),
+      );
     setIsCommitDialogOpen(false);
   };
 

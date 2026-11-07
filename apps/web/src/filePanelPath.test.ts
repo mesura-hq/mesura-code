@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { terminalPathPanelTarget } from "./terminalPathPanelTarget";
+import { changedFilePanelPath, terminalPathPanelTarget } from "./filePanelPath";
 
 describe("terminalPathPanelTarget", () => {
   it("opens a relative link by its workspace path, with its line", () => {
@@ -55,5 +55,19 @@ describe("terminalPathPanelTarget", () => {
       path: "/etc/hosts",
       line: undefined,
     });
+  });
+});
+
+describe("changedFilePanelPath", () => {
+  it("opens a changed file of the project by its workspace path", () => {
+    expect(changedFilePanelPath("frontend/src/app.ts", "/repo", "/repo/frontend")).toBe(
+      "src/app.ts",
+    );
+  });
+
+  it("opens a changed file beside a nested project as a host file", () => {
+    expect(changedFilePanelPath("backend/server.ts", "/repo", "/repo/frontend")).toBe(
+      "/repo/backend/server.ts",
+    );
   });
 });
