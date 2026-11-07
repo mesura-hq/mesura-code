@@ -148,7 +148,7 @@ function PendingLinkRequest(props: {
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Only a session that manages access here can answer this.
+          This device was paired without permission to manage access here. Pair it again to answer.
         </p>
       )}
       <LinkRequestDialog
