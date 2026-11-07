@@ -8,6 +8,22 @@ import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 
 type PlanRow = Extract<MessagesTimelineRow, { kind: "factory-plan" }>;
 
+/** A secret, link or browser takeover request still waiting for an answer in this thread. */
+function isPendingAgentRequestRow(row: MessagesTimelineRow): boolean {
+  if (row.kind !== "event" || row.projectedItem.visibility !== "local") return false;
+  const { item } = row.projectedItem;
+  switch (item.type) {
+    case "secret_request":
+      return item.secretStatus === "pending";
+    case "link_request":
+      return item.linkStatus === "pending";
+    case "browser_takeover_request":
+      return item.takeoverStatus === "pending";
+    default:
+      return false;
+  }
+}
+
 function newestFactoryPlanRow(rows: ReadonlyArray<MessagesTimelineRow>): PlanRow | null {
   let newest: PlanRow | null = null;
   for (const row of rows) {
@@ -41,10 +57,12 @@ export function placePendingTimelineRows(
       ? newest
       : null;
   const chronological: MessagesTimelineRow[] = [];
+  const agentRequests: MessagesTimelineRow[] = [];
   const questions: MessagesTimelineRow[] = [];
   for (const row of rows) {
     if (row.kind === "pending-user-input") questions.push(row);
+    else if (isPendingAgentRequestRow(row)) agentRequests.push(row);
     else if (row !== pendingPlan) chronological.push(row);
   }
-  return [...chronological, ...(pendingPlan ? [pendingPlan] : []), ...questions];
+  return [...chronological, ...agentRequests, ...(pendingPlan ? [pendingPlan] : []), ...questions];
 }

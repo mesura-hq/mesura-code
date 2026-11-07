@@ -63,13 +63,45 @@ const approval = (second: number, payload = makeFactoryPlanPayload()) =>
     formatPlanApprovalMessage({ ...payload, routes: FACTORY_DEFAULT_TEST_ROUTES }),
     "user",
   );
+/** An agent's request card: a secret, a link or a browser takeover. */
+const agentRequest = (
+  id: string,
+  second: number,
+  fields:
+    | { type: "secret_request"; secretStatus: "pending" | "saved" }
+    | { type: "link_request"; linkStatus: "pending" | "linked" }
+    | { type: "browser_takeover_request"; takeoverStatus: "pending" | "done" },
+): OrchestrationV2TurnItem => {
+  const {
+    messageId: _messageId,
+    text: _text,
+    attachments: _attachments,
+    streaming: _streaming,
+    type: _type,
+    ...base
+  } = message(id, second) as Extract<OrchestrationV2TurnItem, { type: "assistant_message" }>;
+  const reason = `Reason for ${id}`;
+  switch (fields.type) {
+    case "secret_request":
+      return { ...base, ...fields, label: "API key", reason };
+    case "link_request":
+      return { ...base, ...fields, reason };
+    case "browser_takeover_request":
+      return { ...base, ...fields, tabId: "login-tab", reason };
+  }
+};
 function inputFor(
   items: ReadonlyArray<OrchestrationV2TurnItem>,
   requests: PendingUserInput[] = [],
+  inheritedItemIds: ReadonlySet<string> = new Set(),
 ): MessagesTimelineRowsInput {
   return {
     timelineEntries: deriveTimelineEntriesFromVisibleTurnItems({
-      visibleTurnItems: projectFactoryTurnItems(items),
+      visibleTurnItems: projectFactoryTurnItems(items).map((projected) =>
+        inheritedItemIds.has(projected.item.id)
+          ? { ...projected, visibility: "inherited" as const }
+          : projected,
+      ),
       optimisticMessages: [],
     }),
     environmentId,
@@ -249,4 +281,55 @@ it("places pending cards after a live Factory run card", () => {
     "factory-plan",
     "pending-user-input",
   ]);
+});
+
+it("keeps pending secret, link and takeover requests at the end, before the plan and questions", () => {
+  const pendingQuestion = question("question", 5);
+  const rows = deriveMessagesTimelineRows({
+    ...inputFor(
+      [
+        message("start", 1, "Begin", "user"),
+        agentRequest("link", 2, { type: "link_request", linkStatus: "pending" }),
+        agentRequest("secret", 3, { type: "secret_request", secretStatus: "pending" }),
+        agentRequest("takeover", 4, {
+          type: "browser_takeover_request",
+          takeoverStatus: "pending",
+        }),
+        plan("plan", 5),
+        pendingQuestion.item,
+        message("tail", 6),
+      ],
+      [pendingQuestion.pending],
+    ),
+    isWorking: true,
+    activeTurnStartedAt: at(6),
+  });
+  expect(
+    rows.slice(-5).map((row) => (row.kind === "event" ? row.projectedItem.item.id : row.kind)),
+  ).toEqual(["link", "secret", "takeover", "factory-plan", "pending-user-input"]);
+});
+
+it("leaves answered requests and requests answered in another thread where they were asked", () => {
+  const rows = deriveMessagesTimelineRows(
+    inputFor(
+      [
+        message("start", 1, "Begin", "user"),
+        agentRequest("linked", 2, { type: "link_request", linkStatus: "linked" }),
+        agentRequest("saved", 3, { type: "secret_request", secretStatus: "saved" }),
+        agentRequest("done", 4, { type: "browser_takeover_request", takeoverStatus: "done" }),
+        agentRequest("inherited", 5, { type: "link_request", linkStatus: "pending" }),
+        message("tail", 6),
+      ],
+      [],
+      new Set(["inherited"]),
+    ),
+  );
+  const order = rows.flatMap((row) =>
+    row.kind === "event"
+      ? [row.projectedItem.item.id]
+      : row.kind === "message"
+        ? [row.message.text]
+        : [],
+  );
+  expect(order).toEqual(["Begin", "linked", "saved", "done", "inherited", "tail"]);
 });
