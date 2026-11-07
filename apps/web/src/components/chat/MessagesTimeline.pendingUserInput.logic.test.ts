@@ -146,3 +146,33 @@ it("retains pending projection identities through unrelated thread refreshes", (
   expect(changed).not.toBe(first);
   expect(projectRequests([])).toBe(empty);
 });
+
+it("keeps confirmed draft history visible outside folded work and pending drafts at the bottom", () => {
+  const draftReview = { title: "Email", channel: "email", fields: [], body: "Original" };
+  const item = {
+    ...requestItem,
+    status: "completed" as const,
+    draftReview,
+    questionAnswer: {
+      requestId,
+      answers: { body: "  Confirmed\n" },
+      attachmentsByQuestionId: {},
+      questionTextById: { body: "Draft text" },
+    },
+  };
+  const rows = deriveMessagesTimelineRows({
+    timelineEntries: entriesFor([userItem, item]),
+    isWorking: false,
+    turnDiffSummaries: [],
+    supportsConversationRollback: false,
+    environmentId: EnvironmentId.make("draft-environment"),
+    threadId: itemThreadId,
+    pendingUserInputs: [
+      { ...request, requestId: RuntimeRequestId.make("another-draft"), draftReview },
+    ],
+  });
+  expect(
+    rows.find((row) => row.kind === "event" && row.projectedItem.item.id === item.id),
+  ).toBeDefined();
+  expect(rows.at(-1)?.kind).toBe("pending-user-input");
+});

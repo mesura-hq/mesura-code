@@ -1,3 +1,5 @@
+import { draftReviewReply, reviewedDraft } from "@t3tools/contracts";
+import { planDraftReview } from "./DraftReviews.ts";
 import type {
   GuestShareId,
   OrchestrationV2SearchThreadInput,
@@ -518,6 +520,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "queued-run.edit":
     case "runtime-request.respond":
     case "runtime-request.delivery.fail":
+    case "draft-review.present":
+    case "draft-review.reopen":
     case "thread.user-input.dismiss":
     case "checkpoint.rollback":
     case "checkpoint.rollback.fail":
@@ -8394,6 +8398,36 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  // Mesura: editable drafts share the persisted runtime request lifecycle.
+  const dispatchDraftReview = Effect.fn("orchestrationV2.dispatchDraftReview")(function* (
+    command: Extract<
+      OrchestrationV2Command,
+      { type: "draft-review.present" | "draft-review.reopen" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const projection = yield* projectionStore
+      .getThreadRecords(command.threadId, ["turnItems", "runtimeRequests"], {
+        turnItemTypes: ["user_input_request"],
+        messageRoles: [],
+      })
+      .pipe(mapDispatchError(command));
+    const now = yield* DateTime.now;
+    const ordinal = yield* projectionStore
+      .getNextTurnItemOrdinal(command.threadId)
+      .pipe(mapDispatchError(command));
+    const planned = yield* Effect.try({
+      try: () => planDraftReview(command, projection, ordinal, now),
+      catch: (cause) =>
+        new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause,
+        }),
+    });
+    for (const event of planned) yield* emit(events, command)(event);
+  });
+
   /**
    * Mesura: records or updates a Software Factory card. The decision lives in
    * `FactoryCards.ts`; this reads the thread and emits what it returns.
@@ -8707,6 +8741,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         );
       }
 
+      if (
+        context.item?.type === "user_input_request" &&
+        context.item.draftReview &&
+        command.decision === "cancel" &&
+        answers !== undefined
+      ) {
+        const definition = context.item.draftReview;
+        yield* Effect.try({
+          try: () => reviewedDraft(definition, answers, command.decision === "cancel"),
+          catch: (cause) =>
+            new OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause,
+            }),
+        });
+      }
       const now = yield* DateTime.now;
       const resolvedRequest = {
         ...runtimeRequest,
@@ -8866,7 +8917,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           });
         }
         const replies: string[] = [];
-        for (const question of approvalTurnItem.questions) {
+        if (approvalTurnItem.draftReview) {
+          const definition = approvalTurnItem.draftReview;
+          const draft = yield* Effect.try({
+            try: () => reviewedDraft(definition, answers ?? {}),
+            catch: (cause) =>
+              new OrchestratorDispatchError({
+                commandId: command.commandId,
+                commandType: command.type,
+                cause,
+              }),
+          });
+          replies.push(draftReviewReply(draft));
+        }
+        for (const question of approvalTurnItem.draftReview ? [] : approvalTurnItem.questions) {
           // Mesura: choices with notes and exact choice values (messageModeAnswers.ts).
           const answer = messageModeAnswerText(question, answers?.[question.id]);
           if (answer === null) {
@@ -12701,6 +12765,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "prepared-run.retry":
         yield* dispatchPreparedRunRetry(command, events);
         break;
+      case "draft-review.present":
+      case "draft-review.reopen":
+        yield* dispatchDraftReview(command, events);
+        break;
       case "runtime-request.respond":
         yield* dispatchRuntimeRequestRespond(command, events, effects);
         break;
@@ -12986,6 +13054,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       Effect.filterOrFail(
         (planned) =>
           planned.events.length > 0 ||
+          command.type === "draft-review.present" ||
+          command.type === "draft-review.reopen" ||
           command.type === "thread.background-work.settle" ||
           command.type === "thread.stop" ||
           command.type === "subagent.stop" ||

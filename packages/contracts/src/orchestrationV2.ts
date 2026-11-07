@@ -1,3 +1,4 @@
+import { DraftReviewDefinition } from "./draftReview.ts";
 import { OrchestrationMessageContext } from "./composerContext.ts";
 import { withRecordIdTable } from "./orchestrationV2IdTable.ts";
 import * as DateTime from "effect/DateTime";
@@ -1642,6 +1643,8 @@ export const OrchestrationV2TurnItem = Schema.Union([
     questions: Schema.Array(OrchestrationV2UserInputQuestion),
     questionAnswer: Schema.optional(UserInputAttachmentAnswerPayload),
     responseMode: Schema.optional(Schema.Literal("message")),
+    draftReview: Schema.optional(DraftReviewDefinition),
+    draftReviewRevisedBy: Schema.optional(RuntimeRequestId),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2497,6 +2500,8 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     questions: Schema.Array(OrchestrationV2UserInputQuestion),
     questionAnswer: Schema.optional(UserInputAttachmentAnswerPayload),
     responseMode: Schema.optional(Schema.Literal("message")),
+    draftReview: Schema.optional(DraftReviewDefinition),
+    draftReviewRevisedBy: Schema.optional(RuntimeRequestId),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
@@ -2929,6 +2934,20 @@ export const OrchestrationV2StoredEventJson = Schema.Struct({
 export type OrchestrationV2StoredEventJson = typeof OrchestrationV2StoredEventJson.Type;
 
 export const OrchestrationV2Command = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("draft-review.present"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    requestKey: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+    draft: DraftReviewDefinition,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("draft-review.reopen"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    requestId: RuntimeRequestId,
+  }),
+
   Schema.Struct({
     type: Schema.Literal("thread.stop"),
     commandId: CommandId,

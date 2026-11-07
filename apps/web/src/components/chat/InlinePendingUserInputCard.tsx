@@ -57,6 +57,7 @@ export interface InlinePendingUserInputContext {
   maxFileBytes: number | null;
   focusRequestId?: RuntimeRequestId | null;
   onQuestionFocused?: () => void;
+  onDraftReopened?: (requestId: RuntimeRequestId) => void;
   unavailable: boolean;
   respondingRequestIds: ReadonlyArray<RuntimeRequestId>;
   onRespond: (requestId: RuntimeRequestId, answers: Record<string, unknown>) => Promise<boolean>;

@@ -1,4 +1,5 @@
 import {
+  draftReviewRequestId,
   type CommandId,
   type RuntimeRequestId,
   ThreadId,
@@ -83,6 +84,24 @@ const writesThread = <P extends { readonly threadId?: ThreadId | undefined }, A,
 ) => McpToolAccess.writesThreads((params: P) => [params.threadId], handle);
 
 export const layer = McpToolAccess.toLayer(ThreadToolkit, {
+  t3_draft_review: writesThread((input) =>
+    Effect.gen(function* () {
+      const { threads, projection } = yield* readThread(input.threadId);
+      const result = yield* threads
+        .dispatch({
+          type: "draft-review.present",
+          commandId: yield* newCommandId(),
+          threadId: projection.thread.id,
+          requestKey: input.requestKey,
+          draft: input.draft,
+        })
+        .pipe(Effect.mapError(dispatchFailure));
+      return {
+        sequence: result.sequence,
+        requestId: draftReviewRequestId(projection.thread.id, input.requestKey),
+      };
+    }),
+  ),
   run_scheduled_task_now: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const scheduler = yield* ScheduledTasks.ScheduledTaskService;
@@ -223,7 +242,12 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   ),
   t3_pending_request_respond: writesThread((input) =>
     Effect.gen(function* () {
-      const { threads, projection } = yield* readQuestion(input);
+      const { threads, projection, item } = yield* readQuestion(input);
+      if (item.draftReview)
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message: "Only the user can confirm a draft in the chat.",
+        });
       const result = yield* threads
         .dispatch({
           type: "runtime-request.respond",
