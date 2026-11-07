@@ -1,3 +1,4 @@
+import { PendingDraftReviewCard, DraftReviewHistoryCard } from "./DraftReviewRequestCard";
 import { useHoldFactoryPlanCardSession } from "../../factory/factoryPlanCardSession";
 import { factoryPlanRoutesKey } from "../../factory/useFactoryPlanApproval";
 import { TIMELINE_FIND_VISIBLE_CONTENT_POSITION } from "./timelineFindScrollPolicy";
@@ -673,7 +674,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   const [focusRequestId, setFocusRequestId] = useState<PendingUserInput["requestId"] | null>(null);
   const pendingContext = pendingUserInput
-    ? { ...pendingUserInput, focusRequestId, onQuestionFocused: () => setFocusRequestId(null) }
+    ? {
+        ...pendingUserInput,
+        focusRequestId,
+        onQuestionFocused: () => setFocusRequestId(null),
+        onDraftReopened: setFocusRequestId,
+      }
     : null;
   const factoryContext = {
     onOpenFactoryPlan: onOpenFactoryPlan ?? null,
@@ -731,6 +737,15 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const navigateTimeline = () => viewportRef.current?.navigate({ releasesFollow: true });
   // Mesura: the question keybinding scrolls to the first pending question and focuses it.
   useEffect(() => {
+    if (focusRequestId) {
+      const index = rows.findIndex(
+        (row) => row.kind === "pending-user-input" && row.request.requestId === focusRequestId,
+      );
+      if (index >= 0) {
+        navigateTimeline();
+        void listRef.current?.scrollToIndex({ index, animated: false, viewOffset: 24 });
+      }
+    }
     const revealQuestion = () => {
       const index = rows.findIndex((row) => row.kind === "pending-user-input");
       if (index < 0) return;
@@ -740,7 +755,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       void listRef.current?.scrollToIndex({ index, animated: false, viewOffset: 24 });
     };
     return subscribePickerAction("question", revealQuestion);
-  }, [rows, listRef, navigateTimeline]);
+  }, [rows, listRef, navigateTimeline, focusRequestId]);
   const restoreReady = restoringThreadPosition && rows.length > 0;
   // Z: syncs LegendList's scroll position with which thread it shows. The list
   // is not keyed per thread and reports no "new data" event, and the restore
@@ -1482,7 +1497,29 @@ function PendingUserInputRow({
   request: Extract<MessagesTimelineRow, { kind: "pending-user-input" }>["request"];
 }) {
   const context = use(PendingUserInputCtx);
-  return context ? <InlinePendingUserInputCard request={request} context={context} /> : null;
+  if (!context) return null;
+  return request.draftReview ? (
+    <PendingDraftReviewCard
+      request={{ ...request, draftReview: request.draftReview }}
+      context={context}
+    />
+  ) : (
+    <InlinePendingUserInputCard request={request} context={context} />
+  );
+}
+
+function DraftAwareEventRow({ row }: { row: Extract<TimelineRow, { kind: "event" }> }) {
+  const context = use(PendingUserInputCtx);
+  const item = row.projectedItem.item;
+  if (item.type === "user_input_request" && item.draftReview && context)
+    return (
+      <DraftReviewHistoryCard
+        item={{ ...item, draftReview: item.draftReview }}
+        visibility={row.projectedItem.visibility}
+        context={context}
+      />
+    );
+  return <V2EventTimelineRow row={row} />;
 }
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
@@ -1567,7 +1604,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "mcp-app" ? <McpAppTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
-      {row.kind === "event" ? <V2EventTimelineRow row={row} /> : null}
+      {row.kind === "event" ? <DraftAwareEventRow row={row} /> : null}
     </div>
   );
 });

@@ -1,4 +1,5 @@
 import {
+  DraftReviewDefinition,
   OrchestratorMcpEnvironmentTarget,
   ScheduledTaskId,
   ScheduledTask,
@@ -347,7 +348,21 @@ const ScheduledTaskRunTool = Tool.make("run_scheduled_task_now", {
   .annotate(Tool.Destructive, true)
   .annotate(Tool.OpenWorld, true);
 
+const DraftReviewTool = Tool.make("t3_draft_review", {
+  ...commandTool,
+  description:
+    "Present an editable draft at the bottom of the chat. Use channel email, whatsapp, slack, or any custom channel. Fields describe editable metadata (recipient, subject, chat, workspace, channel). Returns immediately. Wait for the user's confirmation message before continuing with the draft. Confirmation supplies the exact edited text; it does not send or publish it or grant permission to do so. Reuse requestKey only to retry the same draft. Never answer this request yourself.",
+  success: Schema.Struct({ sequence: NonNegativeInt, requestId: RuntimeRequestId }),
+  parameters: Schema.Struct({
+    environmentId: OrchestratorMcpEnvironmentTarget,
+    threadId: Schema.optional(ThreadId),
+    requestKey: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+    draft: DraftReviewDefinition,
+  }),
+});
+
 export const ThreadToolkit = Toolkit.make(
+  DraftReviewTool,
   ScheduledTaskRunTool,
   ThreadSearchTool,
   ThreadForkTool,

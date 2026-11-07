@@ -19,7 +19,6 @@ import { usePendingUserInputDraftStore } from "../../pendingUserInputDraftStore"
 import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import {
   clearQuestionAttachmentDraft,
-  questionAttachmentDraftId,
   questionAttachmentDraftPrefix,
   useQuestionAttachmentPreparation,
 } from "../../questionAttachments";
@@ -81,42 +80,38 @@ export function useMesuraPendingThreadRequests(input: {
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   // oxlint-disable-next-line t3code/react-effect-budget -- prunes external draft stores when the server's pending set changes; no handler owns that change
   useEffect(() => {
-    if (!activeThread) return;
+    // Reload can expose a non-null cached projection that predates a revision.
+    // Absence is not resolution: only explicit terminal requests can erase saved edits.
+    if (!activeThread || serverProjection === null) return;
     const questionThread = activeThread;
-    const currentRequests = pendingUserInputs;
-    // Answer drafts of requests that are no longer pending are dropped with their files.
-    const requestIds = new Set<string>(currentRequests.map((request) => request.requestId));
+    const resolvedRequestIds = new Set<string>(
+      serverProjection.runtimeRequests
+        .filter((request) => request.status !== "pending")
+        .map((request) => request.id),
+    );
     for (const key of Object.keys(usePendingUserInputDraftStore.getState().requests)) {
       const [draftEnvironmentId, draftThreadId, requestId] = JSON.parse(key);
       if (
         draftEnvironmentId === environmentId &&
         draftThreadId === questionThread.id &&
-        !requestIds.has(requestId)
+        resolvedRequestIds.has(requestId)
       )
         usePendingUserInputDraftStore.getState().clear(key);
     }
     const prefix = questionAttachmentDraftPrefix(environmentId, questionThread.id);
-    const retained = new Set(
-      currentRequests.flatMap((request) =>
-        request.questions.map((question) =>
-          questionAttachmentDraftId(
-            environmentId,
-            questionThread.id,
-            request.requestId,
-            question.id,
-          ),
-        ),
-      ),
+    const resolvedAttachmentPrefixes = [...resolvedRequestIds].map(
+      (requestId) =>
+        `${prefix}${encodeURIComponent(`${JSON.stringify([requestId]).slice(0, -1)},`)}`,
     );
     const keys = new Set([
       ...Object.keys(useComposerDraftStore.getState().draftsByThreadKey),
       ...Object.keys(useQuestionAttachmentPreparation.getState().counts),
     ]);
     for (const key of keys) {
-      if (key.startsWith(prefix) && !retained.has(DraftId.make(key)))
+      if (resolvedAttachmentPrefixes.some((resolvedPrefix) => key.startsWith(resolvedPrefix)))
         clearQuestionAttachmentDraft(DraftId.make(key));
     }
-  }, [environmentId, activeThread, pendingUserInputs]);
+  }, [environmentId, activeThread, serverProjection]);
   const onRespondToApproval = async (
     requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,
@@ -319,7 +314,7 @@ export function useMesuraPendingThreadRequests(input: {
   // Mesura: the in-feed question cards' shared state (ADR-007). A request that cannot be
   // resumed, or a scope that no longer allows operating the thread, makes them read-only.
   const inlinePendingUserInput = (() =>
-    activeThreadId && pendingUserInputs.length > 0
+    activeThreadId
       ? {
           environmentId,
           threadId: activeThreadId,

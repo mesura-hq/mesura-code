@@ -1,3 +1,4 @@
+import { draftReviewQuestions } from "@t3tools/contracts";
 import { act, fakeTimers, render as renderBrowser, type Screen } from "../test/render";
 /**
  * Entry point: AppRoot with its memory router, real ChatView, MessagesTimeline,
@@ -187,8 +188,9 @@ async function setupBrowserFixture0() {
   const container = document.createElement("div");
   document.body.append(container);
 
-  async function mountApp({ discardMountTimers = false } = {}) {
+  async function mountApp({ discardMountTimers = false, deferProjection = false } = {}) {
     publishFenceThreadProjection(fixture.projection!, environmentId);
+    if (deferProjection) appRootFence.threadStates.delete(threadId);
     const route = createRootRoute({
       component: () => (
         <SidebarProvider>
@@ -966,3 +968,161 @@ it("a fine pointer keeps one tap from the attach button to the file dialog", asy
   // The press must not take focus from the composer's editor.
   expect(pointerDowns.map((event) => event.defaultPrevented)).toEqual([true]);
 });
+
+it("edits a real draft card, keeps it across remount, and retries the exact reply", async () => {
+  await using fixtureScope = await setupBrowserFixture0();
+  const draft = {
+    title: "Slack draft",
+    channel: "slack",
+    fields: [{ id: "channel", label: "Canal", value: "#propuestas", required: true }],
+    body: "Original",
+  };
+  fixture.projection = {
+    ...fixture.projection!,
+    runtimeRequests: fixture.projection!.runtimeRequests.map((request) => ({
+      ...request,
+      responseCapability: { type: "message" as const },
+    })),
+    turnItems: fixture.projection!.turnItems.map((item) =>
+      item.type === "user_input_request"
+        ? {
+            ...item,
+            draftReview: draft,
+            questions: draftReviewQuestions(draft),
+            responseMode: "message" as const,
+          }
+        : item,
+    ),
+  };
+  await using first = await fixtureScope.mountApp();
+  const card = first.getByRole("region", { name: "Draft: Slack draft" });
+  await expect
+    .element(card.getByRole("textbox", { name: "Texto del draft" }))
+    .toHaveValue("Original");
+  const text = "  Hola 🙂\n\nEdición exacta.  ";
+  await userEvent.fill(card.getByRole("textbox", { name: "Texto del draft" }), text);
+  await userEvent.fill(card.getByRole("textbox", { name: "Canal", exact: true }), "#revisión");
+  await first.unmount();
+  await using second = await fixtureScope.mountApp();
+  await expect.element(second.getByRole("textbox", { name: "Texto del draft" })).toHaveValue(text);
+  fixture.respond.mockResolvedValueOnce({
+    _tag: "Failure",
+    cause: { _tag: "Fail", error: new Error("Disconnected") },
+  } as never);
+  await userEvent.click(second.getByRole("button", { name: "Usar este texto" }));
+  await expect.element(second.getByRole("button", { name: "Reintentar" })).toBeEnabled();
+  await userEvent.click(second.getByRole("button", { name: "Reintentar" }));
+  expect(fixture.respond).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({ answers: { body: text, "field:channel": "#revisión" } }),
+    }),
+  );
+  await expect.element(second.getByRole("textbox", { name: "Texto del draft" })).toHaveValue(text);
+});
+
+it("keeps saved answers while the shell loads before the request projection", async () => {
+  await using fixtureScope = await setupBrowserFixture0();
+  const key = JSON.stringify([environmentId, threadId, requestId]);
+  usePendingUserInputDraftStore
+    .getState()
+    .update(key, FENCE_USER_INPUT_QUESTIONS[0]!, { text: "Saved before reload" });
+  await using _screen = await fixtureScope.mountApp({ deferProjection: true });
+  expect(usePendingUserInputDraftStore.getState().requests[key]?.answers.scope?.customAnswer).toBe(
+    "Saved before reload",
+  );
+  await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+  await vi.waitFor(() =>
+    expect(fixtureScope.questionField("scope")?.value).toBe("Saved before reload"),
+  );
+});
+
+it("keeps revision edits across a non-null stale projection and clears only resolved requests", async () => {
+  await using fixtureScope = await setupBrowserFixture0();
+  const draft = { title: "Reopened draft", channel: "slack", fields: [], body: "" };
+  const previous = makeFenceUserInput({
+    threadId,
+    requestId,
+    createdAt: now,
+    questions: draftReviewQuestions(draft),
+    responseMode: "message",
+  });
+  const stale = {
+    ...fixture.projection!,
+    runtimeRequests: [{ ...previous.request, status: "cancelled" as const }],
+    turnItems: [{ ...previous.item, draftReview: draft, status: "cancelled" as const }],
+  };
+  const revision = makeFenceUserInput({
+    threadId,
+    requestId: `${requestId}:revision`,
+    createdAt: now,
+    questions: draftReviewQuestions(draft),
+    responseMode: "message",
+  });
+  const latest = {
+    ...stale,
+    runtimeRequests: [...stale.runtimeRequests, revision.request],
+    turnItems: [...stale.turnItems, { ...revision.item, draftReview: draft }],
+  };
+  fixture.projection = latest;
+  await using first = await fixtureScope.mountApp();
+  await userEvent.fill(first.getByRole("textbox", { name: "Texto del draft" }), "RELOAD SENTINEL");
+  await first.unmount();
+  fixture.projection = stale;
+  await using second = await fixtureScope.mountApp();
+  const key = JSON.stringify([environmentId, threadId, revision.request.id]);
+  expect(usePendingUserInputDraftStore.getState().requests[key]?.answers.body?.customAnswer).toBe(
+    "RELOAD SENTINEL",
+  );
+  await act(async () => publishFenceThreadProjection(latest, environmentId));
+  await expect
+    .element(second.getByRole("textbox", { name: "Texto del draft" }))
+    .toHaveValue("RELOAD SENTINEL");
+  await act(async () =>
+    publishFenceThreadProjection(
+      {
+        ...latest,
+        runtimeRequests: latest.runtimeRequests.map((request) => ({
+          ...request,
+          status: "resolved" as const,
+        })),
+      },
+      environmentId,
+    ),
+  );
+  await vi.waitFor(() =>
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined(),
+  );
+});
+
+it.each([
+  { visibility: "inherited" as const, sourceThreadId: ThreadId.make("source"), canReopen: false },
+  { visibility: "local" as const, sourceThreadId: ThreadId.make("source"), canReopen: false },
+  { visibility: "local" as const, sourceThreadId: threadId, canReopen: true },
+])(
+  "reopens history only for a local draft in the current thread ($visibility, $sourceThreadId)",
+  async ({ visibility, sourceThreadId, canReopen }) => {
+    await using fixtureScope = await setupBrowserFixture0();
+    const draft = { title: "History draft", channel: "slack", fields: [], body: "Saved text" };
+    const item = { ...questionItem(), threadId: sourceThreadId, draftReview: draft };
+    fixture.projection = {
+      ...fixture.projection!,
+      runtimeRequests: [],
+      turnItems: sourceThreadId === threadId ? [item] : [],
+      visibleTurnItems: [{ position: 0, visibility, sourceThreadId, sourceItemId: item.id, item }],
+    };
+    await using screen = await fixtureScope.mountApp();
+    const history = screen.getByRole("region", { name: "Draft: History draft" });
+    await expect.element(history).toBeVisible();
+    const reopen = history.getByRole("button", { name: "Volver a editar" });
+    if (canReopen) {
+      await userEvent.click(reopen);
+      expect(fixture.noopCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input: expect.objectContaining({ type: "draft-review.reopen", threadId, requestId }),
+        }),
+      );
+    } else {
+      await expect.element(reopen).not.toBeInTheDocument();
+    }
+  },
+);

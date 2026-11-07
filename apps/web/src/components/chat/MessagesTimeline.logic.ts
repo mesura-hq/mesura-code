@@ -2271,21 +2271,41 @@ function deriveMessagesTimelineRowsWithPending(
   input: Parameters<typeof deriveMessagesTimelineRowsWithoutPending>[0],
 ): MessagesTimelineRow[] {
   const requests = input.pendingUserInputs ?? [];
-  if (requests.length === 0 || !input.environmentId || !input.threadId)
+  if (!input.environmentId || !input.threadId)
     return deriveMessagesTimelineRowsWithoutPending(input);
   const byId = new Map<string, PendingUserInput>(
     requests.map((request) => [request.requestId, request]),
   );
+  const historyRows: MessagesTimelineRow[] = [];
   const activityTimes = new Map<string, string>();
   const timelineEntries = input.timelineEntries.filter((entry) => {
     if (entry.kind !== "work") return true;
     const requestId = pendingRequestIdOfWorkEntry(entry.entry);
     const request = requestId === null ? undefined : byId.get(requestId);
-    if (!request) return true;
+    if (!request) {
+      const projectedItem = entry.entry.projectedItem;
+      if (projectedItem?.item.type === "user_input_request" && projectedItem.item.draftReview) {
+        historyRows.push({
+          kind: "event",
+          id: entry.id,
+          createdAt: entry.createdAt,
+          projectedItem,
+        });
+        return false;
+      }
+      return true;
+    }
     activityTimes.set(request.requestId, entry.createdAt);
     return false;
   });
   const rows = deriveMessagesTimelineRowsWithoutPending({ ...input, timelineEntries });
+  for (const row of historyRows) {
+    const index = rows.findIndex(
+      (entry) => entry.createdAt !== null && entry.createdAt > row.createdAt!,
+    );
+    if (index < 0) rows.push(row);
+    else rows.splice(index, 0, row);
+  }
   for (const request of byId.values()) {
     const row: MessagesTimelineRow = {
       kind: "pending-user-input",
