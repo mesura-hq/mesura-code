@@ -15,6 +15,19 @@ becomes an attachment when inserting it would exceed the message limit. On a
 hardware keyboard, use `Cmd+Shift+V` on Apple devices or `Ctrl+Shift+V` elsewhere
 to keep a large paste editable in the composer instead.
 
+## Review a draft
+
+Ask the agent to present an editable draft with `t3_draft_review`. The draft stays
+below the conversation beside pending questions. Edit its text and metadata in
+place. Email, WhatsApp and Slack have channel icons. Other channels use the same
+editor with custom fields.
+
+Confirming gives the agent the exact edited version. It does not send or publish
+the message. Edits survive a reload in the same browser. A confirmed version
+stays in the conversation. Reopen it to create a new revision without changing
+the version the agent already received. Discarding keeps the draft available to
+reopen and does not deliver its text to the agent.
+
 ## Formatting
 
 The composer writes Markdown and shows it styled as you type. Markers such as

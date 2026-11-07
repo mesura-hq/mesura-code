@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import { draftReviewRequestId, SourceControlProviderKind } from "@t3tools/contracts";
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
@@ -1185,6 +1185,128 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
         (yield* outbox.listByCommandId(nextCommandId)).map((effect) => effect.request.type),
         ["provider-turn.start"],
       );
+    }),
+  );
+
+  it.effect("keeps draft revisions durable and delivers exact confirmed text once", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-draft");
+      const requestId = draftReviewRequestId(threadId, "runtime-draft-request");
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-draft"),
+        createdBy: "user",
+        creationSource: "web",
+        threadId,
+        projectId: ProjectId.make("draft-project"),
+        title: "Draft",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: process.cwd(),
+      });
+      const draft = {
+        title: "Email",
+        channel: "email",
+        fields: [
+          { id: "to", label: "To", value: "test@example.com", required: true },
+          { id: "subject", label: "Subject", value: "Original" },
+        ],
+        body: "Original body",
+      };
+      const present = {
+        type: "draft-review.present" as const,
+        commandId: CommandId.make("present-draft"),
+        threadId,
+        requestKey: "runtime-draft-request",
+        draft,
+      };
+      yield* orchestrator.dispatch(present);
+      yield* orchestrator.dispatch({
+        ...present,
+        commandId: CommandId.make("retry-present-draft"),
+      });
+      assert.equal((yield* orchestrator.getThreadProjection(threadId)).runtimeRequests.length, 1);
+      const invalid = yield* orchestrator
+        .dispatch({
+          type: "runtime-request.respond",
+          commandId: CommandId.make("blank-draft"),
+          threadId,
+          requestId,
+          answers: { body: "  ", "field:to": "test@example.com", "field:subject": "" },
+        })
+        .pipe(Effect.result);
+      assert.equal(invalid._tag, "Failure");
+      assert.equal(
+        (yield* orchestrator.getThreadProjection(threadId)).runtimeRequests[0]?.status,
+        "pending",
+      );
+      const answers = {
+        body: "  Hola 👋\n\nTexto editado.\n",
+        "field:to": " changed@example.com ",
+        "field:subject": "",
+      };
+      const confirm = {
+        type: "runtime-request.respond" as const,
+        commandId: CommandId.make("confirm-draft"),
+        threadId,
+        requestId,
+        answers,
+      };
+      const accepted = yield* orchestrator.dispatch(confirm);
+      assert.equal((yield* orchestrator.dispatch(confirm)).sequence, accepted.sequence);
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      assert.deepEqual(projection.runtimeRequests[0]?.answers, answers);
+      assert.equal(projection.messages.length, 1);
+      const text = projection.messages[0]!.text;
+      const delivered = JSON.parse(text.slice(text.indexOf("\n") + 1));
+      assert.equal(delivered.body, answers.body);
+      assert.equal(delivered.fields[0].value, answers["field:to"]);
+      assert.equal(delivered.fields[1].value, "");
+      const reopen = {
+        type: "draft-review.reopen" as const,
+        commandId: CommandId.make("reopen-draft"),
+        threadId,
+        requestId,
+      };
+      yield* orchestrator.dispatch(reopen);
+      yield* orchestrator.dispatch({ ...reopen, commandId: CommandId.make("retry-reopen-draft") });
+      const reopened = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(reopened.runtimeRequests.length, 2);
+      const revision = reopened.turnItems.find(
+        (item) => item.type === "user_input_request" && item.requestId !== requestId,
+      );
+      assert.equal(revision?.type, "user_input_request");
+      if (revision?.type !== "user_input_request") return;
+      assert.equal(revision.draftReview?.body, answers.body);
+      assert.equal(revision.draftReview?.fields[0]?.value, answers["field:to"]);
+      yield* orchestrator.dispatch({
+        type: "runtime-request.respond",
+        commandId: CommandId.make("dismiss-draft"),
+        threadId,
+        requestId: revision.requestId,
+        decision: "cancel",
+        answers: { body: "", "field:to": "", "field:subject": "Changed before discard" },
+      });
+      assert.equal((yield* orchestrator.getThreadProjection(threadId)).messages.length, 1);
+      yield* orchestrator.dispatch({
+        type: "draft-review.reopen",
+        commandId: CommandId.make("reopen-dismissed"),
+        threadId,
+        requestId: revision.requestId,
+      });
+      const afterDiscard = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(afterDiscard.runtimeRequests.length, 3);
+      const latestDraft = afterDiscard.turnItems.findLast(
+        (item) => item.type === "user_input_request",
+      );
+      if (latestDraft?.type === "user_input_request") {
+        assert.equal(latestDraft.draftReview?.body, "");
+        assert.equal(latestDraft.draftReview?.fields[0]?.value, "");
+        assert.equal(latestDraft.draftReview?.fields[1]?.value, "Changed before discard");
+      }
     }),
   );
 

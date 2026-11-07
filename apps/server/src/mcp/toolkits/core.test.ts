@@ -1,3 +1,8 @@
+import {
+  draftReviewQuestions,
+  draftReviewRequestId,
+  type OrchestrationV2ServerCommand,
+} from "@t3tools/contracts";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -915,3 +920,92 @@ it.effect("only the caller that prepared a pending upload can discard it", () =>
     ),
   ),
 );
+
+it.effect("registers draft review for agents and refuses agent confirmation", () => {
+  const shell = McpToolAccessTestkit.liveThreadShell(threadId);
+  const projection = McpToolAccessTestkit.idleThreadProjection(shell);
+  const draft = { title: "Slack reply", channel: "slack", fields: [], body: "Original" };
+  const requestId = draftReviewRequestId(threadId, "reply");
+  const commands: OrchestrationV2ServerCommand[] = [];
+  return Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const call = (name: string, args: object) =>
+      server
+        .callTool({ name, arguments: args })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        );
+    const result = yield* call("t3_draft_review", { requestKey: "reply", draft });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({ sequence: 1, requestId });
+    expect(commands).toMatchObject([
+      { type: "draft-review.present", threadId, requestKey: "reply", draft },
+    ]);
+    const denied = yield* call("t3_pending_request_respond", {
+      requestId,
+      answers: { body: "Self-approved" },
+    });
+    expect(declaredFailure(denied)).toMatchObject({
+      code: "invalid_request",
+      message: "Only the user can confirm a draft in the chat.",
+    });
+    expect(commands).toHaveLength(1);
+  }).pipe(
+    Effect.provide(
+      layerThreadToolkit.pipe(
+        Layer.provideMerge(McpServer.McpServer.layer),
+        Layer.provide(NodeCrypto.layer),
+        Layer.provide(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: () => Effect.succeed(shell),
+            getProjectThreadRecords: () =>
+              Effect.succeed({
+                ...projection,
+                runtimeRequests: [
+                  {
+                    id: requestId,
+                    nodeId: NodeId.make("draft-node"),
+                    providerTurnId: null,
+                    nativeRequestRef: null,
+                    kind: "user_input",
+                    status: "pending",
+                    responseCapability: { type: "message" },
+                    createdAt: shell.createdAt,
+                    resolvedAt: null,
+                  },
+                ],
+                turnItems: [
+                  {
+                    id: TurnItemId.make("draft-item"),
+                    threadId,
+                    runId: null,
+                    nodeId: null,
+                    providerThreadId: null,
+                    providerTurnId: null,
+                    nativeItemRef: null,
+                    parentItemId: null,
+                    ordinal: 0,
+                    status: "waiting",
+                    title: "Draft",
+                    startedAt: shell.createdAt,
+                    completedAt: null,
+                    updatedAt: shell.updatedAt,
+                    type: "user_input_request",
+                    requestId,
+                    questions: draftReviewQuestions(draft),
+                    draftReview: draft,
+                    responseMode: "message",
+                  },
+                ],
+              }),
+            dispatch: (command) => {
+              commands.push(command);
+              return Effect.succeed({ sequence: 1, storedEvents: [] });
+            },
+          }),
+        ),
+      ),
+    ),
+  );
+});

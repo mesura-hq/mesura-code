@@ -1,3 +1,4 @@
+import type { DraftReviewDefinition } from "@t3tools/contracts";
 import type {
   EnvironmentId,
   ThreadId,
@@ -80,6 +81,7 @@ export interface ThreadPendingUserInput {
   readonly questions: ReadonlyArray<ThreadUserInputQuestion>;
   readonly responseCapability: OrchestrationV2RuntimeRequest["responseCapability"]["type"];
   readonly responseMode?: "message";
+  readonly draftReview?: DraftReviewDefinition;
   readonly dismissible: boolean;
 }
 
@@ -244,6 +246,7 @@ export function derivePendingThreadRequests(
           multiSelect: question.multiSelect ?? false,
         })),
         responseCapability,
+        ...(item.draftReview ? { draftReview: item.draftReview } : {}),
         dismissible: item.responseMode === "message" || responseCapability === "message",
         ...(item.responseMode === "message" || responseCapability === "message"
           ? { responseMode: "message" as const }
