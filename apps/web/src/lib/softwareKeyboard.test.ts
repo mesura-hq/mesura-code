@@ -214,7 +214,7 @@ describe("software keyboard detection", () => {
       unsubscribe();
     });
 
-    it("ends the closing state when the keyboard closes a little below the old height", () => {
+    it("records an unfocused shrink after a dismissal as the new closed height", () => {
       const { store, state, resizeLayout } = layoutFixture({
         touchOnly: true,
         editableFocused: true,
@@ -228,6 +228,40 @@ describe("software keyboard detection", () => {
       state.editableFocused = true;
       resizeLayout(490);
       expect(store.getSnapshot()).toBe(false);
+      unsubscribe();
+    });
+
+    it("keeps the closed height when a refocus interrupts a dismissal", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(390, 844);
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      state.editableFocused = false;
+      resizeLayout(260, 844);
+      expect(store.getSnapshot()).toBe(false);
+      state.editableFocused = true;
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("keeps the closed height through dismissal frames near it", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(560);
+      state.editableFocused = false;
+      resizeLayout(700);
+      resizeLayout(730);
+      state.editableFocused = true;
+      resizeLayout(590);
+      expect(store.getSnapshot()).toBe(true);
       unsubscribe();
     });
 

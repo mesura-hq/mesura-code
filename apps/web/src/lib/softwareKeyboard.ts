@@ -27,8 +27,9 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
   const closedHeightByWidth = new Map<number, number>();
   if (win) closedHeightByWidth.set(win.innerWidth, win.innerHeight);
   let open = false;
-  // A keyboard still closing after blur reports heights that must not lower the closed one.
-  let closingAfterBlur = false;
+  // While a keyboard closes after blur its heights only grow and never lower the closed height.
+  // An unfocused shrink is a window change instead (split screen) and records the new height.
+  let lastClosingHeight: number | null = null;
   // Rotating while the keyboard is open reaches a width with no closed height yet.
   let openAtUnknownWidth: { width: number; height: number } | null = null;
 
@@ -36,10 +37,10 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
     win?.matchMedia?.("(pointer: coarse)").matches === true &&
     isEditable(win.document?.activeElement);
 
-  // The height counts as closed again: near the closed height, or well above the open one.
+  // The height counts as closed again: back at the closed height, or well above the open one.
   const closureReached = (width: number, height: number) => {
     const closedHeight = closedHeightByWidth.get(width);
-    if (closedHeight !== undefined) return closedHeight - height <= KEYBOARD_THRESHOLD;
+    if (closedHeight !== undefined) return height >= closedHeight;
     if (openAtUnknownWidth?.width !== width) return true;
     return height - openAtUnknownWidth.height > KEYBOARD_THRESHOLD;
   };
@@ -53,16 +54,24 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
     if (!win) return false;
     const { innerWidth: width, innerHeight: height } = win;
     if (!keyboardCanShow()) {
-      if (open) closingAfterBlur = true;
-      if (closingAfterBlur && closureReached(width, height)) closingAfterBlur = false;
-      if (!closingAfterBlur) recordClosed(width, height);
-      else if (openAtUnknownWidth?.width === width) {
-        openAtUnknownWidth.height = Math.min(openAtUnknownWidth.height, height);
+      if (open) lastClosingHeight = Number.NEGATIVE_INFINITY;
+      if (
+        lastClosingHeight === null ||
+        height < lastClosingHeight ||
+        closureReached(width, height)
+      ) {
+        lastClosingHeight = null;
+        recordClosed(width, height);
+      } else {
+        lastClosingHeight = height;
+        if (openAtUnknownWidth?.width === width) {
+          openAtUnknownWidth.height = Math.min(openAtUnknownWidth.height, height);
+        }
       }
       open = false;
       return open;
     }
-    closingAfterBlur = false;
+    lastClosingHeight = null;
     const closedHeight = closedHeightByWidth.get(width);
     if (closedHeight === undefined) {
       if (openAtUnknownWidth?.width === width) {
