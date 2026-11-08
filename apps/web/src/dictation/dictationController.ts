@@ -430,29 +430,17 @@ function startLevelPolling() {
   }, LEVEL_POLL_INTERVAL_MS);
 }
 
-/** One warning per recording: a later long hide updates it until the user closes it. */
-let silenceWarning: { readonly sessionId: string; readonly toastId: string } | null = null;
-
 function warnMicrophoneMayHaveStopped(hiddenMs: number) {
   const { session } = useDictationSessionStore.getState();
   if (!session) return;
-  const warning = {
-    type: "warning" as const,
+  toastManager.add({
+    // One warning per recording: base-ui updates an open toast with this id, else adds it again.
+    id: `dictation-silence-${session.sessionId}`,
+    type: "warning",
     title: "Part of this recording may be silent",
     description: `The screen was off or Mesura Code was in the background for ${formatHiddenDuration(hiddenMs)}. Android cuts the microphone about a minute after that, so what you said later was probably not recorded.`,
     timeout: 0,
-  };
-  if (silenceWarning?.sessionId === session.sessionId) {
-    toastManager.update(silenceWarning.toastId, warning);
-    return;
-  }
-  const toastId = toastManager.add({
-    ...warning,
-    onClose: () => {
-      if (silenceWarning?.toastId === toastId) silenceWarning = null;
-    },
   });
-  silenceWarning = { sessionId: session.sessionId, toastId };
 }
 
 function guardScreenForRecording() {
