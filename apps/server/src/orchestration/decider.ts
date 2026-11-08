@@ -206,6 +206,29 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   return plannedEvents;
 });
 
+/** A deleted thread keeps no voice history, so it accepts no voice command. */
+const requireLiveVoiceThread = (
+  readModel: OrchestrationReadModel,
+  command: Extract<
+    OrchestrationCommand,
+    {
+      type: "thread.voice-call.start" | "thread.voice-transcript.append" | "thread.voice-call.end";
+    }
+  >,
+) =>
+  requireThread({ readModel, command, threadId: command.threadId }).pipe(
+    Effect.flatMap((thread) =>
+      thread.deletedAt === null
+        ? Effect.void
+        : Effect.fail(
+            new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Thread '${command.threadId}' is deleted for command '${command.type}'.`,
+            }),
+          ),
+    ),
+  );
+
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
@@ -2208,6 +2231,53 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [unsettledEvent, activityAppendedEvent];
+    }
+
+    // Mesura: voice history. Each command records one thread event and nothing else: no
+    // message, activity, turn or session change. The voice HTTP routes own call invariants.
+    case "thread.voice-call.start": {
+      yield* requireLiveVoiceThread(readModel, command);
+      const { type: _type, commandId: _commandId, ...payload } = command;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.startedAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.voice-call-started",
+        payload,
+      };
+    }
+
+    case "thread.voice-transcript.append": {
+      yield* requireLiveVoiceThread(readModel, command);
+      const { type: _type, commandId: _commandId, ...payload } = command;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.appendedAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.voice-transcript-appended",
+        payload,
+      };
+    }
+
+    case "thread.voice-call.end": {
+      yield* requireLiveVoiceThread(readModel, command);
+      const { type: _type, commandId: _commandId, ...payload } = command;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.endedAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.voice-call-ended",
+        payload,
+      };
     }
 
     default: {

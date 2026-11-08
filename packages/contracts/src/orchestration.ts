@@ -27,6 +27,11 @@ import {
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { FactoryRunShellSummary } from "./factory.ts";
 import {
+  VoiceCallEndedPayload,
+  VoiceCallStartedPayload,
+  VoiceTranscriptAppendedPayload,
+} from "./voiceConversation.ts";
+import {
   PullRequestActor,
   PullRequestChecksState,
   PullRequestMergeability,
@@ -1573,6 +1578,25 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
   stack: Schema.NullOr(ThreadPullRequestStack),
 });
 
+// Mesura: voice history. Only the owner-checked voice HTTP routes dispatch these.
+const ThreadVoiceCallStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.voice-call.start"),
+  commandId: CommandId,
+  ...VoiceCallStartedPayload.fields,
+});
+
+const ThreadVoiceTranscriptAppendCommand = Schema.Struct({
+  type: Schema.Literal("thread.voice-transcript.append"),
+  commandId: CommandId,
+  ...VoiceTranscriptAppendedPayload.fields,
+});
+
+const ThreadVoiceCallEndCommand = Schema.Struct({
+  type: Schema.Literal("thread.voice-call.end"),
+  commandId: CommandId,
+  ...VoiceCallEndedPayload.fields,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadAutoSettleCommand,
   ThreadPullRequestSyncCommand,
@@ -1591,6 +1615,9 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTitleRefineCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
+  ThreadVoiceCallStartCommand,
+  ThreadVoiceTranscriptAppendCommand,
+  ThreadVoiceCallEndCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1634,6 +1661,9 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.voice-call-started",
+  "thread.voice-transcript-appended",
+  "thread.voice-call-ended",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -2116,6 +2146,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.voice-call-started"),
+    payload: VoiceCallStartedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.voice-transcript-appended"),
+    payload: VoiceTranscriptAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.voice-call-ended"),
+    payload: VoiceCallEndedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

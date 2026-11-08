@@ -6,6 +6,7 @@ import type {
   VoiceConversationPreferences,
 } from "@t3tools/contracts";
 import { voiceSpeakingInstructions } from "@t3tools/shared/voice-conversation-prompts";
+import * as Context from "effect/Context";
 
 export interface CreateVoiceSessionInput extends VoiceConversationPreferences {
   readonly sessionId: string;
@@ -19,6 +20,15 @@ export interface CreateVoiceSessionInput extends VoiceConversationPreferences {
   readonly context: string;
 }
 
+/** Why the server, not the owner, ended a live call. */
+export type VoiceSessionServerEndReason = "expired" | "max-duration";
+
+export interface VoiceSessionServerEnd {
+  readonly sessionId: string;
+  readonly ownerId: string;
+  readonly reason: VoiceSessionServerEndReason;
+}
+
 export interface VoiceSessionManagerOptions {
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
@@ -26,8 +36,18 @@ export interface VoiceSessionManagerOptions {
   readonly maxDurationMs?: number;
   readonly heartbeatLeaseMs?: number;
   readonly sweepIntervalMs?: number;
-  readonly scheduleSweep?: (sweep: () => void, intervalMs: number) => () => void;
+  /** A sweep resolves after the server-side ends it started are recorded. */
+  readonly scheduleSweep?: (sweep: () => Promise<void>, intervalMs: number) => () => void;
+  /** Records a call the server ended at the heartbeat lease or the 15-minute limit. */
+  readonly onServerEnd?: (end: VoiceSessionServerEnd) => Promise<void>;
+  /** Runs at the end of every sweep, with or without live sessions, e.g. to retry records. */
+  readonly onSweep?: () => Promise<void>;
 }
+
+/** Manager overrides for the voice HTTP layer. Production uses the defaults. */
+export const VoiceSessionManagerConfig = Context.Reference<
+  Omit<VoiceSessionManagerOptions, "onServerEnd" | "onSweep">
+>("t3/voice/VoiceSessionManagerConfig", { defaultValue: () => ({}) });
 
 export class VoiceSessionError extends Error {
   readonly status: number;
@@ -210,8 +230,9 @@ export function createVoiceSessionManager(
     session.closing = true;
   };
 
-  const sweep = (): void => {
+  const sweep = async (): Promise<void> => {
     const timestamp = now();
+    const serverEnds: Array<Promise<void>> = [];
     for (const session of sessions.values()) {
       if (
         !session.closing &&
@@ -219,6 +240,17 @@ export function createVoiceSessionManager(
           timestamp - session.heartbeatAt >= heartbeatLeaseMs)
       ) {
         beginClosing(session);
+        if (session.creationSettled && session.providerId && options.onServerEnd) {
+          serverEnds.push(
+            options
+              .onServerEnd({
+                sessionId: session.sessionId,
+                ownerId: session.ownerId,
+                reason: timestamp - session.startedAt >= maxDurationMs ? "max-duration" : "expired",
+              })
+              .catch(() => undefined),
+          );
+        }
       }
       if (!session.closing || !session.creationSettled) continue;
       if (!session.providerId || session.providerClosed) {
@@ -236,11 +268,13 @@ export function createVoiceSessionManager(
         void hangup(session).catch(() => undefined);
       }
     }
+    await Promise.all(serverEnds);
+    await options.onSweep?.().catch(() => undefined);
   };
   const stopSweep =
     options.scheduleSweep?.(sweep, sweepIntervalMs) ??
     (() => {
-      const sweepTimer = NodeTimers.setInterval(sweep, sweepIntervalMs);
+      const sweepTimer = NodeTimers.setInterval(() => void sweep(), sweepIntervalMs);
       sweepTimer.unref();
       return () => NodeTimers.clearInterval(sweepTimer);
     })();

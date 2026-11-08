@@ -79,6 +79,7 @@ import {
   WORKTREE_SETUP_ACTIVITY_KIND,
   worktreeSetupActivityId,
   type WorktreeSetupSnapshot,
+  isVoiceHistoryEventType,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -999,11 +1000,14 @@ const makeWsRpcLayer = (
         events: ReadonlyArray<ShellEvent>,
       ): Effect.Effect<ReadonlyArray<OrchestrationShellStreamEvent>, never, never> =>
         Effect.gen(function* () {
-          if (events.length === 0) {
+          // Mesura: voice history never changes a shell summary. Drop it before coalescing so
+          // a voice batch cannot replace a real work update for the same thread.
+          const summaryEvents = events.filter((event) => !isVoiceHistoryEventType(event.type));
+          if (summaryEvents.length === 0) {
             return [];
           }
           const latestByAggregate = new Map<string, ShellEvent>();
-          for (const event of events) {
+          for (const event of summaryEvents) {
             latestByAggregate.set(`${event.aggregateKind}:${event.aggregateId}`, event);
           }
           const survivors = Array.from(latestByAggregate.values()).sort(

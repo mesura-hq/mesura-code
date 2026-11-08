@@ -109,6 +109,12 @@ export function applyThreadDetailEvent(
     case "project.deleted":
       return { kind: "unchanged" };
 
+    // Mesura: voice history has its own paginated routes and never changes thread detail.
+    case "thread.voice-call-started":
+    case "thread.voice-transcript-appended":
+    case "thread.voice-call-ended":
+      return { kind: "unchanged" };
+
     // ── Thread lifecycle ────────────────────────────────────────────
     case "thread.created":
       return {

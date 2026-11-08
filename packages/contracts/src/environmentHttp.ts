@@ -50,8 +50,17 @@ import {
   VoiceConversationCreateInput,
   VoiceConversationCreateResult,
   VoiceConversationHttpErrors,
+  VoiceConversationEndInput,
   VoiceConversationSessionInput,
   VoiceConversationSettings,
+  VoiceCallListParams,
+  VoiceCallListQuery,
+  VoiceCallPage,
+  VoiceTranscriptAppendInput,
+  VoiceTranscriptAppendResult,
+  VoiceTranscriptListParams,
+  VoiceTranscriptListQuery,
+  VoiceTranscriptPage,
 } from "./voiceConversation.ts";
 import {
   RelayCloudEnvironmentHealthRequest,
@@ -665,8 +674,36 @@ class EnvironmentVoiceHttpApi extends HttpApiGroup.make("voice")
   .add(
     HttpApiEndpoint.post("end", "/api/voice/sessions/end", {
       headers: OptionalBearerHeaders,
-      payload: VoiceConversationSessionInput,
+      payload: VoiceConversationEndInput,
       success: VoiceConversationAcknowledgement,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  // Mesura: persisted voice history. Appends need orchestration:operate and the call's owner;
+  // reads need orchestration:read and never touch the live audio session.
+  .add(
+    HttpApiEndpoint.post("appendTranscript", "/api/voice/sessions/transcript", {
+      headers: OptionalBearerHeaders,
+      payload: VoiceTranscriptAppendInput,
+      success: VoiceTranscriptAppendResult,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("listCalls", "/api/voice/threads/:threadId/calls", {
+      headers: OptionalBearerHeaders,
+      params: VoiceCallListParams,
+      payload: VoiceCallListQuery,
+      success: VoiceCallPage,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("listFragments", "/api/voice/threads/:threadId/calls/:callId/fragments", {
+      headers: OptionalBearerHeaders,
+      params: VoiceTranscriptListParams,
+      payload: VoiceTranscriptListQuery,
+      success: VoiceTranscriptPage,
       error: VoiceConversationErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}

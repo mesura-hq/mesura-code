@@ -5,11 +5,10 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   type AuthEnvironmentScope,
-  EnvironmentAuthenticatedAuth,
-  EnvironmentAuthenticatedPrincipal,
   EnvironmentHttpApi,
   type OrchestrationThreadDetailSnapshot,
   type EnvironmentSessionPrincipalShape,
+  VoiceConversationError,
 } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -18,7 +17,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Etag from "effect/unstable/http/Etag";
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
@@ -26,6 +24,8 @@ import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { voiceConversationHttpApiLayer } from "./http.ts";
+import { VoiceHistory, type VoiceHistoryShape } from "./VoiceHistory.ts";
+import { makeVoiceTestAuthLayer } from "./voiceHttp.testFixtures.ts";
 
 const THREAD_ID = "thread-under-test";
 const API_KEY = `sk-${"test-key-".repeat(4)}`;
@@ -83,20 +83,15 @@ const principalsByToken: Readonly<Record<string, EnvironmentSessionPrincipalShap
   },
 };
 
-const authLayer = Layer.succeed(EnvironmentAuthenticatedAuth, ((httpEffect) =>
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const token = request.headers.authorization?.replace(/^Bearer /, "") ?? "";
-    const principal: EnvironmentSessionPrincipalShape = principalsByToken[token] ?? {
+const authLayer = makeVoiceTestAuthLayer(
+  (token) =>
+    principalsByToken[token] ?? {
       sessionId: `session-${token}` as EnvironmentSessionPrincipalShape["sessionId"],
       subject: "voice-http-test",
       method: "bearer-access-token",
       scopes: new Set(scopesByToken[token] ?? []),
-    };
-    return yield* httpEffect.pipe(
-      Effect.provideService(EnvironmentAuthenticatedPrincipal, principal),
-    );
-  })) as EnvironmentAuthenticatedAuth["Service"]);
+    },
+);
 
 const makeThreadSnapshot = (deletedAt: string | null = null) =>
   ({
@@ -110,7 +105,21 @@ const makeThreadSnapshot = (deletedAt: string | null = null) =>
     },
   }) as unknown as OrchestrationThreadDetailSnapshot;
 
+// Accepts every call start and end, so ownership here is the live session manager's. A test
+// overrides one operation to exercise a history failure.
+const acceptingVoiceHistory: VoiceHistoryShape = {
+  assertCanStart: () => Effect.void,
+  start: () => Effect.void,
+  end: () => Effect.void,
+  endByServer: () => Effect.void,
+  retryPendingServerEnds: Effect.void,
+  append: () => Effect.die("Not used by voice session HTTP tests."),
+  listCalls: () => Effect.die("Not used by voice session HTTP tests."),
+  listFragments: () => Effect.die("Not used by voice session HTTP tests."),
+};
+
 interface HarnessOptions {
+  readonly history?: Partial<VoiceHistoryShape>;
   readonly initialApiKey?: string;
   readonly threadSnapshot?: () => Option.Option<OrchestrationThreadDetailSnapshot>;
   readonly fetch?: typeof fetch;
@@ -141,6 +150,8 @@ const withHandler = <A>(
   } as unknown as ProjectionSnapshotQuery["Service"]);
   const routesLayer = HttpApiBuilder.layer(VoiceTestApi).pipe(
     Layer.provide(voiceConversationHttpApiLayer),
+    // These routes test the live session; persisted history has its own suite.
+    Layer.provide(Layer.succeed(VoiceHistory, { ...acceptingVoiceHistory, ...options.history })),
     Layer.provide(authLayer),
     Layer.provide(secretStoreLayer),
     Layer.provide(snapshotQueryLayer),
@@ -489,5 +500,61 @@ describe("voice conversation HTTP routes", () => {
       expect(ownerEnd.status).toBe(200);
       expect(providerFetch).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it.effect("VH-HT1 a history failure on end still hangs up the owner's audio first", () => {
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      if (init?.method === "POST" && String(input) === "https://api.openai.com/v1/live/sessions") {
+        return new Response(
+          JSON.stringify({
+            session: { id: "provider-session" },
+            transport: { sdp: "v=0\\r\\nanswer" },
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(null, { status: 204 });
+    });
+    const storageFailure = new VoiceConversationError({
+      status: 502,
+      message: "The voice history could not be saved or read. Try again.",
+    });
+    return withHandler(
+      {
+        initialApiKey: API_KEY,
+        fetch: providerFetch,
+        history: {
+          end: () => Effect.fail(storageFailure),
+        },
+      },
+      async (environment) => {
+        const created = await call(
+          environment,
+          post("/api/voice/sessions", createPayload, "operate"),
+        );
+        expect(created.status).toBe(200);
+
+        // The live session rejects a foreign client before the history is read: no hangup.
+        const otherEnd = await call(
+          environment,
+          post("/api/voice/sessions/end", { sessionId: SESSION_ID }, "operate-other"),
+        );
+        expect(otherEnd.status).toBe(404);
+        expect(providerFetch).toHaveBeenCalledTimes(1);
+
+        const ownerEnd = await call(
+          environment,
+          post("/api/voice/sessions/end", { sessionId: SESSION_ID, lastSequence: 2 }, "operate"),
+        );
+        expect(ownerEnd.status).toBe(502);
+        expect(await ownerEnd.text()).toContain("could not be saved or read");
+        expect(providerFetch).toHaveBeenCalledTimes(2);
+        const heartbeat = await call(
+          environment,
+          post("/api/voice/sessions/heartbeat", { sessionId: SESSION_ID }, "operate"),
+        );
+        expect(heartbeat.status).toBe(404);
+      },
+    );
   });
 });

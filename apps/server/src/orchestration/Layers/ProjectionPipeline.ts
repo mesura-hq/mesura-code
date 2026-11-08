@@ -3,6 +3,7 @@ import {
   isImportedAgentSessionMessageId,
   UserInputAttachmentAnswerPayload,
   type ChatAttachment,
+  isVoiceHistoryEventType,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
@@ -37,6 +38,8 @@ import {
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import * as ProjectionThreadPullRequests from "../../persistence/ProjectionThreadPullRequests.ts";
+import { ProjectionVoiceCallRepository } from "../../persistence/Services/ProjectionVoiceCalls.ts";
+import { ProjectionVoiceCallRepositoryLive } from "../../persistence/Layers/ProjectionVoiceCalls.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import {
   type ProjectionTurn,
@@ -74,6 +77,8 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadTurns: "projection.thread-turns",
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
+  // Mesura: persisted voice call history.
+  voiceCalls: "projection.voice-calls",
 } as const;
 
 type ProjectorName =
@@ -141,6 +146,10 @@ function isStalePendingApprovalFailureDetail(detail: string | null): boolean {
 
 // A refresh reads each persisted summary source, so skip activities that cannot change the result.
 function shouldRefreshThreadShellSummary(event: OrchestrationEvent): boolean {
+  // Mesura: voice history batches never change a shell summary.
+  if (isVoiceHistoryEventType(event.type)) {
+    return false;
+  }
   if (event.type !== "thread.activity-appended") {
     return true;
   }
@@ -485,6 +494,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadRepository = yield* ProjectionThreadRepository;
     const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
+    const projectionVoiceCallRepository = yield* ProjectionVoiceCallRepository;
     const projectionThreadPullRequestRepository =
       yield* ProjectionThreadPullRequests.ProjectionThreadPullRequestRepository;
     const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
@@ -1949,6 +1959,50 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
     });
 
+    // Mesura: voice history rows. A recreated or deleted thread drops its calls; a revert keeps
+    // them, since a call is a record of the conversation rather than of the workspace.
+    const applyVoiceCallsProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyVoiceCallsProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "thread.created":
+        case "thread.deleted":
+          yield* projectionVoiceCallRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          return;
+
+        case "thread.voice-call-started":
+          yield* projectionVoiceCallRepository.insertCall({
+            callId: event.payload.callId,
+            threadId: event.payload.threadId,
+            ownerKey: event.payload.ownerKey,
+            startedAt: event.payload.startedAt,
+          });
+          return;
+
+        case "thread.voice-transcript-appended":
+          yield* projectionVoiceCallRepository.appendFragments({
+            callId: event.payload.callId,
+            batchId: event.payload.batchId,
+            fragments: event.payload.fragments,
+          });
+          return;
+
+        case "thread.voice-call-ended":
+          yield* projectionVoiceCallRepository.markEnded({
+            callId: event.payload.callId,
+            reason: event.payload.reason,
+            endedAt: event.payload.endedAt,
+            finalSequence: event.payload.lastSequence,
+          });
+          return;
+
+        default:
+          return;
+      }
+    });
+
     const projectors: ReadonlyArray<ProjectorDefinition> = [
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.projects,
@@ -1985,6 +2039,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threads,
         apply: applyThreadsProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.voiceCalls,
+        apply: applyVoiceCallsProjection,
       },
     ];
 
@@ -2213,6 +2271,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
+  Layer.provideMerge(ProjectionVoiceCallRepositoryLive),
   Layer.provideMerge(ProjectionThreadPullRequests.layer),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),

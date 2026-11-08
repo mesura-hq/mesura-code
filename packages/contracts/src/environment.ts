@@ -171,6 +171,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       servers from before the hosts dock, so clients show "needs update" for them
       rather than subscribing to a method they do not have. */
   hostStats: Schema.optionalKey(Schema.Boolean),
+  /** Mesura: server persists spoken voice call transcripts and serves them over the voice
+      history routes. Absent on older servers, which keep no history -- treat absence as false. */
+  voiceHistory: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

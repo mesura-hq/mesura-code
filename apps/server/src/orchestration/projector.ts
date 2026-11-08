@@ -55,6 +55,9 @@ import {
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  VoiceCallEndedPayload,
+  VoiceCallStartedPayload,
+  VoiceTranscriptAppendedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -1071,6 +1074,26 @@ export function projectEvent(
             }),
           };
         }),
+      );
+
+    // Mesura: voice history lives in its own projection. The read model only advances, so
+    // captions never become messages, work, or latest-turn state.
+    case "thread.voice-call-started":
+      return decodeForEvent(VoiceCallStartedPayload, event.payload, event.type, "payload").pipe(
+        Effect.as(nextBase),
+      );
+
+    case "thread.voice-transcript-appended":
+      return decodeForEvent(
+        VoiceTranscriptAppendedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(Effect.as(nextBase));
+
+    case "thread.voice-call-ended":
+      return decodeForEvent(VoiceCallEndedPayload, event.payload, event.type, "payload").pipe(
+        Effect.as(nextBase),
       );
 
     default:

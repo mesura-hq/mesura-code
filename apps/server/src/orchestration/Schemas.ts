@@ -30,6 +30,9 @@ import {
   ThreadApprovalResponseRequestedPayload as ContractsThreadApprovalResponseRequestedPayloadSchema,
   ThreadCheckpointRevertRequestedPayload as ContractsThreadCheckpointRevertRequestedPayloadSchema,
   ThreadSessionStopRequestedPayload as ContractsThreadSessionStopRequestedPayloadSchema,
+  VoiceCallEndedPayload as ContractsVoiceCallEndedPayloadSchema,
+  VoiceCallStartedPayload as ContractsVoiceCallStartedPayloadSchema,
+  VoiceTranscriptAppendedPayload as ContractsVoiceTranscriptAppendedPayloadSchema,
 } from "@t3tools/contracts";
 
 // Server-internal alias surface, backed by contract schemas as the source of truth.
@@ -70,3 +73,8 @@ export const ThreadApprovalResponseRequestedPayload =
 export const ThreadCheckpointRevertRequestedPayload =
   ContractsThreadCheckpointRevertRequestedPayloadSchema;
 export const ThreadSessionStopRequestedPayload = ContractsThreadSessionStopRequestedPayloadSchema;
+
+// Mesura: voice history.
+export const VoiceCallStartedPayload = ContractsVoiceCallStartedPayloadSchema;
+export const VoiceTranscriptAppendedPayload = ContractsVoiceTranscriptAppendedPayloadSchema;
+export const VoiceCallEndedPayload = ContractsVoiceCallEndedPayloadSchema;

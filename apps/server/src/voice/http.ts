@@ -15,7 +15,12 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { failEnvironmentNotFound, requireEnvironmentScope } from "../auth/http.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { createVoiceSessionManager, VoiceSessionError } from "./VoiceSessionManager.ts";
+import { VoiceHistory } from "./VoiceHistory.ts";
+import {
+  createVoiceSessionManager,
+  VoiceSessionError,
+  VoiceSessionManagerConfig,
+} from "./VoiceSessionManager.ts";
 
 const SECRET_NAME = "voice-openai-api-key";
 const noCache = HttpEffect.appendPreResponseHandler((_request, response) =>
@@ -53,13 +58,36 @@ const requireVoiceOwner = Effect.gen(function* () {
   return voiceOwnerId(principal);
 });
 
+/** History reads need orchestration:read. The identity only marks the requester's own calls. */
+const requireVoiceReader = Effect.gen(function* () {
+  const principal = yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+  return voiceOwnerId(principal);
+});
+
 export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "voice",
   Effect.fnUntraced(function* (handlers) {
     const secrets = yield* ServerSecretStore;
     const snapshots = yield* ProjectionSnapshotQuery;
-    const sessions = createVoiceSessionManager({});
+    const history = yield* VoiceHistory;
+    const historyServices = yield* Effect.context<VoiceHistory>();
+    const sessions = createVoiceSessionManager({
+      ...(yield* VoiceSessionManagerConfig),
+      // The sweep ended a live call: record why, so its owner can still bound pending text.
+      // An end the store rejects stays pending in the history and is retried by every sweep.
+      onServerEnd: ({ sessionId, ownerId, reason }) =>
+        Effect.runPromiseWith(historyServices)(
+          history
+            .endByServer({ callId: sessionId, ownerId, reason })
+            .pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("voice call end is pending until storage accepts it", { cause }),
+              ),
+            ),
+        ),
+      onSweep: () => Effect.runPromiseWith(historyServices)(history.retryPendingServerEnds),
+    });
     yield* Effect.addFinalizer(() => Effect.promise(() => sessions.close()));
 
     const readKey = Effect.gen(function* () {
@@ -124,6 +152,8 @@ export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
               status: 400,
               message: "Add an OpenAI API key in Voice settings before starting a call.",
             });
+          const call = { threadId: payload.threadId, callId: payload.sessionId, ownerId };
+          yield* history.assertCanStart(call);
           const thread = snapshot.value.thread;
           const context = [
             `Selected thread: ${thread.title}. Mode: ${payload.mode}.`,
@@ -140,10 +170,21 @@ export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
           ]
             .join("\n")
             .slice(0, 12_000);
-          return yield* Effect.tryPromise({
+          const created = yield* Effect.tryPromise({
             try: () => sessions.create({ ...payload, apiKey, ownerId, context }),
             catch: safeError,
           });
+          // A call nobody can find in the history is not left running.
+          yield* history
+            .start(call)
+            .pipe(
+              Effect.tapError(() =>
+                Effect.promise(() =>
+                  sessions.end(payload.sessionId, ownerId).catch(() => undefined),
+                ),
+              ),
+            );
+          return created;
         }),
       )
       .handle(
@@ -163,11 +204,67 @@ export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("voice.end")(function* ({ payload }) {
           yield* noCache;
           const ownerId = yield* requireVoiceOwner;
-          yield* Effect.tryPromise({
+          // The live session checks the owner first: a foreign client's 404 ends the request
+          // before any hangup or history write. The owner's audio closes even when the history
+          // then rejects the final boundary or cannot be written; that history error is the
+          // response, and a failed cleanup is reported only when the history succeeded.
+          const cleanupFailure = yield* Effect.tryPromise({
             try: () => sessions.end(payload.sessionId, ownerId),
             catch: safeError,
+          }).pipe(
+            Effect.as(Option.none<VoiceConversationError>()),
+            Effect.catchIf(
+              (error) => error.status !== 404,
+              (error) => Effect.succeed(Option.some(error)),
+            ),
+          );
+          yield* history.end({
+            callId: payload.sessionId,
+            ownerId,
+            lastSequence: payload.lastSequence,
           });
+          if (Option.isSome(cleanupFailure)) return yield* cleanupFailure.value;
           return { ok: true };
+        }),
+      )
+      .handle(
+        "appendTranscript",
+        Effect.fn("voice.appendTranscript")(function* ({ payload }) {
+          yield* noCache;
+          const ownerId = yield* requireVoiceOwner;
+          return yield* history.append({
+            callId: payload.sessionId,
+            ownerId,
+            batchId: payload.batchId,
+            fragments: payload.fragments,
+          });
+        }),
+      )
+      .handle(
+        "listCalls",
+        Effect.fn("voice.listCalls")(function* ({ params, payload }) {
+          yield* noCache;
+          const requesterOwnerId = yield* requireVoiceReader;
+          return yield* history.listCalls({
+            threadId: params.threadId,
+            requesterOwnerId,
+            limit: payload.limit,
+            cursor: payload.cursor,
+          });
+        }),
+      )
+      .handle(
+        "listFragments",
+        Effect.fn("voice.listFragments")(function* ({ params, payload }) {
+          yield* noCache;
+          const requesterOwnerId = yield* requireVoiceReader;
+          return yield* history.listFragments({
+            threadId: params.threadId,
+            callId: params.callId,
+            requesterOwnerId,
+            limit: payload.limit,
+            afterSequence: payload.afterSequence,
+          });
         }),
       );
   }),

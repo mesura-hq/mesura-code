@@ -2230,6 +2230,28 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("VH-W1 the composed server routes voice history reads through VoiceHistory", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const missingThread = yield* fetchEffect(
+        yield* getHttpServerUrl("/api/voice/threads/thread-voice-missing/calls"),
+        { headers: { cookie } },
+      );
+      const body = yield* responseJsonEffect<{ readonly message?: string }>(missingThread);
+      // The history service answers, not the router: a typed voice error, never cached.
+      assert.equal(missingThread.status, 404);
+      assert.equal(body.message, "That voice call is unavailable.");
+      assert.equal(missingThread.headers["cache-control"], "no-store");
+
+      const oversizedPage = yield* fetchEffect(
+        yield* getHttpServerUrl("/api/voice/threads/thread-voice-missing/calls?limit=1000"),
+        { headers: { cookie } },
+      );
+      assert.equal(oversizedPage.status, 400);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("compresses large JSON responses through the composed routes", () =>
     Effect.gen(function* () {
       const descriptor = {
@@ -10962,6 +10984,153 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(first?.kind, "thread-removed");
       assert.equal(first?.kind === "thread-removed" ? first.threadId : null, goneThreadId);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  // Mesura: voice history batches never refetch or broadcast the sidebar summary. They are
+  // dropped before coalescing, so a voice batch cannot win over a real work update.
+  const voiceShellTestEvent = (
+    sequence: number,
+    threadId: ThreadId,
+    type: "thread.message-sent" | "thread.voice-transcript-appended" | "thread.created",
+  ): OrchestrationEvent =>
+    ({
+      sequence,
+      eventId: EventId.make(`event-voice-shell-${sequence}`),
+      aggregateKind: "thread",
+      aggregateId: threadId,
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      type,
+      payload: {} as never,
+    }) as OrchestrationEvent;
+
+  it.effect("VH-S1 subscribeShell replay drops voice-only events before coalescing", () =>
+    Effect.gen(function* () {
+      const workThreadId = ThreadId.make("thread-voice-shell-work");
+      const voiceOnlyThreadId = ThreadId.make("thread-voice-shell-only");
+      const createdThreadId = ThreadId.make("thread-voice-shell-created");
+      const shellFetches: Array<string> = [];
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.succeed(4),
+            readEvents: () =>
+              Stream.fromIterable([
+                voiceShellTestEvent(1, workThreadId, "thread.message-sent"),
+                voiceShellTestEvent(2, workThreadId, "thread.voice-transcript-appended"),
+                voiceShellTestEvent(3, voiceOnlyThreadId, "thread.voice-transcript-appended"),
+                voiceShellTestEvent(4, createdThreadId, "thread.created"),
+              ]),
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: (threadId) =>
+              Effect.sync(() => {
+                shellFetches.push(threadId);
+                return Option.some(makeDefaultOrchestrationThreadShell({ id: threadId }));
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = Array.from(
+        yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeShell]({
+              afterSequence: 0,
+              requestCompletionMarker: true,
+            }).pipe(
+              Stream.takeUntil((item) => item.kind === "synchronized"),
+              Stream.runCollect,
+            ),
+          ),
+        ),
+      );
+
+      const upserts = items.flatMap((item) =>
+        item.kind === "thread-upserted" ? [[item.thread.id, item.sequence] as const] : [],
+      );
+      // The work update keeps its own sequence instead of losing to the later voice batch.
+      assert.deepEqual(upserts, [
+        [workThreadId, 1],
+        [createdThreadId, 4],
+      ]);
+      assert.equal(items.at(-1)?.kind, "synchronized");
+      assert.notInclude(shellFetches, voiceOnlyThreadId);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("VH-S2 subscribeShell live bursts drop voice-only events before coalescing", () =>
+    Effect.gen(function* () {
+      const workThreadId = ThreadId.make("thread-voice-live-work");
+      const voiceOnlyThreadId = ThreadId.make("thread-voice-live-only");
+      const sentinelThreadId = ThreadId.make("thread-voice-live-sentinel");
+      const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+      const synchronized = yield* Deferred.make<void>();
+      const shellFetches: Array<string> = [];
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            streamDomainEvents: Stream.fromPubSub(liveEvents),
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: (threadId) =>
+              Effect.sync(() => {
+                shellFetches.push(threadId);
+                return Option.some(makeDefaultOrchestrationThreadShell({ id: threadId }));
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const itemsFiber = yield* withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeShell]({
+              requestCompletionMarker: true,
+            }).pipe(
+              Stream.tap((item) =>
+                item.kind === "synchronized"
+                  ? Deferred.succeed(synchronized, undefined).pipe(Effect.ignore)
+                  : Effect.void,
+              ),
+              Stream.takeUntil(
+                (item) => item.kind === "thread-upserted" && item.thread.id === sentinelThreadId,
+              ),
+              Stream.runCollect,
+            ),
+          ).pipe(Effect.forkScoped);
+
+          yield* Deferred.await(synchronized);
+          for (const event of [
+            voiceShellTestEvent(1, workThreadId, "thread.message-sent"),
+            voiceShellTestEvent(2, workThreadId, "thread.voice-transcript-appended"),
+            voiceShellTestEvent(3, voiceOnlyThreadId, "thread.voice-transcript-appended"),
+            voiceShellTestEvent(4, sentinelThreadId, "thread.created"),
+          ]) {
+            yield* PubSub.publish(liveEvents, event);
+          }
+          return yield* Fiber.join(itemsFiber);
+        }),
+      ).pipe(Effect.timeout("2 seconds"));
+
+      const liveUpserts = Array.from(items)
+        .slice(2)
+        .flatMap((item) =>
+          item.kind === "thread-upserted" ? [[item.thread.id, item.sequence] as const] : [],
+        );
+      assert.deepEqual(liveUpserts, [
+        [workThreadId, 1],
+        [sentinelThreadId, 4],
+      ]);
+      assert.notInclude(shellFetches, voiceOnlyThreadId);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
   it.effect("subscribeShell retries a transient shell projection refetch failure", () =>

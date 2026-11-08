@@ -247,6 +247,8 @@ export const make = Effect.gen(function* () {
       ...(desktopAppUpdate ? { desktopAppUpdate: true } : {}),
       // Mesura: the hosts dock.
       hostStats: true,
+      // Mesura: persisted voice call history.
+      voiceHistory: true,
     },
   };
 
