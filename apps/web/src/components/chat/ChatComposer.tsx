@@ -2509,6 +2509,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onShowMore={showMoreRestingImages}
       />
     ) : null;
+  // Mesura: the collapsed phone row shows the meter too, not only the expanded footer.
+  const contextWindowMeterElement =
+    settings.contextWindowMeterEnabled && activeContextWindow ? (
+      <ContextWindowMeter
+        usage={activeContextWindow}
+        modelDisplayName={activeThreadModelDisplayName}
+        onCompact={onCompactContext}
+        compactDisabled={compactDisabled}
+        compactDisabledReason={resolvedCompactDisabledReason}
+      />
+    ) : reserveContextWindowMeter ? (
+      <ContextWindowMeterPlaceholder />
+    ) : null;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const composerMainSurfaceRef = useComposerRestingTransition(
@@ -3793,6 +3806,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     (showProviderUnavailable ? "Enable a provider in Settings" : "Ask anything...")}
                 </button>
                 {collapsedComposerImagePreviews}
+                {contextWindowMeterElement ? (
+                  // Focus here must not expand the composer, or the meter remounts and its popover closes.
+                  <span data-chat-composer-collapsed-controls="true" className="contents">
+                    {contextWindowMeterElement}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   data-chat-composer-transition-actions="true"
@@ -4053,17 +4072,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {settings.contextWindowMeterEnabled && activeContextWindow ? (
-                    <ContextWindowMeter
-                      usage={activeContextWindow}
-                      modelDisplayName={activeThreadModelDisplayName}
-                      onCompact={onCompactContext}
-                      compactDisabled={compactDisabled}
-                      compactDisabledReason={resolvedCompactDisabledReason}
-                    />
-                  ) : reserveContextWindowMeter ? (
-                    <ContextWindowMeterPlaceholder />
-                  ) : null}
+                  {contextWindowMeterElement}
                   {composerAttachButton}
                   {dictationStartControl}
                   <ComposerFooterPrimaryActions
