@@ -54,6 +54,17 @@ describe("recording screen guard", () => {
     expect(screen.wakeLock.request).toHaveBeenCalledTimes(2);
   });
 
+  it("asks again when a request pending across a hide is refused", async () => {
+    const screen = createFakeScreen();
+    guard();
+    screen.hideFor(1_000);
+    await screen.refuseNext();
+    expect(screen.wakeLock.request).toHaveBeenCalledTimes(2);
+    // A second refusal with no return in between asks nothing more.
+    await screen.refuseNext();
+    expect(screen.wakeLock.request).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps recording when the lock is refused", async () => {
     const screen = createFakeScreen();
     const { onMicrophoneMayHaveStopped } = guard();

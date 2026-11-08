@@ -954,6 +954,20 @@ describe("dictation on a phone whose screen goes off", () => {
     expect(useDictationSessionStore.getState().session).not.toBeNull();
   });
 
+  it("keeps one warning per recording and updates its duration after another long hide", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _screenOverride = { [Symbol.dispose]: () => setRecordingScreenEnvironment(null) };
+    const update = vi.spyOn(toastManager, "update");
+    const screen = createFakeScreen();
+    await startDictation();
+    screen.hideFor(2 * 60_000);
+    screen.hideFor(5 * 60_000);
+    expect(silenceWarnings()).toHaveLength(1);
+    expect(update).toHaveBeenCalledOnce();
+    expect(update.mock.calls[0]![0]).toBe(vi.mocked(toastManager.add).mock.results.at(-1)!.value);
+    expect(update.mock.calls[0]![1].description).toContain("5 min");
+  });
+
   it("does not warn for a long hide while the recording was paused", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     using _screenOverride = { [Symbol.dispose]: () => setRecordingScreenEnvironment(null) };

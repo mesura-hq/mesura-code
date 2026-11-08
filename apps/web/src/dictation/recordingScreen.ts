@@ -56,14 +56,21 @@ export function guardRecordingScreen(handlers: RecordingScreenHandlers): Recordi
   let released = false;
   let lock: WakeLockSentinel | null = null;
   let requesting = false;
+  // A return to the page while a request was pending; a refusal of that request owes it one retry.
+  let requestedAgainWhilePending = false;
   let capturingHiddenSince: number | null = null;
 
   const holdScreen = () => {
-    if (!wakeLock || requesting || (lock && !lock.released)) return;
+    if (!wakeLock || (lock && !lock.released)) return;
+    if (requesting) {
+      requestedAgainWhilePending = true;
+      return;
+    }
     requesting = true;
     wakeLock.request("screen").then(
       (sentinel) => {
         requesting = false;
+        requestedAgainWhilePending = false;
         if (released) {
           void sentinel.release().catch(() => undefined);
           return;
@@ -75,6 +82,9 @@ export function guardRecordingScreen(handlers: RecordingScreenHandlers): Recordi
       // Refused (battery saver, a hidden page): the recording goes on without it.
       () => {
         requesting = false;
+        const retry = requestedAgainWhilePending;
+        requestedAgainWhilePending = false;
+        if (retry && !released && page.visibilityState === "visible") holdScreen();
       },
     );
   };
