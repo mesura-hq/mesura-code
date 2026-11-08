@@ -1054,7 +1054,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     useTriggerLabel={false}
                     showNewBadge={model.badge === "new"}
                     unavailable={model.isUnavailable === true}
-                    jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
+                    jumpLabel={
+                      props.extension?.hideModelJumpLabels
+                        ? null
+                        : (modelJumpLabelByKey.get(modelKey) ?? null)
+                    }
                     disabledReason={disabledReason}
                     accessory={props.extension?.renderRowAccessory?.({
                       instanceId: model.instanceId,

@@ -378,6 +378,33 @@ describe("combined picker in the composer: inline effort", () => {
     expect(app.savedSnapshot()).toEqual(before);
   });
 
+  it("combined picker Left and Right never move focus to the provider sidebar", async () => {
+    await using app = await mountApp();
+    await app.openPicker();
+    expect(highlightedRow()).toBeNull();
+    expect(effortValue("GPT-5.4")).toBe("Medium");
+
+    // Without a highlighted row, the saved model's effort changes.
+    await press(searchInput(), "ArrowLeft");
+    expect(document.activeElement).toBe(searchInput());
+    expect(effortValue("GPT-5.4")).toBe("Low");
+    expect(effortValue("GPT-5.5")).toBe("High");
+  });
+
+  it("combined picker Left and Right on a focused provider button change effort", async () => {
+    await using app = await mountApp();
+    await app.openPicker();
+    const providerButton = pickerContent()!.querySelector<HTMLButtonElement>(
+      '[data-model-picker-sidebar] button[aria-pressed="true"]',
+    )!;
+    await act(async () => providerButton.focus());
+
+    await press(providerButton, "ArrowLeft");
+    expect(document.activeElement).toBe(searchInput());
+    expect(effortValue("GPT-5.4")).toBe("Low");
+    expect(selectedProviderTab()).toBe("Codex");
+  });
+
   it("combined picker modified arrows keep their usual meaning", async () => {
     await using app = await mountApp();
     await app.openPicker();
