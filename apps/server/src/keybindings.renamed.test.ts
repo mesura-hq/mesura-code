@@ -26,7 +26,6 @@ it.layer(NodeServices.layer)("renamed keybinding commands", (it) => {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
       yield* fs.writeFileString(
         keybindingsConfigPath,
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         JSON.stringify([
           { key: "mod+shift+e", command: "fileTree.overview", when: "!terminalFocus" },
           { key: "mod+j", command: "terminal.toggle" },

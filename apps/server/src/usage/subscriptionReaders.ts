@@ -1,21 +1,7 @@
 /**
- * Read the two vendor endpoints that meter a directly polled subscription.
- *
- * Neither plan is reachable through any agent's own protocol — OpenCode's
- * server API has no usage, quota or billing route at all — so these are the
- * only door. Both are read over plain HTTP with the subscription's own
- * credential, which is why they need no agent running.
- *
- * A failure is classified rather than flattened. "We could not reach it" and
- * "we reached it and could not understand it" need opposite responses: the
- * first is the vendor's outage, the second is our bug and the panel says so.
- *
- * Known gap: Z.ai reports its own status inside the body at HTTP 200, so a
- * rejected credential arrives as an unparseable body and is classified
- * `unrecognized` — our bug — rather than `unauthorized`. Fixing that needs the
- * vendor's auth-failure code set, which is undocumented; guessing at codes
- * would misfile a different set of responses instead. Revisit if Z.ai
- * documents them, or once a real rejection shows which code it carries.
+ * Read vendor quota endpoints with the subscription's own credential: no agent protocol has them.
+ * Known gap: Z.ai rejects a credential at HTTP 200 with an undocumented code, so it is classified
+ * `unrecognized`, not `unauthorized`, until Z.ai documents the codes or a real rejection shows one.
  *
  * @module usage/subscriptionReaders
  */
@@ -23,7 +9,7 @@ import { AccountLimitsFailureReason } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 
 import {
   normalizeOpenCodeGoAccountLimits,
@@ -94,55 +80,49 @@ interface ReadInput {
  * what the panel needs, and a response body is exactly the thing most likely to
  * quote a token back at us.
  */
-function readUsage(input: {
+const readUsage = Effect.fn(function* (input: {
   readonly request: SubscriptionHttpRequest;
   readonly get: (
     request: SubscriptionHttpRequest,
   ) => Effect.Effect<SubscriptionHttpResponse, SubscriptionTransportError>;
   readonly normalize: (payload: unknown) => NormalizedAccountLimits | null;
   readonly vendor: string;
-}): Effect.Effect<NormalizedAccountLimits, SubscriptionReadError> {
-  return Effect.gen(function* () {
-    const response = yield* input.get(input.request).pipe(
-      Effect.timeout(SUBSCRIPTION_READ_TIMEOUT),
-      Effect.mapError(
-        () =>
-          new SubscriptionReadError({
-            reason: "unreachable",
-            detail: `${input.vendor} usage endpoint did not answer.`,
-          }),
-      ),
-    );
-
-    if (response.status === 401 || response.status === 403) {
-      return yield* Effect.fail(
-        new SubscriptionReadError({
-          reason: "unauthorized",
-          detail: `${input.vendor} rejected the subscription's credential.`,
-        }),
-      );
-    }
-    // A throttle is a transient vendor condition, not something we misparsed.
-    // Letting it fall through would report it to the user as our bug.
-    if (response.status === 429 || response.status >= 500) {
-      return yield* Effect.fail(
+}): Effect.fn.Return<NormalizedAccountLimits, SubscriptionReadError> {
+  const response = yield* input.get(input.request).pipe(
+    Effect.timeout(SUBSCRIPTION_READ_TIMEOUT),
+    Effect.mapError(
+      () =>
         new SubscriptionReadError({
           reason: "unreachable",
-          detail: `${input.vendor} usage endpoint answered ${response.status}.`,
+          detail: `${input.vendor} usage endpoint did not answer.`,
         }),
-      );
-    }
+    ),
+  );
 
-    const unrecognized = new SubscriptionReadError({
-      reason: "unrecognized",
-      detail: `${input.vendor} usage reading was not understood.`,
+  if (response.status === 401 || response.status === 403) {
+    return yield* new SubscriptionReadError({
+      reason: "unauthorized",
+      detail: `${input.vendor} rejected the subscription's credential.`,
     });
-    const payload = yield* decodeJson(response.body).pipe(Effect.mapError(() => unrecognized));
-    const normalized = input.normalize(payload);
-    if (normalized === null) return yield* Effect.fail(unrecognized);
-    return normalized;
+  }
+  // A throttle is a transient vendor condition, not something we misparsed.
+  // Letting it fall through would report it to the user as our bug.
+  if (response.status === 429 || response.status >= 500) {
+    return yield* new SubscriptionReadError({
+      reason: "unreachable",
+      detail: `${input.vendor} usage endpoint answered ${response.status}.`,
+    });
+  }
+
+  const unrecognized = new SubscriptionReadError({
+    reason: "unrecognized",
+    detail: `${input.vendor} usage reading was not understood.`,
   });
-}
+  const payload = yield* decodeJson(response.body).pipe(Effect.mapError(() => unrecognized));
+  const normalized = input.normalize(payload);
+  if (normalized === null) return yield* unrecognized;
+  return normalized;
+});
 
 /** The OpenCode Go plan, authenticated with a bearer token. */
 export function readOpenCodeGoUsage(input: ReadInput) {
@@ -177,12 +157,9 @@ export function readZaiUsage(input: ReadInput) {
 }
 
 /**
- * Adapt Effect's HTTP client to the narrow `get` the readers take.
- *
- * The status is reported rather than filtered, because these readers classify
- * on it: a 401 and a 500 mean different things to the panel. The error detail
- * carries the vendor's name and nothing from the response, since a body is the
- * likeliest place a token gets echoed back at us.
+ * Adapt Effect's HTTP client to the readers' narrow `get`. It passes every status through, because
+ * the readers classify on it. The error detail carries nothing from the response: a body is the
+ * likeliest place a token gets echoed back.
  */
 export function makeSubscriptionHttpGet(
   httpClient: HttpClient.HttpClient,

@@ -1,0 +1,31 @@
+# Mesura: fork-owned. The server's editor conformance harnesses drive a real
+# Neovim, and fail in CI when it is missing (apps/server/src/editor/conformance/nvimOnPath.ts).
+# The release tarball rather than Ubuntu's apt package, which is 0.9 and older
+# than the editor bridge targets. Keep the version in step with the one the
+# developer runs, and update the digest with it: the published asset's sha256,
+# `gh release view v<version> -R neovim/neovim --json assets`.
+name: Setup Neovim
+description: Install a pinned Neovim release on Linux x86_64 and put it on PATH.
+inputs:
+  version:
+    description: Neovim release, without the leading v.
+    default: "0.12.5"
+  sha256:
+    description: SHA-256 of nvim-linux-x86_64.tar.gz for that release.
+    default: bce0f56eda1f1b1db6eee8f4133d7a38813ea07933837dd1777411ca384c6875
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        NEOVIM_VERSION: ${{ inputs.version }}
+        NEOVIM_SHA256: ${{ inputs.sha256 }}
+      run: |
+        set -euo pipefail
+        archive="$RUNNER_TEMP/nvim-linux-x86_64.tar.gz"
+        curl --fail --silent --show-error --location --retry 3 --output "$archive" \
+          "https://github.com/neovim/neovim/releases/download/v${NEOVIM_VERSION}/nvim-linux-x86_64.tar.gz"
+        echo "${NEOVIM_SHA256}  ${archive}" | sha256sum --check --strict
+        tar -xzf "$archive" -C "$RUNNER_TEMP"
+        echo "$RUNNER_TEMP/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/nvim-linux-x86_64/bin/nvim" --version | head -n 1

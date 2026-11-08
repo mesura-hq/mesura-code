@@ -1,11 +1,6 @@
 /**
- * Which of Neovim's messages are errors.
- *
- * `msg_show` carries a kind, and the kinds are Neovim's own vocabulary rather
- * than a severity: `emsg` is an error message, `echoerr` is one a script
- * raised, `wmsg` is a warning, and a great many are the empty string. Reading
- * the text for "E492" instead would be guessing, and it would be wrong in
- * every language but English.
+ * Which `msg_show` kinds are errors. Kinds are Neovim's vocabulary, not a severity (`emsg`,
+ * `echoerr`, `wmsg`, often empty); matching text such as "E492" would break in other languages.
  */
 const ERROR_MESSAGE_KINDS: ReadonlySet<string> = new Set([
   "emsg",

@@ -14,11 +14,9 @@ import {
   toFactoryRunShellSummary,
 } from "./factoryRun.ts";
 
-// A copy of `skills/core/sf-team/tests/fixtures/events.v1.jsonl` in the agent-env repository,
-// written by phase 6 against `skills/core/sf-team/bin/run-events.mjs`, the single definition of
-// record version 1. Re-copy it byte for byte whenever that file changes, so the recorder's
-// definition and this fold are compared at every change. JSONL carries no comments, so the
-// source is named here.
+// Byte-for-byte copy of `skills/core/sf-team/tests/fixtures/events.v1.jsonl` (agent-env repository),
+// written against `skills/core/sf-team/bin/run-events.mjs`, the definition of record version 1.
+// Re-copy it whenever that file changes. JSONL carries no comments, so the source is named here.
 const FIXTURE_LINES = NodeFS.readFileSync(
   new URL("./fixtures/factory-events.v1.jsonl", import.meta.url),
   "utf8",

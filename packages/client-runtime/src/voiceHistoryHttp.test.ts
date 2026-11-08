@@ -11,7 +11,7 @@ import * as Layer from "effect/Layer";
 import { RemoteEnvironmentAuthorization } from "./authorization/service.ts";
 import { RelayConnectionTarget, type PreparedConnection } from "./connection/model.ts";
 import { ManagedRelayDpopSigner } from "./relay/managedRelay.ts";
-import { remoteHttpClientLayer } from "./rpc/http.ts";
+import { layerRemoteHttpClient } from "./rpc/http.ts";
 import {
   appendVoiceTranscript,
   createVoiceHistoryOwnerGuard,
@@ -190,11 +190,14 @@ const makeEnvironment = (options: {
     return respond(Response.json({}, { status: 404 }));
   };
   const layer = Layer.mergeAll(
-    remoteHttpClientLayer(fetcher as typeof fetch),
+    layerRemoteHttpClient(fetcher as typeof fetch),
     Layer.succeed(RemoteEnvironmentAuthorization, remote),
     Layer.succeed(ManagedRelayDpopSigner, signer),
   );
-  const client = (run: RunPromise, isCurrent: () => boolean = () => true): VoiceHistoryClient => {
+  const historyClient = (
+    run: RunPromise,
+    isCurrent: () => boolean = () => true,
+  ): VoiceHistoryClient => {
     const guard = createVoiceHistoryOwnerGuard({ historyOwnerId: "owner-a", isCurrent });
     return {
       append: (payload: VoiceTranscriptAppendInput) =>
@@ -216,7 +219,7 @@ const makeEnvironment = (options: {
     outbound,
     authorizations,
     layer,
-    client,
+    historyClient,
     transcriptRequests,
     call,
     /** The credential the next authorization resolves to, as after a re-pair. */
@@ -289,7 +292,7 @@ describe("voice history requests bound to the verified owner", () => {
         const result = await resumeVoiceHistoryOutbox({
           owner,
           store,
-          client: environment.client(run, () => current),
+          historyClient: environment.historyClient(run, () => current),
         });
 
         expect(textCarriers(environment.outbound)).toEqual([]);
@@ -315,7 +318,7 @@ describe("voice history requests bound to the verified owner", () => {
         const result = await resumeVoiceHistoryOutbox({
           owner,
           store,
-          client: environment.client(run),
+          historyClient: environment.historyClient(run),
         });
 
         expect(textCarriers(environment.outbound)).toEqual([]);
@@ -346,7 +349,11 @@ describe("voice history requests bound to the verified owner", () => {
         });
         const { store, backing } = makeStore();
 
-        await resumeVoiceHistoryOutbox({ owner, store, client: environment.client(run) });
+        await resumeVoiceHistoryOutbox({
+          owner,
+          store,
+          historyClient: environment.historyClient(run),
+        });
 
         expect(environment.authorizations).toContain("token-a");
         // The rejected attempt carried owner A's credential; nothing went out under owner B.
@@ -375,7 +382,7 @@ describe("voice history requests bound to the verified owner", () => {
         const result = await resumeVoiceHistoryOutbox({
           owner,
           store,
-          client: environment.client(run),
+          historyClient: environment.historyClient(run),
         });
 
         const carriers = textCarriers(environment.outbound);
@@ -404,7 +411,7 @@ describe("voice history requests bound to the verified owner", () => {
         await resumeVoiceHistoryOutbox({
           owner,
           store,
-          client: environment.client(run, () => current),
+          historyClient: environment.historyClient(run, () => current),
         });
 
         expect(textCarriers(environment.outbound)).toEqual([]);
@@ -427,7 +434,7 @@ describe("voice history requests bound to the verified owner", () => {
         const result = await resumeVoiceHistoryOutbox({
           owner,
           store,
-          client: environment.client(run),
+          historyClient: environment.historyClient(run),
         });
 
         const protectedPaths = environment.outbound
@@ -463,7 +470,11 @@ describe("voice history requests bound to the verified owner", () => {
         });
         const { store, backing } = makeStore();
 
-        await resumeVoiceHistoryOutbox({ owner, store, client: environment.client(run) });
+        await resumeVoiceHistoryOutbox({
+          owner,
+          store,
+          historyClient: environment.historyClient(run),
+        });
 
         expect(environment.outbound.map((request) => [request.path, request.owner])).toEqual([
           ["/api/voice/settings", "owner-a"],

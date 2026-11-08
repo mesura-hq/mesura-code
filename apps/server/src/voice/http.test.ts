@@ -6,7 +6,6 @@ import {
   AuthOrchestrationReadScope,
   type AuthEnvironmentScope,
   EnvironmentHttpApi,
-  type OrchestrationThreadDetailSnapshot,
   type EnvironmentSessionPrincipalShape,
   VoiceConversationError,
 } from "@t3tools/contracts";
@@ -15,14 +14,15 @@ import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Etag from "effect/unstable/http/Etag";
-import * as HttpPlatform from "effect/unstable/http/HttpPlatform";
-import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
-import * as HttpApi from "effect/unstable/httpapi/HttpApi";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
+import * as Etag from "effect/http/Etag";
+import * as HttpPlatform from "effect/http/HttpPlatform";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
+import * as HttpApi from "effect/http-api/HttpApi";
+import * as HttpRouter from "effect/http/HttpRouter";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { ProjectionVoiceCallRepository } from "../persistence/Services/ProjectionVoiceCalls.ts";
 import { voiceConversationHttpApiLayer } from "./http.ts";
 import { VoiceHistory, type VoiceHistoryShape } from "./VoiceHistory.ts";
 import { makeVoiceTestAuthLayer } from "./voiceHttp.testFixtures.ts";
@@ -109,17 +109,8 @@ const authLayer = makeVoiceTestAuthLayer(
     },
 );
 
-const makeThreadSnapshot = (deletedAt: string | null = null) =>
-  ({
-    snapshotSequence: 1,
-    thread: {
-      id: THREAD_ID,
-      title: "Voice test thread",
-      latestTurn: { state: "idle" },
-      deletedAt,
-      messages: [{ role: "user", text: "Explain this function." }],
-    },
-  }) as unknown as OrchestrationThreadDetailSnapshot;
+/** The thread as the v2 projection holds it: absent, deleted, or live. */
+type ThreadState = "missing" | "deleted" | "live";
 
 // Accepts every call start and end, so ownership here is the live session manager's. A test
 // overrides one operation to exercise a history failure.
@@ -137,7 +128,7 @@ const acceptingVoiceHistory: VoiceHistoryShape = {
 interface HarnessOptions {
   readonly history?: Partial<VoiceHistoryShape>;
   readonly initialApiKey?: string;
-  readonly threadSnapshot?: () => Option.Option<OrchestrationThreadDetailSnapshot>;
+  readonly threadState?: () => ThreadState;
   readonly fetch?: typeof fetch;
 }
 
@@ -160,17 +151,28 @@ const withHandler = <A>(
     getOrCreateRandom: () => Effect.die("Not used by voice HTTP tests."),
     remove: (name) => Effect.sync(() => void secretsByName.delete(name)),
   } satisfies ServerSecretStore.ServerSecretStore["Service"]);
-  const snapshotQueryLayer = Layer.succeed(ProjectionSnapshotQuery, {
-    getThreadDetailSnapshot: () =>
-      Effect.succeed(options.threadSnapshot?.() ?? Option.some(makeThreadSnapshot())),
-  } as unknown as ProjectionSnapshotQuery["Service"]);
+  const threadState = () => options.threadState?.() ?? "live";
+  const threadLayer = Layer.merge(
+    Layer.mock(ProjectionVoiceCallRepository)({
+      isLiveThread: () => Effect.sync(() => threadState() === "live"),
+    }),
+    Layer.mock(ThreadManagementService.ThreadManagementService)({
+      getThreadShell: () =>
+        Effect.sync(() =>
+          threadState() === "missing"
+            ? null
+            : ({ id: THREAD_ID, title: "Voice test thread", status: "idle" } as never),
+        ),
+      getTimelinePage: () => Effect.succeed({ items: [], totalItems: 0, hasMore: false }),
+    }),
+  );
   const routesLayer = HttpApiBuilder.layer(VoiceTestApi).pipe(
     Layer.provide(voiceConversationHttpApiLayer),
     // These routes test the live session; persisted history has its own suite.
     Layer.provide(Layer.succeed(VoiceHistory, { ...acceptingVoiceHistory, ...options.history })),
     Layer.provide(authLayer),
     Layer.provide(secretStoreLayer),
-    Layer.provide(snapshotQueryLayer),
+    Layer.provide(threadLayer),
     Layer.provideMerge(
       HttpPlatform.layer.pipe(
         Layer.provideMerge(NodeServices.layer),
@@ -326,12 +328,12 @@ describe("voice conversation HTTP routes", () => {
   it.effect(
     "requires orchestration:operate and rejects missing or deleted threads before provider access",
     () => {
-      let threadSnapshot = Option.none<OrchestrationThreadDetailSnapshot>();
+      let threadState: ThreadState = "missing";
       const providerFetch = vi.fn<typeof fetch>();
       return withHandler(
         {
           initialApiKey: API_KEY,
-          threadSnapshot: () => threadSnapshot,
+          threadState: () => threadState,
           fetch: providerFetch,
         },
         async (environment) => {
@@ -347,7 +349,7 @@ describe("voice conversation HTTP routes", () => {
           );
           expect(missingThread.status).toBe(404);
 
-          threadSnapshot = Option.some(makeThreadSnapshot("2026-10-05T00:00:00.000Z"));
+          threadState = "deleted";
           const deletedThread = await call(
             environment,
             post("/api/voice/sessions", createPayload, "operate"),

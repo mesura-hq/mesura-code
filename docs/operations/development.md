@@ -2,7 +2,7 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24;
+Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 26.12.1;
 Bun is optional. From the repository root:
 
 ```sh
@@ -15,11 +15,43 @@ a new browser.
 
 Prefer a container? See [Dev container](../internals/devcontainer.md) for VS Code and Codespaces setup.
 
+## GitCafe mirror (optional)
+
+GitHub is the source of truth. [git.cafe/pingdotgg/t3code](https://git.cafe/pingdotgg/t3code) is a
+two-way synced mirror with much higher API rate limits, which helps when many agents work at once.
+You never need it to contribute.
+
+Pushes, PRs, comments, reviews, labels, and issue edits made on GitCafe sync to GitHub within
+about a minute, and PR and issue numbers match. CI runs on GitHub, and its checks show up on
+GitCafe.
+
+```sh
+git remote set-url origin https://git.cafe/pingdotgg/t3code.git
+git remote add github https://github.com/pingdotgg/t3code.git
+gh repo set-default pingdotgg/t3code   # `gh` is still used for merging
+bun install -g @gitcafe/cli@latest   # `cafe` needs Bun 1.2 or newer
+cafe auth login && cafe auth http setup
+cafe skills install --global  # optional: cafe-* skills for coding agents
+```
+
+With `origin` on git.cafe, work through GitCafe and leave GitHub's API alone:
+
+- Push to `origin`, open PRs with `cafe pr create` (`--head owner/repo:branch` from a fork) or
+  `cafe stack submit`, and use `cafe` for everything after that. Link the git.cafe PR URL, not the
+  github.com one, wherever a tool tracks the PR, so polling stays on GitCafe.
+- Read checks with `cafe pr status <n>`, and GitHub Actions logs with `cafe ci logs <run>` (run ids
+  from `cafe ci list --pr <n>`). `cafe ci rerun <run>` reruns one. These need `cafe` 0.11 or newer.
+- Write closing references as `Fixes pingdotgg/t3code#<n>`. GitCafe turns a bare `#<n>` in text it
+  syncs to GitHub into a git.cafe link, and GitHub does not close issues from those.
+- Merge with `gh pr merge <n> --match-head-commit <sha>`, because `cafe pr merge` cannot pin the
+  commit you reviewed.
+- `cafe` commands differ from `gh`: `cafe issue comments <n>` not `--comments`, `cafe pr status`
+  not `pr checks`.
+
 ## Choosing a dev process
 
 Use `vp run dev` for server and web, or `vp run dev:desktop` for the Electron client.
 `dev:server` and `dev:web` start those processes separately.
-See the [mobile README](../../apps/mobile/README.md) for native builds and Metro.
 
 Flags go directly after the task name, for example `vp run dev --home-dir /tmp/t3code-dev`.
 Add `--browser` to open a browser automatically.
@@ -27,13 +59,54 @@ Add `--browser` to open a browser automatically.
 ### State and ports
 
 Linked worktrees default to their own `.t3/userdata`, even when `T3CODE_HOME` is set.
-The main checkout defaults to `~/.t3/dev/userdata`. An explicit `--home-dir` wins in both cases.
-Never run a development server against the live `~/.t3/userdata`.
+The main checkout defaults to `~/.mesura-code/dev/userdata`. An explicit `--home-dir` wins in both cases.
+Never run a development server against the live `~/.mesura-code/userdata` or installed T3 Code’s `~/.t3/userdata`.
 See [test data](../../AGENTS.md#test-data) for copying a consistent database snapshot.
 
 Read ports from the `[dev-runner]` output. Worktrees derive stable preferences from their paths,
 but occupied ports can shift them. `T3CODE_PORT_OFFSET` or `T3CODE_DEV_INSTANCE` can select a
 different preference when needed.
+
+Automatic first-start seeding is disabled in this fork. `--seed` or `T3CODE_DEV_SEED=1` requests a copy from `~/.mesura-code/userdata/statev2.sqlite`. Configure provider isolation before its first start.
+
+### Isolating a copied home from live providers
+
+A server started on a copy of a live home can reach that home's live provider sessions: the copied
+threads name sessions the developer's real agents own, and a provider started with the developer's
+HOME, binary or credentials resumes them. Editing copied provider settings field by field leaves
+paths open, so keep none of them. Before the copy's first start:
+
+1. **Write `settings.json` fresh; do not copy it.** Add only what the test needs besides the
+   providers. These must stay at their defaults, so do not carry them over from a copy:
+   - `continueThreadsAfterServerUpdate: false`, with no `projectSettingsOverrides` entry turning it
+     on: the restart continuation resumes threads with their last model selection.
+   - `autoResumeLimitedThreads: false`: the usage-limit worker resumes limited threads.
+   - `usageLimitSources: {}` and `cursorKeychainUsageEnabled: false`: both reach live accounts.
+2. **Write `providerInstances` yourself, with stubs only.** One entry per built-in driver with a
+   default instance — `codex`, `claudeAgent`, `cursor`, `grok`, `opencode`, `antigravity`, `pi`,
+   `muse` — so the registry synthesizes no enabled default (`deriveProviderInstanceConfigMap`).
+   Each entry gets a `binaryPath` to an absolute stub and scratch `homePath`/`shadowHomePath` where
+   the driver has them, and nothing else: no `environment` (it can restore `CURSOR_API_KEY`), no
+   OpenCode `serverUrl`, no API key fields. Add no `acpRegistry` instance: it runs its own
+   `commandPath` or a cached binary that no stub covers. `enabled: false` does not isolate an
+   instance, because the session manager still calls a disabled instance's adapter.
+3. **Do not rely on a stub directory on `PATH`.** The server prepends the login shell's `PATH` at
+   start (`fixPath` in `apps/server/src/os-jank.ts`), so a real `claude` in `/usr/local/bin` still
+   wins over a stub put first; the absolute stub `binaryPath`s of step 2 are what isolate.
+4. **Leave the credentials behind.** Do not copy `secrets` or `provider-auth/`.
+5. **Start the server with a cleared environment and a scratch home**: `env -i`, then only `PATH`,
+   and `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` all under
+   one scratch directory. An inherited variable can carry a key (`CURSOR_API_KEY`, which Cursor's
+   V2 SDK uses whatever `binaryPath` says) or point usage polling at live data
+   (`OPENCODE_DATA_DIR`, `ANTIGRAVITY_DATA_DIR`), and server and provider code read credential
+   files from the real home (OpenCode's `auth.json`, Cursor's `~/.config/cursor/auth.json`,
+   Antigravity's `~/.gemini`). Run Node and `vp` by absolute path (nvm's `~` no longer resolves),
+   pass the copied state with an absolute `--base-dir` or `--home-dir`, and set
+   `neovimConfigDirectory` to an absolute path if the editor is under test: its default
+   `~/.neovim` now names the scratch home.
+
+Before starting, read `settings.json` back and refuse to start unless `providerInstances` holds
+exactly the stubbed entries above.
 
 ### Sharing and remote debugging
 
@@ -52,9 +125,21 @@ when changing this setup:
   chunks. Static imports can work on first load and fail after a route split.
 - Bundled dev rebuilds Tailwind through watched files. Its ordinary Vite hot-update hook expects
   a server/module graph that Rolldown does not provide.
+- The app and its routes are lazy chunks, built on first request. A plugin pre-bundles the
+  startup chain when the server starts. Renaming or moving a startup route or the app entry
+  silently drops it from that list.
 
-The workarounds live in the [web entry](../../apps/web/src/bootstrap.ts) and
-[Tailwind plugin](../../apps/web/vite/tailwind.ts).
+The workarounds live in the [web entry](../../apps/web/src/bootstrap.ts),
+[Tailwind plugin](../../apps/web/vite/tailwind.ts), and
+[startup warmup](../../apps/web/vite/warmBundledDev.ts).
+
+`vp run dev --share --built` skips the Vite dev server. It runs `vp build --watch` for the web
+app, and the backend serves `apps/web/dist` on the same tailnet URL and pairing flow. Use it when
+someone tests over a slow link or only needs to use the app: loads are production size, and the
+first load does not wait for dev bundling. There is no HMR. After an edit, wait for the
+`built in` line (about 6 s), then reload. Until the first build exists, the URL shows a page that
+reloads by itself. The license manifest is not generated in this mode. `--built` requires
+`--share` and the `dev` mode.
 
 #### Reusable dev credential
 
@@ -76,8 +161,7 @@ Put that value in the main checkout's gitignored `.env`:
 T3CODE_DEV_AUTH_TOKEN=<the value generated above>
 ```
 
-The `t3.json` Setup Worktree commands on Unix and Windows link that file to each worktree's
-`.env`. The dev runner reads repository env files at startup. `.env.local` and inherited process
+The `t3.json` Setup Worktree action links that file to each worktree's `.env`. The dev runner reads repository env files at startup. `.env.local` and inherited process
 environment values override `.env`, so no per-worktree export is needed after setup.
 
 For a manual worktree or launcher without that link, export the same fixed value instead:
@@ -99,7 +183,19 @@ for the security model.
 
 ## Checks
 
-Run checks for the files and packages you changed:
+`vp run check:changed` runs CI's fast checks for your branch's changes: format and lint of the
+changed files, `knip:check` when code or a manifest changes, the generated GraphQL checks, typecheck
+of the affected packages and their dependents, and the test files beside the changed files. It maps
+files to packages with [ci-changes.cjs](../../.github/scripts/ci-changes.cjs), as CI does. It
+compares against the merge base with `origin/main`, or with a ref you pass. CI still runs the full
+test suites and the jobs the summary lists, so a local pass does not promise a green CI run.
+
+The steps run side by side, so a run takes about as long as its slowest step, usually knip's
+exports pass at about 10 s. When the files are exactly those of the last passing run, it prints that
+run's summary instead of running again. Any change to a file, the install, or a generated file runs
+the checks again.
+
+While you iterate, run single checks:
 
 ```sh
 vp test run <files>
@@ -107,7 +203,15 @@ vp lint <files>
 vp run --filter <package> typecheck
 ```
 
-Use `vp run lint:mobile` for native mobile changes. CI owns the full suite; see
+In `apps/web`, a test that renders React or touches the DOM is named `*.browser.test.{ts,tsx}`
+and runs in headless Chromium with the React Compiler on, like the app. There is no jsdom; other
+`*.test.ts` files run in Node.
+
+TypeScript workspaces typecheck with `tsc`. The `typescript` catalog entry is
+`@tsc-rs/typescript`, the tsc-rs drop-in, with Effect diagnostics, quick fixes, and
+refactors built in. VS Code uses it through `js/ts.tsdk.path` in `.vscode/settings.json`.
+
+CI owns the full suite; see
 [ci.yml](../../.github/workflows/ci.yml) for its current jobs.
 The [manual Windows lane](../../.github/workflows/windows-tests.yml) is available for focused
 Windows investigation while that suite is not a required gate.

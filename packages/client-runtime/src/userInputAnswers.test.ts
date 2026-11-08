@@ -36,3 +36,13 @@ it("shared custom-answer setter leaves choice-only drafts unchanged", () => {
     {},
   );
 });
+
+it("sends a prefilled editor answer verbatim, including an emptied one", () => {
+  const editor = { ...question, options: [], initialAnswer: "  draft text\n" };
+  expect(
+    buildPendingUserInputAnswers([editor], { scope: { customAnswer: "  draft text\n" } }),
+  ).toEqual({ scope: "  draft text\n" });
+  expect(buildPendingUserInputAnswers([editor], { scope: { customAnswer: "" } })).toEqual({
+    scope: "",
+  });
+});

@@ -7,22 +7,10 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * Monaco ships a language service per family, and this app wants none of them:
- * code intelligence comes from a language server on the backend, and a second
- * analysis running in the browser is a disagreeing answer that costs about two
- * megabytes compressed.
- *
- * This file used to guard nine lines that switched those services off at
- * runtime. They worked and they saved nothing: each service references its
- * worker through the bundler's worker plugin, so the four worker chunks were
- * built either way — 9,160,971 bytes raw, 2,058,703 gzipped, emitted and never
- * fetched. What actually removes them is not importing the services at all.
- *
- * So the thing to guard moved. It is now the curated entry and the alias that
- * points every bare `monaco-editor` import at it, and the way each of them
- * breaks is silent: a stray `languages/features` import puts a service back, a
- * loosened alias pattern swallows the editor worker's own deep import, and
- * neither shows up as anything but a bigger bundle.
+ * Code intelligence comes from a backend language server, so Monaco's per-family language services
+ * are dead weight (~2 MB gzipped). Disabling them at runtime still built their worker chunks; only
+ * not importing them removes them. This guards the curated entry and the `monaco-editor` alias, whose
+ * breakages (a stray `languages/features` import, a loosened alias) only show as a bigger bundle.
  */
 
 const read = (relativePath: string) =>
@@ -60,11 +48,9 @@ it("keeps the grammars, because colour is not the expensive part", () => {
     );
   }
 
-  // JSON is the exception and it is worth pinning, because the obvious tidy-up
-  // is to delete these two lines for consistency with the other three. It has
-  // no Monarch grammar at all: its registration and its tokenizer live in the
-  // language service, so without this a `.json` file is not a language Monaco
-  // knows about.
+  // JSON is the exception: deleting these two lines looks like a tidy-up, but JSON has no Monarch
+  // grammar, so its registration and tokenizer live in the language service. Without them Monaco
+  // does not know `.json` as a language.
   assert.include(entry, "languages/features/json/tokenization.js");
   assert.include(entry, 'languages.setTokensProvider("json"');
   assert.notInclude(

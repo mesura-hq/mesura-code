@@ -7,6 +7,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { BORROWED_RUNTIME_VOCABULARIES } from "../../packages/symmetria-broker-contract/src/upstreamLock.ts";
 import {
+  compileVocabularyLock,
+  expectVocabularyLockRejection,
+} from "../../packages/symmetria-broker-contract/test/compilerGuard.ts";
+import {
   commandOutput,
   contractPackageRoot,
   expectSuccessfulCommand,
@@ -16,67 +20,14 @@ import {
   vitePlusPath,
 } from "./contractHarness.ts";
 
-// ⚠ NO MOVER ESTE ARCHIVO DENTRO DE packages/symmetria-broker-contract.
-//
-// Abajo, este test lanza `vp test run` CONTRA ESE PAQUETE como subproceso, para
-// comprobar desde afuera que su suite pasa. Si el archivo vive dentro del
-// paquete, el comando lo recolecta, él relanza el comando, y eso lo recolecta de
-// nuevo: recursión con abanico de procesos que agota la RAM. Probado el
-// 2026-08-20 — el intento colgó 600 s y no emitió una sola línea.
-//
-// Su ubicación fuera del paquete es load-bearing, no un descuido. El costo
-// conocido es que `vp run -r test` no lo recolecta, porque tests/ no es un
-// paquete del workspace; la salida correcta es darle a tests/ su propio
-// package.json y declararlo en pnpm-workspace.yaml, no mudar el archivo.
+// ⚠ NO MOVER ESTE ARCHIVO DENTRO DE packages/symmetria-broker-contract. Este test lanza `vp test run`
+// contra ese paquete; adentro, el comando se recolectaría a sí mismo en recursión hasta agotar la RAM.
+// Costo conocido: `vp run -r test` no lo recolecta. La salida correcta es darle a tests/ su propio
+// package.json en pnpm-workspace.yaml, no mudar el archivo.
 const acceptanceTestsRoot = NodePath.join(repositoryRoot, "tests");
+const PACKAGE_REPAIR_SUITE_PROCESS_TIMEOUT_MS = 45_000;
+const PACKAGE_REPAIR_SUITE_TEST_TIMEOUT_MS = 60_000;
 type RuntimeVocabularyName = keyof typeof BORROWED_RUNTIME_VOCABULARIES;
-
-const writeContractTypeShim = (
-  directory: string,
-  changedVocabulary?: {
-    readonly name: RuntimeVocabularyName;
-    readonly values: ReadonlyArray<string>;
-  },
-) => {
-  const source = Object.entries(BORROWED_RUNTIME_VOCABULARIES)
-    .map(([name, canonicalValues]) => {
-      const values = changedVocabulary?.name === name ? changedVocabulary.values : canonicalValues;
-      return `export type ${name} = ${values.map((value) => JSON.stringify(value)).join(" | ")};`;
-    })
-    .join("\n");
-  const shimPath = NodePath.join(directory, "contracts-shim.ts");
-  NodeFS.writeFileSync(shimPath, `${source}\n`);
-  return shimPath;
-};
-
-const compileUpstreamLock = (
-  directory: string,
-  changedVocabulary?: {
-    readonly name: RuntimeVocabularyName;
-    readonly values: ReadonlyArray<string>;
-  },
-) => {
-  const shimPath = writeContractTypeShim(directory, changedVocabulary);
-  const configPath = NodePath.join(directory, "tsconfig.json");
-  NodeFS.writeFileSync(
-    configPath,
-    `${JSON.stringify(
-      {
-        extends: NodePath.join(repositoryRoot, "tsconfig.base.json"),
-        compilerOptions: {
-          noEmit: true,
-          paths: {
-            "@t3tools/contracts": [shimPath],
-          },
-        },
-        files: [NodePath.join(contractPackageRoot, "src/upstreamLock.ts")],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  return run(typecheckerPath, ["-p", configPath]);
-};
 
 // The phase implementation is present in this working tree. These checks are
 // post-implementation regression guards, so each one must pass in this tree.
@@ -94,7 +45,9 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     );
 
     expect(manifest.name).toBe("@symmetria/acceptance-tests");
-    expect(manifest.scripts?.test).toBe("vp test run");
+    expect(manifest.scripts?.test).toBe(
+      "vp test run --config ../vite.config.ts --dir . --max-workers=1 --no-file-parallelism",
+    );
     expect(manifest.scripts?.typecheck).toBe("tsc --noEmit");
     expect(workspaceSource).toMatch(/^\s*- tests\s*$/m);
     expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], acceptanceTestsRoot));
@@ -105,31 +58,32 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], contractPackageRoot));
   });
 
-  it("keeps the package repair guards in its normal test suite", () => {
-    expect(NodeFS.existsSync(contractPackageRoot)).toBe(true);
-    const result = run(vitePlusPath, ["test", "run", "--reporter=verbose"], contractPackageRoot);
-    expectSuccessfulCommand(result);
-    const output = commandOutput(result);
-    expect(output).toContain("src/upstreamLockFiring.test.ts");
-    expect(output).toContain("fails when upstream adds or removes a literal");
-    expect(output).toContain("src/primitives.test.ts");
-    expect(output).toContain("refuses a fractional value");
-  });
+  // This guard runs a whole package, including compiler guards. The five-second
+  // unit-test budget rejected a successful 5305 ms run after the upstream sync.
+  it(
+    "keeps the package repair guards in its normal test suite",
+    () => {
+      expect(NodeFS.existsSync(contractPackageRoot)).toBe(true);
+      const result = run(
+        vitePlusPath,
+        ["test", "run", "--reporter=verbose", "--max-workers=1"],
+        contractPackageRoot,
+        PACKAGE_REPAIR_SUITE_PROCESS_TIMEOUT_MS,
+      );
+      expectSuccessfulCommand(result);
+      const output = commandOutput(result);
+      expect(output).toContain("src/upstreamLockFiring.test.ts");
+      expect(output).toContain("fails when upstream adds or removes a literal");
+      expect(output).toContain("src/primitives.test.ts");
+      expect(output).toContain("refuses a fractional value");
+    },
+    PACKAGE_REPAIR_SUITE_TEST_TIMEOUT_MS,
+  );
 
-  // Este guard comprueba que el paquete que agregamos no rompe la suite de
-  // contracts de UPSTREAM. Eso es lo que afirma, y nada más.
-  //
-  // ⚠ NO VOLVER A FIJAR EL CONTEO EXACTO. La primera versión afirmaba
-  // `Tests 257 passed (257)`. El primer merge con upstream lo rompió: el commit
-  // fe8750208 ("fix(contracts): reconcile provider default tests") agregó UN
-  // test, la suite pasó 257 → 258, y este guard falló con todo en verde. La
-  // igualdad no medía nuestra regresión, medía el ritmo de desarrollo de
-  // upstream, que sube cada semana y no es asunto nuestro.
-  //
-  // El piso sí es nuestro. El riesgo real es que la suite se ENCOJA — que un
-  // cambio del fork haga que dejen de recolectarse archivos, que es la forma en
-  // que "todo verde" puede mentir. Un piso lo detecta y no le cobra nada a
-  // upstream por crecer.
+  // Afirma que nuestro paquete no rompe la suite de contracts de UPSTREAM, y nada más.
+  // ⚠ NO VOLVER A FIJAR EL CONTEO EXACTO: upstream agregó un test y el guard falló con todo en verde.
+  // El piso sí es nuestro: detecta una suite que se ENCOGE (archivos que dejan de recolectarse) y no
+  // le cobra nada a upstream por crecer.
   const CONTRACT_SUITE_FLOOR = { files: 19, tests: 257 } as const;
 
   // ⚠ JSON, NUNCA la salida de texto del reporter. La segunda versión de este
@@ -152,6 +106,7 @@ describe("Symmetria broker contract phase-one regression guards", () => {
   // un valor que no nos pertenece. Primero el conteo exacto de upstream, después
   // el formato de salida de vitest. Lo que sí es nuestro es que la suite esté
   // verde y no se encoja.
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("keeps upstream's contract suite green and not shrinking", () => {
     const reportPath = NodePath.join(
       NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "symmetria-contract-report-")),
@@ -160,7 +115,7 @@ describe("Symmetria broker contract phase-one regression guards", () => {
 
     const result = run(
       vitePlusPath,
-      ["test", "run", "--reporter=json", `--outputFile=${reportPath}`],
+      ["test", "run", "--reporter=json", `--outputFile=${reportPath}`, "--max-workers=1"],
       NodePath.join(repositoryRoot, "packages/contracts"),
     );
     expectSuccessfulCommand(result);
@@ -184,29 +139,30 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     expect(report.numPassedTests).toBeGreaterThanOrEqual(CONTRACT_SUITE_FLOOR.tests);
   }, 60_000);
 
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("keeps every borrowed runtime vocabulary locked in both assignability directions", () => {
     expect(NodeFS.existsSync(NodePath.join(contractPackageRoot, "src/upstreamLock.ts"))).toBe(true);
     const temporaryDirectory = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "symmetria-upstream-lock-"),
     );
     try {
-      const matchingResult = compileUpstreamLock(temporaryDirectory);
+      const matchingResult = compileVocabularyLock(temporaryDirectory);
       expectSuccessfulCommand(matchingResult);
 
       for (const [name, canonicalValues] of Object.entries(BORROWED_RUNTIME_VOCABULARIES) as Array<
         [RuntimeVocabularyName, ReadonlyArray<string>]
       >) {
-        const expandedResult = compileUpstreamLock(temporaryDirectory, {
+        const expandedResult = compileVocabularyLock(temporaryDirectory, {
           name,
           values: [...canonicalValues, "future_upstream_literal"],
         });
-        expect(expandedResult.status, `${name} accepted an upstream addition`).not.toBe(0);
+        expectVocabularyLockRejection(expandedResult, name);
 
-        const reducedResult = compileUpstreamLock(temporaryDirectory, {
+        const reducedResult = compileVocabularyLock(temporaryDirectory, {
           name,
           values: canonicalValues.slice(1),
         });
-        expect(reducedResult.status, `${name} accepted an upstream removal`).not.toBe(0);
+        expectVocabularyLockRejection(reducedResult, name);
       }
     } finally {
       NodeFS.rmSync(temporaryDirectory, { force: true, recursive: true });
@@ -362,13 +318,12 @@ describe("Symmetria broker contract phase-one regression guards", () => {
       };
     };
 
-    // Effect 4.0.0-rc.112 emits the bound directly; up to beta.103 it wrapped
-    // it in `allOf: [{ minimum: 0 }]`. What this guard is for is the alignment
-    // below — every non-negative field carrying the SAME constraint — so the
-    // shape is pinned only to catch the day one of them stops matching.
+    // Effect now emits Int's safe-integer ceiling as well as the minimum.
+    // Require the full wire range and keep every branded field aligned with it.
     expect(documents.base).toEqual({
       type: "integer",
       minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
     });
     expect(documents.draftVersion).toEqual(documents.base);
     expect(documents.snapshotRevision).toEqual(documents.base);
@@ -436,22 +391,8 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     }
   });
 
-  // NO REPONER: acá vivía "keeps unrelated registry metadata out of the
-  // phase-one lockfile change", que leía pnpm-lock.yaml y exigía que los bloques
-  // de @xmldom/xmldom no tuvieran una línea `deprecated:`.
-  //
-  // Era imposible de pasar por construcción. pnpm reescribe esa metadata cada vez
-  // que resuelve contra el registro, y eso ocurre en la cadena `prepare` de la
-  // raíz — que dispara el propio `pnpm test`. Medido el 2026-08-20: el lockfile
-  // pasaba de 25 a 27 inserciones durante la misma corrida que lo verificaba, así
-  // que ejecutar el test era lo que lo rompía.
-  //
-  // La premisa también era equivocada. Esas líneas no son contaminación: son
-  // hechos del registro que pnpm mantiene al día. Se las trató como basura porque
-  // aparecieron por primera vez en un diff junto a un cambio ajeno, y de ahí salió
-  // un guardián permanente contra el comportamiento normal de la herramienta.
-  //
-  // Si alguna vez hace falta proteger el lockfile, hay que afirmar sobre el diff
-  // COMMITEADO, no sobre el árbol de trabajo que las herramientas del proyecto
-  // reescriben mientras el test corre.
+  // NO REPONER el test que exigía que los bloques de @xmldom/xmldom en pnpm-lock.yaml no tuvieran
+  // `deprecated:`. pnpm reescribe esa metadata del registro en la cadena `prepare` que dispara el
+  // propio `pnpm test`, así que correrlo lo rompía. Para proteger el lockfile, afirmar sobre el diff
+  // COMMITEADO, no sobre el árbol de trabajo.
 });

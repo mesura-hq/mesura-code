@@ -8,22 +8,29 @@ export const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 export const OPEN_SYSTEM_SETTINGS_CHANNEL = "desktop:open-system-settings";
 export const PROBE_REMOTE_EDITORS_CHANNEL = "desktop:probe-remote-editors";
 export const MENU_ACTION_CHANNEL = "desktop:menu-action";
-export const DICTATION_RENDERER_REQUEST_CHANNEL = "desktop:dictation-renderer-request";
-export const RESOLVE_DICTATION_RENDERER_REQUEST_CHANNEL =
-  "desktop:resolve-dictation-renderer-request";
-export const GET_DICTATION_SNAPSHOT_CHANNEL = "desktop:get-dictation-snapshot";
-export const GET_DICTATION_SHELL_AVAILABILITY_CHANNEL = "desktop:get-dictation-shell-availability";
-export const DICTATION_COMMAND_CHANNEL = "desktop:dictation-command";
-export const DICTATION_SNAPSHOT_CHANNEL = "desktop:dictation-snapshot";
-export const DICTATION_SHELL_AVAILABILITY_CHANNEL = "desktop:dictation-shell-availability";
+// Mesura's own dictation, decoupled from Symmetria Shell. Main→renderer: a
+// `--dictation …` command line a second launch of the binary forwarded.
+export const DICTATION_COMMAND_LINE_CHANNEL = "desktop:dictation-command-line";
+// Renderer→main: the dictation state the widget shows; main relays it to the
+// widget window on DICTATION_WIDGET_STATE_CHANNEL, so the widget opens no
+// server connection of its own.
+export const PUBLISH_DICTATION_WIDGET_STATE_CHANNEL = "desktop:publish-dictation-widget-state";
+export const DICTATION_WIDGET_STATE_CHANNEL = "desktop:dictation-widget-state";
+export const GET_DICTATION_WIDGET_STATE_CHANNEL = "desktop:get-dictation-widget-state";
+// Widget→main: the widget page rendered the state it was asked to acknowledge; the window shows.
+export const DICTATION_WIDGET_RENDERED_CHANNEL = "desktop:dictation-widget-rendered";
 // The renderer forwards its projected thread list here, and the main process
 // republishes it on the Symmetria socket. Renderer→main, unlike the dictation
 // pair above: the renderer already holds the read model, so a second
 // subscription in the main process would be a duplicate with its own auth.
 export const PUBLISH_THREADS_CHANNEL = "desktop:publish-threads";
 export const PASTE_AS_TEXT_CHANNEL = "desktop:paste-as-text";
+export const REVEAL_WINDOW_CHANNEL = "desktop:reveal-window";
 export const SNAP_SHOT_EVENT_CHANNEL = "desktop:snap-shot-event";
+export const WEB_LINK_OPEN_CHANNEL = "desktop:web-link-open";
+export const WEB_LINK_READY_CHANNEL = "desktop:web-link-ready";
 export const QUIT_SHORTCUT_CHANNEL = "desktop:quit-shortcut";
+export const TRACKPAD_SCROLL_END_CHANNEL = "desktop:trackpad-scroll-end";
 export const GET_WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:get-window-fullscreen-state";
 export const WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:window-fullscreen-state";
 export const DESKTOP_APP_ACTIVATION_READY_CHANNEL = "desktop:app-activation-ready";
@@ -35,7 +42,11 @@ export const UPDATE_SET_CHANNEL_CHANNEL = "desktop:update-set-channel";
 export const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 export const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 export const UPDATE_CHECK_CHANNEL = "desktop:update-check";
+export const CLI_COMMAND_GET_STATE_CHANNEL = "desktop:cli-command-get-state";
+export const CLI_COMMAND_INSTALL_CHANNEL = "desktop:cli-command-install";
+export const CLI_COMMAND_UNINSTALL_CHANNEL = "desktop:cli-command-uninstall";
 export const GET_APP_BRANDING_CHANNEL = "desktop:get-app-branding";
+export const GET_RELAY_TELEMETRY_ENABLED_CHANNEL = "desktop:get-relay-telemetry-enabled";
 export const GET_SYSTEM_LOCALE_CHANNEL = "desktop:get-system-locale";
 export const GET_LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANNEL = "desktop:get-local-environment-bootstraps";
 export const GET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL = "desktop:get-local-environment-enabled";
@@ -82,6 +93,7 @@ export const SET_WSL_BACKEND_ENABLED_CHANNEL = "desktop:set-wsl-backend-enabled"
 export const SET_WSL_DISTRO_CHANNEL = "desktop:set-wsl-distro";
 export const SET_WSL_ONLY_CHANNEL = "desktop:set-wsl-only";
 export const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancelled";
+export const PREVIEW_SET_FORWARDED_SHORTCUTS_CHANNEL = "desktop:preview-set-forwarded-shortcuts";
 export const PREVIEW_CREATE_TAB_CHANNEL = "desktop:preview-create-tab";
 export const PREVIEW_CLOSE_TAB_CHANNEL = "desktop:preview-close-tab";
 export const PREVIEW_REGISTER_WEBVIEW_CHANNEL = "desktop:preview-register-webview";
@@ -92,6 +104,7 @@ export const PREVIEW_REFRESH_CHANNEL = "desktop:preview-refresh";
 export const PREVIEW_ZOOM_IN_CHANNEL = "desktop:preview-zoom-in";
 export const PREVIEW_ZOOM_OUT_CHANNEL = "desktop:preview-zoom-out";
 export const PREVIEW_RESET_ZOOM_CHANNEL = "desktop:preview-reset-zoom";
+export const PREVIEW_SET_ZOOM_FACTOR_CHANNEL = "desktop:preview-set-zoom-factor";
 export const PREVIEW_HARD_RELOAD_CHANNEL = "desktop:preview-hard-reload";
 export const PREVIEW_SET_COLOR_SCHEME_CHANNEL = "desktop:preview-set-color-scheme";
 export const PREVIEW_SET_AUDIO_MUTED_CHANNEL = "desktop:preview-set-audio-muted";
@@ -101,7 +114,10 @@ export const PREVIEW_CLEAR_CACHE_CHANNEL = "desktop:preview-clear-cache";
 export const PREVIEW_GET_CONFIG_CHANNEL = "desktop:preview-get-config";
 export const PREVIEW_IMPORT_SOURCES_CHANNEL = "desktop:preview-import-sources";
 export const PREVIEW_IMPORT_COOKIES_CHANNEL = "desktop:preview-import-cookies";
+export const PREVIEW_READ_COOKIES_CHANNEL = "desktop:preview-read-cookies";
 export const PREVIEW_SET_ANNOTATION_THEME_CHANNEL = "desktop:preview-set-annotation-theme";
+export const PREVIEW_SET_ANNOTATION_SEND_ENABLED_CHANNEL =
+  "desktop:preview-set-annotation-send-enabled";
 export const PREVIEW_PICK_ELEMENT_CHANNEL = "desktop:preview-pick-element";
 export const PREVIEW_CANCEL_PICK_ELEMENT_CHANNEL = "desktop:preview-cancel-pick-element";
 export const PREVIEW_CAPTURE_SCREENSHOT_CHANNEL = "desktop:preview-capture-screenshot";
@@ -110,21 +126,21 @@ export const PREVIEW_COPY_ARTIFACT_CHANNEL = "desktop:preview-copy-artifact";
 export const PREVIEW_PICTURE_IN_PICTURE_OPEN_CHANNEL = "desktop:preview-pip-open";
 export const PREVIEW_PICTURE_IN_PICTURE_CLOSE_CHANNEL = "desktop:preview-pip-close";
 export const PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL = "desktop:preview-pip-frame";
-export const PREVIEW_AUTOMATION_STATUS_CHANNEL = "desktop:preview-automation-status";
-export const PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL = "desktop:preview-automation-snapshot";
-export const PREVIEW_AUTOMATION_CLICK_CHANNEL = "desktop:preview-automation-click";
-export const PREVIEW_AUTOMATION_TYPE_CHANNEL = "desktop:preview-automation-type";
-export const PREVIEW_AUTOMATION_PRESS_CHANNEL = "desktop:preview-automation-press";
-export const PREVIEW_AUTOMATION_SCROLL_CHANNEL = "desktop:preview-automation-scroll";
-export const PREVIEW_AUTOMATION_EVALUATE_CHANNEL = "desktop:preview-automation-evaluate";
-export const PREVIEW_AUTOMATION_WAIT_FOR_CHANNEL = "desktop:preview-automation-wait-for";
 export const PREVIEW_RECORDING_START_CHANNEL = "desktop:preview-recording-start";
 export const PREVIEW_RECORDING_STOP_CHANNEL = "desktop:preview-recording-stop";
 export const PREVIEW_RECORDING_SAVE_CHANNEL = "desktop:preview-recording-save";
 export const PREVIEW_RECORDING_FRAME_CHANNEL = "desktop:preview-recording-frame";
 export const PREVIEW_STATE_CHANGE_CHANNEL = "desktop:preview-state-change";
 export const PREVIEW_POINTER_EVENT_CHANNEL = "desktop:preview-pointer-event";
+export const PREVIEW_OPEN_LINK_CHANNEL = "desktop:preview-open-link";
 
 export const MAC_PERMISSION_HELPER_CHANNEL = "desktop:mac-permission-helper";
 
 export const CHECK_SYSTEM_PERMISSION_CHANNEL = "desktop:check-system-permission";
+
+export const PREVIEW_RECORDING_INPUT_CHANNEL = "desktop:preview-recording-input";
+
+export const RECEIVE_PROVIDER_AUTH_CALLBACK_CHANNEL = "desktop:receive-provider-auth-callback";
+export const CANCEL_PROVIDER_AUTH_CALLBACK_CHANNEL = "desktop:cancel-provider-auth-callback";
+export const TAKE_LEGACY_LOCAL_STORAGE_CHANNEL = "desktop:take-legacy-local-storage";
+export const COMPLETE_LEGACY_LOCAL_STORAGE_CHANNEL = "desktop:complete-legacy-local-storage";

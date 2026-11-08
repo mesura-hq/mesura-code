@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vp test run"
+    "test": "vp test run --config ../vite.config.ts --dir . --max-workers=1 --no-file-parallelism"
   },
   "devDependencies": {
     "@types/node": "catalog:",

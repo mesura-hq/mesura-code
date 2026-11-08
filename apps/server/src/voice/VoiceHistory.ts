@@ -1,19 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off - owner keys are one-way SHA-256 digests.
 /**
- * VoiceHistory - Mesura: the persisted record of spoken voice calls.
- *
- * A call's history lives in the orchestration event store as thread.voice-* events, dispatched
- * through `OrchestrationEngine`. An accepted dispatch has already committed its event, its
- * projection rows and its receipt in one transaction, so every acknowledgement here reads back
- * what it wrote. The projection rows are rebuilt by replay; there is no second journal.
- *
- * Ownership is checked against the persisted call. A call ID is not a credential.
+ * VoiceHistory - Mesura: spoken voice calls, stored as voice events (`VoiceHistoryEvents`). An
+ * acknowledgement follows the commit of its event and projection, so it reads back what it
+ * wrote. Ownership is checked against the persisted call; a call ID is not a credential.
  */
 import * as NodeCrypto from "node:crypto";
 
 import {
-  CommandId,
-  type OrchestrationCommand,
   type ThreadId,
   VOICE_HISTORY_DEFAULT_PAGE_SIZE,
   type VoiceCallEndReason,
@@ -31,11 +24,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
-import { isOrchestrationCommandRejection } from "../orchestration/Errors.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionThreadRepositoryLive } from "../persistence/Layers/ProjectionThreads.ts";
 import { ProjectionVoiceCallRepositoryLive } from "../persistence/Layers/ProjectionVoiceCalls.ts";
-import { ProjectionThreadRepository } from "../persistence/Services/ProjectionThreads.ts";
 import {
   type ProjectionVoiceCall,
   type ProjectionVoiceCallCursor,
@@ -43,6 +32,7 @@ import {
   type ProjectionVoiceFragment,
   voiceBatchContentDigest,
 } from "../persistence/Services/ProjectionVoiceCalls.ts";
+import { VoiceHistoryEvents, VoiceHistoryEventsLive } from "./VoiceHistoryEvents.ts";
 
 export interface VoiceHistoryShape {
   /** Reject a call ID already used by another client, thread, or an ended call. */
@@ -107,6 +97,7 @@ export class VoiceHistory extends Context.Service<VoiceHistory, VoiceHistoryShap
 const unavailable = () =>
   new VoiceConversationError({ status: 404, message: "That voice call is unavailable." });
 const conflict = (message: string) => new VoiceConversationError({ status: 409, message });
+const isVoiceConversationError = Schema.is(VoiceConversationError);
 const storageFailure = () =>
   new VoiceConversationError({
     status: 502,
@@ -155,23 +146,97 @@ const toSummary = (call: ProjectionVoiceCall, requesterOwnerId: string): VoiceCa
 });
 
 const makeVoiceHistory = Effect.gen(function* () {
-  const engine = yield* OrchestrationEngineService;
   const calls = yield* ProjectionVoiceCallRepository;
-  const threads = yield* ProjectionThreadRepository;
-  // Validation and dispatch of one operation must not interleave with another. The engine
-  // already runs commands one at a time, so one permit costs no parallelism.
+  const events = yield* VoiceHistoryEvents;
+  // Validation and the write of one operation must not interleave with another.
   const writes = yield* Semaphore.make(1);
 
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
-  const dispatch = (command: OrchestrationCommand) =>
-    engine.dispatch(command).pipe(
-      Effect.asVoid,
-      // The only rejection a voice command has is a missing or deleted thread.
-      Effect.mapError((error) =>
-        isOrchestrationCommandRejection(error) ? unavailable() : storageFailure(),
-      ),
-    );
+  type VoiceWrite =
+    | {
+        readonly type: "started";
+        readonly threadId: ThreadId;
+        readonly callId: string;
+        readonly ownerKey: string;
+        readonly startedAt: string;
+      }
+    | {
+        readonly type: "appended";
+        readonly threadId: ThreadId;
+        readonly callId: string;
+        readonly batchId: string;
+        readonly fragments: ReadonlyArray<VoiceTranscriptFragment>;
+      }
+    | {
+        readonly type: "ended";
+        /** The operation's identity: the hangup or server end, or the owner's later boundary. */
+        readonly operation: "end" | "final";
+        readonly threadId: ThreadId;
+        readonly callId: string;
+        readonly reason: VoiceCallEndReason;
+        readonly lastSequence: number | null;
+        readonly endedAt: string;
+      };
+
+  /**
+   * Commit one voice event with its projection. Its command ID matches the prototype's. A deleted
+   * thread keeps no voice history, so it accepts no voice event.
+   */
+  const write = Effect.fn("VoiceHistory.write")(
+    function* (change: VoiceWrite) {
+      yield* requireLiveThread(change.threadId);
+      const appendedAt = yield* nowIso;
+      switch (change.type) {
+        case "started":
+          return yield* events.append({
+            commandId: `voice:${change.callId}:start`,
+            occurredAt: change.startedAt,
+            event: {
+              type: "thread.voice-call-started",
+              payload: {
+                threadId: change.threadId,
+                callId: change.callId,
+                ownerKey: change.ownerKey,
+                startedAt: change.startedAt,
+              },
+            },
+          });
+        case "appended":
+          return yield* events.append({
+            commandId: `voice:${change.callId}:batch:${change.batchId}`,
+            occurredAt: appendedAt,
+            event: {
+              type: "thread.voice-transcript-appended",
+              payload: {
+                threadId: change.threadId,
+                callId: change.callId,
+                batchId: change.batchId,
+                fragments: change.fragments,
+                appendedAt,
+              },
+            },
+          });
+        case "ended":
+          return yield* events.append({
+            commandId: `voice:${change.callId}:${change.operation}`,
+            occurredAt: change.operation === "end" ? change.endedAt : appendedAt,
+            event: {
+              type: "thread.voice-call-ended",
+              payload: {
+                threadId: change.threadId,
+                callId: change.callId,
+                reason: change.reason,
+                lastSequence: change.lastSequence,
+                endedAt: change.endedAt,
+              },
+            },
+          });
+      }
+    },
+    Effect.asVoid,
+    Effect.mapError((error) => (isVoiceConversationError(error) ? error : storageFailure())),
+  );
 
   const readCall = (callId: string) =>
     calls.getCall({ callId }).pipe(Effect.mapError(storageFailure));
@@ -219,10 +284,8 @@ const makeVoiceHistory = Effect.gen(function* () {
   const requireLiveThread = Effect.fn("VoiceHistory.requireLiveThread")(function* (
     threadId: ThreadId,
   ) {
-    const thread = yield* threads.getById({ threadId }).pipe(Effect.mapError(storageFailure));
-    if (Option.isNone(thread) || thread.value.deletedAt !== null) {
-      return yield* unavailable();
-    }
+    const live = yield* calls.isLiveThread({ threadId }).pipe(Effect.mapError(storageFailure));
+    if (!live) return yield* unavailable();
   });
 
   const assertCanStart: VoiceHistoryShape["assertCanStart"] = Effect.fn(
@@ -242,9 +305,8 @@ const makeVoiceHistory = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* assertCanStart(input);
         if (Option.isSome(yield* readCall(input.callId))) return;
-        yield* dispatch({
-          type: "thread.voice-call.start",
-          commandId: CommandId.make(`voice:${input.callId}:start`),
+        yield* write({
+          type: "started",
           threadId: input.threadId,
           callId: input.callId,
           ownerKey: voiceOwnerKeyOf(input.ownerId),
@@ -274,7 +336,7 @@ const makeVoiceHistory = Effect.gen(function* () {
         yield* settlePendingServerEnd(callId);
         const call = yield* readOwnedCall(callId, ownerId);
         // A batch ID is bound to the complete request it was first accepted with. An exact
-        // retry returns here, before the engine's receipt could answer for changed content.
+        // retry returns here without a second write.
         const acceptedDigest = yield* calls
           .getBatchDigest({ callId, batchId })
           .pipe(Effect.mapError(storageFailure));
@@ -317,17 +379,9 @@ const makeVoiceHistory = Effect.gen(function* () {
         ) {
           return yield* conflict("That voice call has ended.");
         }
-        // The event carries the complete batch, also when every fragment is already stored, so
-        // the batch identity survives restart and replay. Stored fragments keep their content.
-        yield* dispatch({
-          type: "thread.voice-transcript.append",
-          commandId: CommandId.make(`voice:${callId}:batch:${batchId}`),
-          threadId: call.threadId,
-          callId,
-          batchId,
-          fragments,
-          appendedAt: yield* nowIso,
-        });
+        // The write records the complete batch digest, also when every fragment is already
+        // stored, so the batch identity survives a restart. Stored fragments keep their content.
+        yield* write({ type: "appended", threadId: call.threadId, callId, batchId, fragments });
         return { lastSequence: Math.max(highest, call.lastSequence) };
       }),
     );
@@ -342,9 +396,9 @@ const makeVoiceHistory = Effect.gen(function* () {
         const belowStored = lastSequence !== undefined && lastSequence < call.lastSequence;
         if (call.endedAt === null) {
           // The hangup is recorded even when its boundary is rejected: audio ended either way.
-          yield* dispatch({
-            type: "thread.voice-call.end",
-            commandId: CommandId.make(`voice:${callId}:end`),
+          yield* write({
+            type: "ended",
+            operation: "end",
             threadId: call.threadId,
             callId,
             reason: "hangup",
@@ -366,9 +420,9 @@ const makeVoiceHistory = Effect.gen(function* () {
         if (lastSequence === undefined) return;
         // The call ended without a boundary: a server-side end, or a hangup whose boundary was
         // rejected. The owner now bounds its pending flush; the original reason and time stay.
-        yield* dispatch({
-          type: "thread.voice-call.end",
-          commandId: CommandId.make(`voice:${callId}:final`),
+        yield* write({
+          type: "ended",
+          operation: "final",
           threadId: call.threadId,
           callId,
           reason: call.endReason ?? "interrupted",
@@ -383,9 +437,9 @@ const makeVoiceHistory = Effect.gen(function* () {
     reason: VoiceCallEndReason,
     endedAt: string,
   ) =>
-    dispatch({
-      type: "thread.voice-call.end",
-      commandId: CommandId.make(`voice:${call.callId}:end`),
+    write({
+      type: "ended",
+      operation: "end",
       threadId: call.threadId,
       callId: call.callId,
       reason,
@@ -498,8 +552,11 @@ const makeVoiceHistory = Effect.gen(function* () {
   } satisfies VoiceHistoryShape;
 });
 
-/** Built after the engine, so recovery runs after the event replay. */
+/**
+ * Built after the event store and its projection catch-up, so recovery sees every replayed call.
+ * `VoiceHistoryNotices` is exported for the WebSocket notice stream.
+ */
 export const VoiceHistoryLive = Layer.effect(VoiceHistory, makeVoiceHistory).pipe(
-  Layer.provide(ProjectionVoiceCallRepositoryLive),
-  Layer.provide(ProjectionThreadRepositoryLive),
+  Layer.provideMerge(VoiceHistoryEventsLive),
+  Layer.provideMerge(ProjectionVoiceCallRepositoryLive),
 );

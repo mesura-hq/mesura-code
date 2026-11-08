@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { resolveExternalWebLinkHost, showExternalLinkContextMenu } from "./externalLinkContextMenu";
+import { resolveExternalWebLinkHref, showExternalLinkContextMenu } from "./externalLinkContextMenu";
 
 function createHarness(
   selection:
@@ -29,167 +29,89 @@ function createHarness(
 }
 
 describe("external chat link context menu", () => {
-  it("offers both open actions and Copy Link", async () => {
-    const harness = createHarness(null);
-
-    await showExternalLinkContextMenu({
-      href: "https://example.com/docs?topic=menus#copy",
-      position: { x: 12, y: 24 },
-      ...harness,
-    });
-
-    expect(harness.showContextMenu).toHaveBeenCalledWith(
-      [
-        { id: "open-in-preview", label: "Open in integrated browser" },
-        { id: "open-external", label: "Open in system browser" },
-        { id: "copy-link", label: "Copy Link" },
-      ],
-      { x: 12, y: 24 },
-    );
-    expect(harness.openInPreview).not.toHaveBeenCalled();
-    expect(harness.openExternal).not.toHaveBeenCalled();
-    expect(harness.copyLink).not.toHaveBeenCalled();
-  });
-
-  it("still offers the link's own actions where the integrated browser cannot be opened", async () => {
-    const harness = createHarness(null);
-
-    await showExternalLinkContextMenu({
-      href: "https://github.com/pingdotgg/t3code/pull/6169",
-      canOpenInPreview: false,
-      position: { x: 4, y: 8 },
-      ...harness,
-    });
-
-    expect(harness.showContextMenu).toHaveBeenCalledWith(
-      [
-        { id: "open-external", label: "Open in system browser" },
-        { id: "copy-link", label: "Copy Link" },
-      ],
-      { x: 4, y: 8 },
-    );
-  });
-
-  it("copies the exact destination without opening it", async () => {
-    const harness = createHarness("copy-link");
-    const href = "https://example.com/docs?topic=menus#copy";
-
-    await showExternalLinkContextMenu({ href, position: { x: 1, y: 2 }, ...harness });
-
-    expect(harness.copyLink).toHaveBeenCalledWith(href);
-    expect(harness.openInPreview).not.toHaveBeenCalled();
-    expect(harness.openExternal).not.toHaveBeenCalled();
+  it.each([
+    [
+      "https://example.com/docs?topic=security#links",
+      "https://example.com/docs?topic=security#links",
+    ],
+    ["HTTP://EXAMPLE.COM", "http://example.com/"],
+    ["//example.com/path", "https://example.com/path"],
+  ])("resolves the safe external web-link href for %s as %s", (href, expected) => {
+    expect(resolveExternalWebLinkHref(href)).toBe(expected);
   });
 
   it.each([
-    ["link-to-thread", "Link to thread", true],
-    ["unlink-from-thread", "Unlink from thread", false],
-  ] as const)("offers and runs the %s action", async (action, label, linked) => {
-    const harness = createHarness(action);
-    const href = "https://github.com/pingdotgg/t3code/pull/42";
-
-    await showExternalLinkContextMenu({
-      href,
-      threadLinkAction: action,
-      position: { x: 1, y: 2 },
-      ...harness,
-    });
-
-    expect(harness.showContextMenu).toHaveBeenCalledWith(
-      expect.arrayContaining([{ id: action, label }]),
-      { x: 1, y: 2 },
-    );
-    expect(harness.updateThreadLink).toHaveBeenCalledWith(href, linked);
+    "javascript:alert(document.domain)",
+    " \nJaVaScRiPt:alert(document.domain)",
+    "data:text/html,<script>alert(document.domain)</script>",
+    "file:///tmp/example.txt",
+    "mailto:hello@example.com",
+    "/relative/path",
+    "not a URL",
+    "",
+  ])("rejects unsafe external web-link href %s", (href) => {
+    expect(resolveExternalWebLinkHref(href)).toBeNull();
   });
+});
 
-  it.each([
-    ["open-in-preview" as const, "openInPreview" as const],
-    ["open-external" as const, "openExternal" as const],
-  ])("preserves the %s action", async (selection, expectedCallback) => {
-    const harness = createHarness(selection);
+afterEach(() => vi.unstubAllGlobals());
+
+it.each([
+  [767, false],
+  [1280, true],
+] as const)(
+  "chat link menu policy: width %s coarse %s hides explicit app and rejects stale native selection",
+  async (innerWidth, coarse) => {
+    vi.stubGlobal("window", { innerWidth, matchMedia: () => ({ matches: coarse }) });
+    const harness = createHarness("open-in-preview");
     const href = "https://example.com/docs";
-
     await showExternalLinkContextMenu({ href, position: { x: 1, y: 2 }, ...harness });
-
-    expect(harness[expectedCallback]).toHaveBeenCalledWith(href);
-    expect(harness.copyLink).not.toHaveBeenCalled();
-  });
-
-  it("reports the selected action when it fails", async () => {
-    const harness = createHarness("copy-link");
-    const cause = new Error("clipboard denied");
-    harness.copyLink.mockRejectedValue(cause);
-
-    await showExternalLinkContextMenu({
-      href: "https://example.com/docs",
-      position: { x: 1, y: 2 },
-      ...harness,
-    });
-
-    expect(harness.reportFailure).toHaveBeenCalledWith("copy-link", cause);
-  });
-
-  it("reports the menu operation when the native menu cannot be shown", async () => {
-    const harness = createHarness(null);
-    const cause = new Error("menu unavailable");
-    harness.showContextMenu.mockRejectedValue(cause);
-
-    await showExternalLinkContextMenu({
-      href: "https://example.com/docs",
-      position: { x: 1, y: 2 },
-      ...harness,
-    });
-
-    expect(harness.reportFailure).toHaveBeenCalledWith("show-link-context-menu", cause);
+    expect(
+      harness.showContextMenu.mock.calls[0]?.[0].map((item: { id: string }) => item.id),
+    ).toEqual(["open-external", "copy-link"]);
     expect(harness.openInPreview).not.toHaveBeenCalled();
-    expect(harness.openExternal).not.toHaveBeenCalled();
-    expect(harness.copyLink).not.toHaveBeenCalled();
+    expect(harness.openExternal).toHaveBeenCalledExactlyOnceWith(href);
+  },
+);
+
+it("chat link menu policy: a pending desktop app selection uses system after a viewport change", async () => {
+  let width = 1280;
+  vi.stubGlobal("window", {
+    get innerWidth() {
+      return width;
+    },
+    matchMedia: () => ({ matches: false }),
   });
+  const harness = createHarness(null);
+  let choose = () => {};
+  harness.showContextMenu.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        choose = () => resolve("open-in-preview");
+      }),
+  );
+  const href = "https://example.com/docs";
+  const selecting = showExternalLinkContextMenu({ href, position: { x: 1, y: 2 }, ...harness });
+  expect(
+    harness.showContextMenu.mock.calls[0]?.[0].map((item: { id: string }) => item.id),
+  ).toContain("open-in-preview");
+  width = 767;
+  choose();
+  await selecting;
+  expect(harness.openInPreview).not.toHaveBeenCalled();
+  expect(harness.openExternal).toHaveBeenCalledExactlyOnceWith(href);
+});
 
-  it.each([
-    ["open-in-preview" as const, "openInPreview" as const, "open-link-in-preview"],
-    ["open-external" as const, "openExternal" as const, "open-link-external"],
-  ])("reports a failed %s action", async (selection, callback, operation) => {
-    const harness = createHarness(selection);
-    const cause = new Error("open failed");
-    harness[callback].mockRejectedValue(cause);
-
-    await showExternalLinkContextMenu({
-      href: "https://example.com/docs",
-      position: { x: 1, y: 2 },
-      ...harness,
-    });
-
-    expect(harness.reportFailure).toHaveBeenCalledWith(operation, cause);
+it("chat link menu policy: a rejected stale phone open reports the actual system operation", async () => {
+  vi.stubGlobal("window", { innerWidth: 767, matchMedia: () => ({ matches: false }) });
+  const harness = createHarness("open-in-preview");
+  const failure = new Error("System browser unavailable");
+  harness.openExternal.mockRejectedValueOnce(failure);
+  await showExternalLinkContextMenu({
+    href: "https://example.com",
+    position: { x: 1, y: 2 },
+    ...harness,
   });
-
-  it("reports a failed thread link action", async () => {
-    const harness = createHarness("link-to-thread");
-    const cause = new Error("thread update failed");
-    harness.updateThreadLink.mockRejectedValue(cause);
-
-    await showExternalLinkContextMenu({
-      href: "https://github.com/pingdotgg/t3code/pull/42",
-      threadLinkAction: "link-to-thread",
-      position: { x: 1, y: 2 },
-      ...harness,
-    });
-
-    expect(harness.reportFailure).toHaveBeenCalledWith("link-pull-request-to-thread", cause);
-  });
-
-  it.each([
-    ["https://example.com", "example.com"],
-    ["http://localhost:3000/path", "localhost"],
-    ["//cdn.example.com/clip.mp4?signature=abc#t=2", "cdn.example.com"],
-    ["//", null],
-    ["#details", null],
-    ["mailto:hello@example.com", null],
-    ["file:///tmp/example.txt", null],
-    ["javascript:void(0)", null],
-    ["not a URL", null],
-    [undefined, null],
-  ])("resolves the external web-link host for %s as %s", (href, expected) => {
-    expect(resolveExternalWebLinkHost(href)).toBe(expected);
-  });
+  expect(harness.reportFailure).toHaveBeenCalledExactlyOnceWith("open-link-external", failure);
+  expect(harness.openInPreview).not.toHaveBeenCalled();
 });

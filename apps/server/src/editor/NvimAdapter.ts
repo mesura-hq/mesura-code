@@ -5,13 +5,9 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 /**
- * Spawning Neovim, behind a service.
- *
- * The same shape as `PtyAdapter`: the thing that talks to the operating system
- * is a service so the sessions above it can be built and tested without one.
- * Unlike a terminal this is a byte pipe rather than a pseudo-terminal — Neovim
- * embedded speaks msgpack on stdin and stdout, and a pseudo-terminal would put
- * line discipline in the middle of a binary protocol.
+ * Spawning Neovim behind a service, like `PtyAdapter`, so sessions are testable without one.
+ * It is a byte pipe, not a pseudo-terminal: embedded Neovim speaks msgpack on stdin and stdout,
+ * and line discipline would corrupt that binary protocol.
  */
 
 export class NvimSpawnError extends Data.TaggedError("NvimSpawnError")<{

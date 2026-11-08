@@ -333,12 +333,9 @@ describe("focusPane", () => {
   });
 
   it("enters the sidebar on a thread row, never on the toolbar", () => {
-    // This assertion used to name `[data-sidebar="menu-button"][data-active]`
-    // and call it the active thread row. It is not: in the running app those
-    // are the six icon buttons in the sidebar's top and bottom bars, all of
-    // them `data-active="false"`, so the old selector matched nothing and the
-    // keyboard landed on the collapse toggle. A thread row is a
-    // `role="button"` inside an `<li data-thread-item>`.
+    // Regression: `[data-sidebar="menu-button"]` is the toolbar's icon buttons,
+    // not thread rows, and once landed the keyboard on the collapse toggle.
+    // A thread row is a `role="button"` inside an `<li data-thread-item>`.
     const row = new FakeElement([]);
     const toolbarButton = new FakeElement([]);
     installDocument({
@@ -401,13 +398,9 @@ describe("focusPane", () => {
 });
 
 describe("isSidebarSearchFocused", () => {
-  /**
-   * The sidebar's `j` and `k` are the only bare-letter chords in the app, so
-   * something has to say when the sidebar has the keyboard but a letter is
-   * meant to be a letter. That is any text entry inside it, not one named
-   * search box: the thread search and the project filter are two different
-   * inputs and a rule keyed to one would silently stop guarding the other.
-   */
+  // The sidebar's bare `j`/`k` chords must yield to any text entry inside it,
+  // not one named search box: the thread search and the project filter are
+  // separate inputs, and a rule keyed to one stops guarding the other.
   function focused(element: FakeElement | null): void {
     installDocument({ activeElement: element });
   }

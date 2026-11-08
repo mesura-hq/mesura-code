@@ -88,6 +88,19 @@ export function factoryRunLabel(
   }
 }
 
+/**
+ * The thread row's top status slot for a running run: `5/11 Review`. The long label stays for
+ * the run card and the accessible name. Null for a thread without a run.
+ */
+export function factoryRunShortLabel(
+  run: FactoryRunShellSummary | null | undefined,
+): string | null {
+  if (run == null) return null;
+  if (run.phaseIndex === 0) return "Starting";
+  const phase = `${run.phaseIndex}/${run.phaseCount}`;
+  return run.node === null ? phase : `${phase} ${factoryNodeDisplayName(run.node)}`;
+}
+
 export function factoryPhaseMarkTone(status: FactoryRunPhaseStatus): FactoryPhaseMarkTone {
   switch (status) {
     case "running":
@@ -111,9 +124,9 @@ export function factoryEventClock(iso: string): string {
 /** A run's clock reading. Below a second it reads `0s`; `formatDuration` would say `1ms`. */
 export const factoryClockText = (ms: number) => (ms < 1_000 ? "0s" : formatDuration(ms));
 
-/** `repair 2/5 — Verify ①: <change>`: one return, on the Run tab and in the report's steps. */
+/** `repair 2/5 (Verify ①): <change>`: one return, on the Run tab and in the report's steps. */
 export function factoryReturnText(entry: FactoryRunReturn): string {
-  return `${entry.kind} ${entry.n}/${entry.budget} — ${factoryNodeDisplayName(entry.node)}: ${entry.change}`;
+  return `${entry.kind} ${entry.n}/${entry.budget} (${factoryNodeDisplayName(entry.node)}): ${entry.change}`;
 }
 
 const usd = (amount: number) => `$${amount.toFixed(2)}`;

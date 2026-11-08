@@ -4,11 +4,12 @@
  * Agent thread search adds a separate path; these pin that the lexical picker
  * still reaches only `orchestration.searchThreads` in the environment it names.
  */
-import { EnvironmentId, ORCHESTRATION_WS_METHODS } from "@t3tools/contracts";
+import { EnvironmentId, ORCHESTRATION_V2_WS_METHODS } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import * as HttpClient from "effect/http/HttpClient";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { executeAtomQuery } from "./runtime.ts";
@@ -20,6 +21,10 @@ import {
 } from "./threadSearchEnvironmentFakes.testFixtures.ts";
 
 const silentReporter = { warn: () => undefined, error: () => undefined };
+const unusedHttpClientLayer = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make(() => Effect.die("Unexpected HTTP request during lexical thread search")),
+);
 
 const specs: FakeEnvironmentSpec[] = [
   {
@@ -66,7 +71,9 @@ it.effect(
       Effect.gen(function* () {
         const fakes = yield* makeFakeEnvironments(specs);
         const atoms = createOrchestrationEnvironmentAtoms(
-          Atom.runtime(Layer.succeed(EnvironmentRegistry, fakes.registry)),
+          Atom.runtime(
+            Layer.merge(Layer.succeed(EnvironmentRegistry, fakes.registry), unusedHttpClientLayer),
+          ),
         );
         const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
           Effect.sync(() => registry.dispose()),
@@ -87,7 +94,7 @@ it.effect(
         expect(fakes.calls).toEqual([
           {
             environmentId: "env-laptop",
-            method: ORCHESTRATION_WS_METHODS.searchThreads,
+            method: ORCHESTRATION_V2_WS_METHODS.searchThreads,
             input: { query: "needle" },
           },
         ]);
@@ -106,7 +113,9 @@ it.effect(
       Effect.gen(function* () {
         const fakes = yield* makeFakeEnvironments(specs);
         const atoms = createOrchestrationEnvironmentAtoms(
-          Atom.runtime(Layer.succeed(EnvironmentRegistry, fakes.registry)),
+          Atom.runtime(
+            Layer.merge(Layer.succeed(EnvironmentRegistry, fakes.registry), unusedHttpClientLayer),
+          ),
         );
         const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
           Effect.sync(() => registry.dispose()),
@@ -125,7 +134,7 @@ it.effect(
         );
 
         expect(fakes.calls.map((call) => [call.environmentId, call.method])).toEqual([
-          ["env-server", ORCHESTRATION_WS_METHODS.searchThreads],
+          ["env-server", ORCHESTRATION_V2_WS_METHODS.searchThreads],
         ]);
         expect(AsyncResult.isSuccess(result)).toBe(true);
         if (AsyncResult.isSuccess(result)) {

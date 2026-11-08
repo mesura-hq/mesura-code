@@ -1,31 +1,22 @@
 // @effect-diagnostics nodeBuiltinImport:off - reads the developer's own config directory.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { NvimBridge } from "../NvimBridge.ts";
+import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * The developer's own configuration, driven.
- *
- * Gated on `MESURA_NVIM_CONFIG_DIR` on purpose, and it cannot run in
- * continuous integration: the configuration is a separate repository and its
- * first start installs 55 plugins under `stdpath('data')`. Run it on a machine
- * that has both:
- *
+ * Drives the developer's own configuration, so it needs `MESURA_NVIM_CONFIG_DIR` and cannot run in
+ * CI: the configuration is a separate repository whose first start installs 55 plugins. It proves
+ * the real mappings work under `--embed` and keep the mirror equal to the buffer. Run it with:
  *   MESURA_NVIM_CONFIG_DIR=~/.neovim vp test run src/editor/conformance/realConfig.test.ts
- *
- * What it proves is the thing no unit test can: that the mappings the
- * developer actually uses still behave under `--embed`, with the host plugin
- * loaded after the configuration, and that the mirror equals the buffer after
- * each of them. A mapping that silently stops working is exactly the failure
- * this whole cycle exists to prevent.
  */
 
 const configDirectory = (() => {
@@ -36,15 +27,6 @@ const configDirectory = (() => {
     return NodeFS.statSync(expanded).isDirectory() ? expanded : null;
   } catch {
     return null;
-  }
-})();
-
-const nvimAvailable = (() => {
-  try {
-    NodeChildProcess.execFileSync("nvim", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
   }
 })();
 
@@ -93,7 +75,9 @@ const assertMirrored = (bridge: NvimBridge.Session) =>
     assert.deepStrictEqual(bridge.lines, lines, "the mirror equals the buffer");
   });
 
-if (!enabled) {
+if (configDirectory !== null && !nvimAvailable) reportMissingNvim("real-configuration harness");
+
+if (configDirectory === null) {
   it("skips the real-configuration harness", () => {
     // Said out loud rather than silently absent: a harness that vanishes looks
     // the same as a harness that passed.
@@ -106,6 +90,44 @@ if (!enabled) {
 
 if (enabled)
   it.layer(layer, { excludeTestServices: true })("the developer's configuration, driven", (it) => {
+    it.effect("pushes the cursor for insert-mode keys under the developer's configuration", () =>
+      withRealConfig(["hello"], "notes.txt", (bridge) =>
+        Effect.gen(function* () {
+          /** Sends a key and waits for the plugin's push that puts the caret at `col`. */
+          const pressAndAwaitPush = (key: string, col: number) =>
+            Effect.gen(function* () {
+              const pushed = yield* Deferred.make<void>();
+              const stop = bridge.subscribe((event) => {
+                if (
+                  event.kind === "cursor" &&
+                  event.source === "push" &&
+                  bridge.cursor.col === col
+                ) {
+                  Deferred.doneUnsafe(pushed, Effect.void);
+                }
+              });
+              yield* bridge.input(key);
+              yield* Deferred.await(pushed);
+              stop();
+            });
+
+          yield* pressAndAwaitPush("i", 1);
+          yield* bridge.settle;
+          // The plugins that run on every inserted character are loaded here,
+          // and the caret still comes from the push, never from a read.
+          const before = bridge.metrics.cursorReads;
+          for (const [index, key] of [..."abcde"].entries()) {
+            yield* pressAndAwaitPush(key, index + 2);
+          }
+          assert.strictEqual(
+            bridge.metrics.cursorReads - before,
+            0,
+            "cursor reads for five insert-mode keys",
+          );
+        }).pipe(Effect.orDie),
+      ),
+    );
+
     it.effect("starts, loads the configuration and reports the host flag", () =>
       withRealConfig(["const value = 1;"], "probe.ts", (bridge) =>
         Effect.gen(function* () {
@@ -126,11 +148,9 @@ if (enabled)
     it.effect("flash labels a jump target on s and takes it", () =>
       withRealConfig(["alpha beta", "gamma delta", "epsilon zeta"], "jump.lua", (bridge) =>
         Effect.gen(function* () {
-          // `input` here, not `type`. Flash blocks Neovim's main loop waiting for
-          // a label, so nothing answers over RPC while the labels are on screen —
-          // and the labels are the whole point. They arrive as a redraw on the
-          // notification stream, which needs no reply, so frames are what this
-          // waits on. `<Esc>` then unblocks it.
+          // `input`, not `type`: flash blocks Neovim's main loop on a label, so no RPC answers while
+          // the labels show. The labels arrive as redraw notifications, so this waits on frames, and
+          // `<Esc>` then unblocks Neovim.
           yield* bridge.input("se");
 
           // Frames, not a clock, and bounded rather than endless. `nvim_input`
@@ -201,11 +221,9 @@ if (enabled)
             );
             assert.isNotEmpty(labelled, "flash drew labels");
 
-            // A direct API write rather than a key, because flash is blocking
-            // on a label and would take a keystroke as one. This is what an
-            // agent's write looks like from Neovim's side, and it is the case
-            // the per-row bookkeeping exists for: a line redrawing must not
-            // take the labels off every other line with it.
+            // An API write, as an agent writes, because flash would take a key as a label. The
+            // per-row bookkeeping exists for this case: one line redrawing must keep the labels on
+            // every other line.
             yield* bridge.request("nvim_buf_set_lines", [0, 3, 4, false, ["const changed = 2;"]]);
             yield* bridge.awaitFrame;
 
@@ -225,20 +243,14 @@ if (enabled)
     it.effect("draws a search as highlight runs over the text it matched", () =>
       withRealConfig(["alpha target beta", "gamma delta", "target again"], "search.lua", (bridge) =>
         Effect.gen(function* () {
-          // The search register directly, rather than the `/` key. Measured:
-          // under his configuration `/target<CR>` moves the cursor onto the
-          // match and leaves nothing highlighted, because flash owns `/` and
-          // clears `hlsearch` when its jump finishes. Pressing the key here
-          // would test flash's behaviour and call it this host's.
+          // The search register, not `/`: under the developer's configuration flash owns `/` and
+          // clears `hlsearch` after its jump, so pressing `/` would test flash, not this host.
           yield* bridge.type(':let @/ = "target"<CR>');
           yield* bridge.type(":set hlsearch<CR>");
           yield* bridge.settle;
 
-          // Frames, bounded, not one frame and a hope. Under a configuration
-          // this size the redraw that paints the matches is not reliably the
-          // next one — measured: one run in four reported nothing when this
-          // waited for a single frame, which is a test that lies a quarter of
-          // the time about a feature that works.
+          // A bounded number of frames, not one: under this configuration the redraw that paints
+          // the matches is not reliably the next frame. A single-frame wait failed one run in four.
           let frames = 0;
           while (bridge.highlightRuns.length === 0 && frames < 40) {
             yield* bridge.awaitFrame;

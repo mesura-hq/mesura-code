@@ -100,7 +100,7 @@ describe("Symmetria contract checksum", () => {
     const strict = Schema.Struct({ title: TrimmedNonEmptyString });
     const loose = Schema.Struct({ title: Schema.String });
     const documentOf = (schema: Schema.Top) =>
-      JSON.stringify(Schema.toJsonSchemaDocument(schema, { additionalProperties: true }));
+      JSON.stringify(Schema.toJsonSchemaDocument(schema, { onExcessProperty: "ignore" }));
     expect(documentOf(strict)).toBe(documentOf(loose));
     expect(computeSymmetriaSourceChecksum([{ root: "R", ast: strict.ast }])).not.toBe(
       computeSymmetriaSourceChecksum([{ root: "R", ast: loose.ast }]),

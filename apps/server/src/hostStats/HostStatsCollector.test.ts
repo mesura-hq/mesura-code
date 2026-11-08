@@ -1,14 +1,10 @@
 /**
- * Phase 1 fence of the hosts dock plan: acceptance criteria 1, 2, 3, 5, 6, 7 and 8.
- *
- * Entry point: `HostStatsCollector.make`, the constructor phase 2 wraps into the
- * sampler. Nothing in the server calls the collector during phase 1, so these
- * specs drive it directly against the fixture trees in `./fixtures`
+ * Drives `HostStatsCollector.make` directly against the fixture trees in `./fixtures`
  * (provenance in `./fixtures/README.md`).
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { HostStatsSample, type HostStatsGpu } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -21,7 +17,7 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as HostStatsCollector from "./HostStatsCollector.ts";
 import { HostOs, type HostOsApi } from "./portableReaders.ts";
@@ -41,9 +37,8 @@ const NVIDIA_SMI_ARGS = [
 ];
 
 /**
- * Expected second-reading rates between `vigilia-home` and `vigilia-home-60s-later`.
- * CPU follows proc(5): idle time is `idle + iowait`, and the total is the first eight
- * fields, because `guest` and `guest_nice` are already counted inside `user` and `nice`.
+ * Rates from `vigilia-home` to `vigilia-home-60s-later`. Per proc(5), idle is `idle + iowait` and
+ * the total is the first eight fields (`guest` and `guest_nice` are already in `user` and `nice`).
  * cpu  7957187 202 1169318 12256969 28932 58487 26810 0 153145 0   (vigilia-home)
  * cpu  8033079 202 1178122 12267617 28969 58802 26906 0 153697 0   (60 s later)
  */
@@ -63,7 +58,6 @@ const EXPECTED_CPU_PERCENT = 100 * (1 - CPU_IDLE_DELTA / CPU_TOTAL_DELTA);
 const NET_RX_DELTA = 2_103_605_220 - 2_102_414_876 + (2_149_679 - 2_145_366);
 const NET_TX_DELTA = 3_283_662_277 - 3_274_314_579 + (128_358 - 127_778);
 
-// ---------------------------------------------------------------------------
 // nvidia-smi fakes
 
 type NvidiaSmiBehaviour =
@@ -137,7 +131,6 @@ function fakeSpawner(
   );
 }
 
-// ---------------------------------------------------------------------------
 // fixture helpers
 
 const fixtureRoot = (name: string) => `${FIXTURES_DIRECTORY}/${name}`;
@@ -160,7 +153,7 @@ const makeCollector = (
       sysRoot: path.join(root, "sys"),
       diskPath: root,
     }).pipe(
-      Effect.provideService(HostProcessPlatform, options.platform ?? "linux"),
+      Effect.provideService(HostProcess.Platform, options.platform ?? "linux"),
       options.hostOs ? Effect.provideService(HostOs, options.hostOs) : (effect) => effect,
       Effect.provideService(
         ChildProcessSpawner.ChildProcessSpawner,
@@ -241,7 +234,6 @@ const gpuByVendor = (sample: HostStatsSample, vendor: HostStatsGpu["vendor"]) =>
   sample.gpus?.find((gpu) => gpu.vendor === vendor);
 
 it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
-  // -------------------------------------------------------------------------
   // AC1
   it.effect("AC1: a vigilia-home reading reports load, memory, swap, AMD GPU and k10temp", () =>
     Effect.gen(function* () {
@@ -284,7 +276,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC2
   it.effect(
     "AC2: CPU percent and network rates come from counter deltas, null on the first reading",
@@ -308,7 +299,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
       }),
   );
 
-  // -------------------------------------------------------------------------
   // AC3
   it.effect("AC3: counters that went backwards yield null rates, never negative ones", () =>
     Effect.gen(function* () {
@@ -506,7 +496,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC5
   it.effect("AC5: a suspended NVIDIA GPU reads as sleeping and nvidia-smi is never spawned", () =>
     Effect.gen(function* () {
@@ -532,7 +521,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC6
   const copyLaptopWithActiveNvidia = Effect.gen(function* () {
     const root = yield* copyFixture("arch-laptop");
@@ -673,7 +661,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC7
   it.effect("AC7: a conversa reading has null GPU and temperature, zero swap, and no error", () =>
     Effect.gen(function* () {
@@ -696,7 +683,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC8
   type ReaderCase = {
     readonly reader: string;
@@ -838,7 +824,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
       }),
   );
 
-  // -------------------------------------------------------------------------
   // Non-Linux fallbacks (plan detail): Node's `os` supplies CPU, load and memory.
   const GIB = 1024 * MIB;
 
@@ -945,7 +930,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
       }),
   );
 
-  // -------------------------------------------------------------------------
   // Regression: what the repair and rework turns learned, beyond the fence.
 
   it.effect("regression: a NIC that vanishes between readings nulls the network rates", () =>

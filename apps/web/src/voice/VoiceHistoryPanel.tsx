@@ -1,23 +1,21 @@
 import { useAtomValue } from "@effect/atom-react";
 import { createEnvironmentRpcSubscriptionAtomFamily } from "@t3tools/client-runtime/state/runtime";
 import { listVoiceCalls, listVoiceTranscript } from "@t3tools/client-runtime/voice-conversation";
-import {
-  ORCHESTRATION_WS_METHODS,
-  type ScopedThreadRef,
-  type VoiceCallSummary,
-} from "@t3tools/contracts";
+import { type ScopedThreadRef, VOICE_WS_METHODS, type VoiceCallSummary } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { ArrowLeft } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { connectionAtomRuntime } from "~/connection/runtime";
+import { useStableCallback } from "~/hooks/useStableCallback";
 import { Button } from "~/components/ui/button";
 import { runtime } from "~/lib/runtime";
 import { cn } from "~/lib/utils";
 import { readPreparedConnection } from "~/state/session";
 import {
+  createVoiceHistoryReadQueue,
   createVoiceTranscriptReader,
   foldVoiceHistoryNotice,
   initialVoiceHistoryNotices,
@@ -41,13 +39,14 @@ let voiceHistorySubscriptions = 0;
  */
 const voiceHistoryNotices = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
   label: "environment-data:voice-history:notices",
-  tag: ORCHESTRATION_WS_METHODS.subscribeVoiceHistory,
+  tag: VOICE_WS_METHODS.subscribeVoiceHistory,
   idleTtlMs: 5_000,
   transform: (stream) =>
     Stream.suspend(() => {
       voiceHistorySubscriptions += 1;
+      const generation = voiceHistorySubscriptions;
       return stream.pipe(
-        Stream.scan(initialVoiceHistoryNotices(voiceHistorySubscriptions), foldVoiceHistoryNotice),
+        Stream.scan(() => initialVoiceHistoryNotices(generation), foldVoiceHistoryNotice),
         Stream.drop(1),
       );
     }),
@@ -115,129 +114,127 @@ export function VoiceHistoryPanel({
     readonly callId: string;
     readonly snapshot: VoiceTranscriptSnapshot;
   } | null>(null);
-  const callsRef = useRef(calls);
-  useEffect(() => {
-    callsRef.current = calls;
-  }, [calls]);
   const firstPageIdsRef = useRef<ReadonlyArray<string>>([]);
   const readerRef = useRef<ReturnType<typeof createVoiceTranscriptReader> | null>(null);
-  const selectedIdRef = useRef<string | null>(null);
-
-  const readPage = useCallback(
-    async (cursor: string | null) => {
-      const prepared = readPreparedConnection(environmentId);
-      if (!prepared)
-        throw new Error("Connect to this environment to read its voice conversations.");
-      return runtime.runPromise(
-        listVoiceCalls(prepared, {
-          threadId,
-          ...(cursor === null ? {} : { cursor }),
-          limit: CALLS_PAGE_SIZE,
-        }),
-      );
+  const [readQueue] = useState(createVoiceHistoryReadQueue);
+  // Queued reads need the preceding response before React commits its render.
+  const listRef = useRef({ calls, nextCursor });
+  const applyCalls = useStableCallback(
+    (update: (current: ReadonlyArray<VoiceCallSummary>) => ReadonlyArray<VoiceCallSummary>) => {
+      const next = update(listRef.current.calls);
+      listRef.current = { ...listRef.current, calls: next };
+      setCalls(next);
     },
-    [environmentId, threadId],
   );
+  const applyCursor = (cursor: string | null) => {
+    listRef.current = { ...listRef.current, nextCursor: cursor };
+    setNextCursor(cursor);
+  };
 
-  const report = useCallback(async (read: () => Promise<void>) => {
-    try {
-      await read();
-      setError(null);
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const readPage = async (cursor: string | null) => {
+    const prepared = readPreparedConnection(environmentId);
+    if (!prepared) throw new Error("Connect to this environment to read its voice conversations.");
+    return runtime.runPromise(
+      listVoiceCalls(prepared, {
+        threadId,
+        ...(cursor === null ? {} : { cursor }),
+        limit: CALLS_PAGE_SIZE,
+      }),
+    );
+  };
+
+  // No try/finally: React Compiler cannot compile it and would skip this whole component.
+  const report = async (read: () => Promise<void>) => {
+    const failure = await readQueue.read(read).then(
+      () => null,
+      (cause: unknown) => errorMessage(cause),
+    );
+    setError(failure);
+    setLoading(false);
+  };
 
   /** The newest page; older pages already loaded stay, with this page's fresher summaries. */
-  const readFirstPage = useCallback(
-    () =>
-      report(async () => {
-        const page = await readPage(null);
-        firstPageIdsRef.current = page.calls.map((call) => call.callId);
-        setCalls((current) => [
-          ...page.calls,
-          ...current.filter((call) => !page.calls.some((fresh) => fresh.callId === call.callId)),
-        ]);
-        setNextCursor((current) => current ?? page.nextCursor);
-      }),
-    [readPage, report],
+  // Stable: the mount read and the notice handler start it after a commit.
+  const readFirstPage = useStableCallback(() =>
+    report(async () => {
+      const page = await readPage(null);
+      const olderPagesLoaded = listRef.current.calls.length > page.calls.length;
+      firstPageIdsRef.current = page.calls.map((call) => call.callId);
+      applyCalls((current) => [
+        ...page.calls,
+        ...current.filter((call) => !page.calls.some((fresh) => fresh.callId === call.callId)),
+      ]);
+      if (!olderPagesLoaded) applyCursor(page.nextCursor);
+    }),
   );
 
   /** Every page shown so far, read again: a gap in notices may have changed any of them. */
-  const resyncLoadedPages = useCallback(
-    () =>
-      report(async () => {
-        const wanted = Math.max(callsRef.current.length, 1);
-        const fresh: VoiceCallSummary[] = [];
-        let cursor: string | null = null;
-        do {
-          const page = await readPage(cursor);
-          if (fresh.length === 0) firstPageIdsRef.current = page.calls.map((call) => call.callId);
-          fresh.push(...page.calls);
-          cursor = page.nextCursor;
-        } while (cursor !== null && fresh.length < wanted);
-        setCalls(fresh);
-        setNextCursor(cursor);
-      }),
-    [readPage, report],
-  );
+  const resyncLoadedPages = () =>
+    report(async () => {
+      const wanted = Math.max(listRef.current.calls.length, 1);
+      const fresh: VoiceCallSummary[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = await readPage(cursor);
+        if (fresh.length === 0) firstPageIdsRef.current = page.calls.map((call) => call.callId);
+        fresh.push(...page.calls);
+        cursor = page.nextCursor;
+      } while (cursor !== null && fresh.length < wanted);
+      applyCalls(() => fresh);
+      applyCursor(cursor);
+    });
 
   /** One older call's summary, which the first page does not cover. */
-  const readSummary = useCallback(
-    (callId: string) =>
-      report(async () => {
-        const prepared = readPreparedConnection(environmentId);
-        if (!prepared) return;
-        const page = await runtime.runPromise(
-          listVoiceTranscript(prepared, {
-            threadId,
-            callId,
-            afterSequence: SUMMARY_ONLY_AFTER_SEQUENCE,
-            limit: 1,
-          }),
-        );
-        setCalls((current) => withSummaries(current, [page.call]));
-      }),
-    [environmentId, threadId, report],
-  );
+  const readSummary = (callId: string) =>
+    report(async () => {
+      const prepared = readPreparedConnection(environmentId);
+      if (!prepared) return;
+      const page = await runtime.runPromise(
+        listVoiceTranscript(prepared, {
+          threadId,
+          callId,
+          afterSequence: SUMMARY_ONLY_AFTER_SEQUENCE,
+          limit: 1,
+        }),
+      );
+      applyCalls((current) => withSummaries(current, [page.call]));
+    });
 
   const readOlder = () =>
     report(async () => {
-      if (nextCursor === null) return;
-      const page = await readPage(nextCursor);
-      setCalls((current) => [
+      const cursor = listRef.current.nextCursor;
+      if (cursor === null) return;
+      const page = await readPage(cursor);
+      applyCalls((current) => [
         ...current,
         ...page.calls.filter((call) => !current.some((known) => known.callId === call.callId)),
       ]);
-      setNextCursor(page.nextCursor);
+      applyCursor(page.nextCursor);
     });
 
   // One serialized reader per selected call. Its responses carry the call's authoritative
   // summary, which also refreshes that call's entry in the list, wherever it was loaded from.
+  // oxlint-disable-next-line t3code/react-effect-budget -- owns the selected call's serialized transcript reader
   useEffect(() => {
-    selectedIdRef.current = selectedId;
     if (selectedId === null) return;
     const reader = createVoiceTranscriptReader({
-      read: async (afterSequence) => {
-        const prepared = readPreparedConnection(environmentId);
-        if (!prepared) throw new Error("Connect to this environment to read this conversation.");
-        return runtime.runPromise(
-          listVoiceTranscript(prepared, {
-            threadId,
-            callId: selectedId,
-            ...(afterSequence === null ? {} : { afterSequence }),
-            limit: TRANSCRIPT_PAGE_SIZE,
-          }),
-        );
-      },
+      read: (afterSequence) =>
+        readQueue.read(async () => {
+          const prepared = readPreparedConnection(environmentId);
+          if (!prepared) throw new Error("Connect to this environment to read this conversation.");
+          const page = await runtime.runPromise(
+            listVoiceTranscript(prepared, {
+              threadId,
+              callId: selectedId,
+              ...(afterSequence === null ? {} : { afterSequence }),
+              limit: TRANSCRIPT_PAGE_SIZE,
+            }),
+          );
+          applyCalls((current) => withSummaries(current, [page.call]));
+          return page;
+        }),
       onUpdate: (snapshot) => {
         setReaderState({ callId: selectedId, snapshot });
-        if (snapshot.call) {
-          const call = snapshot.call;
-          setCalls((current) => withSummaries(current, [call]));
-        }
       },
       describeError: errorMessage,
     });
@@ -247,8 +244,10 @@ export function VoiceHistoryPanel({
       reader.dispose();
       if (readerRef.current === reader) readerRef.current = null;
     };
-  }, [environmentId, threadId, selectedId]);
+  }, [environmentId, threadId, selectedId, readQueue, applyCalls]);
 
+  // ChatView keys this panel by thread, so this reads each thread's first page once.
+  // oxlint-disable-next-line t3code/react-effect-budget -- reads the thread's first page from the environment
   useEffect(() => {
     void readFirstPage();
   }, [readFirstPage]);
@@ -257,25 +256,29 @@ export function VoiceHistoryPanel({
     AsyncResult.value(useAtomValue(voiceHistoryNotices({ environmentId, input: { threadId } }))),
   ) as VoiceHistoryNotices | null;
   const handledRef = useRef<VoiceHistoryHandled | null>(null);
-  useEffect(() => {
-    if (notices === null) return;
+  // Stable, so the effect below runs per notice value; it still reads this render's calls.
+  const handleNotices = useStableCallback((notices: VoiceHistoryNotices) => {
     const plan = planVoiceHistoryRefresh({
       notices,
       previous: handledRef.current,
-      selectedCallId: selectedIdRef.current,
+      selectedCallId: selectedId,
       firstPageCallIds: firstPageIdsRef.current,
-      loadedCallIds: callsRef.current.map((call) => call.callId),
+      loadedCallIds: calls.map((call) => call.callId),
     });
     handledRef.current = plan.handled;
     if (plan.resync) void resyncLoadedPages();
     else if (plan.refreshFirstPage) void readFirstPage();
     for (const callId of plan.summaryCallIds) void readSummary(callId);
     if (plan.readSelected) void readerRef.current?.request();
-  }, [notices, readFirstPage, readSummary, resyncLoadedPages]);
+  });
+  // oxlint-disable-next-line t3code/react-effect-budget -- reacts to the environment's notice stream
+  useEffect(() => {
+    if (notices !== null) handleNotices(notices);
+  }, [notices, handleNotices]);
 
   const transcript = readerState?.callId === selectedId ? readerState.snapshot : null;
   const listed = calls.find((call) => call.callId === selectedId) ?? null;
-  const selected = transcript?.call ?? listed;
+  const selected = listed ?? transcript?.call;
 
   return (
     <section
@@ -362,7 +365,7 @@ function VoiceCallTranscriptHistory({
 }) {
   const fragments = transcript?.fragments ?? [];
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="scrollbar-gutter-both min-h-0 flex-1 overflow-y-auto">
       <p className="px-4 pt-3 text-xs text-muted-foreground">
         {formatStartedAt(call.startedAt)} · {callState(call)}
       </p>

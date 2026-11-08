@@ -1,20 +1,23 @@
+import * as NodeModule from "node:module";
+
 import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
-import { Packr, Unpackr, addExtension } from "msgpackr";
+
+// Externalizing msgpackr with a static import failed the single-executable ESM guard.
+// Disk require loads the staged native closure in SEA and ordinary Node runtimes.
+const requireForMsgpackr = NodeModule.createRequire(import.meta.url);
+const { Packr, Unpackr, addExtension } = requireForMsgpackr(
+  "msgpackr",
+) as typeof import("msgpackr");
 
 /**
- * Neovim's msgpack-RPC framing, and nothing else.
- *
- * Written here rather than taken from the `neovim` npm package for two reasons
- * the prototype ran into. That package pulls `winston` into the server, and it
- * routes `nvim_buf_lines_event` to `Buffer` objects instead of to the generic
- * notification listener — which is exactly the incremental text path this
- * bridge is built on, so the one event that matters most would arrive somewhere
- * this code cannot see it.
+ * Neovim's msgpack-RPC framing, and nothing else. Not the `neovim` npm package: it pulls in
+ * `winston`, and it routes `nvim_buf_lines_event` to `Buffer` objects instead of the generic
+ * notification listener, which hides the incremental text path this bridge is built on.
  */
 
 /** The three handle kinds Neovim sends as msgpack extension types. */
@@ -80,25 +83,15 @@ let extensionsRegistered = false;
  * being broken rather than like a missing codec.
  */
 function registerExtensions(): void {
-  // WORKAROUND: `addExtension` writes into a table that msgpackr keeps at module
-  // scope, shared by every Packr and Unpackr in the process — its non-class
-  // extension API has no per-instance registry, so there is nowhere else to put
-  // this. Nothing collides today: Effect's own RPC and msgpack transports build
-  // their own instances but register no extension types, and 0, 1 and 2 are
-  // Neovim's. The risk is a future one, and it is silent — another registrant
-  // for those numbers would make Buffer, Window and Tabpage handles decode as
-  // whatever it returns, everywhere, with no error. Anything in this process
-  // that registers a msgpack extension has to check this first. Remove once
-  // msgpackr grows a per-instance extension table.
+  // WORKAROUND: `addExtension` registers types 0-2 in msgpackr's process-wide table, which has
+  // no per-instance registry. Any other registrant of those types would silently change how
+  // every handle decodes, so check here before registering a msgpack extension anywhere.
+  // Remove once msgpackr has a per-instance extension table.
   if (extensionsRegistered) return;
   extensionsRegistered = true;
   for (const [index, kind] of EXTENSION_KINDS.entries()) {
-    // `unpack`, not `read`: msgpackr stores whatever this key holds straight
-    // into its extension table and calls it, so the wrong key registers an
-    // object where a function is expected. The decoder then throws on the very
-    // first handle Neovim sends, which is the answer to `nvim_get_current_buf`
-    // — and because the throw aborts the whole read, the response is never
-    // delivered and the call simply never returns.
+    // `unpack`, not `read`: msgpackr calls whatever this key holds. With the wrong key the
+    // decoder throws on the first handle, aborts the read, and that call never returns.
     addExtension({
       type: index,
       unpack: (data: Uint8Array) => ({ kind, id: handleId(data) }) satisfies NvimHandle,
@@ -197,15 +190,8 @@ export const makeNvimRpc = Effect.fn("NvimRpc.make")(function* (duplex: NvimRpcD
         if (typeof end === "number") consumed = end;
       });
     } catch (error) {
-      // Two very different things throw here and only one of them is routine.
-      //
-      // A truncated frame is a socket splitting where it likes: keep the tail
-      // and the next read completes it. A frame that is malformed rather than
-      // merely short never completes, so retrying it forever wedges the tail at
-      // the same byte — no response or notification is ever delivered again,
-      // the tail grows on every chunk, and nothing says why. msgpackr marks the
-      // routine case with `incomplete`, so the other one is surfaced instead of
-      // being waited on.
+      // msgpackr marks a truncated frame `incomplete`: keep the tail for the next read.
+      // A malformed frame never completes and would wedge the tail forever, so it fails.
       const failure = error as { incomplete?: boolean; lastPosition?: number };
       if (typeof failure.lastPosition === "number") consumed = failure.lastPosition;
       if (failure.incomplete !== true) {
@@ -277,18 +263,17 @@ export const makeNvimRpc = Effect.fn("NvimRpc.make")(function* (duplex: NvimRpcD
     }),
   );
 
-  const request: NvimRpc["request"] = (method, params) =>
-    Effect.gen(function* () {
-      const deferred = yield* Deferred.make<unknown, NvimRpcError>();
-      // Checked with nothing that can yield between it and `pending.set`, so a
-      // close cannot land in between and leave this request unanswered.
-      if (closedWith !== null) return yield* closedWith;
-      const messageId = nextMessageId;
-      nextMessageId += 1;
-      pending.set(messageId, deferred);
-      duplex.write(packNvimFrame([0, messageId, method, params]));
-      return yield* Deferred.await(deferred);
-    });
+  const request: NvimRpc["request"] = Effect.fn(function* (method, params) {
+    const deferred = yield* Deferred.make<unknown, NvimRpcError>();
+    // Checked with nothing that can yield between it and `pending.set`, so a
+    // close cannot land in between and leave this request unanswered.
+    if (closedWith !== null) return yield* closedWith;
+    const messageId = nextMessageId;
+    nextMessageId += 1;
+    pending.set(messageId, deferred);
+    duplex.write(packNvimFrame([0, messageId, method, params]));
+    return yield* Deferred.await(deferred);
+  });
 
   const notify: NvimRpc["notify"] = (method, params) =>
     Effect.sync(() => {

@@ -1,17 +1,8 @@
 /**
- * Cross-environment identity for a provider subscription.
- *
- * Two environments that drive the same subscription report the same key, which
- * is what lets a client fold their readings into one row instead of listing the
- * same limits once per machine.
- *
- * The key names the vendor the subscription is metered against, not the driver
- * that read it. Two vendors are still kept apart when they share an address —
- * one person's Claude and ChatGPT subscriptions are two accounts — but one
- * subscription read through two different agents is one account, which keying
- * by driver could not express.
- *
- * @module provider/accountIdentity
+ * Cross-environment identity for a provider subscription, so a client folds two machines'
+ * readings of one subscription into one row. The key names the vendor the subscription is
+ * metered against, not the driver that read it: one subscription read by two agents is one
+ * account, and one person's Claude and ChatGPT subscriptions stay two.
  */
 import {
   accountLimitsSubscriptionKey,

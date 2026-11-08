@@ -93,11 +93,9 @@ export const HostStatsHostFacts = Schema.Struct({
 export type HostStatsHostFacts = typeof HostStatsHostFacts.Type;
 
 /**
- * Every bucket as one array per `HostStatsBucket` field, so a snapshot of 144
- * buckets does not repeat each field name 144 times. `slots[i]` is bucket i's
- * offset from `firstStart` in buckets; a missing bucket is a missing slot,
- * never a row of nulls. Every column has one entry per slot, and slots
- * strictly increase; decoding rejects a value that breaks either.
+ * Columnar, so 144 buckets do not repeat each field name. `slots[i]` is bucket i's offset from
+ * `firstStart`; a missing bucket is a missing slot, never a row of nulls. Decoding rejects columns
+ * whose length differs from `slots`, and slots that do not strictly increase.
  */
 function hasOneValuePerOrderedSlot(encoded: {
   readonly slots: ReadonlyArray<number>;

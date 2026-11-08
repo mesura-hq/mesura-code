@@ -9,11 +9,7 @@ import {
   type HostStatsSnapshotMessage,
   toHostStatsBucketColumns,
 } from "@t3tools/contracts";
-import {
-  HostProcessArchitecture,
-  HostProcessHostname,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 
 import { BUCKET_MS, SAMPLE_INTERVAL_MS, WINDOW_MS } from "./hostStatsBuckets.ts";
@@ -64,16 +60,15 @@ export function roundBucketForWire(bucket: HostStatsBucket): HostStatsBucket {
 }
 
 /** The host facts, read at `now`; boot time is on the server's clock, like `serverNow`. */
-export const readHostFacts = (now: number) =>
-  Effect.gen(function* () {
-    return {
-      hostname: yield* HostProcessHostname,
-      platform: yield* HostProcessPlatform,
-      arch: yield* HostProcessArchitecture,
-      cpuCount: (yield* HostOs).cpus().length,
-      bootedAt: Math.max(0, Math.round(now - NodeOS.uptime() * 1000)),
-    } satisfies HostStatsHostFacts;
-  });
+export const readHostFacts = Effect.fn(function* (now: number) {
+  return {
+    hostname: yield* HostProcess.Hostname,
+    platform: yield* HostProcess.Platform,
+    arch: yield* HostProcess.Architecture,
+    cpuCount: (yield* HostOs).cpus().length,
+    bootedAt: Math.max(0, Math.round(now - NodeOS.uptime() * 1000)),
+  } satisfies HostStatsHostFacts;
+});
 
 export function makeSnapshotMessage(input: {
   readonly serverNow: number;

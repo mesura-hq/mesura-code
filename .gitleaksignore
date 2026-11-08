@@ -1,0 +1,47 @@
+# Fake test key `sk-dictation-ac6-secret`, not a credential. Its commit is already in pushed history, so only an ignore entry can clear it.
+78e0f16a7e431fbd43a5bc32fb18d3603a9b3c89:apps/server/src/dictation/DictationRpc.test.ts:generic-api-key:60
+
+# OpenCode status tests hash literal console-key, go-key and inline-key fixtures.
+f04546609a0600bd6b878baca0dae75b191f7d35:packages/provider-opencode/src/server/status.test.ts:generic-api-key:124
+f04546609a0600bd6b878baca0dae75b191f7d35:packages/provider-opencode/src/server/status.test.ts:generic-api-key:125
+f04546609a0600bd6b878baca0dae75b191f7d35:packages/provider-opencode/src/server/status.test.ts:generic-api-key:126
+
+# outboundHttp.test.ts uses this public, self-signed loopback TLS fixture for ALPN tests.
+3ff452bd65adf758e68b886d1e3778ae1ec7d970:apps/server/src/outboundHttp.test.ts:private-key:17
+
+# The same reviewed public fixtures in the staged merge tree.
+apps/server/src/outboundHttp.test.ts:private-key:24
+packages/provider-opencode/src/server/status.test.ts:generic-api-key:118
+packages/provider-opencode/src/server/status.test.ts:generic-api-key:119
+packages/provider-opencode/src/server/status.test.ts:generic-api-key:120
+# The web-push documentation's example PushSubscription keys, used as public test fixtures.
+apps/server/src/push/PushRpc.test.ts:generic-api-key:34
+packages/contracts/src/pushNotifications.test.ts:generic-api-key:34
+
+# Upstream sync to 210b2e7c6a: public test fixtures, not credentials. The digest hashes a
+# fixture token in the same test; the relay preview keys are placeholder hex strings.
+0191d6c647fe0c9af09717d675b91b5a611b3b9e:infra/task-cache/src/NativeClients.test.ts:generic-api-key:6
+ff1f6fd8849cdd2e0a07096eac4fd4440d1ad989:infra/relay/src/previewStages.test.ts:generic-api-key:11
+ff1f6fd8849cdd2e0a07096eac4fd4440d1ad989:infra/relay/src/previewStages.test.ts:generic-api-key:42
+ff1f6fd8849cdd2e0a07096eac4fd4440d1ad989:infra/relay/src/previewTunnelSweep.test.ts:generic-api-key:11
+
+# Merge of dev e216462ca0 into the realtime voice branch: the staged merge tree places these
+# reviewed fixtures, byte-identical to dev, at new lines. Not credentials: the fake dictation key,
+# an HTML render fixture value, the public loopback TLS fixture, the web-push documentation's
+# example subscription keys, placeholder hex relay keys, a fixture token digest and the OpenCode
+# status key hashes.
+apps/server/src/dictation/DictationRpc.test.ts:generic-api-key:51
+apps/server/src/htmlRender/HtmlRender.test.ts:generic-api-key:148
+apps/server/src/outboundHttp.test.ts:private-key:22
+apps/server/src/push/PushRpc.test.ts:generic-api-key:31
+packages/contracts/src/pushNotifications.test.ts:generic-api-key:30
+infra/relay/src/hooks/HeldHooks.test.ts:generic-api-key:19
+infra/relay/src/hooks/HeldHooks.test.ts:generic-api-key:20
+infra/relay/src/previewStages.test.ts:generic-api-key:11
+infra/relay/src/previewStages.test.ts:generic-api-key:42
+infra/relay/src/previewTunnelSweep.test.ts:generic-api-key:10
+infra/relay/src/http/Api.test.ts:generic-api-key:1071
+infra/relay/src/hooks/HookForwarder.test.ts:generic-api-key:56
+infra/task-cache/src/NativeClients.test.ts:generic-api-key:6
+packages/provider-opencode/src/server/status.test.ts:generic-api-key:121
+packages/provider-opencode/src/server/status.test.ts:generic-api-key:122

@@ -18,7 +18,7 @@ const decode = Schema.decodeUnknownResult(SymmetriaSurfacePresence);
 const decodeOrThrow = Schema.decodeUnknownSync(SymmetriaSurfacePresence);
 const encodeOrThrow = Schema.encodeSync(SymmetriaSurfacePresence);
 
-const lease = Schema.decodeUnknownSync(ClientActivityLease)({
+const lease = Schema.decodeSync(ClientActivityLease)({
   sessionId: "aus_2f10c9",
   rpcClientId: 41,
   clientId: "clt_desktop_7a1e",

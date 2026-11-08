@@ -10,12 +10,15 @@ import * as Stream from "effect/Stream";
 import * as ServerConfig from "../config.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as KnownWorkspaces from "./KnownWorkspaces.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./WorkspaceFileSystem.ts";
 import * as WorkspaceFileWatcher from "./WorkspaceFileWatcher.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 
 const FileSystemLayer = WorkspaceFileSystem.layer.pipe(
+  // Watch fixtures create their own temporary workspaces; authorization is tested separately.
+  Layer.provide(Layer.mock(KnownWorkspaces.KnownWorkspaces)({ assertContains: () => Effect.void })),
   Layer.provide(WorkspacePaths.layer),
   Layer.provide(WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer))),
 );
@@ -181,30 +184,33 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileWatcherLive", (
       }),
     );
 
-    it.effect(
-      "recovers when the parent directory is deleted and recreated",
-      () =>
-        Effect.gen(function* () {
-          const fileSystem = yield* FileSystem.FileSystem;
-          const path = yield* Path.Path;
-          const cwd = yield* makeTempDir;
-          yield* writeTextFile(cwd, "sub/notes.md", "first");
+    it.effect("recovers when the parent directory is deleted and recreated", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "sub/notes.md", "first");
 
-          const queue = yield* watchIntoQueue(cwd, "sub/notes.md");
-          yield* Queue.take(queue);
+        const queue = yield* watchIntoQueue(cwd, "sub/notes.md");
+        const baseline = yield* Queue.take(queue);
 
-          // Deleting the directory leaves the underlying watch inert: it stops
-          // reporting and raises neither error nor close, so without the
-          // absent-file recheck the subscription would go silent forever.
-          yield* fileSystem.remove(path.join(cwd, "sub"), { recursive: true }).pipe(Effect.orDie);
-          const afterDelete = yield* Queue.take(queue);
-          expect(afterDelete.type).toBe("removed");
+        // Deleting the directory leaves the underlying watch inert: it stops
+        // reporting and raises neither error nor close, so without the
+        // absent-file recheck the subscription would go silent forever.
+        yield* fileSystem.remove(path.join(cwd, "sub"), { recursive: true }).pipe(Effect.orDie);
+        const afterDelete = yield* Queue.take(queue);
+        expect(afterDelete.type).toBe("removed");
 
-          yield* writeTextFile(cwd, "sub/notes.md", "back after the directory returned");
-          const afterRecreate = yield* Queue.take(queue);
-          expect(afterRecreate.type).toBe("changed");
-        }),
-      { timeout: 20_000 },
+        yield* writeTextFile(cwd, "sub/notes.md", "back after the directory returned");
+        // The queue acknowledges the missing-file recheck after the native
+        // directory watch became inert. No elapsed-time assertion is needed.
+        const afterRecreate = yield* Queue.take(queue);
+        expect(afterRecreate.type).toBe("changed");
+        expect(afterRecreate.relativePath).toBe("sub/notes.md");
+        if (baseline.type === "changed" && afterRecreate.type === "changed") {
+          expect(afterRecreate.revision).not.toBe(baseline.revision);
+        }
+      }),
     );
 
     it.effect("fails for a path that escapes the workspace root", () =>

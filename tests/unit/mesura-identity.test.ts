@@ -1,21 +1,13 @@
+// @effect-diagnostics nodeBuiltinImport:off - reads product source from an external contract guard, not from the application runtime.
+import * as NodeFS from "node:fs";
 import { assert, it } from "vite-plus/test";
 
 import { commandOutput, run } from "./contractHarness.ts";
 
-// Two sites keep T3 Code's `.t3` literal on purpose, and neither can collide
-// with the installed T3 Code this fork runs beside:
-//
-//   packages/shared/src/devHome.ts  a linked worktree's own `<worktree>/.t3`,
-//                                   which is local to that worktree.
-//   packages/ssh/src/tunnel.ts      `$HOME/.t3` inside shell scripts that run on
-//                                   REMOTE hosts, not on this machine. It builds
-//                                   the path from shell text rather than the
-//                                   `".t3"` literal, so this scan never sees it.
-//
-// Every other product path must resolve to Mesura Code's own home. This is a
-// negative over the whole repository: a review by hand cannot promise it,
-// because the cost of missing one site is that the fork writes into the live
-// database of the T3 Code in daily use.
+// A linked worktree keeps its own `<worktree>/.t3` through devHome.ts.
+// The setup marker and icon-scanner exceptions below must prove their local
+// use before this scan accepts them. No product default may reach the shared
+// home of the installed T3 Code that runs beside Mesura Code.
 const SITES_ALLOWED_TO_KEEP_THE_T3_LITERAL = ["packages/shared/src/devHome.ts"];
 
 it("leaves no product code defaulting to T3 Code's shared home", () => {
@@ -35,24 +27,42 @@ it("leaves no product code defaulting to T3 Code's shared home", () => {
   // git grep exits 1 when nothing matches, which is a result and not a failure.
   assert.isAtMost(found.status ?? 2, 1, commandOutput(found));
 
+  // The icon scanner mentions the worktree state directory only to exclude it.
+  // A literal used outside that exclusion set must still fail this home guard.
+  const candidateScannerPath = "apps/server/src/project/ProjectIconCandidates.ts";
+  const candidateScannerSource = NodeFS.readFileSync(
+    new URL(`../../${candidateScannerPath}`, import.meta.url),
+    "utf8",
+  );
+  const excludedDirectories = candidateScannerSource.match(
+    /const EXCLUDED_DIRECTORIES = new Set\(\[([\s\S]*?)\]\);/,
+  )?.[1];
+  const onlyExcludesWorktreeState =
+    candidateScannerSource.match(/"\.t3"/g)?.length === 1 && excludedDirectories?.includes('".t3"');
+
+  // Setup markers belong beside this script's worktree, never under HOME.
+  // Do not allow the file wholesale: a second `.t3` use must fail the scan.
+  const setupPath = "scripts/setup-worktree.ts";
+  const setupSource = NodeFS.readFileSync(new URL(`../../${setupPath}`, import.meta.url), "utf8");
+  const onlyUsesWorktreeMarkers =
+    setupSource.match(/"\.t3"/g)?.length === 1 &&
+    setupSource.includes("const worktree = NodePath.dirname(import.meta.dirname);") &&
+    setupSource.includes('const markerDir = NodePath.join(worktree, ".t3");');
+
   const files = (found.stdout ?? "")
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
+    .filter((file) => file !== candidateScannerPath || !onlyExcludesWorktreeState)
+    .filter((file) => file !== setupPath || !onlyUsesWorktreeMarkers)
     .sort();
 
   assert.deepEqual(files, SITES_ALLOWED_TO_KEEP_THE_T3_LITERAL);
 });
 
-// The five files whose default home moved. Their prose has to move with it:
-// `--help` output naming `~/.t3` is worse than no help at all here, because it
-// tells an operator this fork reads the installed T3 Code's database. Verification
-// found exactly that in migrate-dev-db's flag description and command
-// description, where the code beside them already resolved to `~/.mesura-code`.
-//
-// This scans for `~/.t3` and not for `.t3` alone, on purpose: `<worktree>/.t3`
-// still appears in migrate-dev-db's doc comment and is still correct, because a
-// linked worktree keeps its own local directory.
+// `--help` text naming `~/.t3` in these files would tell an operator this fork reads the installed
+// T3 Code's database. The scan is for `~/.t3`, not `.t3`: `<worktree>/.t3` in migrate-dev-db's doc
+// comment is correct, because a linked worktree keeps its own local directory.
 const FILES_WHOSE_DEFAULT_HOME_MOVED = [
   "apps/desktop/src/app/DesktopStatePaths.ts",
   "apps/server/scripts/migrate-dev-db.ts",
@@ -75,24 +85,10 @@ it("leaves no prose naming T3 Code's home where the default already moved", () =
   assert.equal((found.stdout ?? "").trim(), "");
 });
 
-// ⚠ The rename sweep searched for `T3 Code`, with a space, and that alphabet is
-// not the only one the name appears in. `packages/client-runtime` builds an
-// OAuth token-exchange body, so its expected fixture carries the name
-// FORM-ENCODED — `client_label=T3+Code+Mobile`, where the space is a `+`. The
-// sweep renamed the label that FEEDS that request and could not see the
-// expectation it had to match, because no search for `T3 Code` reaches
-// `T3+Code`. It sat broken from 992a7122b until the first upstream sync ran the
-// package, five days later.
-//
-// Two things hid it for that long, and both are fixed elsewhere: CI had never
-// run on this fork (#8), and the verification sweep covered ten of sixteen
-// packages. This guard is the third defence, and the only one that is specific
-// to the failure rather than to the process around it.
-//
-// Encodings, not spellings. `T3-Code` is deliberately ABSENT from this list:
-// it is the packaging artifact name (`T3-Code-0.0.4-x64.dmg`), which the
-// approved plan defers along with the rest of the packaging identity. Adding it
-// here would fail on work that was scoped out on purpose.
+// ⚠ A sweep for `T3 Code` cannot see encoded forms: the client-runtime OAuth fixture carries
+// `client_label=T3+Code+Mobile` FORM-ENCODED, and a rename once broke it unseen for five days.
+// List encodings, not spellings. `T3-Code` is deliberately ABSENT: it is the packaging artifact
+// name, which the plan deferred with the rest of the packaging identity.
 const ENCODED_PRODUCT_NAMES = [
   "T3+Code", // application/x-www-form-urlencoded — the one that actually broke
   "T3%20Code", // percent-encoded space, in a URL path or query

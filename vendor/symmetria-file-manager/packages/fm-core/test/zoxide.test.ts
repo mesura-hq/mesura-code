@@ -14,7 +14,7 @@ import { filterFrecent, parseFrecent } from "../src/zoxide.ts";
  *   whitespace and never on all of them.
  */
 const REAL = ` 4536.0 /home/jc/Downloads
-  446.0 /home/jc/work/sales/bambin
+  446.0 /home/jc/work/sales/acme
   278.0 /home/jc/.dotfiles
 `;
 
@@ -22,7 +22,7 @@ describe("reading the frecent list", () => {
   it("reads a score and a path from each line", () => {
     expect(parseFrecent(REAL)).toEqual([
       { score: 4536, path: "/home/jc/Downloads" },
-      { score: 446, path: "/home/jc/work/sales/bambin" },
+      { score: 446, path: "/home/jc/work/sales/acme" },
       { score: 278, path: "/home/jc/.dotfiles" },
     ]);
   });
@@ -89,7 +89,7 @@ describe("narrowing the list as the user types", () => {
 
   it("keeps the paths that contain what was typed", () => {
     expect(filterFrecent(entries, "sales").map((e) => e.path)).toEqual([
-      "/home/jc/work/sales/bambin",
+      "/home/jc/work/sales/acme",
     ]);
   });
 
@@ -99,7 +99,7 @@ describe("narrowing the list as the user types", () => {
 
   it("matches anywhere in the path, not only the last segment", () => {
     expect(filterFrecent(entries, "/home/jc/w").map((e) => e.path)).toEqual([
-      "/home/jc/work/sales/bambin",
+      "/home/jc/work/sales/acme",
     ]);
   });
 

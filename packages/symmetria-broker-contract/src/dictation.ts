@@ -1,13 +1,8 @@
 /**
- * One Shell-owned dictation session as Mesura and Symmetria Shell exchange it.
- *
- * Audio, provider configuration, transcript history and recovery never cross
- * this contract. The final dictated text appears only on `dictation.deliver`;
- * every snapshot and presentation update stays safe to render in the Shell.
- *
- * A target is captured before recording and is immutable for the session. A
- * process id, window address and current route can discover the Mesura surface,
- * but none of them can address the text after an asynchronous transcription.
+ * Audio, provider configuration, transcript history and recovery never cross this contract.
+ * The dictated text appears only on `dictation.deliver`; every other update is safe to render.
+ * The target is captured before recording and stays immutable: a process id, window address
+ * or route cannot address the text after an asynchronous transcription.
  */
 import {
   CommandId,

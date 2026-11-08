@@ -10,7 +10,7 @@ const decodeStreamItem = Schema.decodeUnknownResult(SymmetriaStreamItem);
 const READ_MODEL: ProjectableReadModel = {
   projects: [
     { id: "prj_vigilia", title: "vigilia" },
-    { id: "prj_kosmos", title: "kosmos-app" },
+    { id: "prj_storefront", title: "storefront-app" },
   ],
   threads: [
     {
@@ -37,7 +37,7 @@ const READ_MODEL: ProjectableReadModel = {
     },
     {
       id: "thr_idle",
-      projectId: "prj_kosmos",
+      projectId: "prj_storefront",
       title: "Offline voice outbox",
       branch: null,
       worktreePath: null,
@@ -67,11 +67,8 @@ describe("projectReadModel", () => {
   });
 
   it("takes the revision from its caller rather than from the read model", () => {
-    // ⚠ This assertion replaces one that required the opposite. The first
-    // version borrowed upstream's `snapshotSequence`, on the contract's own
-    // reasoning — and the measurement in `threadFeed.ts`'s module note showed
-    // that field advances on every transcript event, so deltas numbered with
-    // it would read as gaps. The publisher owns the numbering now.
+    // The caller supplies `revision`: upstream's `snapshotSequence` advances on every transcript
+    // event, so deltas numbered with it read as gaps (see `threadFeed.ts`).
     expect(projectReadModel(READ_MODEL, 412).revision).toBe(412);
     expect(projectReadModel(READ_MODEL, 7).revision).toBe(7);
   });
@@ -79,7 +76,7 @@ describe("projectReadModel", () => {
   it("gives every project a non-empty name taken from the source", () => {
     expect(projectReadModel(READ_MODEL, 1).projects).toEqual([
       { projectId: "prj_vigilia", name: "vigilia" },
-      { projectId: "prj_kosmos", name: "kosmos-app" },
+      { projectId: "prj_storefront", name: "storefront-app" },
     ]);
   });
 
@@ -110,11 +107,8 @@ describe("projectReadModel", () => {
   });
 
   it("drops a thread whose title upstream left blank", () => {
-    // `title` is required and non-blank on the wire, and upstream's own type
-    // says it cannot be blank — but upstream's check is dropped on emission
-    // and this producer is the last place that can refuse one. Dropping the
-    // row beats failing the whole snapshot: one thread missing from the bar
-    // costs less than every thread missing.
+    // Upstream's blank-title check is lost on emission, so this producer is the last place to refuse
+    // one. Dropping the row beats failing the snapshot: one thread missing beats every thread missing.
     const withBlank: ProjectableReadModel = {
       ...READ_MODEL,
       threads: [{ ...READ_MODEL.threads[0]!, title: "   " }],

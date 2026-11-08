@@ -10,21 +10,21 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { Command, Flag } from "effect/unstable/cli";
+import { Command, Flag } from "effect/cli";
 import sharp from "sharp";
+import type { PngOptions } from "sharp";
 
 import { BRAND_ASSET_PATHS, DEVELOPMENT_PUBLIC_ICON_OVERRIDES } from "./lib/brand-assets.ts";
 import { encodePngIco, readPngDimensions, WINDOWS_ICON_SIZES } from "./lib/icon-export.ts";
 
-export const PINNED_LIBVIPS_VERSION = "8.18.3";
+// Sharp 0.35.4 locks bundled libvips 8.18.6. Advance this pin only after
+// confirming that every committed generated asset keeps its exact bytes.
+export const PINNED_LIBVIPS_VERSION = "8.18.6";
 
 /**
- * The boot splash blocks first paint on this file, so it ships at 3x the 64px
- * box the splash draws it in rather than at icon resolution, and it is the one
- * rendition worth quantizing: a palette cuts it by 58% (37,489 -> 15,657
- * bytes) at 46 dB PSNR, which is invisible on a 64px metallic cube. The icons
- * keep the plain encoding, because changing theirs would rewrite every tracked
- * asset for no user-visible gain.
+ * The boot splash blocks first paint on this file, so it ships at 3x its 64px box and is quantized:
+ * a palette cuts it by 58% at 46 dB PSNR, invisible at that size. The icons keep the plain
+ * encoding, because changing it would rewrite every tracked asset for no visible gain.
  */
 export const SPLASH_MARK_SIZE = 192;
 export const SPLASH_MARK_PNG_OPTIONS = { palette: true, quality: 90, effort: 10 } as const;
@@ -34,6 +34,8 @@ export interface VariantOutputs {
   readonly macos: string;
   readonly universal: string;
   readonly appleTouch: string;
+  readonly webIcon192: string;
+  readonly webIcon512: string;
   readonly favicon16: string;
   readonly favicon32: string;
   readonly faviconIco: string;
@@ -46,19 +48,6 @@ export interface IconVariant {
   readonly source: string;
   readonly composerAsset: string;
   readonly outputs: VariantOutputs;
-}
-
-interface IconComposerTool {
-  readonly path: string;
-  readonly version: string;
-  readonly bundleVersion: string;
-  readonly supportsDesignGeneration: boolean;
-}
-
-interface CommandResult {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number;
 }
 
 export class IconExportFileSystemError extends Schema.TaggedError<IconExportFileSystemError>()(
@@ -126,6 +115,8 @@ export const ICON_VARIANTS = [
       macos: BRAND_ASSET_PATHS.developmentDesktopIconPng,
       universal: BRAND_ASSET_PATHS.developmentUniversalIconPng,
       appleTouch: BRAND_ASSET_PATHS.developmentWebAppleTouchIconPng,
+      webIcon192: BRAND_ASSET_PATHS.developmentWebIcon192Png,
+      webIcon512: BRAND_ASSET_PATHS.developmentWebIcon512Png,
       favicon16: BRAND_ASSET_PATHS.developmentWebFavicon16Png,
       favicon32: BRAND_ASSET_PATHS.developmentWebFavicon32Png,
       faviconIco: BRAND_ASSET_PATHS.developmentWebFaviconIco,
@@ -142,6 +133,8 @@ export const ICON_VARIANTS = [
       macos: BRAND_ASSET_PATHS.nightlyMacIconPng,
       universal: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
       appleTouch: BRAND_ASSET_PATHS.nightlyWebAppleTouchIconPng,
+      webIcon192: BRAND_ASSET_PATHS.nightlyWebIcon192Png,
+      webIcon512: BRAND_ASSET_PATHS.nightlyWebIcon512Png,
       favicon16: BRAND_ASSET_PATHS.nightlyWebFavicon16Png,
       favicon32: BRAND_ASSET_PATHS.nightlyWebFavicon32Png,
       faviconIco: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
@@ -158,6 +151,8 @@ export const ICON_VARIANTS = [
       macos: BRAND_ASSET_PATHS.productionMacIconPng,
       universal: BRAND_ASSET_PATHS.productionUniversalIconPng,
       appleTouch: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
+      webIcon192: BRAND_ASSET_PATHS.productionWebIcon192Png,
+      webIcon512: BRAND_ASSET_PATHS.productionWebIcon512Png,
       favicon16: BRAND_ASSET_PATHS.productionWebFavicon16Png,
       favicon32: BRAND_ASSET_PATHS.productionWebFavicon32Png,
       faviconIco: BRAND_ASSET_PATHS.productionWebFaviconIco,
@@ -189,7 +184,7 @@ const RepositoryRoot = Effect.service(Path.Path).pipe(
 export async function renderRasterIcon(
   sourcePath: string,
   size: number,
-  pngOptions: sharp.PngOptions = { adaptiveFiltering: true, compressionLevel: 9 },
+  pngOptions: PngOptions = { adaptiveFiltering: true, compressionLevel: 9 },
 ): Promise<Buffer> {
   const image = sharp(sourcePath, { failOn: "error" });
   // `fit: "fill"` stretches rather than letterboxes, so a non-square source
@@ -248,32 +243,12 @@ export async function renderBrandIconVariant(
     [variant.outputs.ios, ios],
     [variant.outputs.universal, ios],
     [variant.outputs.appleTouch, await render(180)],
+    [variant.outputs.webIcon192, await render(192)],
+    [variant.outputs.webIcon512, await render(512)],
     [variant.outputs.favicon16, await render(16)],
     [variant.outputs.favicon32, await render(32)],
     [variant.outputs.faviconIco, ico],
     [variant.outputs.windowsIco, ico],
-  ]);
-}
-
-export async function renderMobileSystemAssets(
-  repositoryRoot: string,
-): Promise<Map<string, Buffer>> {
-  const monochromeSource = await NodeFSP.readFile(
-    NodePath.join(repositoryRoot, BRAND_ASSET_PATHS.monochromeSourceSvg),
-  );
-  const whiteTemplateSource = monochromeSource
-    .toString("utf8")
-    .replaceAll("currentColor", "#ffffff");
-  const renderTemplate = (size: number) =>
-    sharp(Buffer.from(whiteTemplateSource))
-      .resize(size, size, { fit: "fill", kernel: sharp.kernel.lanczos3 })
-      .png({ adaptiveFiltering: true, compressionLevel: 9 })
-      .toBuffer();
-
-  return new Map<string, Buffer>([
-    [BRAND_ASSET_PATHS.mobileAndroidMonochromeIconPng, await renderTemplate(432)],
-    [BRAND_ASSET_PATHS.mobileAndroidNotificationIconPng, await renderTemplate(96)],
-    [BRAND_ASSET_PATHS.mobileWidgetMarkSvg, monochromeSource],
   ]);
 }
 
@@ -295,11 +270,6 @@ export async function collectGeneratedBrandAssets(
       throw new Error(`Generated development web icon is missing: ${override.sourceRelativePath}`);
     }
     generated.set(override.targetRelativePath, sourceContents);
-  }
-
-  const mobileSystemAssets = await renderMobileSystemAssets(repositoryRoot);
-  for (const [relativePath, contents] of mobileSystemAssets) {
-    generated.set(relativePath, contents);
   }
 
   generated.set(
@@ -478,7 +448,7 @@ export const exportBrandIcons = Effect.fn("exportBrandIcons")(function* (checkOn
 export const exportBrandIconsCommand = Command.make(
   "export-brand-icons",
   {
-    check: Flag.boolean("check").pipe(
+    check: Flag.Boolean("check").pipe(
       Flag.withDescription("Verify generated icon assets without modifying files."),
       Flag.withDefault(false),
     ),

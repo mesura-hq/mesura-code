@@ -1,15 +1,7 @@
 /**
- * Reading scroll for the chat timeline.
- *
- * The shortcut pair behind this moves the viewport by half its own height so
- * the other half stays on screen. That remaining half is what a reader tracks
- * to keep their place; a full-viewport jump replaces everything at once and
- * costs the reader the thread they were following.
- *
- * The animation exists for the same reason and is deliberately short. Long
- * scrolls smear the text and the eye cannot hold a line through them, while an
- * instant jump gives no direction of travel at all. A brief decelerating move
- * reads as "the page moved down", which is the whole point.
+ * One press moves half the viewport so the other half stays on screen for the reader to
+ * keep their place. The animation is short on purpose: a long scroll smears the text,
+ * and an instant jump shows no direction of travel.
  */
 
 /** Fraction of the viewport one press travels. */
@@ -56,13 +48,9 @@ export function readingScrollDistance(visibleHeight: number): number {
 }
 
 /**
- * Where a press should land, clamped to the scrollable range.
- *
- * `from` lets a press that arrives mid-animation re-target off the previous
- * destination rather than off the position the animation happens to be
- * passing through. Without that, holding the key stalls: each press would
- * measure a viewport that has barely started moving and ask for a distance it
- * is already covering.
+ * `from` lets a press that arrives mid-animation re-target off the previous destination.
+ * Measuring from the animating position instead stalls a held key, because each press
+ * asks for a distance the animation is already covering.
  */
 export function resolveReadingScrollTarget(
   viewport: ReadingScrollViewport,

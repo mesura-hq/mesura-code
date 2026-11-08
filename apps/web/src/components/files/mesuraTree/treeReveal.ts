@@ -5,12 +5,9 @@ export interface HandledReveal {
 }
 
 /**
- * Whether a selected file should be revealed in the tree now.
- *
- * The file surface names its file and bumps a reveal id when the same file
- * should be shown again (opened from search a second time). An entries refresh
- * re-renders the tree with the same pair; replaying the reveal then would close
- * an active tree search and steal focus, which is what the T3 tree learned.
+ * Whether a selected file should be revealed now. A new reveal id asks to show the same
+ * file again; an entries refresh re-renders with the same pair, and replaying it then
+ * would close an active tree search and steal focus.
  */
 export function nextRevealRequest(
   handled: HandledReveal | null,

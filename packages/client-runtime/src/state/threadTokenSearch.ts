@@ -1,16 +1,7 @@
 /**
- * Word-at-a-time matching for "find that thread".
- *
- * The command palette joins a thread's title, project and branch into one
- * string and asks whether the query appears contiguously inside it. That fails
- * the way people actually remember a thread — roughly the project, roughly the
- * title — because those two words come from two different fields and often in
- * the wrong order. `mesura rename` never finds `Rename the sidebar` in
- * `Mesura Code`.
- *
- * Here every word of the query has to match some field and the order does not
- * matter. Web and mobile both search threads, which is why this lives in
- * client-runtime rather than beside either one's search UI.
+ * People remember a thread as roughly the project plus roughly the title, two fields in either
+ * order, so a contiguous substring match fails: `mesura rename` never finds `Rename the sidebar` in
+ * `Mesura Code`. Here every query word must match some field, in any order.
  */
 
 /** The text a thread is found by. Listed in the order they are worth. */
@@ -75,12 +66,8 @@ function startsAWord(character: string | undefined): boolean {
 }
 
 /**
- * How well one word sits in one already-normalised field, or null when the
- * field lacks it.
- *
- * Every occurrence is weighed, not just the first: in "prerename call rename"
- * the first hit is buried inside another word while a later one starts a word,
- * and reporting the buried one would under-rank the field.
+ * Weighs every occurrence, not just the first: in "prerename call rename" the first hit is buried
+ * inside a word while a later one starts a word. Null when the field lacks the word.
  */
 function scoreInField(normalizedField: string, word: string): number | null {
   if (normalizedField.length === 0) return null;
@@ -101,12 +88,8 @@ function scoreInField(normalizedField: string, word: string): number | null {
 }
 
 /**
- * A thread's fields normalised once, with the weight each carries.
- *
- * Normalising is NFKD plus two regexes plus a lowercase, and both callers of
- * this module search as the user types. Doing it once per field per query
- * rather than once per field per word is what keeps a keystroke cheap on a long
- * thread list.
+ * Normalising (NFKD, two regexes, lowercase) runs once per field per query, not once per word,
+ * because both callers search on every keystroke over a long thread list.
  */
 function weighFields(fields: ThreadSearchFields): ReadonlyArray<readonly [string, number]> {
   const weighed: Array<readonly [string, number]> = [];
@@ -158,12 +141,8 @@ export interface ThreadTokenMatchInput {
 }
 
 /**
- * What this thread is worth for this query, or null when some word matches
- * nothing at all.
- *
- * Higher is better. A caller that sorts on it must break ties by input
- * position, so threads of equal relevance keep the recency order they arrived
- * in.
+ * Higher is better; null when some word matches nothing. A caller that sorts on it must break ties
+ * by input position, so threads of equal relevance keep their recency order.
  */
 export function scoreThreadTokenMatch(input: ThreadTokenMatchInput): number | null {
   if (input.tokens.length === 0) return 0;
@@ -191,16 +170,9 @@ export function matchesThreadTokens(input: ThreadTokenMatchInput): boolean {
 }
 
 /**
- * The one word to send to the server's message search.
- *
- * The server matches a contiguous `LIKE`, so a multi-word query finds nothing
- * inside messages and only one word can usefully be asked for. Prefer a word
- * that names no project: that is the one saying what the thread is about
- * rather than where it lives. The longest such word wins, because a longer
- * word is the more specific one.
- *
- * This is a heuristic. It serves "roughly the project, roughly what was said",
- * and it degrades to the whole query when there is only one word.
+ * The server's message search matches one contiguous `LIKE`, so only one word can be sent. Prefer
+ * the longest word that names no project: it says what the thread is about, not where it lives.
+ * With one word, the whole query is sent.
  */
 export function selectThreadContentToken(
   tokens: ReadonlyArray<string>,

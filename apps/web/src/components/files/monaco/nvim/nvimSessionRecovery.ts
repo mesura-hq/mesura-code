@@ -3,19 +3,9 @@ import type { EditorSessionEndReason } from "@t3tools/contracts";
 import type { NvimFallback } from "./nvimFallback.ts";
 
 /**
- * What a panel does once its editor session is gone.
- *
- * A session goes with the server that held it — a restart, the desktop app
- * replacing its backend — and the server also ends one on purpose, saying why.
- * The client holds what a new session needs — the file, the project, the text
- * on screen — so where a new session is the right answer it opens the file
- * again, and then attaches afresh, because the old stream has ended or failed
- * for good. In that order: an attachment that reaches the server first finds no
- * session and fails again.
- *
- * Pure, and apart from the hook, because this is the part with the races in it
- * and each case here is one the hook met: an attach that loses the race with
- * the first open, a reopen that fails, a server that keeps dropping the session.
+ * What a panel does once its editor session is gone (server restart, backend replaced, or ended on
+ * purpose with a reason). Where a new session is right it reopens the file, then attaches afresh,
+ * in that order: an attach that reaches the server first finds no session. Pure, for the races.
  */
 
 /** How many reopens in a row, with no session answering in between, before falling back. */

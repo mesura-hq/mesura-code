@@ -2,18 +2,9 @@ import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
- * The wire shape of one editor session: an embedded Neovim driving a file that
- * a client has open.
- *
- * One session per thread, not one per file. A session is a whole Neovim, so it
- * is expensive to start and it carries state — registers, marks, jumplist, undo
- * — that the developer expects to survive moving between files in the same
- * piece of work. Opening a second file in a thread switches the window to
- * another buffer inside the session it already has.
- *
- * Every bound in this file is a refusal made early. An editor session carries
- * whole files and whole screens over a link that may be a phone on mobile
- * data, so a field with no cap is a message with no cap.
+ * One editor session per thread, not per file: a Neovim is expensive to start and carries registers,
+ * marks, jumplist and undo across files in one piece of work. Every bound here is an early refusal:
+ * the session carries whole files and screens, possibly to a phone on mobile data.
  */
 
 const EditorLineSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
@@ -21,8 +12,16 @@ const EditorColumnSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const EditorRowsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
   Schema.isLessThanOrEqualTo(500),
 );
+/**
+ * The widest viewport a client may ask for.
+ *
+ * A request, not the grid: the host sizes Neovim's grid itself, past the
+ * widest line the cursor can reach (`apps/server/src/editor/gridWidth.ts`), so
+ * a client clamps what it measures to this and loses nothing by it.
+ */
+export const EDITOR_VIEWPORT_MAX_COLS = 1000;
 const EditorColsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
-  Schema.isLessThanOrEqualTo(1000),
+  Schema.isLessThanOrEqualTo(EDITOR_VIEWPORT_MAX_COLS),
 );
 
 /**
@@ -58,18 +57,53 @@ export type EditorSessionOpenInput = Schema.Codec.Encoded<typeof EditorSessionOp
 export const EditorSessionAttachInput = EditorSessionThreadInput;
 export type EditorSessionAttachInput = Schema.Codec.Encoded<typeof EditorSessionAttachInput>;
 
+/**
+ * `lane` names one client's key stream for a thread and `index` counts its batches upwards. The
+ * server answers a batch whose `index` is not above the lane's last applied one as a success without
+ * applying it: a client that lost the reply re-sends, and Neovim already has it.
+ */
+export const EditorInputSequence = Schema.Struct({
+  lane: Schema.String.check(Schema.isMaxLength(64)),
+  index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type EditorInputSequence = typeof EditorInputSequence.Type;
+
 export const EditorSessionInputInput = Schema.Struct({
   ...EditorSessionThreadInput.fields,
   /** Neovim key notation: `<C-w>v`, `<Esc>`, plain text. */
   keys: Schema.String.check(Schema.isMaxLength(1024)),
+  sequence: Schema.optional(EditorInputSequence),
 });
 export type EditorSessionInputInput = Schema.Codec.Encoded<typeof EditorSessionInputInput>;
+
+/**
+ * Read after the keys ran, so a no-op batch still answers. The client releases the editor on Escape
+ * only when the last batch answered plain normal mode, not `blocking`, with no flash label and none
+ * pending; the attach stream's `mode` event can predate the keys. `blocking`: Neovim waits for a key
+ * Escape must reach; a plugin's `getcharstr()` wait (flash's `f`) shows only in `state()`.
+ */
+export const EditorSessionInputResult = Schema.Struct({
+  mode: Schema.String,
+  blocking: Schema.Boolean,
+  /** flash is labelling jump targets; Neovim's own mode says `n` meanwhile. */
+  jumping: Schema.Boolean,
+});
+export type EditorSessionInputResult = typeof EditorSessionInputResult.Type;
+
+/**
+ * `pointer` (wheel, scrollbar, touch): Neovim never saw the scroll, so the host moves the cursor in,
+ * as Vim's wheel does. `keys` or absent: never moves the cursor, because the request can be older
+ * than keys Neovim already ran.
+ */
+export const EditorViewportSource = Schema.Literals(["pointer", "keys"]);
+export type EditorViewportSource = typeof EditorViewportSource.Type;
 
 export const EditorSessionViewportInput = Schema.Struct({
   ...EditorSessionThreadInput.fields,
   topline: EditorLineSchema,
   rows: EditorRowsSchema,
   cols: EditorColsSchema,
+  source: Schema.optional(EditorViewportSource),
 });
 export type EditorSessionViewportInput = Schema.Codec.Encoded<typeof EditorSessionViewportInput>;
 
@@ -117,12 +151,8 @@ const EditorCursor = Schema.Struct({
 export type EditorCursor = typeof EditorCursor.Type;
 
 /**
- * One highlight Neovim has defined, as the client needs it to paint.
- *
- * `groups` carries the highlight group names `ext_hlstate` reports. The client
- * needs them to tell a decoration it should draw from one the host already
- * draws itself — a visual selection painted twice, in two disagreeing colours,
- * is the failure this field exists to prevent.
+ * `groups` carries the `ext_hlstate` group names, so the client can skip decorations the host
+ * already draws: a visual selection painted twice, in two colours, is the failure this prevents.
  */
 const EditorHighlightDefinition = Schema.Struct({
   fg: Schema.optional(Schema.Int),
@@ -159,6 +189,17 @@ export const EditorSessionSnapshot = Schema.Struct({
 });
 export type EditorSessionSnapshot = typeof EditorSessionSnapshot.Type;
 
+/**
+ * `escape` is the one Escape confirmation a client has before its first batch, read under the
+ * thread's lock. Only `open` carries it: an attach snapshot can be older than the last batch's answer.
+ * A client takes it only while its lane sent nothing since the open began. Absent from older hosts.
+ */
+export const EditorSessionOpenResult = Schema.Struct({
+  ...EditorSessionSnapshot.fields,
+  escape: Schema.optionalKey(EditorSessionInputResult),
+});
+export type EditorSessionOpenResult = typeof EditorSessionOpenResult.Type;
+
 const EditorOverlay = Schema.Struct({
   line: EditorLineSchema,
   col: EditorColumnSchema,
@@ -189,20 +230,8 @@ const EditorSnapshotEvent = Schema.Struct({
  * put the off-by-one somewhere nobody looks.
  */
 /**
- * One change to the text, and which file it is a change to.
- *
- * `relativePath` is not decoration. A delta is meaningless without knowing
- * what it is a delta *to*, and this event used to carry only the range and the
- * text — so a change to one buffer applied to another file was undetectable by
- * construction, on both sides of the wire. Three separate defects reached disk
- * that way, each one a different route to the same thing: the panel rendered
- * another file's text as the open file, and the save that followed wrote it.
- * Each was fixed with a guard reconstructed out of band, and none of those
- * guards made the next route impossible.
- *
- * With the path on the event the client drops a mismatch outright, whatever
- * route produced it. The guards remain as the cheaper first line; this is what
- * makes the mistake unrepresentable rather than merely caught.
+ * `relativePath` makes a delta applied to the wrong file unrepresentable: the client drops a
+ * mismatch whatever route produced it. Without it, three defects wrote another file's text to disk.
  */
 const EditorLinesEvent = Schema.Struct({
   type: Schema.Literal("lines"),
@@ -233,12 +262,8 @@ const EditorModeEvent = Schema.Struct({
 });
 
 /**
- * The selection Neovim is showing.
- *
- * Both ends, because neither is "the start": a selection made upwards has its
- * anchor below its cursor. `kind` is the mode itself, so `v`, `V` and the
- * literal Ctrl-V of a block stay distinguishable, and the client draws each as
- * the selection Monaco has for it rather than as a decoration.
+ * Both ends, because a selection made upwards has its anchor below its cursor. `kind` is the mode
+ * itself, so `v`, `V` and a block's literal Ctrl-V stay distinct and map to Monaco selections.
  */
 const EditorVisualEvent = Schema.Struct({
   type: Schema.Literal("visual"),
@@ -259,12 +284,8 @@ const EditorViewportEvent = Schema.Struct({
 });
 
 /**
- * Everything drawn over the buffer that is not the buffer's own text.
- *
- * `rows` names the rows this event replaces, so the client can drop what it
- * had for those rows and take these instead. Without it a decoration that went
- * away would have no way of being removed, because nothing is sent for a row
- * that now has nothing on it.
+ * `rows` names the rows this event replaces, so a decoration that went away can be removed:
+ * nothing is sent for a row that now has nothing on it.
  */
 const EditorDecorationsEvent = Schema.Struct({
   type: Schema.Literal("decorations"),
@@ -313,18 +334,9 @@ const EditorWriteRequestedEvent = Schema.Struct({
 });
 
 /**
- * The session is gone, and this attachment's stream ends after it.
- *
- * `reason` says what a client should do about it, which is why there are four:
- *
- * - `closed` — the thread's editor was closed on purpose (the thread was
- *   archived). Not reopened.
- * - `replaced` — a new session took over the thread, because its project
- *   moved. Attach again; there is nothing to open.
- * - `stopping` — the server is shutting down. Wait: the attach that follows
- *   the reconnect finds no session, and that is the signal to reopen.
- * - `gave-up` — Neovim kept exiting until the server stopped replacing it.
- *   Reopening would repeat it.
+ * `closed`: closed on purpose (thread archived), not reopened. `replaced`: a new session took over
+ * because the project moved; attach again. `stopping`: server shutdown; the attach after reconnect
+ * finds no session, which signals reopen. `gave-up`: Neovim kept exiting; reopening would repeat it.
  */
 export const EditorSessionEndReason = Schema.Literals([
   "closed",
@@ -357,12 +369,8 @@ export const EditorSessionEvent = Schema.Union([
 export type EditorSessionEvent = typeof EditorSessionEvent.Type;
 
 /**
- * Neovim could not be started, and why.
- *
- * The reasons are the launch's own, carried to the client unchanged so the
- * panel can say what to fix — a configuration directory that is not there is a
- * different problem from a Neovim that is too old, and telling the developer
- * "the editor did not start" for both is telling them nothing.
+ * The launch's own reasons, carried unchanged so the panel can say what to fix: a missing
+ * configuration directory and a too-old Neovim are different problems.
  */
 export class EditorSessionSpawnError extends Schema.TaggedError<EditorSessionSpawnError>()(
   "EditorSessionSpawnError",
@@ -407,9 +415,28 @@ export class EditorSessionRpcError extends Schema.TaggedError<EditorSessionRpcEr
   }
 }
 
+/**
+ * A re-sent key batch the server cannot vouch for: the Neovim that accepted it
+ * exited and was replaced, and accepting is not running, so the restored text
+ * may or may not hold it. Sending it again could type it twice; the client
+ * reports the keys lost instead.
+ */
+export class EditorSessionInputLostError extends Schema.TaggedError<EditorSessionInputLostError>()(
+  "EditorSessionInputLostError",
+  {
+    threadId: Schema.String,
+    detail: Schema.String,
+  },
+) {
+  override get message() {
+    return `Keys for thread ${this.threadId} may not have reached Neovim: ${this.detail}`;
+  }
+}
+
 export const EditorSessionError = Schema.Union([
   EditorSessionSpawnError,
   EditorSessionLookupError,
   EditorSessionRpcError,
+  EditorSessionInputLostError,
 ]);
 export type EditorSessionError = typeof EditorSessionError.Type;

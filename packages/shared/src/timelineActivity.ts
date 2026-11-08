@@ -1,5 +1,16 @@
-import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 import { formatDuration } from "./orchestrationTiming.ts";
+
+/**
+ * Mesura: the fields this module reads from a thread activity. Upstream's
+ * orchestrator v2 deleted `TimelineActivityLike`, so the shape is
+ * structural; v2 compaction arrives as a `compaction` turn item instead.
+ */
+export interface TimelineActivityLike {
+  readonly kind: string;
+  readonly payload: unknown;
+  readonly createdAt: string;
+  readonly sequence?: number | undefined;
+}
 
 const COMPACTION_DETAILS_MARKER = "\n\nCompaction details\n";
 
@@ -9,7 +20,7 @@ function finiteCompactionMetric(value: unknown): number | undefined {
     : undefined;
 }
 
-function activityPayload(activity: OrchestrationThreadActivity): Record<string, unknown> {
+function activityPayload(activity: TimelineActivityLike): Record<string, unknown> {
   return activity.payload !== null && typeof activity.payload === "object"
     ? (activity.payload as Record<string, unknown>)
     : {};
@@ -93,13 +104,13 @@ export function formatContextCompactionDetailFromPayload(input: {
 }
 
 export function activityRemainsVisibleOutsideTurnFold(
-  kind: OrchestrationThreadActivity["kind"] | undefined,
+  kind: TimelineActivityLike["kind"] | undefined,
 ): boolean {
   return kind === "context-compaction";
 }
 
 export function contextCompactionActivityDetail(
-  kind: OrchestrationThreadActivity["kind"],
+  kind: TimelineActivityLike["kind"],
   detail: unknown,
 ): string | undefined {
   if (kind !== "context-compaction") {
@@ -112,8 +123,8 @@ export function contextCompactionActivityDetail(
 }
 
 export function contextCompactionActivityDetailFromHistory(
-  activity: OrchestrationThreadActivity,
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  activity: TimelineActivityLike,
+  activities: ReadonlyArray<TimelineActivityLike>,
 ): string | undefined {
   const payload = activityPayload(activity);
   const rawDetail = payload.detail;

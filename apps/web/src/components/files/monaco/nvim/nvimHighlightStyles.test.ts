@@ -8,15 +8,9 @@ import {
 } from "./nvimHighlightStyles.ts";
 
 /**
- * Neovim's highlight attributes, as CSS.
- *
- * The colours are the developer's own colourscheme, read out of
- * `hl_attr_define` rather than guessed from a group name — flash's labels, the
- * search highlight and a plugin's own groups all arrive the same way, as an id
- * with attributes attached, and the id is the only thing the drawing refers to.
- *
- * Scoped to one editor by a prefix class, because two file panels showing two
- * threads have two Neovims, and id 7 means something different in each.
+ * Neovim's highlight attributes as CSS, read from `hl_attr_define` by id (the only thing the
+ * drawing refers to) and scoped by a per-editor prefix class, because two Neovims give id 7 two
+ * meanings.
  */
 
 const PREFIX = "nvim-scope-abc";

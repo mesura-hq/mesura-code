@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { ForwardCompatibleArray, TrimmedString } from "./baseSchemas.ts";
 
-export const MAX_KEYBINDING_VALUE_LENGTH = 64;
+const MAX_KEYBINDING_VALUE_LENGTH = 64;
 const MAX_KEYBINDING_WHEN_LENGTH = 256;
 export const MAX_WHEN_EXPRESSION_DEPTH = 64;
 export const MAX_SCRIPT_ID_LENGTH = 24;
@@ -17,6 +17,8 @@ export const THREAD_JUMP_KEYBINDING_COMMANDS = [
   "thread.jump.7",
   "thread.jump.8",
   "thread.jump.9",
+  // Mesura: a tenth, on mod+0, so every row on screen has a key.
+  "thread.jump.10",
 ] as const;
 export type ThreadJumpKeybindingCommand = (typeof THREAD_JUMP_KEYBINDING_COMMANDS)[number];
 
@@ -37,6 +39,7 @@ export type ModelPickerJumpKeybindingCommand =
 const THREAD_KEYBINDING_COMMANDS = [
   "thread.stop",
   "thread.steerQueuedMessage",
+  "thread.editQueuedMessage",
   "thread.previous",
   "thread.next",
   // The sidebar's page step, five threads at a time. Separate commands
@@ -46,11 +49,8 @@ const THREAD_KEYBINDING_COMMANDS = [
   "thread.nextPage",
   "thread.copyReference",
   "thread.settle",
-  // Bound to no chord since the 2026-W35 sync: upstream's thread.settle owns
-  // mod+shift+s and does the same thing. The handlers here stay until the two
-  // are unified, which is follow-up work, not part of the merge.
-  "thread.toggleSettled",
   "thread.pin",
+  "thread.undo",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
@@ -74,6 +74,22 @@ export const CHAT_SCROLL_KEYBINDING_COMMANDS = [
 ] as const;
 export type ChatScrollKeybindingCommand = (typeof CHAT_SCROLL_KEYBINDING_COMMANDS)[number];
 
+/**
+ * Mesura's own dictation. The mode commands only select where the transcript goes, as
+ * Symmetria Shell's keys do; stopping is `dictation.toggle` or the strip's stop button.
+ * The rename warning on `question.toggleCollapse` below applies to every id here.
+ */
+export const DICTATION_KEYBINDING_COMMANDS = [
+  "dictation.toggle",
+  "dictation.mode.clipboard",
+  "dictation.mode.inject",
+  "dictation.mode.submit",
+  "dictation.pause",
+  "dictation.restart",
+  "dictation.cancel",
+] as const;
+export type DictationKeybindingCommand = (typeof DICTATION_KEYBINDING_COMMANDS)[number];
+
 export const STATIC_KEYBINDING_COMMANDS = [
   // Directional pane focus. The application claims these in the capture
   // phase in every pane, the embedded editor and the terminal included, so a
@@ -84,14 +100,22 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "pane.focusUp",
   "pane.focusDown",
   "sidebar.toggle",
+  "navigation.back",
+  "navigation.forward",
   "terminal.toggle",
   "terminal.split",
   "terminal.splitVertical",
   "terminal.new",
   "terminal.close",
   "rightPanel.toggle",
+  "rightPanel.new",
+  "threadPanel.toggle",
   "rightPanel.toggleMaximized",
   "rightPanel.close",
+  "rightPanel.nextTab",
+  "rightPanel.newTab",
+  "rightPanel.previousTab",
+  "view.reopenClosed",
   "pullRequest.copyNumber",
   "diff.toggle",
   "preview.toggle",
@@ -103,33 +127,37 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "commandPalette.toggle",
   "filePicker.toggle",
   "projectSearch.toggle",
-  // Opens the project scope picker, which filters the sidebar's thread list to
-  // one project. It writes the same state the sidebar's own dropdown writes, so
-  // the two are one filter and not two. The rename warning below applies to this
-  // id too: RETIRED_KEYBINDING_DEFAULTS matches on the command, so it can move a
-  // rule's key but never carry it to a new command name.
+  // Opens the sidebar's project filter, which narrows the thread list to one
+  // project. The rename warning below applies to this id too:
+  // RETIRED_KEYBINDING_DEFAULTS matches on the command, so it can move a rule's
+  // key but never carry it to a new command name.
   "projectScope.toggle",
-  // Opens the thread search picker: every thread, in every project and every
-  // environment, found by words that may come from the project name, the title
-  // or the branch in any order. The command palette lists threads too, but it
-  // matches one contiguous substring over those fields joined, so it cannot
-  // find a thread from its project plus a word of its title. The rename
-  // warning below applies to this id too.
+  // Flips the sidebar's project filter between All projects and the last
+  // project it held.
+  "projectScope.toggleAll",
+  // Focuses the sidebar's Search field, which searches every project while it
+  // has text. The rename warning below applies to this id too.
   "threadSearch.toggle",
+  "usage.open",
+  "theme.select",
+  "appearance.cycle",
   "themeEditor.toggle",
   "composer.stash",
+  "composer.sendAlternate",
+  "composer.sendBackground",
+  "composer.sendAndNewThread",
   "composer.host",
+  "composer.cycleHost",
   "composer.effort",
+  "composer.increaseEffort",
+  "composer.decreaseEffort",
   "composer.mode",
   "composer.workspace",
   "composer.previousWorktree",
   "composer.branch",
-  // Fork additions, kept as one block after upstream's run rather than sorted
-  // into it. Upstream keeps growing that run, and a fork id interleaved with it
-  // turns every one of those additions into a conflict.
-  //
-  // (ADR-003) Upstream ships no keyboard route to attaching at all, so retiring
-  // the fork's attachment stack would have taken the only one.
+  // Fork additions, kept as one block after upstream's run so that upstream's additions to that run
+  // do not conflict. Upstream ships no keyboard route to attaching (ADR-003), so retiring the
+  // fork's attachment stack would have taken the only one.
   "composer.attachFiles",
   // Reaches the Symmetria file tree in the files surface and leaves it again,
   // and opens the file manager over the window. The rename warning below
@@ -137,11 +165,22 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // RENAMED_KEYBINDING_COMMANDS in packages/shared.
   "fileTree.toggle",
   "fileTree.miller",
+  // The Diff surface's Tree diff mode: the working tree's changed files.
+  // Opens the surface on that mode, or closes it when that mode is showing.
+  "treeDiff.toggle",
+  // Opens the Diff surface's mode menu (Tree diff, Files diff, Branch changes,
+  // Latest turn, Turn).
+  "diff.modeMenu",
   "usage.peek",
   // Held like usage.peek, and opens the sidebar's Hosts dock instead.
   "hosts.peek",
+  // Collapses or expands the sidebar's Working section. The rename warning below applies to this
+  // id too.
+  "sidebar.toggleWorking",
   "chat.new",
   "chat.newLocal",
+  "chat.newWithoutProject",
+  "chat.find",
   "editor.openFavorite",
   "traitsPicker.toggle",
   // Both open a branch-toolbar control. The workspace one exists only while
@@ -149,30 +188,33 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // once a thread owns a worktree.
   "workspacePicker.toggle",
   "branchPicker.toggle",
-  // Folds the agent's question prompt into its header so the thread behind it
-  // is readable while the answer is still being composed. Reachable by click
-  // from that header too; the shortcut exists because the question arrives
-  // while the hands are on the keyboard.
-  //
-  // Never rename this id. It is written verbatim into every user's
-  // keybindings.json on first startup, and RETIRED_KEYBINDING_DEFAULTS migrates
-  // a rule's key only — it matches on the command, so it cannot carry a command
-  // to a new name. A rename orphans the rule in every config that already has
-  // it, silently.
+  // The run context drawer: machine, workspace and branch in one keyboard-first
+  // surface under the composer. The two quick toggles change the draft without
+  // opening it. The rename warning below applies to these ids too.
+  "runContext.toggle",
+  "runContext.cycleMachine",
+  "runContext.toggleWorkspace",
+  // Folds the agent's question prompt into its header so the thread stays readable while the answer
+  // is composed. Never rename this id: it is written verbatim into every user's keybindings.json,
+  // and RETIRED_KEYBINDING_DEFAULTS matches on the command, so it cannot move a rule to a new name.
+  // A rename silently orphans the rule in every config that already has it.
   "question.toggleCollapse",
-  // Opens the chat header's inline title rename for the open thread, the
-  // same field a double-click on the title opens. Upstream has no keyboard
-  // route to it. Kept out of THREAD_KEYBINDING_COMMANDS: that group is
-  // traversal, dispatched by the sidebar, and this acts on the open thread
-  // from the chat header. The rename warning above applies to this id too.
+  // Opens the chat header's inline title rename for the open thread, like a double-click on the
+  // title. Kept out of THREAD_KEYBINDING_COMMANDS: that group is traversal, dispatched by the
+  // sidebar, and this acts on the open thread from the chat header. The rename warning above
+  // applies to this id too.
   "thread.rename",
-  // Settle and un-settle in one command. Kept out of THREAD_KEYBINDING_COMMANDS
-  // because that group is traversal, dispatched by the sidebar; this acts on the
-  // open thread's lifecycle and is dispatched by the chat view. The rename
-  // warning above applies to this id too.
   ...CHAT_SCROLL_KEYBINDING_COMMANDS,
+  "usage.cost",
+  "usage.tokens",
+  "usage.limits",
+  "usage.period.day",
+  "usage.period.week",
+  "usage.period.month",
+  "usage.period.quarter",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
+  ...DICTATION_KEYBINDING_COMMANDS,
 ] as const;
 
 export const SCRIPT_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([
@@ -221,6 +263,12 @@ export const KeybindingShortcut = Schema.Struct({
 });
 export type KeybindingShortcut = typeof KeybindingShortcut.Type;
 
+export const PreviewForwardedShortcut = Schema.Struct({
+  command: KeybindingCommand,
+  shortcut: KeybindingShortcut,
+});
+export type PreviewForwardedShortcut = typeof PreviewForwardedShortcut.Type;
+
 const KeybindingWhenNodeRef = Schema.suspend(
   (): Schema.Codec<KeybindingWhenNode> => KeybindingWhenNode,
 );
@@ -257,13 +305,7 @@ export const ResolvedKeybindingRule = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "ignore" } });
 export type ResolvedKeybindingRule = typeof ResolvedKeybindingRule.Type;
 
-/**
- * The command set grows over time, so a client may receive rules it cannot
- * represent (a command or `when` node added after that client shipped).
- * Decoding drops those rules instead of failing the whole payload —
- * rejecting the config would take down the connection over a shortcut the
- * client couldn't dispatch anyway.
- */
+/** Drops undecodable rules without failing the connection. */
 export const ResolvedKeybindingsConfig = ForwardCompatibleArray(ResolvedKeybindingRule).check(
   Schema.isMaxLength(MAX_KEYBINDINGS_COUNT),
 );

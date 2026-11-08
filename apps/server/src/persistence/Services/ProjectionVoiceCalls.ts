@@ -2,7 +2,8 @@
 /**
  * ProjectionVoiceCallRepository - Mesura: projection of persisted voice call history.
  *
- * Rows are derived from the thread.voice-* events and are rebuilt by replaying the event store.
+ * Rows are derived from the voice events in the application event store and are rebuilt by
+ * replaying them (`voice/VoiceHistoryEvents.ts`). Only the voice projector writes them.
  *
  * @module ProjectionVoiceCallRepository
  */
@@ -132,9 +133,14 @@ export interface ProjectionVoiceCallRepositoryShape {
   readonly markEnded: (
     input: EndProjectionVoiceCallInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+  /** A deleted thread keeps no voice history. */
   readonly deleteByThreadId: (input: {
     readonly threadId: ThreadId;
   }) => Effect.Effect<void, ProjectionRepositoryError>;
+  /** True when the thread exists and is not deleted. */
+  readonly isLiveThread: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<boolean, ProjectionRepositoryError>;
   readonly getCall: (input: {
     readonly callId: string;
   }) => Effect.Effect<Option.Option<ProjectionVoiceCall>, ProjectionRepositoryError>;

@@ -15,7 +15,7 @@ import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { ProviderDriverError } from "../provider/Errors.ts";
 import { makeAccountLimitsService, type PolledSubscription } from "./AccountLimitsService.ts";
 import { SubscriptionReadError } from "./subscriptionReaders.ts";
@@ -256,8 +256,8 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
                 fail
                   ? Effect.fail(
                       new ProviderDriverError({
-                        driver: "claudeAgent",
-                        instanceId: "claude",
+                        driver: ProviderDriverKind.make("claudeAgent"),
+                        instanceId: ProviderInstanceId.make("claude"),
                         detail: "unreachable",
                       }),
                     )
@@ -491,8 +491,8 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
                 fail
                   ? Effect.fail(
                       new ProviderDriverError({
-                        driver: "claudeAgent",
-                        instanceId: "claude",
+                        driver: ProviderDriverKind.make("claudeAgent"),
+                        instanceId: ProviderInstanceId.make("claude"),
                         detail: "secret-bearing provider error",
                       }),
                     )

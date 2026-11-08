@@ -7,6 +7,10 @@ Hover over the **Usage** button in the sidebar footer to open the limits panel. 
 `Alt+U`. Release the shortcut to close the panel, or press `Escape`. Selecting the Usage button
 still opens the Usage analytics page.
 
+On a phone, open the sidebar and hold your finger on the **Usage** button. The panel stays open
+after you lift it; touch anywhere outside the panel to close it. A short tap still opens the Usage
+page.
+
 The panel opens inside the sidebar itself, above the footer buttons, and pushes the thread list up
 while it is open. It is available on the thread list only. The Settings, Usage and Pull requests
 pages show a **Back** button in that footer instead, and the panel does not open there.

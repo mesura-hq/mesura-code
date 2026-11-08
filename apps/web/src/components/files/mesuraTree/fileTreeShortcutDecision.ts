@@ -19,14 +19,9 @@ export interface FileTreeShortcutInput {
 }
 
 /**
- * What `Ctrl+E` does, from where the developer is.
- *
- * Not focused on the tree: reach it — opening the files surface first when
- * another surface is up. Focused on the tree, from anywhere in it including
- * its search field: leave it — to the editor when a file surface is active,
- * hiding the tree, or to the composer when only the tree is shown, leaving it
- * in place because a files surface without its tree is empty. One chord, one
- * meaning per state, no wrap-around.
+ * What `Ctrl+E` does. Outside the tree it reaches the tree, opening the files surface
+ * first. Inside it (search field included) it leaves: to the editor, hiding the tree, or
+ * to the composer with the tree kept, because a files surface without its tree is empty.
  */
 export function decideFileTreeShortcut(input: FileTreeShortcutInput): FileTreeShortcutAction {
   if (!input.hasThread) return "none";

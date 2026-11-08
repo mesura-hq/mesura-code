@@ -60,4 +60,61 @@ describe("portable repository file fence", () => {
 
     expect(artifact).toEqual(document);
   });
+
+  it("portable repository schema regression: exports the open provider slug pattern used by the runtime", () => {
+    const document = buildMesuraProjectFileJsonSchema() as typeof artifact;
+    const provider = document.properties.defaultModelSelection.properties.provider;
+    expect(provider.pattern).toBe("^[a-zA-Z][a-zA-Z0-9_-]*$");
+    const pattern = new RegExp(provider.pattern, "u");
+
+    for (const slug of ["codex", "custom_driver", "claudeAgent", "driver-2"]) {
+      expect(pattern.test(slug)).toBe(true);
+      expect(
+        parseMesuraProjectFile(
+          JSON.stringify({ version: 1, defaultModelSelection: { provider: slug, model: "model" } }),
+        ),
+      ).toEqual({ version: 1, defaultModelSelection: { provider: slug, model: "model" } });
+    }
+    for (const slug of ["bad/driver", "1driver", "driver space", ""]) {
+      expect(pattern.test(slug)).toBe(false);
+      expect(
+        parseMesuraProjectFile(
+          JSON.stringify({ version: 1, defaultModelSelection: { provider: slug, model: "model" } }),
+        ),
+      ).toBeNull();
+    }
+  });
+
+  it("portable repository schema regression: closes nested editor objects while the runtime strips unknown fields", () => {
+    expect(buildMesuraProjectFileJsonSchema()).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        defaultModelSelection: {
+          additionalProperties: false,
+          properties: { options: { items: { additionalProperties: false } } },
+        },
+      },
+    });
+    expect(
+      parseMesuraProjectFile(
+        JSON.stringify({
+          version: 1,
+          scripts: [{ name: "Ignored", command: "do-not-run" }],
+          defaultModelSelection: {
+            provider: "custom_driver",
+            model: " model ",
+            ignored: true,
+            options: [{ id: "reasoningEffort", value: "high", ignored: true }],
+          },
+        }),
+      ),
+    ).toEqual({
+      version: 1,
+      defaultModelSelection: {
+        provider: "custom_driver",
+        model: "model",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      },
+    });
+  });
 });

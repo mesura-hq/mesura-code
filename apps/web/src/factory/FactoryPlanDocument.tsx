@@ -1,9 +1,10 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { ChevronRightIcon } from "lucide-react";
 import { memo, useMemo, type ReactNode } from "react";
 
 import ChatMarkdown from "../components/ChatMarkdown";
-import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "../components/chat/FileTagChip";
+import { ContextChip } from "../components/ContextChip";
+import { FileTagChipContent } from "../components/chat/FileTagChip";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useTheme } from "../hooks/useTheme";
@@ -19,11 +20,20 @@ import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys"
 export interface MarkdownScope {
   readonly environmentId: EnvironmentId;
   readonly cwd: string | undefined;
+  /** The thread whose file panel opens the document's file links. */
+  readonly threadRef?: ScopedThreadRef | undefined;
 }
 
 export function Markdown({ text, scope }: { text: string; scope: MarkdownScope }) {
   if (text.trim() === "") return null;
-  return <ChatMarkdown text={text} cwd={scope.cwd} environmentId={scope.environmentId} />;
+  return (
+    <ChatMarkdown
+      text={text}
+      cwd={scope.cwd}
+      environmentId={scope.environmentId}
+      threadRef={scope.threadRef}
+    />
+  );
 }
 
 /** Closed until the reader opens it; the panel mounts its content only while open. */
@@ -66,7 +76,7 @@ function PhaseCard({
         <div className="mt-3 flex flex-wrap gap-1">
           {phase.files.map((file, index) => (
             <Tooltip key={fileKeys[index]}>
-              <TooltipTrigger render={<span className={CHAT_FILE_TAG_CHIP_CLASS_NAME} />}>
+              <TooltipTrigger render={<ContextChip kind="mention" />}>
                 <FileTagChipContent
                   path={file}
                   label={file.split("/").at(-1) ?? file}
@@ -180,14 +190,16 @@ export const FactoryPlanDocument = memo(function FactoryPlanDocument({
   markdown,
   environmentId,
   cwd,
+  threadRef,
 }: {
   markdown: string;
   environmentId: EnvironmentId;
   cwd: string | undefined;
+  threadRef?: ScopedThreadRef | undefined;
 }) {
   const { resolvedTheme } = useTheme();
   const document = useMemo(() => deriveFactoryPlanDocumentModel(markdown), [markdown]);
-  const scope = useMemo(() => ({ environmentId, cwd }), [environmentId, cwd]);
+  const scope = useMemo(() => ({ environmentId, cwd, threadRef }), [environmentId, cwd, threadRef]);
   const sectionKeys = useMemo(
     () => occurrenceKeys(document.sections.map((section) => section.heading)),
     [document],

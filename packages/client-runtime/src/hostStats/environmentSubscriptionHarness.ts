@@ -1,9 +1,7 @@
 /**
- * Test harness: mounts one environment subscription atom from
- * `createEnvironmentSubscriptionAtomFamily`, the factory `state/server.ts`
- * builds `hostStats` with, over a queue the test offers messages to. The
- * connection is always connected; the harness proves what the atom hands a
- * listener, not how the connection behaves.
+ * Mounts one `createEnvironmentSubscriptionAtomFamily` atom over a queue the test offers messages
+ * to. The connection is always connected: the harness proves what the atom hands a listener, not
+ * how the connection behaves.
  */
 import { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -12,7 +10,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
 import {
   AVAILABLE_CONNECTION_STATE,

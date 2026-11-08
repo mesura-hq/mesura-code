@@ -10,15 +10,9 @@ import {
 import { widgetsFor } from "../components/files/monaco/nvim/nvimDecorations.ts";
 
 /**
- * Folding a thread's editor session into the state the driver reconciles to.
- *
- * The property that matters here is not that one event is applied correctly.
- * It is that **the state after N events does not depend on how many renders
- * happened in between.** A fold that kept only the last event had that
- * property for one event and lost it for two, which is the shape of every
- * silent corruption this file exists to prevent: the render is coalesced, the
- * first delta is never applied, and every later delta is then measured against
- * text that has drifted.
+ * The property under test: the state after N events does not depend on how many renders
+ * happened in between. A coalesced render that skips one delta measures every later delta
+ * against drifted text.
  */
 
 const fold = (state: EditorSessionState, events: ReadonlyArray<EditorSessionEvent>) =>
@@ -48,11 +42,8 @@ const linesEvent = (
 
 describe("a delta that names another file", () => {
   it("is refused rather than applied", () => {
-    // The defect this prevents, end to end: a change belonging to one file is
-    // applied to the text of another, the panel renders the result as the open
-    // file, and the save writes it to disk. It happened three times by three
-    // different routes, which is why the check is here — at the one place that
-    // does not have to know which route produced it.
+    // Otherwise the panel renders another file's change as the open file and the save
+    // writes it to disk, which three different routes once did.
     const state = fold(EMPTY_EDITOR_SESSION_STATE, [
       snapshot(["one", "two", "three"]),
       linesEvent(0, 1, ["WRONG"], "src/somewhere-else.ts"),

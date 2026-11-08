@@ -1,9 +1,6 @@
 /**
- * Test fixtures for the Hosts dock and the mobile Hosts screen: a fleet of
- * four hosts in the four states both clients have to tell apart. Every history is built by applying a real
- * snapshot message, never by hand, so the fixtures cannot drift from the
- * shared model's shape. Imported by tests only, through
- * `@t3tools/client-runtime/host-stats/fixtures`.
+ * Four hosts in the four states the Hosts dock must tell apart. Every history comes from applying
+ * a real snapshot message, never by hand, so the fixtures cannot drift from the model's shape.
  */
 import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
 import { BearerConnectionTarget, PrimaryConnectionTarget } from "../connection/model.ts";

@@ -1,15 +1,7 @@
 /**
- * Loading and round-tripping the checked-in golden fixtures.
- *
- * A golden fixture pins the **encoded** shape, which is the only shape a
- * consumer outside TypeScript ever sees. Asserting both directions is what
- * makes it a pin rather than a sample: the fixture has to decode, and encoding
- * what it decoded to has to reproduce the document byte for byte, including its
- * key order and its two-space indentation. A field that silently reorders,
- * renames or drops on the way out fails here.
- *
- * Shared rather than restated per module, because every later phase pins its
- * own roots the same way.
+ * A golden fixture pins the **encoded** shape, the only one a non-TypeScript consumer sees.
+ * It must decode, and re-encoding must reproduce the file byte for byte, key order and
+ * two-space indentation included, so a field that reorders, renames or drops fails here.
  */
 // @effect-diagnostics nodeBuiltinImport:off - a test helper reads fixtures off
 // disk directly; pulling in the Effect `FileSystem` layer to read two files

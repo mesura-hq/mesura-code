@@ -1,31 +1,29 @@
-import { readThread } from "../../state/entities";
-import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import type { PendingUserInputError } from "../../pendingUserInputDraftStore";
-import {
-  SymmetriaComposerDraftId,
-  type SymmetriaDictationTarget,
-} from "@symmetria/broker-contract";
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { CheckIcon, PaperclipIcon, XIcon } from "lucide-react";
 import type {
-  ApprovalRequestId,
+  RuntimeRequestId,
   EnvironmentId,
   ThreadId,
   UserInputQuestion,
 } from "@t3tools/contracts";
-import type { PendingUserInput } from "@t3tools/client-runtime/pending-requests";
+import type { PendingUserInput } from "../../session-logic";
 import { useShallow } from "zustand/react/shallow";
 import {
   buildPendingUserInputAnswers,
+  pendingUserInputDismissAction,
   resolvePendingUserInputAnswer,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
 import {
+  editPendingUserInputAnswerText,
   EMPTY_QUESTION_ANSWERS,
   pendingUserInputRequestKey,
   usePendingUserInputDraftStore,
 } from "../../pendingUserInputDraftStore";
-import { useComposerDraftStore } from "../../composerDraftStore";
+
+const EMPTY_VOICED_QUESTION_IDS: ReadonlyArray<string> = [];
+import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import {
   questionAttachmentDraftId,
   stageQuestionAttachments,
@@ -37,10 +35,19 @@ import {
   startAttachmentUpload,
   useAttachmentUploadStore,
 } from "../../lib/attachmentUploadQueue";
-import { dictationCoordinator } from "../../symmetria/dictationCoordinator";
-import { DictationMicrophoneButton } from "../../symmetria/DictationStrip";
+import { AttachmentPicker } from "./AttachmentPicker";
+import { DictationStartButton } from "../../dictation/DictationControls";
+import { registerDictationComposer } from "../../dictation/dictationController";
+import { MaterialDictationModeIcon } from "../../dictation/MaterialDictationModeIcon";
+import {
+  armQuestionSendWhenReady,
+  disarmQuestionSendWhenReady,
+  useQuestionSendWhenReadyArmed,
+} from "../../dictation/sendWhenReady";
+import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
+import { insertDictationSlotAt } from "../../dictation/dictationSlotEdits";
+import { completeQuestionDraftAnswers } from "../../pendingUserInputResponse";
 import { cn } from "../../lib/utils";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface InlinePendingUserInputContext {
   environmentId: EnvironmentId;
@@ -48,17 +55,17 @@ export interface InlinePendingUserInputContext {
   requests: ReadonlyArray<PendingUserInput>;
   supportsAttachments: boolean;
   maxFileBytes: number | null;
-  focusRequestId?: ApprovalRequestId | null;
+  focusRequestId?: RuntimeRequestId | null;
   onQuestionFocused?: () => void;
   unavailable: boolean;
-  respondingRequestIds: ReadonlyArray<ApprovalRequestId>;
-  onDictationTargetChange: (
-    target: SymmetriaDictationTarget | null,
-    previous?: SymmetriaDictationTarget,
-  ) => void;
-  isResponding: (requestId: ApprovalRequestId) => boolean;
-  onRespond: (requestId: ApprovalRequestId, answers: Record<string, unknown>) => Promise<boolean>;
-  onDismiss: (requestId: ApprovalRequestId) => Promise<boolean>;
+  respondingRequestIds: ReadonlyArray<RuntimeRequestId>;
+  onRespond: (requestId: RuntimeRequestId, answers: Record<string, unknown>) => Promise<boolean>;
+  onDismiss: (requestId: RuntimeRequestId) => Promise<boolean>;
+  /** Answers "dismissed" without the draft's attachments, for a question no dismiss can close. */
+  onDismissWithAnswer: (
+    requestId: RuntimeRequestId,
+    answers: Record<string, unknown>,
+  ) => Promise<boolean>;
 }
 
 export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCard({
@@ -74,6 +81,23 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
     (state) => state.requests[key]?.answers ?? EMPTY_QUESTION_ANSWERS,
   );
   const error = usePendingUserInputDraftStore((state) => state.requests[key]?.error ?? null);
+  // A prefilled editor answer (`initialAnswer`) seeds its field once; an edit or a cleared
+  // answer afterwards wins, because the draft then exists.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: seeds the draft store once per request; a later edit must win over the prefill
+  useEffect(() => {
+    const store = usePendingUserInputDraftStore.getState();
+    const current = store.requests[key]?.answers ?? EMPTY_QUESTION_ANSWERS;
+    for (const question of request.questions) {
+      if (
+        question.initialAnswer === undefined ||
+        question.allowCustomAnswer === false ||
+        current[question.id] !== undefined
+      ) {
+        continue;
+      }
+      store.update(key, question, { text: question.initialAnswer });
+    }
+  }, [key, request.questions]);
   const setError = (value: PendingUserInputError | null) =>
     usePendingUserInputDraftStore.getState().setError(key, value);
   const [missingQuestionId, setMissingQuestionId] = useState<string | null>(null);
@@ -98,80 +122,54 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
       ),
     ),
   );
-  const completeDrafts: Record<string, PendingUserInputDraftAnswer> = Object.fromEntries(
-    request.questions.map((question, index) => {
-      const draft = drafts[index];
-      const attachments = draft ? [...draft.images, ...draft.files] : [];
-      return [
-        question.id,
-        {
-          ...answers[question.id],
-          attachmentCount: attachments.length,
-          attachmentsBlocked:
-            preparations[index]! > 0 ||
-            attachments.some(
-              (attachment) =>
-                !context.supportsAttachments ||
-                question.allowCustomAnswer === false ||
-                uploads[attachment.id]?.status !== "ready" ||
-                uploads[attachment.id]?.environmentId !== environmentId,
-            ),
-        },
-      ];
-    }),
+  const voicedQuestionIds = usePendingUserInputDraftStore(
+    (state) => state.requests[key]?.voicedQuestionIds ?? EMPTY_VOICED_QUESTION_IDS,
   );
+  const completeDrafts = completeQuestionDraftAnswers({
+    questions: request.questions,
+    answers,
+    attachments: drafts.map((draft) => (draft ? [...draft.images, ...draft.files] : [])),
+    preparations,
+    uploads,
+    supportsAttachments: context.supportsAttachments,
+    environmentId,
+    voicedQuestionIds,
+  });
   const answerCount = request.questions.filter(
     (question) => resolvePendingUserInputAnswer(question, completeDrafts[question.id]) !== null,
   ).length;
   const blockedUploads = Object.values(completeDrafts).some((draft) => draft.attachmentsBlocked);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: unregisters the focused answer's dictation target on unmount
   useEffect(() => () => unregisterDictation.current?.(), []);
 
   const focusQuestion = (question: UserInputQuestion) => {
     unregisterDictation.current?.();
     unregisterDictation.current = null;
-    if (question.allowCustomAnswer === false) {
-      dictationCoordinator.clearQuestionTarget();
-      context.onDictationTargetChange(null);
-      return;
-    }
-    const target: SymmetriaDictationTarget = {
-      kind: "draft",
-      draftId: SymmetriaComposerDraftId.make(
-        questionAttachmentDraftId(environmentId, threadId, request.requestId, question.id),
-      ),
-      futureThreadRef: { environmentId, threadId },
-    };
-    context.onDictationTargetChange(target);
-    // Row mount state rejected delayed transcripts after scrolling or navigation.
-    // The scoped thread data, not the virtual row, owns the reservation lifetime.
-    const readQuestion = () => {
-      const thread = readThread({ environmentId, threadId });
-      if (!thread || context.isResponding(request.requestId)) return null;
-      return (
-        derivePendingRequests(thread.activities)
-          .userInputs.find((entry) => entry.requestId === request.requestId)
-          ?.questions.find(
-            (entry) => entry.id === question.id && entry.allowCustomAnswer !== false,
-          ) ?? null
-      );
-    };
-    const unregister = dictationCoordinator.registerComposer({
-      target,
-      projectName: null,
-      handle: null,
-      questionTarget: {
-        isAvailable: () => readQuestion() !== null,
-        append: (commandId, text) =>
-          usePendingUserInputDraftStore
-            .getState()
-            .appendTranscript(key, readQuestion()!, commandId, text),
+    if (question.allowCustomAnswer === false) return;
+    const draftId = questionAttachmentDraftId(
+      environmentId,
+      threadId,
+      request.requestId,
+      question.id,
+    );
+    // A recording drops its marker into this answer while the question has focus.
+    unregisterDictation.current = registerDictationComposer({
+      environmentId,
+      target: { kind: "draft", draftId },
+      draftTarget: DraftId.make(draftId),
+      // At the field's caret, read when the recording stops; at the end once it is gone.
+      insertSlot: (slot) => {
+        const field = fields.current.get(question.id);
+        if (!field?.isConnected) return false;
+        const caret = field.selectionStart ?? field.value.length;
+        return editPendingUserInputAnswerText(key, question.id, (text) =>
+          insertDictationSlotAt(text, caret, slot),
+        );
       },
+      question: { requestKey: key, questionId: question.id },
+      thread: { kind: "thread", environmentId, threadId },
     });
-    unregisterDictation.current = () => {
-      unregister();
-      context.onDictationTargetChange(null, target);
-    };
   };
 
   const focusAnswerField = (questionId: string | undefined) => {
@@ -186,17 +184,31 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
   };
   // A deferred focus callback used stale completeness after an option changed.
   // Read this render's answers so the shortcut reaches the first missing answer.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: answers the parent's focus request after the render that has the current answers
   useEffect(() => {
     if (context.focusRequestId !== request.requestId) return;
     const question =
       request.questions.find(
         (entry) => resolvePendingUserInputAnswer(entry, completeDrafts[entry.id]) === null,
       ) ?? request.questions[0];
-    focusAnswerField(question?.id);
+    // `nearest` leaves a card the list already scrolled to in place, and brings one in otherwise.
+    focusAnswerField(question?.id)?.scrollIntoView?.({ block: "nearest" });
     context.onQuestionFocused?.();
   }, [context, request, completeDrafts, focusAnswerField]);
+  const pendingTranscriptions = request.questions.reduce(
+    (count, question) =>
+      count + countPendingDictationSlots(answers[question.id]?.customAnswer ?? ""),
+    0,
+  );
+  // Armed by send mode or by Submit: the answers go by themselves once the transcripts land.
+  const submitsWhenReady = useQuestionSendWhenReadyArmed(key) && pendingTranscriptions > 0;
   const submit = async () => {
     if (responding || context.unavailable) return;
+    // A transcription still pending in an answer: submit once it lands.
+    if (pendingTranscriptions > 0) {
+      armQuestionSendWhenReady(key);
+      return;
+    }
     const built = buildPendingUserInputAnswers(request.questions, completeDrafts);
     if (!built) {
       const missing = request.questions.find(
@@ -216,6 +228,21 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
     }
   };
 
+  const dismiss = async () => {
+    if (responding || context.unavailable) return;
+    setError(null);
+    try {
+      const action = pendingUserInputDismissAction(request);
+      const ok = await (action.type === "dismiss"
+        ? context.onDismiss(action.requestId)
+        : context.onDismissWithAnswer(action.requestId, action.answers));
+      if (ok) return;
+    } catch {
+      // A rejected handler and a refused dismissal keep the card and its draft available.
+    }
+    setError({ kind: "dismiss", message: "Could not dismiss the request. Try again." });
+  };
+
   return (
     <section
       data-pending-user-input-request-id={request.requestId}
@@ -229,40 +256,22 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
             Answer the questions below, then submit together.
           </p>
         </div>
-        {request.dismissible ? (
-          <div>
-            <button
-              type="button"
-              aria-label="Dismiss question without answering"
-              disabled={responding || context.unavailable}
-              onClick={() => {
-                void context
-                  .onDismiss(request.requestId)
-                  .then((ok) => {
-                    if (!ok)
-                      setError({
-                        kind: "dismiss",
-                        message: "Could not dismiss the request. Try again.",
-                      });
-                  })
-                  .catch(() =>
-                    setError({
-                      kind: "dismiss",
-                      message: "Could not dismiss the request. Try again.",
-                    }),
-                  );
-              }}
-              className="rounded p-1.5 text-muted-foreground hover:bg-muted"
-            >
-              <XIcon className="size-4" />
-            </button>
-            {error?.kind === "dismiss" ? (
-              <p role="alert" className="text-xs text-destructive">
-                {error.message}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+        <div>
+          <button
+            type="button"
+            aria-label="Dismiss question without answering"
+            disabled={responding || context.unavailable}
+            onClick={() => void dismiss()}
+            className="rounded p-1.5 text-muted-foreground hover:bg-muted"
+          >
+            <XIcon className="size-4" />
+          </button>
+          {error?.kind === "dismiss" ? (
+            <p role="alert" className="text-xs text-destructive">
+              {error.message}
+            </p>
+          ) : null}
+        </div>
       </header>
       <div className="divide-y divide-border">
         {request.questions.map((question, index) => (
@@ -303,14 +312,27 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
             </p>
           ) : null}
         </div>
-        <button
-          type="button"
-          disabled={responding || context.unavailable || blockedUploads}
-          onClick={() => void submit()}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-        >
-          {responding ? "Sending…" : error?.kind === "respond" ? "Retry" : "Submit"}
-        </button>
+        {submitsWhenReady ? (
+          <button
+            type="button"
+            aria-label="Don't submit when the transcription lands"
+            onClick={() => disarmQuestionSendWhenReady(key)}
+            className="inline-flex items-center gap-2 rounded-md border border-primary/45 bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/15"
+          >
+            <MaterialDictationModeIcon mode="submit" className="size-3.5" />
+            Submits when ready
+            <XIcon className="size-3.5 opacity-70" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={responding || context.unavailable || blockedUploads}
+            onClick={() => void submit()}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {responding ? "Sending…" : error?.kind === "respond" ? "Retry" : "Submit"}
+          </button>
+        )}
       </footer>
     </section>
   );
@@ -343,7 +365,6 @@ function QuestionField({
 }) {
   const id = useId();
   const textarea = useRef<HTMLTextAreaElement | null>(null);
-  const fileInput = useRef<HTMLInputElement | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const target = questionAttachmentDraftId(
     context.environmentId,
@@ -366,12 +387,14 @@ function QuestionField({
   const attachments = [...(draft?.images ?? []), ...(draft?.files ?? [])];
   const canAttach =
     context.supportsAttachments && question.allowCustomAnswer !== false && !disabled;
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: starts the upload of each attachment staged in this answer's draft
   useEffect(() => {
     if (!context.supportsAttachments) return;
     for (const image of [...(draft?.images ?? []), ...(draft?.files ?? [])]) {
       startAttachmentUpload({ environmentId: context.environmentId, image, draftTarget: target });
     }
   }, [draft?.images, draft?.files, context.environmentId, context.supportsAttachments, target]);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: sizes the textarea to its content before paint
   useLayoutEffect(() => {
     const element = textarea.current;
     if (!element || element.value !== (answer?.customAnswer ?? "")) return;
@@ -446,7 +469,12 @@ function QuestionField({
           </h3>
         </div>
       </div>
-      <div className="space-y-1.5" role="group" aria-labelledby={`${id}-question`}>
+      <div
+        className="space-y-1.5"
+        data-mesura-owns-keys
+        role="group"
+        aria-labelledby={`${id}-question`}
+      >
         {question.options.map((option, index) => {
           const value = option.value ?? option.label;
           const selected = answer?.selectedOptionValues?.includes(value) ?? false;
@@ -481,9 +509,7 @@ function QuestionField({
                   </span>
                 ) : null}
               </span>
-              {index < 9 ? (
-                <kbd className="text-[10px] text-muted-foreground">{index + 1}</kbd>
-              ) : null}
+              {index < 9 ? <kbd className="text-3xs text-muted-foreground">{index + 1}</kbd> : null}
             </button>
           );
         })}
@@ -495,43 +521,27 @@ function QuestionField({
         {question.allowCustomAnswer !== false ? (
           <div className="flex items-center gap-1">
             {context.supportsAttachments ? (
-              <>
-                <input
-                  ref={fileInput}
-                  type="file"
-                  multiple
-                  hidden
-                  onChange={(event) => {
-                    void addFiles(Array.from(event.target.files ?? []));
-                    event.target.value = "";
-                  }}
-                />
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        disabled={!canAttach || context.unavailable}
-                        aria-label={`Attach files to ${question.question}`}
-                        onClick={() => fileInput.current?.click()}
-                        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
-                      />
-                    }
-                  >
-                    <PaperclipIcon className="size-4" />
-                  </TooltipTrigger>
-                  <TooltipPopup>Attach files</TooltipPopup>
-                </Tooltip>
-              </>
+              <AttachmentPicker
+                label={`Attach files to ${question.question}`}
+                // A video stages as a file attachment, which needs a file limit.
+                includeVideos={context.maxFileBytes !== null}
+                disabled={!canAttach || context.unavailable}
+                trigger={
+                  <button
+                    type="button"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                  />
+                }
+                onFilesPicked={(files) => void addFiles(files)}
+              >
+                <PaperclipIcon className="size-4" />
+              </AttachmentPicker>
             ) : null}
-            <DictationMicrophoneButton
+            <DictationStartButton
               compact
               disabled={disabled || context.unavailable}
               targetLabel={question.header || question.question}
-              onBeforeStart={(reservation) => {
-                onFocus();
-                return dictationCoordinator.reserve(reservation);
-              }}
+              onBeforeStart={onFocus}
             />
           </div>
         ) : null}
@@ -565,7 +575,7 @@ function QuestionField({
           placeholder={
             question.options.length ? "Add context to your selection…" : "Type your answer…"
           }
-          className="block min-h-18 w-full resize-none overflow-hidden rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+          className="block min-h-18 w-full resize-none overflow-hidden rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 outline-none focus:border-primary focus:ring-1 focus:ring-inset focus:ring-primary/30 disabled:opacity-50"
         />
         {question.allowCustomAnswer === false ? (
           <p id={`${id}-choice-only`} className="mt-1 text-xs text-muted-foreground">

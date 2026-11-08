@@ -1,10 +1,6 @@
 /**
- * Phase 1 fence of the hosts dock plan: acceptance criterion 4, and criterion 8
- * at the level of each reader.
- *
- * Entry point: the reader functions in `linuxReaders.ts`, which
- * `HostStatsCollector.make` composes. Nothing in the server calls them during
- * phase 1, so these specs drive them directly against `./fixtures`.
+ * Drives the reader functions that `HostStatsCollector.make` composes directly against
+ * `./fixtures`.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
@@ -12,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import {
   normalizePciAddress,
@@ -55,7 +51,6 @@ const copyFixture = (name: string) =>
   });
 
 it.layer(NodeServices.layer)("linuxReaders phase 1 fence", (it) => {
-  // -------------------------------------------------------------------------
   // AC4
   it.effect.each([
     {
@@ -100,7 +95,6 @@ it.layer(NodeServices.layer)("linuxReaders phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC8, per reader: a malformed or missing file is a null result, never a failure.
   interface ReaderCase {
     readonly reader: string;

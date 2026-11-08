@@ -7,16 +7,15 @@ import {
   useRightPanelStore,
 } from "~/rightPanelStore";
 
+import { closeAgentSearchPopupForWorkspace } from "~/components/searches/agentSearchPopupStore";
+
 import { decideFileTreeShortcut } from "./fileTreeShortcutDecision";
 import { useFileTreeStore } from "./fileTreeStore";
 
 /**
- * Leaves the tree: to the editor when one is mounted, hiding the tree behind
- * it; otherwise to the composer, with the tree left in place. `Ctrl+E` from
- * inside the tree and `Escape` in it both come here, so the two routes cannot
- * drift. A file surface without an editor (an image, a rendered markdown) has
- * no editor target, and hiding the tree while the keyboard is still in it
- * would drop focus on `body`.
+ * Leaves the tree (`Ctrl+E` and `Escape` both): to the editor, or a preview in its place,
+ * hiding the tree; otherwise to the composer with the tree kept, since hiding it while
+ * it holds the keyboard would drop focus on `body`.
  */
 export function leaveFileTree(): void {
   const store = useFileTreeStore.getState();
@@ -33,12 +32,17 @@ export function runFileTreeToggle(routeThreadRef: ScopedThreadRef | null): void 
   const store = useFileTreeStore.getState();
   const panels = useRightPanelStore.getState();
   const active = selectActiveRightPanelSurface(panels.byThreadKey, routeThreadRef);
+  // A file tab opened from Tree diff hides the explorer on its own; the
+  // shortcut treats it as closed and brings it back there.
+  const hiddenOnTab = active?.kind === "file" && active.explorerHidden === true;
   const action = decideFileTreeShortcut({
     hasThread: routeThreadRef !== null,
     surfaceKind: active?.kind ?? null,
-    explorerOpen: store.explorerOpen,
+    explorerOpen: store.explorerOpen && !hiddenOnTab,
     treeFocused: isFileTreeFocused(),
   });
+  // Mesura: a move to the tree first closes the agent search popup over it.
+  if (action === "open-surface" || action === "show-and-focus") closeAgentSearchPopupForWorkspace();
   switch (action) {
     case "none":
       return;
@@ -51,6 +55,9 @@ export function runFileTreeToggle(routeThreadRef: ScopedThreadRef | null): void 
     }
     case "show-and-focus":
       store.setExplorerOpen(true);
+      if (hiddenOnTab && routeThreadRef && active) {
+        panels.revealFileExplorer(routeThreadRef, active.id);
+      }
       if (focusTarget("tree")) store.clearPendingFocus();
       else store.requestFocus();
       return;
@@ -63,11 +70,15 @@ export function runFileTreeToggle(routeThreadRef: ScopedThreadRef | null): void 
 
 /**
  * A hidden panel that still holds a file keeps it; showing beats replacing
- * the developer's open file with the bare files surface.
+ * the developer's open file with the bare files surface. A file tab opened
+ * from Tree diff gets its explorer back, which is what the shortcut asked for.
  */
 function showFilesSurface(routeThreadRef: ScopedThreadRef): void {
   const panels = useRightPanelStore.getState();
   const selected = selectSelectedRightPanelSurface(panels.byThreadKey, routeThreadRef);
+  if (selected?.kind === "file" && selected.explorerHidden === true) {
+    panels.revealFileExplorer(routeThreadRef, selected.id);
+  }
   if (selected?.kind === "file" || selected?.kind === "files") panels.show(routeThreadRef);
   else panels.open(routeThreadRef, "files");
 }

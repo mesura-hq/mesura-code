@@ -101,6 +101,21 @@ export interface VoiceTranscriptPage {
   readonly nextAfterSequence: number | null;
 }
 
+/** List pages and transcript summaries share one order, including reads queued by invalidations. */
+export function createVoiceHistoryReadQueue() {
+  let tail = Promise.resolve();
+  return {
+    read<A>(operation: () => Promise<A>): Promise<A> {
+      const result = tail.then(operation);
+      tail = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      return result;
+    },
+  };
+}
+
 export interface VoiceTranscriptSnapshot {
   readonly fragments: ReadonlyArray<VoiceTranscriptFragment>;
   /** The summary the latest transcript response returned; authoritative for this call. */

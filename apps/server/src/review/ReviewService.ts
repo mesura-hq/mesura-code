@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 
 import {
   VcsRepositoryDetectionError,
@@ -13,11 +14,16 @@ import {
   type ReviewDiffPreviewError,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
+  type GitWorkingTreeChangesInput,
+  type GitWorkingTreeChangesResult,
 } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+import { readWorkingTreeChanges } from "./GitWorkingTreeChanges.ts";
+import * as GitWorkingTreeWatcher from "./GitWorkingTreeWatcher.ts";
+import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 
 export class ReviewService extends Context.Service<
   ReviewService,
@@ -28,23 +34,33 @@ export class ReviewService extends Context.Service<
     readonly getDiffFileContents: (
       input: ReviewDiffFileContentsInput,
     ) => Effect.Effect<ReviewDiffFileContentsResult, ReviewDiffPreviewError>;
+    /** Fork addition: per-file status for the Git status surface. */
+    readonly getWorkingTreeChanges: (
+      input: GitWorkingTreeChangesInput,
+    ) => Effect.Effect<GitWorkingTreeChangesResult, ReviewDiffPreviewError>;
+    /** Fork addition: the same, pushed again whenever it changes. */
+    readonly subscribeWorkingTreeChanges: (
+      input: GitWorkingTreeChangesInput,
+    ) => Stream.Stream<GitWorkingTreeChangesResult, ReviewDiffPreviewError>;
   }
 >()("t3/review/ReviewService") {}
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
+  const workingTreeWatcher = yield* GitWorkingTreeWatcher.GitWorkingTreeWatcher;
+  const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
 
-  const canonicalizePath = (value: string) => {
+  const canonicalizePath = (value: string, allowMissing = true) => {
     const resolvedPath = path.resolve(value);
     return fileSystem.realPath(resolvedPath).pipe(
       Effect.catchTags({
         PlatformError: (cause) =>
-          cause.reason._tag === "NotFound"
+          cause.reason._tag === "NotFound" && allowMissing
             ? Effect.succeed(resolvedPath)
             : Effect.fail(
                 new VcsRepositoryDetectionError({
@@ -58,22 +74,27 @@ export const make = Effect.gen(function* () {
     );
   };
 
-  const isWithinRoot = (candidate: string, root: string) => {
-    const relative = path.relative(root, candidate);
-    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-  };
-
   const assertWorkspaceBoundCwd = Effect.fn("ReviewService.assertWorkspaceBoundCwd")(function* (
-    operation: "ReviewService.getDiffPreview" | "ReviewService.getDiffFileContents",
+    operation:
+      | "ReviewService.getDiffPreview"
+      | "ReviewService.getDiffFileContents"
+      | "ReviewService.getWorkingTreeChanges"
+      | "ReviewService.subscribeWorkingTreeChanges",
     cwd: string,
   ) {
-    const [candidate, workspaceRoot, worktreesRoot] = yield* Effect.all([
+    const [candidate, workspaceRoot] = yield* Effect.all([
       canonicalizePath(cwd),
       canonicalizePath(config.cwd),
-      canonicalizePath(config.worktreesDir),
     ]);
-
-    if (isWithinRoot(candidate, workspaceRoot) || isWithinRoot(candidate, worktreesRoot)) {
+    if (
+      KnownWorkspaces.isWithinRoot(path, candidate, workspaceRoot) ||
+      // contains also accepts missing roots for workspace creation. Review reads
+      // require assertContains so a missing registered root cannot grant access.
+      (yield* knownWorkspaces.assertContains(candidate).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      ))
+    ) {
       return;
     }
 
@@ -83,7 +104,10 @@ export const make = Effect.gen(function* () {
       detail:
         operation === "ReviewService.getDiffPreview"
           ? "Review diff preview cwd must stay within the configured workspace root."
-          : "Review diff file contents cwd must stay within the configured workspace root.",
+          : operation === "ReviewService.getWorkingTreeChanges" ||
+              operation === "ReviewService.subscribeWorkingTreeChanges"
+            ? "Working tree changes cwd must stay within the configured workspace root."
+            : "Review diff file contents cwd must stay within the configured workspace root.",
     });
   });
 
@@ -133,10 +157,34 @@ export const make = Effect.gen(function* () {
     return yield* git.getReviewDiffFileContents(input);
   });
 
+  const getWorkingTreeChanges: ReviewService["Service"]["getWorkingTreeChanges"] = Effect.fn(
+    "ReviewService.getWorkingTreeChanges",
+  )(function* (input) {
+    yield* assertWorkspaceBoundCwd("ReviewService.getWorkingTreeChanges", input.cwd);
+    return yield* readWorkingTreeChanges({ git, fileSystem, path }, input.cwd);
+  });
+
+  const subscribeWorkingTreeChanges: ReviewService["Service"]["subscribeWorkingTreeChanges"] = (
+    input,
+  ) =>
+    Stream.unwrap(
+      assertWorkspaceBoundCwd("ReviewService.subscribeWorkingTreeChanges", input.cwd).pipe(
+        Effect.as(workingTreeWatcher.watch(input.cwd)),
+      ),
+    );
+
   return ReviewService.of({
     getDiffPreview,
     getDiffFileContents,
+    getWorkingTreeChanges,
+    subscribeWorkingTreeChanges,
   });
 });
 
-export const layer = Layer.effect(ReviewService, make);
+// Fork: the working-tree watcher is built here rather than in `server.ts`, so
+// the watcher adds no requirement for upstream's callers of this layer. Layers
+// are memoized by reference, so a caller that also provides
+// `GitWorkingTreeWatcher.layer` shares this one instance.
+export const layer = Layer.effect(ReviewService, make).pipe(
+  Layer.provide(GitWorkingTreeWatcher.layer),
+);

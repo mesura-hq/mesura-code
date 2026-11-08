@@ -35,15 +35,9 @@ interface CacheEntry<Model extends CachedModel, ViewState> {
 export const RETAINED_MODEL_LIMIT = 32;
 
 /**
- * Keeps one Monaco model per file, so undo survives a switch away and back.
- *
- * The undo stack belongs to the model, not to the editor, so an editor that
- * disposes the outgoing model on every file switch loses it every time. This
- * holds the models instead and hands the same one back when the user returns.
- *
- * Memory is bounded twice over: `projects.readFile` truncates at a megabyte, so
- * no single model is unbounded, and only `RETAINED_MODEL_LIMIT` models are kept
- * once nothing is looking at them. The active one is never evicted.
+ * Keeps one Monaco model per file, so undo (which belongs to the model, not the editor) survives a
+ * switch away and back. Bounded: `projects.readFile` truncates at a megabyte, and only
+ * `RETAINED_MODEL_LIMIT` idle models are kept. The active model is never evicted.
  */
 export class MonacoFileModelCache<Model extends CachedModel, ViewState> {
   readonly #store: ModelStore<Model>;
@@ -56,12 +50,8 @@ export class MonacoFileModelCache<Model extends CachedModel, ViewState> {
   readonly #entries = new Map<string, CacheEntry<Model, ViewState>>();
 
   /**
-   * Told when a key is dropped, so whatever else is keyed by the same path can
-   * be dropped with it.
-   *
-   * The retention record is the one that needs this: it lives beside this
-   * cache for as long as the project does, and without a hook it keeps one
-   * string per file ever opened, for the whole session.
+   * Told when a key is dropped, so state keyed by the same path (the retention record) is dropped
+   * with it instead of growing for the whole session.
    */
   #onEvict: ((key: string) => void) | null = null;
 
@@ -156,15 +146,9 @@ export class MonacoFileModelCache<Model extends CachedModel, ViewState> {
 }
 
 /**
- * The cache key for one file, which is also the model's URI.
- *
- * One string for both on purpose: a key that merely resembled the URI would be
- * a second thing to keep in step, and Monaco throws when a model is created for
- * a URI that already has one. Keying the cache by the URI makes that collision
- * impossible rather than unlikely.
- *
- * The working directory is escaped because it is an absolute path and its
- * separators would otherwise become path segments of the URI.
+ * The cache key for one file, which is also the model's URI: Monaco throws on a second model for
+ * one URI, so one string for both makes that collision impossible. The working directory is escaped
+ * so its separators do not become URI path segments.
  */
 export function monacoFileModelKey(
   environmentId: string,

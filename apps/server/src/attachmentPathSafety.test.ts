@@ -10,20 +10,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { resolveAttachmentPath } from "./attachmentStore.ts";
 
 /**
- * ADR-003 retired this fork's attachment stack for upstream's and named one
- * check worth carrying over: before provider work starts, an attachment path
- * must be a regular file and not a symbolic link. Upstream has no equivalent.
- *
- * The fork's original lived on its own delivery path, which no longer exists.
- * The check sits in `resolveAttachmentPath` instead, because every provider
- * reaches an attachment through it — five adapters, `ProviderService`, and both
- * text-generation modules — and a call site upstream adds later is covered
- * without being touched.
- *
- * It rejects only what is actually there. `Normalizer` resolves the path of an
- * attachment it is about to write, so a path with nothing at it still resolves;
- * anything else would take image attachments out entirely. The last two cases
- * here exist to hold that line.
+ * ADR-003 keeps one fork check: an attachment path must be a regular file, not a symbolic link.
+ * It sits in `resolveAttachmentPath` because every provider reaches attachments through it.
+ * It rejects only what exists: `Normalizer` resolves a path before it writes the file, so a
+ * missing path must still resolve. The last two cases hold that line.
  */
 
 const fileAttachment = (id: string, name: string): ChatAttachment =>

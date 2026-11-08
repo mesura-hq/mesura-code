@@ -1,4 +1,12 @@
-import type { BrowserImportFailureReason, BrowserImportSource } from "@t3tools/contracts";
+import type {
+  BrowserCookieReadResult,
+  BrowserImportResult,
+  BrowserImportSource,
+  BrowserImportSourceId,
+  BrowserProfile,
+  ImportedCookie,
+} from "@t3tools/contracts";
+import { BrowserImportFailureReason, PREVIEW_IMPORT_COOKIES_MAX_COUNT } from "@t3tools/contracts";
 
 export interface WizardTargetProfile {
   readonly id: string;
@@ -7,11 +15,24 @@ export interface WizardTargetProfile {
 
 export type WizardTarget =
   | { readonly kind: "new"; readonly profileId: string }
-  | { readonly kind: "existing"; readonly profileId: string; readonly name: string };
+  | { readonly kind: "existing"; readonly profileId: string; readonly name: string }
+  | { readonly kind: "server"; readonly profileId: string; readonly name: string };
 
 export type WizardTargetSelection =
   | { readonly kind: "new" }
-  | { readonly kind: "existing"; readonly profileId: string };
+  | { readonly kind: "existing"; readonly profileId: string }
+  | { readonly kind: "server"; readonly profileId: string };
+
+/** The server browser holds the same persistent profiles the client reports to it. */
+export function serverImportTargetProfiles(
+  serverBrowserAvailable: boolean,
+  profiles: ReadonlyArray<Pick<BrowserProfile, "id" | "name" | "kind">>,
+): ReadonlyArray<WizardTargetProfile> {
+  if (!serverBrowserAvailable) return [];
+  return profiles
+    .filter((profile) => profile.kind !== "incognito")
+    .map((profile) => ({ id: profile.id, name: profile.name }));
+}
 
 export function initialTargetSelection(
   canCreateProfile: boolean,
@@ -26,36 +47,34 @@ export function resolveWizardTarget(
   selection: WizardTargetSelection,
   newProfileId: string,
   targetProfiles: ReadonlyArray<WizardTargetProfile>,
+  serverTargetProfiles: ReadonlyArray<WizardTargetProfile> = [],
 ): WizardTarget | undefined {
   if (selection.kind === "new") return { kind: "new", profileId: newProfileId };
-  const profile = targetProfiles.find((candidate) => candidate.id === selection.profileId);
+  const candidates = selection.kind === "server" ? serverTargetProfiles : targetProfiles;
+  const profile = candidates.find((candidate) => candidate.id === selection.profileId);
   if (profile === undefined) return undefined;
   return {
-    kind: "existing",
+    kind: selection.kind,
     profileId: selection.profileId,
     name: profile.name,
   };
 }
 
-/**
- * What the import wizard produces once it has actually tried to import. The
- * parent runs the import and classifies the result; the wizard only reacts to
- * it, which keeps the step transitions pure and testable.
- */
+interface ImportCounts {
+  readonly imported: number;
+  readonly skipped: number;
+  readonly skippedDomains: ReadonlyArray<string>;
+  readonly targetName: string;
+  /** Set when the cookies went to the environment's server browser instead of the desktop. */
+  readonly serverBrowser?: true;
+  /** Set when a later server batch failed; the counts cover the batches the server confirmed. */
+  readonly interrupted?: true;
+}
+
 export type ImportOutcome =
-  | {
-      readonly kind: "imported";
-      readonly imported: number;
-      readonly skipped: number;
-      readonly skippedDomains: ReadonlyArray<string>;
-      readonly targetName: string;
-    }
+  | ({ readonly kind: "imported" } & ImportCounts)
   | { readonly kind: "blocked"; readonly reason: BrowserImportFailureReason };
 
-/**
- * The wizard's screens. Every one is a place the user can act from — there are
- * no dead ends. `blocked` covers the reasons no local step recovers.
- */
 export type WizardStep =
   | { readonly step: "quit" }
   | {
@@ -66,25 +85,13 @@ export type WizardStep =
   | { readonly step: "configure" }
   | { readonly step: "checking"; readonly check: "browser" | "fullDiskAccess" }
   | { readonly step: "importing" }
-  | {
-      readonly step: "done";
-      readonly imported: number;
-      readonly skipped: number;
-      readonly skippedDomains: ReadonlyArray<string>;
-      readonly targetName: string;
-    }
+  | ({ readonly step: "done" } & ImportCounts)
   | { readonly step: "blocked"; readonly reason: BrowserImportFailureReason };
 
-/** The import owns its target partition until the write finishes. */
 export function canCloseWizard(step: WizardStep): boolean {
   return step.step !== "importing";
 }
 
-/**
- * Where the wizard opens for a source. A running browser is the one thing we
- * know up front, from the source listing; everything else is discovered by
- * trying, so the wizard starts by letting the user choose what to import.
- */
 export function initialWizardStep(source: BrowserImportSource): WizardStep {
   if (source.unavailable === "browserRunning") return { step: "quit" };
   if (source.unavailable === "needsFullDiskAccess") {
@@ -95,7 +102,6 @@ export function initialWizardStep(source: BrowserImportSource): WizardStep {
   return { step: "configure" };
 }
 
-/** Where an attempted import lands the wizard, by how it turned out. */
 export function outcomeToStep(outcome: ImportOutcome): WizardStep {
   if (outcome.kind === "imported") {
     return {
@@ -104,33 +110,27 @@ export function outcomeToStep(outcome: ImportOutcome): WizardStep {
       skipped: outcome.skipped,
       skippedDomains: outcome.skippedDomains,
       targetName: outcome.targetName,
+      ...(outcome.serverBrowser ? { serverBrowser: true } : {}),
+      ...(outcome.interrupted ? { interrupted: true } : {}),
     };
   }
-  // A browser that reopened mid-import routes back to the quit screen; every
-  // other failure surfaces on the blocked screen, which offers a retry when
-  // one could help.
   if (outcome.reason === "browserRunning") return { step: "quit" };
   if (outcome.reason === "needsFullDiskAccess") {
-    // The failed import already checked access, so explain that it is still
-    // denied instead of returning to an indistinguishable permission screen.
     return { step: "fullDiskAccess", resume: "import", checked: true };
   }
   return { step: "blocked", reason: outcome.reason };
 }
 
-/** Where a fresh availability check lands the wizard after the user quits. */
 export function refreshedSourceStep(source: BrowserImportSource | undefined): WizardStep {
   if (source === undefined) return { step: "blocked", reason: "unknownSource" };
   return initialWizardStep(source);
 }
 
-/** A denied FDA recheck returns to the permission step with visible feedback. */
 export function fullDiskAccessRecheckStep(source: BrowserImportSource | undefined): WizardStep {
   const next = refreshedSourceStep(source);
   return next.step === "fullDiskAccess" ? { ...next, checked: true } : next;
 }
 
-/** Preserve the chosen source profile when a post-quit refresh still lists it. */
 export function refreshedSourceProfileDirectory(
   currentDirectory: string,
   source: BrowserImportSource,
@@ -141,13 +141,6 @@ export function refreshedSourceProfileDirectory(
   return source.profiles[0]?.directory ?? "";
 }
 
-/**
- * Whether retrying could clear a failure. The keychain prompt can be approved
- * on a second try, a missing key appears once the user signs in to the
- * browser (which is what its copy asks for), and a read or session error may
- * be transient; an unsupported browser will not change, so it gets no retry
- * button.
- */
 export function isRetryableReason(reason: BrowserImportFailureReason): boolean {
   switch (reason) {
     case "needsKeychainApproval":
@@ -162,13 +155,148 @@ export function isRetryableReason(reason: BrowserImportFailureReason): boolean {
   }
 }
 
-/**
- * Names the sites whose cookies were skipped: "example.com and google.com",
- * or "a, b, c and 4 more" past a few, so the line stays short.
- */
 export function formatSkippedDomains(domains: ReadonlyArray<string>): string {
   if (domains.length === 0) return "";
   if (domains.length === 1) return domains[0]!;
   if (domains.length <= 3) return `${domains.slice(0, -1).join(", ")} and ${domains.at(-1)}`;
   return `${domains.slice(0, 3).join(", ")} and ${domains.length - 3} more`;
+}
+
+/** IPC carries reason tokens inside messages; treat unknown tokens as read failures without exposing raw
+ * text. */
+export const importFailureReason = (cause: unknown): BrowserImportFailureReason => {
+  const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
+  return (
+    BrowserImportFailureReason.literals.find((reason) => message.includes(`failed: ${reason}.`)) ??
+    "readFailed"
+  );
+};
+
+export interface ServerProfileImportPorts {
+  /** Checked before the read, so a connection without the grant never decrypts the cookies. */
+  readonly canImport: () => boolean;
+  readonly readCookies: (input: {
+    readonly sourceId: BrowserImportSourceId;
+    readonly sourceProfileDirectory: string;
+  }) => Promise<BrowserCookieReadResult>;
+  readonly importCookies: (input: {
+    readonly profileId: string;
+    readonly cookies: ReadonlyArray<ImportedCookie>;
+  }) => Promise<BrowserImportResult>;
+}
+
+/** Reads on the desktop, then sends the cookies to the server browser in batches its RPC accepts. */
+export async function importIntoServerProfile(
+  ports: ServerProfileImportPorts,
+  input: {
+    readonly sourceId: BrowserImportSourceId;
+    readonly sourceProfileDirectory: string;
+    readonly target: Extract<WizardTarget, { readonly kind: "server" }>;
+  },
+): Promise<ImportOutcome> {
+  if (!ports.canImport()) return { kind: "blocked", reason: "serverPermissionDenied" };
+  let read: BrowserCookieReadResult;
+  try {
+    read = await ports.readCookies({
+      sourceId: input.sourceId,
+      sourceProfileDirectory: input.sourceProfileDirectory,
+    });
+  } catch (cause) {
+    return { kind: "blocked", reason: importFailureReason(cause) };
+  }
+  // Cookies the desktop could not decrypt count as skipped, as they do in a desktop import.
+  let imported = 0;
+  let skipped = read.undecryptable;
+  const skippedDomains = new Set(read.undecryptableHosts);
+  const counts = () => ({
+    kind: "imported" as const,
+    imported,
+    skipped,
+    skippedDomains: [...skippedDomains],
+    targetName: input.target.name,
+    serverBrowser: true as const,
+  });
+  for (let start = 0; start < read.cookies.length; start += PREVIEW_IMPORT_COOKIES_MAX_COUNT) {
+    let result: BrowserImportResult;
+    try {
+      result = await ports.importCookies({
+        profileId: input.target.profileId,
+        cookies: read.cookies.slice(start, start + PREVIEW_IMPORT_COOKIES_MAX_COUNT),
+      });
+    } catch (cause) {
+      // Earlier batches are already in the profile; report them rather than hide them.
+      if (start > 0) return { ...counts(), interrupted: true };
+      return { kind: "blocked", reason: serverImportFailureReason(cause) };
+    }
+    imported += result.imported;
+    skipped += result.skipped;
+    for (const domain of result.skippedDomains) skippedDomains.add(domain);
+  }
+  return counts();
+}
+
+const serverImportFailureReason = (cause: unknown): BrowserImportFailureReason =>
+  (cause as { readonly _tag?: unknown } | undefined)?._tag === "EnvironmentAuthorizationError"
+    ? "serverPermissionDenied"
+    : "sessionUnavailable";
+
+function cookieResultCount(count: number): string {
+  return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
+}
+
+export function formatImportResult(
+  result: ImportCounts,
+  destinationEnvironmentName: string,
+): { readonly title: string; readonly description: string; readonly skippedDomains: string } {
+  const { imported, skipped } = result;
+  const destination = result.serverBrowser
+    ? `in ${destinationEnvironmentName}'s server browser`
+    : `for ${destinationEnvironmentName}`;
+  return {
+    title:
+      imported > 0
+        ? `Imported ${cookieResultCount(imported)}`
+        : skipped > 0
+          ? `Skipped ${cookieResultCount(skipped)}`
+          : "No cookies found",
+    description:
+      imported > 0
+        ? `Added to ${result.targetName} ${destination}${result.interrupted ? " before the import stopped" : ""}.${skipped > 0 ? ` ${cookieResultCount(skipped)} skipped.` : ""}${result.interrupted ? " Try again to import the rest." : ""}`
+        : skipped > 0
+          ? `No cookies were imported ${destination}.`
+          : `There were no cookies to import ${destination}.`,
+    skippedDomains: formatSkippedDomains(result.skippedDomains),
+  };
+}
+
+/** Why the wizard lists no server profiles although the environment has a server browser. */
+export function serverImportTargetNotice(
+  serverBrowserAvailable: boolean,
+  canImport: boolean,
+): string | undefined {
+  return serverBrowserAvailable && !canImport
+    ? "The server browser isn't offered: this connection lacks permission to use it."
+    : undefined;
+}
+
+export function parsePaymentDomainsText(text: string): ReadonlyArray<string> {
+  return text
+    .split("\n")
+    .map((line) => line.trim().toLowerCase())
+    .filter((line) => line !== "");
+}
+
+export function formatPaymentDomainsText(domains: ReadonlyArray<string>): string {
+  return domains.join("\n");
+}
+
+/** Undefined when the edit leaves the saved list unchanged. */
+export function paymentDomainsPatch(
+  text: string,
+  current: ReadonlyArray<string>,
+): { readonly browserPaymentDomains: ReadonlyArray<string> } | undefined {
+  const next = parsePaymentDomainsText(text);
+  const unchanged =
+    next.length === current.length && next.every((domain, index) => domain === current[index]);
+  return unchanged ? undefined : { browserPaymentDomains: next };
 }

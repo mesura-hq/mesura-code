@@ -385,5 +385,5 @@ host.
   `assets/AssetAccess.ts`, `ws.ts`
 - `mesura-code/packages/contracts/src/t3ProjectFile.ts`
 - `mesura-code/docs/mesura/adr-002-one-window-many-projects.md`
-- `gh issue list` and `gh issue view 2` on `CaceresCallieri/mesura-code`
+- `gh issue list` and `gh issue view 2` on `mesura-hq/mesura-code`
 - `git status` and `git log` in both repositories

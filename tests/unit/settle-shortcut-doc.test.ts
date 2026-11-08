@@ -8,16 +8,9 @@ import { DEFAULT_KEYBINDINGS } from "../../packages/shared/src/keybindings.ts";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * The chord a command ships on and the chord the manual tells a user to press
- * are two facts in two files, and nothing but this test makes them agree.
- * Moving the settle chord off `alt+s` needed edits in five places, and a
- * review still found a sixth that was wrong.
- *
- * It reads the key out of `DEFAULT_KEYBINDINGS` rather than naming it, so the
- * next move of this default only has to change the table and the prose. It
- * asserts nothing about the surrounding wording on purpose:
- * `docs/user/keybindings.md` is an upstream file this fork edits, and pinning
- * its prose would conflict at every weekly merge for no gain.
+ * Only this test keeps the settle command's shipped chord and the manual's chord in agreement. It
+ * reads the key from `DEFAULT_KEYBINDINGS` and pins no surrounding wording, because
+ * `docs/user/keybindings.md` is an upstream file and pinning its prose would conflict every merge.
  */
 const KEYBINDINGS_DOC = NodePath.join(repositoryRoot, "docs/user/keybindings.md");
 
@@ -37,11 +30,8 @@ it("documents every chord the settle toggle actually ships on", () => {
 });
 
 it("stops telling anyone to press the chord the settle toggle moved off", () => {
-  // A specific historical pin rather than a derived one: the move left no
-  // RETIRED_KEYBINDING_DEFAULTS entry to read the old key back out of, because
-  // the backfill delivers the new chord on its own. A manual that still names
-  // alt+s is worse than one that says nothing — the reader presses it, nothing
-  // happens, and the manual is what told them to.
+  // A historical pin: the move left no RETIRED_KEYBINDING_DEFAULTS entry to read the old key from.
+  // A manual that still names alt+s sends the reader to a key that does nothing.
   assert.notInclude(shippedKeysFor("thread.settle"), "alt+s");
   assert.notMatch(readDoc(), /`alt\+s`/);
 });

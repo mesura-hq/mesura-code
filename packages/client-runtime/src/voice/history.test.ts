@@ -134,7 +134,7 @@ const makeServer = () => {
     call.finalSequence = lastSequence;
   });
   return {
-    client: { append, readCall, end },
+    historyClient: { append, readCall, end },
     append,
     readCall,
     end,
@@ -167,7 +167,7 @@ const makeRecorder = (
     threadId: "thread-1",
     callId: overrides.callId ?? "call-0000000000000001",
     store,
-    client: server.client,
+    historyClient: server.historyClient,
     makeId: () => `batch-${++id}`,
     onFailure: (message) => failures.push(message),
   });
@@ -464,7 +464,7 @@ describe("voice history outbox resume", () => {
     await resumeVoiceHistoryOutbox({
       owner: { ...owner },
       store: memory.store,
-      client: server.client,
+      historyClient: server.historyClient,
     });
 
     expect(server.requests.map((request) => [request.sessionId, request.batchId])).toEqual([
@@ -483,7 +483,7 @@ describe("voice history outbox resume", () => {
     // The first page stores the batch; the server accepts it but the response never arrives.
     const lostResponse = {
       append: async (request: VoiceTranscriptAppendInput) => {
-        await server.client.append(request);
+        await server.historyClient.append(request);
         throw new Error("The connection dropped before the response.");
       },
     };
@@ -492,7 +492,7 @@ describe("voice history outbox resume", () => {
       threadId: "thread-1",
       callId: "call-reload-000000001",
       store: makeMemoryStore(backing).store,
-      client: lostResponse,
+      historyClient: lostResponse,
       makeId: () => "batch-reload-1",
       onFailure: () => {},
     });
@@ -502,7 +502,11 @@ describe("voice history outbox resume", () => {
 
     // A new page with the same identity resumes from the same backing store.
     const reloaded = makeMemoryStore(backing);
-    await resumeVoiceHistoryOutbox({ owner, store: reloaded.store, client: server.client });
+    await resumeVoiceHistoryOutbox({
+      owner,
+      store: reloaded.store,
+      historyClient: server.historyClient,
+    });
 
     expect(server.requests.map((request) => request.batchId)).toEqual([
       "batch-reload-1",
@@ -519,7 +523,11 @@ describe("voice history outbox resume", () => {
     const server = makeServer();
     server.failNextAppends(1);
 
-    await resumeVoiceHistoryOutbox({ owner, store: memory.store, client: server.client });
+    await resumeVoiceHistoryOutbox({
+      owner,
+      store: memory.store,
+      historyClient: server.historyClient,
+    });
 
     expect(server.requests).toHaveLength(1);
     expect(memory.backing.size).toBe(1);
@@ -534,7 +542,7 @@ describe("voice history outbox resume", () => {
     const result = await resumeVoiceHistoryOutbox({
       owner,
       store: memory.store,
-      client: server.client,
+      historyClient: server.historyClient,
     });
 
     expect(server.append).not.toHaveBeenCalled();
@@ -551,7 +559,11 @@ describe("voice history outbox resume", () => {
     // The lease expired or the server restarted after the page closed: ended, no boundary.
     server.calls("call-aaaaaaaaaaaaaaaa").endedAt = "2026-11-08T10:01:00.000Z";
 
-    await resumeVoiceHistoryOutbox({ owner, store: memory.store, client: server.client });
+    await resumeVoiceHistoryOutbox({
+      owner,
+      store: memory.store,
+      historyClient: server.historyClient,
+    });
 
     expect(server.end).toHaveBeenCalledOnce();
     expect(server.end).toHaveBeenCalledWith({ callId: "call-aaaaaaaaaaaaaaaa", lastSequence: 2 });
@@ -574,7 +586,7 @@ describe("voice history outbox resume", () => {
     const result = await resumeVoiceHistoryOutbox({
       owner,
       store: memory.store,
-      client: server.client,
+      historyClient: server.historyClient,
     });
 
     expect(server.end).not.toHaveBeenCalled();
@@ -591,7 +603,7 @@ describe("voice history outbox resume", () => {
     await resumeVoiceHistoryOutbox({
       owner,
       store: memory.store,
-      client: server.client,
+      historyClient: server.historyClient,
       excludeCallIds: new Set(["call-live-00000000001"]),
     });
 

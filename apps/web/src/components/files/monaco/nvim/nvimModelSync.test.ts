@@ -3,35 +3,15 @@ import { describe, expect, it } from "vite-plus/test";
 import { editsForLinesEvent, editsForSnapshot, type MonacoEdit } from "./nvimModelSync.ts";
 
 /**
- * Turning Neovim's view of the text into Monaco edit operations.
- *
- * Pure on purpose. The driver that applies these owns a live editor and is
- * awkward to test; the arithmetic is where the mistakes are, and it is all
- * here. Two coordinate systems meet in this file and they disagree about
- * everything: Neovim counts lines from zero and gives half-open ranges,
- * Monaco counts from one and gives closed ones.
- *
- * The other rule these encode is that an edit which changes nothing must not
- * be produced at all. Monaco moves every decoration, every marker and the
- * caret for an applied edit, so replacing a line with itself is visible.
- *
- * **Every case here asserts the text that comes out, not only the range that
- * goes in.** The first version of this file asserted ranges alone and agreed
- * with an off-by-one that a real Neovim found in a minute: a replacement
- * reaching the last line produced a range ending on line `lineCount + 1`,
- * which Monaco clamps to the end of the text, which left a blank line behind.
- * A range is a claim; the text after applying it is the behaviour.
+ * Every case asserts the resulting text, not only the range: a range-only first version agreed with
+ * an off-by-one that ended a last-line replacement on `lineCount + 1`, which Monaco clamps and
+ * which left a blank line behind. An edit that changes nothing must not be produced at all.
  */
 
 /**
- * Monaco's `applyEdits`, as far as these edits use it.
- *
- * The clamping is the part that matters and the part that has to be honest: a
- * line number past the end of the text resolves to the end of the text, and a
- * column past the end of its line resolves to the end of that line. That is
- * what turns an over-reaching range into a silently wrong edit rather than an
- * error, so a helper that threw instead would hide the very defect these
- * tests exist to catch.
+ * Monaco's `applyEdits`, as far as these edits use it. It clamps like Monaco (a line or column past
+ * the end resolves to the end) instead of throwing, because that clamping turns an over-reaching
+ * range into a silently wrong edit, the defect these tests catch.
  */
 function applyEdits(lines: ReadonlyArray<string>, edits: ReadonlyArray<MonacoEdit>): Array<string> {
   const text = lines.join("\n");

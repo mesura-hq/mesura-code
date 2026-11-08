@@ -6,18 +6,9 @@ import { createSchemaLocalStorage } from "./schemaLocalStorage";
 import { createWriteCoalescer, flushOnPageHide } from "./writeCoalescer";
 
 /**
- * The tree's shape, persisted per project.
- *
- * Stored are the cursor and the collapsed folders — the file manager's tree is
- * expanded by default and its shape stores what is collapsed. `preset` and
- * `checkpoint` back the toolbar's expand-all / restore and are session state.
- * The Symmetria IDE persisted the same thing host-side and learned that root
- * and restored shape must reach the tree together; here the record is built
- * from the stored shape before the tree mounts, so that holds by construction.
- *
- * Keys are never removed: a project the developer stops opening keeps its
- * shape in the origin's storage. Known limitation; a timestamp and an
- * eviction pass would fix it when the count ever matters.
+ * The tree's cursor and collapsed folders, per project; `preset` and `checkpoint` stay
+ * session state. Root and restored shape must reach the tree together, so the record is
+ * built from this before the tree mounts. Keys are never evicted (known limitation).
  */
 export const StoredTreeShape = Schema.Struct({
   selected: Schema.String,
@@ -60,13 +51,9 @@ const WRITE_DELAY_MS = 300;
 const REMEMBERED_KEYS = 16;
 
 /**
- * Restores a project's shape and persists changes to it.
- *
- * `selected` is part of the shape, so the library reports a change on every
- * cursor move; writes are coalesced behind a short delay and flushed when the
- * page hides, so holding `j` costs no synchronous storage write per key. A
- * shape equal to the last successful write, or the default shape of a project
- * that stored nothing, is not written.
+ * Restores and persists a project's shape. Every cursor move reports a change, so writes
+ * are coalesced and flushed on page hide. A shape equal to the last successful write, or
+ * the default shape of a project that stored nothing, is not written.
  */
 export function createTreeShapePersister(storage: TreeShapeStorage, wait = WRITE_DELAY_MS) {
   const written = new Map<string, StoredTreeShape>();

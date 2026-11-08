@@ -1,8 +1,5 @@
 /**
- * Phase 6: whether releasing a `hostStats` subscription closes its stream.
- * Mobile keeps its sessions up in the background, so the Hosts screen can only
- * release a stream by dropping its last reader with a zero idle TTL, the value
- * `apps/mobile/src/state/server.ts` passes as `hostStatsIdleTtlMs`. Web keeps
+ * Only a zero idle TTL closes a `hostStats` stream as soon as its last reader lets go. Web keeps
  * the default five minutes so a re-peek of the dock is instant.
  */
 import * as Effect from "effect/Effect";

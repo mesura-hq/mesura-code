@@ -3,9 +3,11 @@
 import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import { ImportedCookie } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as NodeSqlite from "node:sqlite";
 
@@ -24,7 +26,6 @@ const parseWindowsFirefoxProfiles = (ini: string, root = "C:\\Users\\user\\Firef
     return parseFirefoxProfiles(ini, path, root);
   }).pipe(Effect.provide(NodePath.layerWin32));
 
-/** Builds a `cookies.sqlite` with Firefox's real `moz_cookies` shape. */
 const writeFirefoxCookieDatabase = Effect.fnUntraced(function* (
   rows: ReadonlyArray<{
     host: string;
@@ -38,8 +39,6 @@ const writeFirefoxCookieDatabase = Effect.fnUntraced(function* (
     rawSameSite?: number;
     originAttributes?: string;
   }>,
-  // Firefox stamps `PRAGMA user_version`; schema 16+ stores `expiry` in
-  // milliseconds, earlier ones in seconds.
   schemaVersion = 15,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -47,7 +46,6 @@ const writeFirefoxCookieDatabase = Effect.fnUntraced(function* (
   const file = `${directory}/cookies.sqlite`;
   const database = new NodeSqlite.DatabaseSync(file);
   database.exec(`pragma user_version = ${schemaVersion}`);
-  // Only schemas 10–14 have `rawSameSite`; the schema-15 migration dropped it.
   const hasRawSameSite = schemaVersion >= 10 && schemaVersion <= 14;
   database.exec(
     `create table moz_cookies (
@@ -81,6 +79,8 @@ const writeFirefoxCookieDatabase = Effect.fnUntraced(function* (
   return file;
 });
 
+const decodeImportedCookies = Schema.decodeUnknownEffect(Schema.Array(ImportedCookie));
+
 const run = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Scope.Scope>) =>
   effect.pipe(Effect.provide(NodeServices.layer), Effect.scoped);
 
@@ -88,8 +88,6 @@ describe("readFirefoxCookies", () => {
   it.effect("converts millisecond expiries from schema 16 and newer", () =>
     run(
       Effect.gen(function* () {
-        // Firefox 129 (schema 16) migrated `expiry` to milliseconds; older
-        // profiles still hold seconds. Both must land as seconds for Electron.
         const row = {
           host: "example.test",
           name: "c",
@@ -130,7 +128,6 @@ describe("readFirefoxCookies", () => {
             name: "plain",
             value: "v",
             path: "/app",
-            // Firefox writes 0 for a session cookie.
             expiry: 0,
             isSecure: 0,
             isHttpOnly: 0,
@@ -142,8 +139,6 @@ describe("readFirefoxCookies", () => {
 
         expect(cookies).toEqual([
           {
-            // The leading dot stays on the domain but not in the URL, which is
-            // what Electron matches against.
             url: "https://github.com/",
             name: "session",
             value: "abc",
@@ -158,13 +153,10 @@ describe("readFirefoxCookies", () => {
             url: "http://example.test/app",
             name: "plain",
             value: "v",
-            // Host-only in Firefox, so no `domain`: supplying one would make
-            // Electron widen it to every subdomain of example.test.
             domain: undefined,
             path: "/app",
             secure: false,
             httpOnly: false,
-            // Session cookies carry no expiry rather than one at the epoch.
             expirationDate: undefined,
             sameSite: "no_restriction",
           },
@@ -173,12 +165,27 @@ describe("readFirefoxCookies", () => {
     ),
   );
 
+  it.effect("Firefox cookies decode as the shared ImportedCookie contract", () =>
+    run(
+      Effect.gen(function* () {
+        const row = { value: "v", path: "/", isSecure: 1, isHttpOnly: 1 };
+        const cookies = yield* readFirefoxCookies(
+          yield* writeFirefoxCookieDatabase([
+            { ...row, host: ".github.com", name: "domain", expiry: 1_800_000_000, sameSite: 1 },
+            { ...row, host: "example.test", name: "host-only", expiry: 0, sameSite: 0 },
+            { ...row, host: "strict.test", name: "strict", expiry: 0, sameSite: 2 },
+            { ...row, host: "unset.test", name: "unset", expiry: 0, sameSite: 256 },
+          ]),
+        );
+        expect(cookies).toHaveLength(4);
+        expect(yield* decodeImportedCookies(cookies)).toEqual(cookies);
+      }),
+    ),
+  );
+
   it.effect("keeps an unset SameSite unspecified instead of widening it to none", () =>
     run(
       Effect.gen(function* () {
-        // nsICookie::SAMESITE_UNSET is 256, a cookie that carried no SameSite
-        // attribute. It is not SAMESITE_NONE (0), which is an explicit opt-in
-        // to cross-site use; importing it as "none" would widen its scope.
         const row = {
           host: "example.test",
           name: "c",
@@ -205,8 +212,6 @@ describe("readFirefoxCookies", () => {
   it.effect("imports rows whose SameSite was never written", () =>
     run(
       Effect.gen(function* () {
-        // Schema 9 added `sameSite` without a default, so rows from before the
-        // upgrade hold NULL. One such row must not fail the whole import.
         const row = {
           host: "example.test",
           name: "c",
@@ -236,10 +241,6 @@ describe("readFirefoxCookies", () => {
   it.effect("applies the schema-15 rawSameSite rule to older databases", () =>
     run(
       Effect.gen(function* () {
-        // Schemas 10–14 defaulted `sameSite` to Lax and kept the declared value
-        // in `rawSameSite`. Firefox's own migration to 15 turns "Lax by
-        // default, None declared" into Unset; an unmigrated database has to be
-        // read the same way or an undeclared cookie becomes an explicit Lax.
         const row = {
           host: "example.test",
           name: "c",
@@ -283,9 +284,6 @@ describe("readFirefoxCookies", () => {
             sameSite: 1,
           },
           {
-            // Same host, name and path as above: Firefox keeps these apart by
-            // container, Electron cannot, so importing both would hand the
-            // profile whichever one happened to be written last.
             host: "mail.test",
             name: "session",
             value: "work-container",
@@ -336,7 +334,6 @@ describe("readFirefoxCookies", () => {
 
         yield* readFirefoxCookies(file);
 
-        // The browser's own file is snapshotted, never opened for writing.
         const after = yield* fileSystem.stat(file);
         expect(after.mtime).toEqual(before.mtime);
         expect(after.size).toBe(before.size);
@@ -348,8 +345,6 @@ describe("readFirefoxCookies", () => {
 describe("parseFirefoxProfiles", () => {
   it.effect("reads named profiles and ignores Install sections", () =>
     Effect.gen(function* () {
-      // `Install*` sections name a default profile but do not describe one, so
-      // counting them would invent a profile whose directory does not exist.
       const parsed = yield* parsePosixFirefoxProfiles(
         [
           "[Install4F96D1932A9F858E]",
@@ -378,53 +373,43 @@ describe("parseFirefoxProfiles", () => {
     }),
   );
 
-  it.effect("falls back to the path when a profile has no name", () =>
+  it.effect.each([
+    { platform: "Linux", root: "/home/user/.mozilla/firefox" },
+    { platform: "macOS", root: "/Users/user/Library/Application Support/Firefox" },
+  ])("validates relative and absolute $platform profile paths", ({ root }) =>
     Effect.gen(function* () {
-      expect(
-        yield* parsePosixFirefoxProfiles(["[Profile0]", "Path=Profiles/x.default"].join("\n")),
-      ).toEqual([{ directory: "Profiles/x.default", name: "Profiles/x.default" }]);
+      const parsed = yield* parsePosixFirefoxProfiles(
+        [
+          "[Profile0]",
+          "Name=Relative",
+          "IsRelative=1",
+          "Path=Profiles/relative.default",
+          "[Profile1]",
+          "Name=Custom",
+          "IsRelative=0",
+          "Path=/mnt/custom/firefox-profile",
+          "[Profile2]",
+          "IsRelative=1",
+          "Path=../../escape",
+          "[Profile3]",
+          "IsRelative=1",
+          "Path=/absolute-marked-relative",
+          "[Profile4]",
+          "IsRelative=0",
+          "Path=relative-marked-absolute",
+          "[Profile5]",
+          "IsRelative=1",
+          "Path=Profiles/nul\u0000escape",
+        ].join("\n"),
+        root,
+      );
+
+      expect(parsed).toEqual([
+        { directory: "Profiles/relative.default", name: "Relative" },
+        { directory: "/mnt/custom/firefox-profile", name: "Custom" },
+      ]);
     }),
   );
-
-  for (const [platform, root] of [
-    ["Linux", "/home/user/.mozilla/firefox"],
-    ["macOS", "/Users/user/Library/Application Support/Firefox"],
-  ] as const) {
-    it.effect(`validates relative and absolute ${platform} profile paths`, () =>
-      Effect.gen(function* () {
-        const parsed = yield* parsePosixFirefoxProfiles(
-          [
-            "[Profile0]",
-            "Name=Relative",
-            "IsRelative=1",
-            "Path=Profiles/relative.default",
-            "[Profile1]",
-            "Name=Custom",
-            "IsRelative=0",
-            "Path=/mnt/custom/firefox-profile",
-            "[Profile2]",
-            "IsRelative=1",
-            "Path=../../escape",
-            "[Profile3]",
-            "IsRelative=1",
-            "Path=/absolute-marked-relative",
-            "[Profile4]",
-            "IsRelative=0",
-            "Path=relative-marked-absolute",
-            "[Profile5]",
-            "IsRelative=1",
-            "Path=Profiles/nul\u0000escape",
-          ].join("\n"),
-          root,
-        );
-
-        expect(parsed).toEqual([
-          { directory: "Profiles/relative.default", name: "Relative" },
-          { directory: "/mnt/custom/firefox-profile", name: "Custom" },
-        ]);
-      }),
-    );
-  }
 
   it.effect("uses Windows path rules for relative and absolute profiles", () =>
     Effect.gen(function* () {

@@ -32,15 +32,9 @@ export const setConnectionCatalog = DesktopIpc.makeIpcMethod({
 });
 
 /**
- * Turns "secure storage is unavailable" into an instruction.
- *
- * `resolveLinuxSecretStorageUnavailableMessage` existed for exactly this and
- * had no production caller — only its own test — so every user who hit the
- * failure read the renderer's generic sentence and had no idea that the fix was
- * to install a keyring. Hyprland reaches this path by default: Chromium
- * recognizes a fixed list of XDG_CURRENT_DESKTOP values, Hyprland is not on it,
- * so the app forces gnome-libsecret and then finds no org.freedesktop.secrets
- * on the session bus.
+ * Turns "secure storage is unavailable" into an instruction to install a keyring. Hyprland hits
+ * this by default: Chromium does not recognise its `XDG_CURRENT_DESKTOP`, so the app forces
+ * gnome-libsecret and then finds no `org.freedesktop.secrets` on the session bus.
  */
 export const getSecureStorageUnavailableReason = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.GET_SECURE_STORAGE_UNAVAILABLE_REASON_CHANNEL,

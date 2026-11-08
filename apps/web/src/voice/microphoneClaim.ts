@@ -1,14 +1,11 @@
 import { useSyncExternalStore } from "react";
 
-import { isActiveDictationSession } from "../symmetria/dictationPresentation";
-import { useDictationSessionStore } from "../symmetria/dictationSessionStore";
+import { useDictationSessionStore } from "../dictation/dictationSessionStore";
 
 /**
- * One microphone admission rule for the composer's two capture starts. A voice call claims the
- * microphone synchronously when the phone is pressed, before its asynchronous history and
- * permission checks, and releases it only after its capture has closed. Dictation claims it while
- * the Symmetria Shell reserves the microphone; a recording shell session also blocks a call even
- * when the shell started it on its own.
+ * One microphone rule for calls and dictation. A call claims it synchronously on the phone press,
+ * before any async check, and releases it after capture closes. Dictation claims it while opening
+ * the microphone; from then on its recording session, paused or not, blocks a call.
  */
 export type MicrophoneUser = "call" | "dictation";
 
@@ -26,9 +23,7 @@ export function microphoneBlocker(user: MicrophoneUser): string | null {
   if (user === "dictation") return holder?.user === "call" ? CALL_BLOCKS_DICTATION : null;
   if (holder?.user === "dictation") return DICTATION_BLOCKS_CALL;
   if (holder?.user === "call") return null;
-  return isActiveDictationSession(useDictationSessionStore.getState().session)
-    ? DICTATION_BLOCKS_CALL
-    : null;
+  return useDictationSessionStore.getState().session !== null ? DICTATION_BLOCKS_CALL : null;
 }
 
 /** Claims the microphone, or returns null when another user holds it. Release is idempotent. */

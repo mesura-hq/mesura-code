@@ -29,7 +29,6 @@ describe("application branding residuals", () => {
     for (const relativePath of [
       "apps/desktop/resources/dmg/dmg-background-latest.svg",
       "apps/desktop/resources/dmg/dmg-background-nightly.svg",
-      "apps/mobile/assets/widget/T3Mark.svg",
       "assets/mesura-code/monochrome.svg",
       "assets/prod/logo.svg",
     ]) {
@@ -91,6 +90,8 @@ describe("application branding residuals", () => {
     expect(manifest.icons.map(({ src }) => src)).toEqual([
       "/favicon-32x32.png",
       "/apple-touch-icon.png",
+      "/icon-192.png",
+      "/icon-512.png",
     ]);
     for (const { src } of manifest.icons) {
       expect(NodeFS.existsSync(NodePath.join(REPOSITORY_ROOT, "apps/web/public", src))).toBe(true);

@@ -54,13 +54,11 @@ export interface PortalShortcutState {
   readonly shortcutActionRegistered?: boolean;
   readonly shortcutRegistered: boolean;
   readonly shortcutPending: boolean;
-  /** Whether retry-shortcut can reopen permissions or start a new session. */
   readonly shortcutCanRetry?: boolean;
   readonly shortcutLabel?: string;
   readonly shortcutMessage: string | null;
 }
 
-/** Own the portal session, including consent and release; Electron only reports submission. */
 export class PortalCaptureShortcut {
   state: PortalShortcutState = {
     shortcutRegistered: false,
@@ -117,15 +115,12 @@ export class PortalCaptureShortcut {
     try {
       if (this.pending) this.closeObject(this.pending.path, REQUEST);
       if (this.session) this.closeObject(this.session, SESSION);
-    } catch {
-      // A broken bus is already closing its sessions; local cleanup must still run.
-    }
+    } catch {}
     this.bus.removeListener("message", this.message);
     this.responses.clear();
     this.bus.disconnect();
   };
 
-  /** A previously denied binding is changed by the desktop, not by bypassing its decision. */
   get hasSession() {
     return !this.closed && Boolean(this.session);
   }
@@ -135,7 +130,7 @@ export class PortalCaptureShortcut {
       throw new Error("Change the capture binding in your Hyprland config, then save it.");
     if (!this.hasSession || this.version < 2)
       throw new Error(
-        "Open your desktop's shortcut settings and allow T3 Code's capture shortcut.",
+        "Open your desktop's shortcut settings and allow Mesura Code's capture shortcut.",
       );
     await this.call({
       destination: this.owner,
@@ -161,10 +156,9 @@ export class PortalCaptureShortcut {
     this.update({
       shortcutRegistered: false,
       shortcutPending: false,
-      // This failed session is closing, so retry can register a fresh one.
       shortcutCanRetry: !this.managedByHyprland,
       shortcutMessage: this.managedByHyprland
-        ? "Couldn't connect to Hyprland shortcuts. Make sure xdg-desktop-portal-hyprland is running, then restart T3 Code."
+        ? "Couldn't connect to Hyprland shortcuts. Make sure xdg-desktop-portal-hyprland is running, then restart Mesura Code."
         : error instanceof Error
           ? error.message
           : "Could not register the capture shortcut.",
@@ -304,7 +298,7 @@ export class PortalCaptureShortcut {
             shortcutMessage:
               this.version >= 2
                 ? "Shortcut permission wasn't granted. Open shortcut permissions to allow it."
-                : "Shortcut permission wasn't granted. Allow T3 Code in your desktop's shortcut settings.",
+                : "Shortcut permission wasn't granted. Allow Mesura Code in your desktop's shortcut settings.",
           });
           return undefined;
         }
@@ -327,7 +321,7 @@ export class PortalCaptureShortcut {
         shortcutPending: false,
         shortcutMessage: shortcut
           ? "Managed by Hyprland. Add the binding to your config and save it."
-          : "Hyprland did not register the capture action. Check that xdg-desktop-portal-hyprland is running, then restart T3 Code.",
+          : "Hyprland did not register the capture action. Check that xdg-desktop-portal-hyprland is running, then restart Mesura Code.",
       });
       return;
     }

@@ -1,24 +1,8 @@
 /**
- * Browser key events, in Neovim's key notation.
- *
- * `null` means the key is not ours: the event carries on to Monaco and to the
- * application untouched. Everything this returns is a key Neovim will be given
- * and the browser will not.
- *
- * Two things make this harder than the table it resembles.
- *
- * The developer's keyboard is Latin-American, where a great many printable
- * characters are produced with Shift or AltGr. `Shift` therefore cannot be
- * read as a modifier *for a printable character*: `/` is Shift+7, and sending
- * `<S-/>` would mean nothing to Neovim while `/` means search. Only
- * `event.key` says what was typed, so a printable character goes as itself and
- * its modifier flags are ignored. A named key is the opposite case — `Tab` is
- * `Tab` however it was typed, so there Shift has to be put back.
- *
- * And a key that belongs to the browser's own composition must not be routed
- * at all. A dead-key accent produces a `Dead` keydown, then a second keydown
- * for the letter with `keyCode` 229; taking either away from the browser
- * breaks the composition, and the developer types `á` and gets `a`.
+ * Browser key events in Neovim's key notation; `null` means the key goes on to Monaco and the app.
+ * A printable character goes as itself and ignores modifier flags (on a Latin-American layout `/`
+ * is Shift+7, and `<S-/>` means nothing to Neovim); a named key keeps Shift. Dead-key composition
+ * (`Dead`, then keyCode 229) is never routed, or typing `á` gives `a`.
  */
 
 export interface NvimKeyEvent {
@@ -95,16 +79,9 @@ export function toNvimKey(event: NvimKeyEvent): string | null {
 
   const special = SPECIAL_KEYS[event.key];
 
-  // Shift is a modifier for a named key and never for a printable one. A
-  // printable character arrives already shifted in `event.key`, but `Tab`
-  // stays `Tab` however it was typed — and Neovim maps `<S-Tab>` and `<Tab>`
-  // to different things. In the developer's own configuration they are
-  // `vim.snippet.jump` backwards and forwards, so collapsing them jumps the
-  // wrong way.
-  //
-  // Escape is left out on purpose. Its job is to leave a mode, a configuration
-  // that maps `<S-Esc>` is vanishingly rare, and a Shift held a moment too
-  // long would otherwise strand the developer in insert mode.
+  // Shift is a modifier for a named key, never for a printable one (that arrives shifted in
+  // `event.key`). `<S-Tab>` and `<Tab>` map to different things in Neovim. Escape is left out on
+  // purpose: a Shift held a moment too long would otherwise strand the developer in insert mode.
   const shiftIsPartOfTheKey = event.shiftKey && special !== undefined && event.key !== "Escape";
 
   // `:help key-notation` writes them in this order, and Neovim accepts any:

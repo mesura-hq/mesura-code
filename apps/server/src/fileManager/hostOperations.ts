@@ -6,32 +6,10 @@ import { createEntry, renameEntry, transfer } from "@symmetria/fm-main/ops/mutat
 import type { Operations } from "@symmetria/fm-main/ops/operations";
 
 /**
- * The file manager's write operations, on this server's host.
- *
- * The shape is `Operations` from the vendored `fm-main`, which its registry
- * calls as promises. Copy, move, create and rename are the file manager's own
- * implementation (`ops/mutate.ts`, plain `node:fs`). The two that reach the
- * desktop are this host's: the standalone uses Electron's `shell.trashItem`
- * and `shell.openPath`, which do not exist here.
- *
- * **Trash is `gio trash`, deliberately.** It implements the freedesktop trash
- * specification (the `.trashinfo` record that makes a restore possible, the
- * per-mount fallback), which the file manager's own note refuses to
- * reimplement; a "trash" that cannot be restored from is a delete with a
- * friendlier name. A long selection is trashed in batches, so the argument
- * list stays under the kernel's limit.
- *
- * **Open is `xdg-open`**, detached and unreferenced: the program it starts may
- * run for hours and must not hold the server. Success means the opener
- * STARTED. A detached opener cannot report its exit, so a file type nothing
- * handles (`xdg-open` exits 3) answers success and nothing appears; the
- * standalone, which waits on Electron's `shell.openPath`, reports that case.
- * Waiting on `xdg-open` here would hold the RPC for the life of the program
- * it opens, which is the worse trade.
- *
- * Either binary missing is reported as a failure line in the file manager's
- * status bar, never as a crash; a host command that never finishes is killed
- * after a bounded wait and reported the same way.
+ * `fm-main`'s `Operations` on this host. Trash is `gio trash`, in batches under the argument
+ * limit, because a trash without the freedesktop `.trashinfo` record cannot be restored.
+ * Open is `xdg-open`, detached: success means it STARTED, so an unhandled type (exit 3) still
+ * answers success. A missing binary or a hung command is a status-bar failure, never a crash.
  */
 
 /** What this module needs of a spawned process; `node:child_process` satisfies it. */

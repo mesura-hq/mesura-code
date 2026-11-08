@@ -3,15 +3,8 @@ import type {
   FactoryPlanActivityPayload,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import {
-  defaultFactoryRoutes,
-  readyFactoryRoutes,
-  reconcileFactoryRouteSlots,
-  validateFactoryRoutes,
-  type FactoryRouteSlots,
-} from "@t3tools/client-runtime/factory/routes";
 import { EllipsisIcon, Maximize2Icon } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 
 import ChatMarkdown from "../components/ChatMarkdown";
 import { Badge } from "../components/ui/badge";
@@ -26,17 +19,20 @@ import {
 } from "@t3tools/client-runtime/factory/plan-model";
 import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys";
 import { FactoryApprovedRoutes, FactoryRoutePicker } from "./FactoryRoutePicker";
-import { useFactoryPlanApproval } from "./useFactoryPlanApproval";
+import { factoryPlanRoutesKey, useFactoryPlanApproval } from "./useFactoryPlanApproval";
+import { useFactoryPlanRoutes } from "./useFactoryPlanRoutes";
 import { useFactorySnapshot } from "./useFactorySnapshot";
 
 function FactoryPlanContext({
   environmentId,
   digest,
   cwd,
+  threadRef,
 }: {
   environmentId: EnvironmentId;
   digest: string;
   cwd: string | undefined;
+  threadRef: ScopedThreadRef | null;
 }) {
   const snapshot = useFactorySnapshot(environmentId, digest);
   // Keyed to the body itself: only a new plan text reparses it.
@@ -58,12 +54,19 @@ function FactoryPlanContext({
     return <p className="text-xs text-muted-foreground">The plan's text could not be loaded.</p>;
   }
   if (context === null) return null;
-  return <ChatMarkdown text={context} cwd={cwd} environmentId={environmentId} />;
+  return (
+    <ChatMarkdown
+      text={context}
+      cwd={cwd}
+      environmentId={environmentId}
+      threadRef={threadRef ?? undefined}
+    />
+  );
 }
 
 /**
  * The card's foot: the route per role and Approve, or the routes an approval
- * of these bytes carried. The rows are card-local until Approve sends them.
+ * of these bytes carried. The timeline retains route edits across virtualized mounts.
  */
 function FactoryPlanApprovalSection({
   threadRef,
@@ -72,27 +75,14 @@ function FactoryPlanApprovalSection({
   threadRef: ScopedThreadRef;
   plan: FactoryPlanActivityPayload;
 }) {
-  const { state, providers, approve, sending } = useFactoryPlanApproval(threadRef, plan);
-  // Untouched rows follow the provider lists as they load; the first edit
-  // takes them over.
-  const [edited, setEdited] = useState<FactoryRouteSlots | null>(null);
-  const defaults = useMemo(() => defaultFactoryRoutes(providers), [providers]);
-  // Edits are held to the provider lists as they are now, so Approve never
-  // sends a model or level the server stopped offering.
-  const slots = useMemo(
-    () => (edited === null ? defaults : reconcileFactoryRouteSlots(edited, providers)),
-    [edited, defaults, providers],
+  const { state, providers, approve, canApprove, sending } = useFactoryPlanApproval(
+    threadRef,
+    plan,
   );
-  const routes = readyFactoryRoutes(slots);
-  const { implementer, reviewer, verifier } = slots;
-  const violations =
-    implementer.status === "ready" && reviewer.status === "ready" && verifier.status === "ready"
-      ? validateFactoryRoutes({
-          implementer: implementer.route,
-          reviewer: reviewer.route,
-          verifier: verifier.route,
-        })
-      : [];
+  const { slots, routes, violations, setEdited } = useFactoryPlanRoutes(
+    factoryPlanRoutesKey(threadRef, plan.digest),
+    providers,
+  );
 
   if (state.kind === "approved") {
     return (
@@ -124,7 +114,7 @@ function FactoryPlanApprovalSection({
       <div className="flex justify-end">
         <Button
           size="xs"
-          disabled={routes === null || sending}
+          disabled={!canApprove || routes === null || sending}
           onClick={() => {
             if (routes !== null) void approve(routes);
           }}
@@ -160,7 +150,7 @@ export const FactoryPlanCard = memo(function FactoryPlanCard({
   const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "plan path" });
 
   return (
-    <div className="rounded-[24px] border border-border/80 bg-card/70 p-4 sm:p-5">
+    <div className="rounded-3xl border border-border/80 bg-card/70 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Badge variant="secondary">Factory plan</Badge>
@@ -188,7 +178,12 @@ export const FactoryPlanCard = memo(function FactoryPlanCard({
         </div>
       </div>
       <div className="mt-4">
-        <FactoryPlanContext environmentId={environmentId} digest={plan.digest} cwd={cwd} />
+        <FactoryPlanContext
+          environmentId={environmentId}
+          digest={plan.digest}
+          cwd={cwd}
+          threadRef={threadRef}
+        />
       </div>
       <div className="mt-4 border-t border-border/60 pt-3">
         <p className="text-xs font-medium text-muted-foreground">{summary.phaseCountLabel}</p>

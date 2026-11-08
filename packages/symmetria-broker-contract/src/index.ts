@@ -1,8 +1,5 @@
-// `./checksum.ts` and `./jsonSchema.ts` are deliberately absent. They are build
-// tools that reach for `node:crypto`, and this barrel is what a web or mobile
-// client imports; re-exporting them would put a Node builtin in the runtime
-// surface of a wire contract for code only the generator and the suite call.
-// Both have their own package subpaths, which those two callers use.
+// `./checksum.ts` and `./jsonSchema.ts` stay out of this barrel: they import `node:crypto`,
+// and web clients import this barrel. The generator and the suite use their package subpaths.
 export * from "./command.ts";
 export * from "./dictation.ts";
 export * from "./draft.ts";

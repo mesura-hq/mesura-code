@@ -1,0 +1,21 @@
+/*
+ * The composer overlays the bottom of the captions; `--voice-composer-inset` is its live height.
+ * In Split below lg the captions stack above the work output, so the composer does not cover them.
+ */
+[data-voice-captions-content] {
+  padding-bottom: calc(var(--voice-composer-inset) + var(--spacing) * 6);
+}
+
+[data-voice-latest-captions] {
+  bottom: calc(var(--voice-composer-inset) + var(--spacing) * 3);
+}
+
+@media (width < 64rem) {
+  [data-voice-layout="split"] [data-voice-captions-content] {
+    padding-bottom: calc(var(--spacing) * 6);
+  }
+
+  [data-voice-layout="split"] [data-voice-latest-captions] {
+    bottom: calc(var(--spacing) * 3);
+  }
+}

@@ -6,12 +6,9 @@ import { relativePathFromModelKey, type MonacoFileModels } from "./monacoFileMod
 import { MonacoFileModelRegistry } from "./monacoFileModelRegistry";
 
 /**
- * A project's editor models and its retention record, kept across routes.
- *
- * One registry for the application, built here rather than in a provider,
- * because what it holds has to outlive every component that could host it:
- * opening Settings and switching to a thread in another project are both route
- * changes, and the undo stack lives in the Monaco model.
+ * A project's editor models and its retention record, kept across routes. One registry for the
+ * application, not a provider, because the undo stack lives in the Monaco model and must outlive
+ * route changes such as opening Settings or switching to another project's thread.
  */
 export interface ProjectEditorModels {
   readonly models: MonacoFileModels;
@@ -47,20 +44,12 @@ export function projectEditorModelsKey(environmentId: string, cwd: string): stri
 
 export function useProjectEditorModels(environmentId: string, cwd: string): ProjectEditorModels {
   const key = projectEditorModelsKey(environmentId, cwd);
-  // Acquired once and released on unmount, with no reconciliation for a key
-  // that changed, because it cannot: the chat view mounts the panel with a
-  // React `key` of exactly this composite, so a different project is a
-  // different component instance rather than a re-render of this one.
-  //
-  // An earlier version released and acquired during render to cover the case
-  // anyway. That is a side effect in a render body, which React may run more
-  // than once and may throw away — and what it disposes here is Monaco models
-  // with a live editor attached. It also released the old key twice, once in
-  // the render and once in the effect cleanup that still closed over it, which
-  // would take a project's models out from under a second panel on the same
-  // project. A safety net that can do that is worse than the case it covers,
-  // and the case it covers does not exist.
+  // Acquired once and released on unmount, with no reconciliation for a changed key: the chat
+  // view keys the panel on exactly this composite, so another project is another instance.
+  // REGRESSION: releasing and acquiring during render disposed Monaco models under a live editor
+  // and released the old key twice (render plus stale cleanup). Do not bring it back.
   const [project] = useState(() => registry.acquire(key));
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: releases the registry entry this mount acquired, on unmount
   useEffect(() => () => registry.release(key), [key]);
   return project;
 }

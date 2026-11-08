@@ -1,25 +1,8 @@
 /**
- * The checksum a second repository pins.
- *
- * A consumer outside this repository cannot depend on the TypeScript schemas;
- * it depends on the emitted JSON Schema documents. One hash over all of them is
- * the whole contract surface in a single value, so a consumer pins that value
- * and its own suite fails the moment this fork changes a schema without telling
- * anybody.
- *
- * The framing is fixed and part of the contract, because a hash is only
- * comparable across repositories when both sides frame it the same way. Files
- * are taken in ascending order of their relative path, and for each one the
- * hash absorbs the path, a NUL byte, the exact bytes on disk, and a second NUL
- * byte. The NUL separators are what stop a rename from cancelling out against a
- * content change: without them the concatenation of path and content is
- * ambiguous, and two different document sets could hash alike.
- *
- * The bytes on disk are already canonical — {@link canonicalizeJsonValue} sorts
- * every object key before the emitter serializes a document — so hashing the
- * bytes is hashing a canonical form. That is deliberate: a future Effect beta
- * that emits the same schema with its keys in a different order must not read
- * as a contract change, and it will not, because the emitter sorts them back.
+ * The checksum a second repository pins over the emitted JSON Schema documents. The framing is part
+ * of the contract: files in ascending relative-path order, each absorbed as path, NUL, exact bytes,
+ * NUL; the NULs keep a rename from cancelling a content change. The bytes are already canonical
+ * (sorted keys), so an Effect release that reorders keys does not read as a contract change.
  */
 // @effect-diagnostics nodeBuiltinImport:off - hashing a build artifact is a
 // package tool, not runtime contract logic, and the Effect `Crypto` service
@@ -88,12 +71,8 @@ export type SymmetriaSourceEntry = {
 };
 
 /**
- * A canonical, cycle-safe rendering of a schema tree.
- *
- * Keys are sorted, so a future Effect build that assembles the same tree in
- * another order reads as unchanged. A function is rendered by its name rather
- * than its body: a check keeps its identity, and rewriting the body of a
- * predicate without changing what it accepts does not move the digest.
+ * Keys are sorted, so a future Effect build that assembles the same tree in another order reads as
+ * unchanged. A function renders by name, not body, so rewriting a predicate keeps the digest.
  */
 const renderSchemaNode = (value: unknown, seen: WeakSet<object>): unknown => {
   if (typeof value === "function") return `[function ${value.name}]`;
@@ -114,26 +93,10 @@ const renderSchemaNode = (value: unknown, seen: WeakSet<object>): unknown => {
 };
 
 /**
- * Hashes the schemas themselves, not their JSON Schema projection.
- *
- * The document checksum above cannot see a change JSON Schema cannot express.
- * Measured on this contract: swapping a field from `TrimmedNonEmptyString` to
- * a bare `Schema.String` — a real weakening, since an empty title then decodes
- * — emits byte-identical documents, because a check applied after a
- * transformation is dropped on the way out. Against the schema trees the same
- * edit moves this value, so the drift test fails and the contract surface
- * cannot move in silence.
- *
- * It is recorded beside the document checksum rather than folded into it: a
- * consumer outside TypeScript can reproduce the document checksum from the
- * published bytes and can reproduce nothing about an Effect AST, so the two
- * values answer different questions. This one is a change detector for this
- * repository and its suite; the document checksum is the value a second
- * repository pins.
- *
- * It moves on an Effect upgrade that reshapes the AST, the same way the
- * upstream vocabulary locks fire on an upstream change. That is the intended
- * cost: regenerate, read the diff, and commit the new value deliberately.
+ * Hashes the schema trees, which catch what JSON Schema cannot express: a check applied after a
+ * transformation is dropped on the way out, so weakening `TrimmedNonEmptyString` to `Schema.String`
+ * emits identical documents. Kept beside the document checksum, which non-TypeScript consumers pin.
+ * An Effect upgrade that reshapes the AST moves it: regenerate, read the diff, commit deliberately.
  */
 export const computeSymmetriaSourceChecksum = (
   entries: ReadonlyArray<SymmetriaSourceEntry>,

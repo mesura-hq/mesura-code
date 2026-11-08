@@ -7,41 +7,69 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * A client that shows a thread reports it, so the server can tell somebody is
- * looking rather than that something is cached. The contract for that scope has
- * existed since before this fork and nothing ever emitted it, which is the
- * failure mode these assertions exist to catch: the declaration, the server
- * handling and the tests can all be present and correct while no route retains
- * anything, and every suite still passes.
- *
- * Asserted at the call site because that is where it breaks. Upstream rewrites
- * both route files, and a sync that drops one hook call leaves the scope silently
- * unemitted again — the hooks keep their unit tests, and the feature is gone.
- *
- * The mobile call site matters most: there is no emulator on this machine, so it
- * is the only check standing between that screen and an unnoticed regression.
+ * A client that shows a thread reports it, so the server can tell a viewer from a cache. The scope's
+ * contract existed long before anything emitted it, with every suite green. It is asserted at the
+ * call sites in upstream's chat layout and ThreadRouteView, which a sync can drop silently.
  */
 
 const read = (relativePath: string) =>
   NodeFS.readFileSync(NodePath.join(repositoryRoot, relativePath), "utf8");
 
 it("retains the thread scope from the web thread route", () => {
-  const route = read("apps/web/src/routes/_chat.$environmentId.$threadId.tsx");
+  const layout = read("apps/web/src/routes/_chat.tsx");
+  const view = read("apps/web/src/components/ThreadRouteView.tsx");
 
   assert.include(
-    route,
-    "useThreadBackgroundScope(threadRef)",
+    layout,
+    "<ThreadRouteView target={shownTarget}",
+    "the chat layout no longer mounts the view that retains the visible thread scope",
+  );
+  assert.include(
+    view,
+    'target.kind === "server" ? target.threadRef : (draftSession?.promotedTo ?? inferredThreadRef)',
+    "the shared view no longer selects the server thread or a promoted draft thread",
+  );
+  assert.include(
+    view,
+    "useThreadBackgroundScope(serverThreadRef)",
     "the web thread route no longer retains a thread background scope, so the server cannot tell a browser is looking at a thread",
   );
-});
-
-it("retains the thread scope from the mobile thread screen", () => {
-  const screen = read("apps/mobile/src/features/threads/ThreadRouteScreen.tsx");
-
+  assert.match(
+    view,
+    /useComposerDraftStore\(\(store\) =>\s*draftId === null \? null : store\.getDraftSession\(draftId\)/,
+    "the route no longer subscribes to the draft's promotion state",
+  );
   assert.include(
-    screen,
-    "useThreadBackgroundScope(",
-    "the mobile thread screen no longer retains a thread background scope, and no emulator test covers this",
+    view,
+    "const threadRefs = useThreadRefs();",
+    "the route no longer subscribes to known thread refs",
+  );
+  assert.match(
+    view,
+    /const inferredThreadRef = draftSession\s*\? \(threadRefs\.find\([\s\S]*?ref\.environmentId === draftSession\.environmentId &&\s*ref\.threadId === draftSession\.threadId,[\s\S]*?\) \?\? null\)\s*: null;/,
+    "draft inference must match both the environment and the thread, and leave an uncreated draft unretained",
+  );
+  const entities = read("apps/web/src/state/entities.ts");
+  assert.match(
+    entities,
+    /function useThreadRefs\([^)]*\)[^{]*\{\s*return useAtomValue\(enabled \? environmentThreadShells\.threadRefsAtom/,
+    "the known thread refs no longer subscribe to the current shell",
+  );
+  const scope = read("apps/web/src/hooks/useThreadBackgroundScope.ts");
+  assert.include(
+    scope,
+    "const environmentId = threadRef?.environmentId ?? null;",
+    "the scope loses its environment",
+  );
+  assert.include(
+    scope,
+    "const threadId = threadRef?.threadId ?? null;",
+    "the scope loses its thread",
+  );
+  assert.match(
+    scope,
+    /useEffect\(\(\) => \{\s*if \(environmentId === null \|\| threadId === null\) return;\s*return retainBackgroundScope\(environmentId, \{ type: "thread", threadId \}\);\s*\}, \[environmentId, threadId\]\);/,
+    "the scope must retain the selected thread, release it on departure, and update when either scoped id changes",
   );
 });
 
@@ -58,18 +86,5 @@ it("keeps the thread scope off the routes that show no thread", () => {
     pullRequests,
     "useThreadBackgroundScope",
     "the pull-requests route retains a thread scope, which would report a thread nobody is reading",
-  );
-});
-
-it("routes the mobile subscription observer through the shared retain", () => {
-  const scopes = read("apps/mobile/src/connection/background-activity-scopes.ts");
-  const observer = scopes.slice(
-    scopes.indexOf("export function observeMobileBackgroundActivitySubscription"),
-  );
-
-  assert.include(
-    observer,
-    "retainMobileBackgroundScope(",
-    "the mobile subscription observer inlines its own ref-counting again, so subscription scopes and thread scopes no longer share one map",
   );
 });

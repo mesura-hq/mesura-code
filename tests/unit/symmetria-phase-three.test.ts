@@ -266,6 +266,7 @@ describe("Symmetria broker contract phase-three acceptance guards", () => {
     expectSuccessfulCommand(runContractScript(script));
   });
 
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("keeps the phase-three package tests collected and passing", () => {
     const result = run(vitePlusPath, ["test", "run", "--reporter=verbose"], contractPackageRoot);
     expectSuccessfulCommand(result);

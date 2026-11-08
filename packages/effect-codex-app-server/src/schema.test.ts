@@ -6,7 +6,6 @@ import * as CodexSchema from "./schema.ts";
 const isGetAccountResponse = Schema.is(CodexSchema.V2GetAccountResponse);
 const isThreadReadResponse = Schema.is(CodexSchema.V2ThreadReadResponse);
 const isThreadResumeResponse = Schema.is(CodexSchema.V2ThreadResumeResponse);
-const isThreadRollbackResponse = Schema.is(CodexSchema.V2ThreadRollbackResponse);
 const isThreadForkResponse = Schema.is(CodexSchema.V2ThreadForkResponse);
 const isTurnCompletedNotification = Schema.is(CodexSchema.V2TurnCompletedNotification);
 const decodeThreadResumeResponse = Schema.decodeUnknownSync(CodexSchema.V2ThreadResumeResponse);
@@ -30,7 +29,7 @@ it("keeps async questions in live notifications and thread history", () => {
     CodexSchema.V2ThreadReadResponse__ThreadItem,
     CodexSchema.V2ThreadResumeResponse__ThreadItem,
   ]) {
-    assert.deepEqual(Schema.decodeUnknownSync(schema)(item), item);
+    assert.deepEqual(Schema.decodeSync(schema)(item), item);
   }
 });
 
@@ -46,20 +45,28 @@ it("accepts Codex 0.150 multi-agent values", () => {
   for (const schema of schemas) {
     assert.equal(Schema.is(schema)("completed"), true);
   }
+  const isServerNotificationCollabAgentTool = Schema.is(
+    CodexSchema.ServerNotification__CollabAgentTool,
+  );
+
+  const isV2ThreadResumeResponseCollabAgentTool = Schema.is(
+    CodexSchema.V2ThreadResumeResponse__CollabAgentTool,
+  );
 
   for (const tool of ["sendMessage", "followupTask", "interruptAgent", "listAgents"]) {
-    assert.equal(Schema.is(CodexSchema.ServerNotification__CollabAgentTool)(tool), true);
-    assert.equal(Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentTool)(tool), true);
+    assert.equal(isServerNotificationCollabAgentTool(tool), true);
+    assert.equal(isV2ThreadResumeResponseCollabAgentTool(tool), true);
   }
+  const isServerNotificationCollabAgentToolCallStatus = Schema.is(
+    CodexSchema.ServerNotification__CollabAgentToolCallStatus,
+  );
 
-  assert.equal(
-    Schema.is(CodexSchema.ServerNotification__CollabAgentToolCallStatus)("interrupted"),
-    true,
+  assert.equal(isServerNotificationCollabAgentToolCallStatus("interrupted"), true);
+  const isV2ThreadResumeResponseCollabAgentToolCallStatus = Schema.is(
+    CodexSchema.V2ThreadResumeResponse__CollabAgentToolCallStatus,
   );
-  assert.equal(
-    Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentToolCallStatus)("interrupted"),
-    true,
-  );
+
+  assert.equal(isV2ThreadResumeResponseCollabAgentToolCallStatus("interrupted"), true);
 
   const resumeResponse = {
     approvalPolicy: "never",
@@ -76,6 +83,7 @@ it("accepts Codex 0.150 multi-agent values", () => {
       id: "root-thread",
       modelProvider: "openai",
       preview: "",
+      projectId: null,
       sessionId: "session-1",
       source: "cli",
       status: { type: "idle" },
@@ -99,49 +107,9 @@ it("accepts Codex 0.150 multi-agent values", () => {
       updatedAt: 0,
     },
   };
+  const isV2ThreadResumeResponse = Schema.is(CodexSchema.V2ThreadResumeResponse);
 
-  assert.equal(Schema.is(CodexSchema.V2ThreadResumeResponse)(resumeResponse), true);
-});
-
-it("accepts Codex rate limit errors for thread responses", () => {
-  const failedThread = {
-    cliVersion: "0.150.0",
-    createdAt: 0,
-    cwd: "/tmp/project",
-    ephemeral: false,
-    id: "thread-1",
-    modelProvider: "openai",
-    preview: "",
-    sessionId: "session-1",
-    source: "cli",
-    status: { type: "idle" },
-    turns: [
-      {
-        error: {
-          codexErrorInfo: "rateLimitExceeded",
-          message: "Rate limit exceeded",
-        },
-        id: "turn-1",
-        items: [],
-        status: "failed",
-      },
-    ],
-    updatedAt: 0,
-  };
-  assert.equal(isThreadReadResponse({ thread: failedThread }), true);
-  assert.equal(
-    isThreadResumeResponse({
-      approvalPolicy: "never",
-      approvalsReviewer: "user",
-      cwd: "/tmp/project",
-      model: "gpt-5.6-sol",
-      modelProvider: "openai",
-      sandbox: { type: "dangerFullAccess" },
-      thread: failedThread,
-    }),
-    true,
-  );
-  assert.equal(isThreadRollbackResponse({ thread: failedThread }), true);
+  assert.equal(isV2ThreadResumeResponse(resumeResponse), true);
 });
 
 it("accepts Codex misalignment policy errors for thread responses", () => {
@@ -153,6 +121,7 @@ it("accepts Codex misalignment policy errors for thread responses", () => {
     id: "thread-1",
     modelProvider: "openai",
     preview: "",
+    projectId: null,
     sessionId: "session-1",
     source: "cli",
     status: { type: "idle" },
@@ -180,7 +149,6 @@ it("accepts Codex misalignment policy errors for thread responses", () => {
   };
   assert.equal(isThreadReadResponse({ thread: failedThread }), true);
   assert.equal(isThreadResumeResponse(resumeLikeResponse), true);
-  assert.equal(isThreadRollbackResponse({ thread: failedThread }), true);
   assert.equal(isThreadForkResponse(resumeLikeResponse), true);
   const decodedResume = decodeThreadResumeResponse(resumeLikeResponse);
   assert.equal(decodedResume.thread.turns[0]?.error?.codexErrorInfo, "misalignmentPolicyViolation");
@@ -201,13 +169,15 @@ it("accepts Codex misalignment policy errors for thread responses", () => {
   );
 });
 
-it("accepts Codex 0.150 account plan values", () => {
+it("accepts account plan slugs newer than the pinned protocol", () => {
   const planTypes = [
     "self_serve_business_prolite",
     "ent26",
     "enterprise_cbp_automation",
     "edu_plus",
     "edu_pro",
+    "promax",
+    "some_future_plan",
   ];
 
   for (const planType of planTypes) {

@@ -1,35 +1,11 @@
 /**
- * The narrow read projection of one agent thread.
- *
- * `OrchestrationThread` (`packages/contracts/src/orchestration.ts:373`) is the
- * fork's own read model and is shaped for the fork's own screens: it embeds the
- * message transcript, the activity feed whose `payload` is `Schema.Unknown`,
- * the proposed plans and the checkpoints. None of that may cross to a shell, so
- * this module is an **allowlist** — every field it keeps is named here, and
- * everything else falls away because it was never named. Effect drops a key
- * this struct does not name, at every depth, in both directions: a payload
- * carrying one decodes without it, and encoding never puts one back.
- *
- * That dropping is not a substitute for the mapping. An upstream thread does
- * not decode as a summary unchanged — `OrchestrationThread` names its identity
- * `id` where this struct names it `threadId`, and carries no `tokenUsage` at
- * all, because token cost is `ThreadTokenUsageSnapshot`
- * (`providerRuntime.ts:309`) and reaches a producer separately. A producer
- * builds the summary field by field and relies on the dropping only as the
- * guard that catches what it did not mean to include.
- *
- * A thread is addressed by `threadId` and `projectId` and by nothing else. The
- * process id and the terminal pane slot that Symmetria Shell reads today are
- * exactly what this projection exists to replace: a slot number is reused, and
- * a reused address delivers a dictation to the wrong thread.
- *
- * Timestamps are `IsoDateTime` (`baseSchemas.ts:21`), which is a plain string
- * in this codebase, so a payload stays plain JSON in both directions.
+ * An **allowlist** projection of `OrchestrationThread`: Effect drops every unnamed key, at every
+ * depth, in both directions. A producer still maps field by field; the dropping only catches
+ * what it did not mean to include. A thread is addressed by `threadId` and `projectId` only:
+ * a reused process id or pane slot would deliver a dictation to the wrong thread.
  */
 import {
   IsoDateTime,
-  OrchestrationLatestTurn,
-  OrchestrationSessionStatus,
   ProjectId,
   ThreadId,
   ThreadTokenUsageSnapshot,
@@ -40,33 +16,48 @@ import * as Schema from "effect/Schema";
 import { NonEmptyText } from "./primitives.ts";
 
 /**
+ * Mesura: frozen copies of `OrchestrationSessionStatus` and `OrchestrationLatestTurn`, which
+ * upstream's orchestrator v2 deleted. The protocol owns them so the wire format and the
+ * published JSON Schema stay unchanged; a producer maps v2 thread state onto them.
+ */
+export const SymmetriaSessionStatus = Schema.Literals([
+  "idle",
+  "starting",
+  "running",
+  "ready",
+  "interrupted",
+  "stopped",
+  "error",
+]);
+export type SymmetriaSessionStatus = typeof SymmetriaSessionStatus.Type;
+
+export const SymmetriaLatestTurnState = Schema.Literals([
+  "running",
+  "interrupted",
+  "completed",
+  "error",
+]);
+export type SymmetriaLatestTurnState = typeof SymmetriaLatestTurnState.Type;
+
+/**
  * What the thread's provider session is doing, without saying anything about
  * the provider itself. `OrchestrationSession` (`orchestration.ts:299`) also
  * carries `providerName`, `providerInstanceId` and `lastError`; a shell needs
  * none of them to render a row, and `lastError` is free-form provider text.
  */
 export const SymmetriaThreadLiveness = Schema.Struct({
-  status: OrchestrationSessionStatus,
+  status: SymmetriaSessionStatus,
   activeTurnId: Schema.NullOr(TurnId),
 });
 export type SymmetriaThreadLiveness = typeof SymmetriaThreadLiveness.Type;
 
 /**
- * The latest turn, minus two of the upstream fields. `sourceProposedPlan` is a
- * handle on transcript-shaped content, and a shell that lists threads never
- * follows it. `assistantMessageId` is a handle on one message of the
- * transcript, so publishing it would hand a shell an address inside exactly the
- * content this projection keeps out.
- *
- * `state` composes the upstream literal through `OrchestrationLatestTurn.fields`
- * rather than restating it. Upstream exports the struct value but keeps the
- * state literal module-private (`orchestration.ts:351`), and reaching it through
- * the struct's fields needs no copy and therefore no lock: there is only one
- * vocabulary, so nothing can drift out of step with it.
+ * Omits `sourceProposedPlan` and `assistantMessageId`: both are handles into the transcript,
+ * which this projection keeps out.
  */
 export const SymmetriaThreadLatestTurn = Schema.Struct({
   turnId: TurnId,
-  state: OrchestrationLatestTurn.fields.state,
+  state: SymmetriaLatestTurnState,
   requestedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
@@ -74,47 +65,20 @@ export const SymmetriaThreadLatestTurn = Schema.Struct({
 export type SymmetriaThreadLatestTurn = typeof SymmetriaThreadLatestTurn.Type;
 
 /**
- * One thread, as a surface outside this fork sees it.
- *
- * Every field this struct declares itself is required on the wire. Upstream
- * marks several of them `Schema.optional` so payloads from older servers still
- * decode; the Symmetria contract is new, has no older producer to stay
- * compatible with, and a consumer reading `snoozedUntil` should not have to
- * tell "absent" from "null". A producer that projects an upstream thread
- * supplies `null` for an absent upstream value.
- *
- * `tokenUsage` is the one exception, and it is deliberate. It composes
- * `ThreadTokenUsageSnapshot` whole rather than restating its sixteen fields, so
- * it keeps upstream's own convention: `usedTokens` is required and every other
- * field is an optional key that is absent rather than null when the provider
- * did not report it. A consumer therefore reads absence inside `tokenUsage` and
- * null everywhere else, and phase six emits both conventions into the JSON
- * Schema. Restating the snapshot to make it uniform would put a second copy of
- * a sixteen-field vocabulary in this repository, which is the drift the whole
- * package is built to avoid.
+ * Every field declared here is required; a producer supplies `null` for an absent upstream value.
+ * Exception: `tokenUsage` composes `ThreadTokenUsageSnapshot` whole, so its optional keys are
+ * absent rather than null. A new optional snapshot field needs a `schema/` regeneration, not a
+ * contract version bump.
  */
 export const SymmetriaThreadSummary = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
-  // `title`, `branch` and `worktreePath` are declared on the Symmetria-owned
-  // `NonEmptyText` rather than on upstream's `TrimmedNonEmptyString`, which is
-  // the one place this projection deliberately does NOT borrow. Upstream's
-  // check sits after a transformation, so Effect drops it on emission and the
-  // artifact promised a consumer that `""` was a valid title while the decoder
-  // refused it. Issue #2, and the reason the borrow-rather-than-restate rule
-  // has an exception here: a rule that produces a document which lies to the
-  // only consumer that reads documents is not worth keeping intact.
-  //
-  // The cost is real and accepted: these fields lose their TypeScript brand,
-  // so a producer may now pass an untrimmed string. `NonEmptyText` does not
-  // trim, on purpose — see its docstring; what crosses the wire is what the
-  // producer wrote.
+  // `NonEmptyText`, not upstream's `TrimmedNonEmptyString`: Effect drops upstream's check on
+  // emission, so the artifact would call `""` a valid title while the decoder refuses it.
+  // Accepted cost: these fields lose their brand and are not trimmed.
   title: NonEmptyText,
   branch: Schema.NullOr(NonEmptyText),
-  // `worktreePath` is the name the tree already uses — `OrchestrationThread`
-  // (orchestration.ts:388), `TerminalSessionSnapshot` (terminal.ts:100) and
-  // `git.ts:82` all agree on it. Nullable because a thread need not run in a
-  // worktree.
+  // Nullable because a thread need not run in a worktree.
   worktreePath: Schema.NullOr(NonEmptyText),
   latestTurn: Schema.NullOr(SymmetriaThreadLatestTurn),
   session: Schema.NullOr(SymmetriaThreadLiveness),
@@ -126,27 +90,15 @@ export const SymmetriaThreadSummary = Schema.Struct({
   snoozedUntil: Schema.NullOr(IsoDateTime),
   pinnedAt: Schema.NullOr(IsoDateTime),
   deletedAt: Schema.NullOr(IsoDateTime),
-  // The identifier is what a shared struct is called in the emitted JSON
-  // Schema. Without it Effect names a reused definition `Objects_`, `Objects_1`
-  // and so on, numbered by the order it met them, so inserting one struct
-  // renumbers the rest and `#/$defs/Objects_1` silently comes to mean a
-  // different shape in the next release. A consumer that pins a pointer into
-  // `$defs` needs the name to be the schema's, not its position.
+  // Without the identifier Effect names a reused `$defs` entry by position (`Objects_1`), so
+  // inserting a struct silently repoints a consumer's pinned pointer at a different shape.
 }).annotate({ identifier: "SymmetriaThreadSummary" });
 export type SymmetriaThreadSummary = typeof SymmetriaThreadSummary.Type;
 
 /**
- * The upstream fields this projection deliberately refuses, kept as a value so
- * the privacy test asserts against a list rather than against three examples a
- * reader picked.
- *
- * Two kinds of name belong here. Most are a key of `OrchestrationThread` or of
- * a struct it embeds. The last two are not: `workspaceRoot` and `scripts` are
- * keys of `OrchestrationProject` and `OrchestrationProjectShell`
- * (`orchestration.ts:245` and `:442`), which a thread does not embed at all.
- * They are listed because a producer joining a thread to its project is exactly
- * where project configuration gets folded into a thread row by accident, and
- * the intent forbids project configuration on this wire.
+ * The upstream fields this projection refuses; the privacy test asserts this list.
+ * `workspaceRoot` and `scripts` are project keys, listed because a producer that joins a thread
+ * to its project can fold project configuration into a thread row by accident.
  */
 export const SYMMETRIA_THREAD_SUMMARY_EXCLUDED_UPSTREAM_FIELDS = [
   // Transcript.

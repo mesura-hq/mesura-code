@@ -2,159 +2,102 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  ConfiguredLocalServerUrls,
-  CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
-  DiscoveredLocalServer,
-  PREVIEW_URL_MAX_LENGTH,
   PreviewEvent,
-  PreviewNavStatus,
   PreviewSessionSnapshot,
-  PreviewViewportSetting,
+  PreviewOpenInput,
+  PreviewOpenLinkTargetInput,
+  PreviewOpenLinkTargetResult,
+  PreviewImportCookiesError,
+  PreviewImportCookiesInput,
+  PreviewImportCookiesResult,
 } from "./preview.ts";
-import {
-  PreviewAutomationHost,
-  PreviewAutomationError,
-  PreviewAutomationOpenInput,
-  PreviewAutomationResizeInput,
-  PreviewAutomationResizeResult,
-  PreviewAutomationStatus,
-} from "./previewAutomation.ts";
+import { WS_METHODS } from "./rpc.ts";
+import { PreviewAutomationHost, PreviewAutomationStatus } from "./previewAutomation.ts";
 
 const decodePreviewEvent = Schema.decodeUnknownSync(PreviewEvent);
+const decodeLinkTargetInput = Schema.decodeUnknownSync(PreviewOpenLinkTargetInput);
+const encodeLinkTargetInput = Schema.encodeUnknownSync(PreviewOpenLinkTargetInput);
+const decodeLinkTargetResult = Schema.decodeUnknownSync(PreviewOpenLinkTargetResult);
+const decodeManualOpenInput = Schema.decodeUnknownSync(PreviewOpenInput);
 const decodeSnapshot = Schema.decodeUnknownSync(PreviewSessionSnapshot);
-const decodeNavStatus = Schema.decodeUnknownSync(PreviewNavStatus);
-const decodeServer = Schema.decodeUnknownSync(DiscoveredLocalServer);
-const decodeConfiguredLocalServerUrls = Schema.decodeUnknownSync(ConfiguredLocalServerUrls);
-const decodeViewport = Schema.decodeUnknownSync(PreviewViewportSetting);
-const decodeResizeInput = Schema.decodeUnknownSync(PreviewAutomationResizeInput);
-const decodeOpenInput = Schema.decodeUnknownSync(PreviewAutomationOpenInput);
-const decodeResizeResult = Schema.decodeUnknownSync(PreviewAutomationResizeResult);
 const decodeAutomationHost = Schema.decodeUnknownSync(PreviewAutomationHost);
-const decodeAutomationError = Schema.decodeUnknownSync(PreviewAutomationError);
 const decodeAutomationStatus = Schema.decodeUnknownSync(PreviewAutomationStatus);
+const decodeImportInput = Schema.decodeUnknownSync(PreviewImportCookiesInput);
+const decodeImportResult = Schema.decodeUnknownSync(PreviewImportCookiesResult);
 
-describe("PreviewAutomationOpenInput", () => {
-  it("accepts the inline preview visibility flag", () => {
-    expect(decodeOpenInput({ open: false })).toEqual({ open: false });
-  });
+describe("thread-link allocation contracts", () => {
+  const legacy = {
+    threadId: "thread-link-contract",
+    tabId: "tab-link-contract",
+    navStatus: { _tag: "Idle" },
+    canGoBack: false,
+    canGoForward: false,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  } as const;
 
-  it("retains the legacy show visibility alias", () => {
-    expect(decodeOpenInput({ show: false })).toEqual({ show: false });
-  });
-});
-
-describe("PreviewNavStatus", () => {
-  it("decodes Idle", () => {
-    expect(decodeNavStatus({ _tag: "Idle" })).toEqual({ _tag: "Idle" });
-  });
-
-  it("decodes Loading with title", () => {
-    expect(decodeNavStatus({ _tag: "Loading", url: "http://localhost:5173/", title: "" })).toEqual({
-      _tag: "Loading",
-      url: "http://localhost:5173/",
-      title: "",
-    });
-  });
-
-  it("decodes LoadFailed with code/description", () => {
+  it("thread-link contracts decode legacy snapshots and retain the typed designation in events and lists", () => {
+    expect(decodeSnapshot(legacy)).toEqual(legacy);
+    const snapshot = { ...legacy, purpose: "thread-link", runtime: "server" } as const;
+    expect(decodeSnapshot(snapshot)).toEqual(snapshot);
+    const result = {
+      selectedTabId: legacy.tabId,
+      sessions: [snapshot, { ...legacy, tabId: "manual" }],
+      serverEpoch: "epoch",
+      revision: 1,
+    };
+    expect(decodeLinkTargetResult(result)).toEqual(result);
     expect(
-      decodeNavStatus({
-        _tag: "LoadFailed",
-        url: "https://example.com/",
-        title: "Example",
-        code: -105,
-        description: "ERR_NAME_NOT_RESOLVED",
+      decodePreviewEvent({
+        type: "opened",
+        threadId: legacy.threadId,
+        tabId: legacy.tabId,
+        createdAt: legacy.updatedAt,
+        serverEpoch: "epoch",
+        revision: 1,
+        snapshot,
       }),
-    ).toEqual({
-      _tag: "LoadFailed",
-      url: "https://example.com/",
-      title: "Example",
-      code: -105,
-      description: "ERR_NAME_NOT_RESOLVED",
-    });
+    ).toMatchObject({ snapshot });
+    expect(() => decodeSnapshot({ ...legacy, purpose: "manual" })).toThrow();
   });
 
-  it("rejects empty url", () => {
-    expect(() => decodeNavStatus({ _tag: "Loading", url: "", title: "" })).toThrow();
-  });
-});
-
-describe("PreviewSessionSnapshot", () => {
-  it("round-trips a Success snapshot", () => {
-    const snapshot = decodeSnapshot({
-      threadId: "thread-1",
-      tabId: "preview-thread-1",
-      navStatus: {
-        _tag: "Success",
-        url: "http://localhost:5173/",
-        title: "Vite App",
-      },
-      canGoBack: false,
-      canGoForward: false,
-      updatedAt: "2026-01-01T00:00:00.000Z",
+  it("thread-link contracts accept only allocation settings and leave ordinary open untagged", () => {
+    const input = { threadId: legacy.threadId, profileId: "work", viewport: { _tag: "fill" } };
+    expect(decodeLinkTargetInput(input)).toEqual(input);
+    expect(encodeLinkTargetInput(decodeLinkTargetInput(input))).toEqual(input);
+    expect(decodeLinkTargetInput({ threadId: legacy.threadId })).toEqual({
+      threadId: legacy.threadId,
     });
-    expect(snapshot.tabId).toBe("preview-thread-1");
-    expect(snapshot.navStatus._tag).toBe("Success");
-  });
-});
-
-describe("PreviewViewportSetting", () => {
-  it("decodes fill, freeform, and preset modes", () => {
-    expect(decodeViewport({ _tag: "fill" })).toEqual({ _tag: "fill" });
-    expect(decodeViewport({ _tag: "freeform", width: 1024, height: 768 })).toEqual({
-      _tag: "freeform",
-      width: 1024,
-      height: 768,
-    });
+    expect(() => decodeLinkTargetInput({ threadId: "" })).toThrow();
+    expect(() =>
+      decodeLinkTargetInput({ ...input, viewport: { _tag: "freeform", width: 1, height: 1 } }),
+    ).toThrow();
+    for (const field of [
+      { url: "https://example.com/" },
+      { runtime: "desktop" },
+      { purpose: "thread-link" },
+      { automationOwner: "provider-session" },
+    ]) {
+      expect(() => decodeLinkTargetInput({ ...input, ...field })).toThrow();
+    }
     expect(
-      decodeViewport({
-        _tag: "preset",
-        presetId: "iphone-15-pro",
-        width: 393,
-        height: 852,
-      }),
-    ).toMatchObject({ _tag: "preset", presetId: "iphone-15-pro" });
+      decodeManualOpenInput({ threadId: legacy.threadId, purpose: "thread-link" }),
+    ).not.toHaveProperty("purpose");
   });
 
-  it("rejects unsafe dimensions and oversized render areas", () => {
-    expect(() => decodeViewport({ _tag: "freeform", width: 100, height: 800 })).toThrow();
-    expect(() => decodeViewport({ _tag: "freeform", width: 3840, height: 3840 })).toThrow();
-  });
-});
-
-describe("PreviewAutomationResizeInput", () => {
-  it("requires fields that match the selected mode", () => {
-    expect(decodeResizeInput({ mode: "fill" })).toEqual({ mode: "fill" });
-    expect(
-      decodeResizeInput({ mode: "preset", preset: "pixel-7", orientation: "landscape" }),
-    ).toMatchObject({ mode: "preset", preset: "pixel-7" });
-    expect(() => decodeResizeInput({ mode: "preset", preset: "pixel-8" })).toThrow();
-    expect(() => decodeResizeInput({ mode: "freeform", width: 1024 })).toThrow();
-    expect(() => decodeResizeInput({ mode: "fill", width: 1024, height: 768 })).toThrow();
-  });
-
-  it("allows fill-mode measurements below the minimum selectable fixed size", () => {
-    expect(
-      decodeResizeResult({
-        tabId: "preview-t",
-        setting: { _tag: "fill" },
-        viewport: { width: 180, height: 120 },
-      }).viewport,
-    ).toEqual({ width: 180, height: 120 });
-  });
-});
-
-describe("preview automation tab targeting", () => {
-  it("accepts an explicit tab and rejects contradictory open behavior", () => {
-    expect(decodeResizeInput({ tabId: "tab-app", mode: "fill" })).toMatchObject({
-      tabId: "tab-app",
-      mode: "fill",
-    });
-    expect(decodeOpenInput({ tabId: "tab-app", reuseExistingTab: true })).toMatchObject({
-      tabId: "tab-app",
-      reuseExistingTab: true,
-    });
-    expect(() => decodeOpenInput({ tabId: "tab-app", reuseExistingTab: false })).toThrow();
+  it("thread-link contracts require the complete authoritative allocation envelope", () => {
+    const result = {
+      selectedTabId: legacy.tabId,
+      sessions: [legacy],
+      serverEpoch: "epoch",
+      revision: 1,
+    };
+    for (const field of ["selectedTabId", "sessions", "serverEpoch", "revision"] as const) {
+      const incomplete = Object.fromEntries(
+        Object.entries(result).filter(([key]) => key !== field),
+      );
+      expect(() => decodeLinkTargetResult(incomplete)).toThrow();
+    }
+    expect(() => decodeLinkTargetResult({ ...result, revision: -1 })).toThrow();
   });
 });
 
@@ -171,34 +114,6 @@ describe("PreviewAutomationHost", () => {
         supportedOperations: ["status", "resize"],
       }).supportedOperations,
     ).toEqual(["status", "resize"]);
-  });
-});
-
-describe("PreviewAutomationError", () => {
-  it("preserves a typed non-editable target failure", () => {
-    const error = decodeAutomationError({
-      _tag: "PreviewAutomationTargetNotEditableError",
-      operation: "type",
-      environmentId: "environment-1",
-      threadId: "thread-1",
-      providerSessionId: "provider-session-1",
-      providerInstanceId: "codex",
-      clientId: "client-1",
-      connectionId: "connection-1",
-      requestId: "request-1",
-      tabId: "tab-1",
-      timeoutMs: 1_000,
-      remoteTag: "PreviewAutomationTargetNotEditableError",
-      remoteMessageLength: 12,
-      cause: {},
-      selectorKind: "focused-element",
-    });
-
-    expect(error._tag).toBe("PreviewAutomationTargetNotEditableError");
-    if (error._tag === "PreviewAutomationTargetNotEditableError") {
-      expect(error.selectorKind).toBe("focused-element");
-      expect(error.message).toBe("Preview automation type requires an editable focused element.");
-    }
   });
 });
 
@@ -223,142 +138,54 @@ describe("PreviewAutomationStatus", () => {
   });
 });
 
-describe("PreviewEvent", () => {
-  it("decodes opened", () => {
-    const event = decodePreviewEvent({
-      type: "opened",
-      threadId: "t",
-      tabId: "preview-t",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      serverEpoch: "server-a",
-      revision: 1,
-      snapshot: {
-        threadId: "t",
-        tabId: "preview-t",
-        navStatus: { _tag: "Idle" },
-        canGoBack: false,
-        canGoForward: false,
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-    });
-    expect(event.type).toBe("opened");
+describe("previewImportCookies contracts", () => {
+  const cookie = {
+    url: "https://example.test/",
+    name: "session",
+    value: "abc",
+    domain: ".example.test",
+    path: "/",
+    secure: true,
+    httpOnly: true,
+    expirationDate: 1_800_000_000,
+    sameSite: "lax",
+  } as const;
+
+  it("previewImportCookies is a preview RPC that takes a profile id and its cookies", () => {
+    expect(WS_METHODS.previewImportCookies).toBe("preview.importCookies");
+    const input = { profileId: "profile-work", cookies: [cookie] };
+    expect(decodeImportInput(input)).toEqual(input);
   });
 
-  it("decodes failed with code/description", () => {
-    const event = decodePreviewEvent({
-      type: "failed",
-      threadId: "t",
-      tabId: "preview-t",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      serverEpoch: "server-a",
-      revision: 1,
-      url: "https://example.com/",
-      title: "",
-      code: -105,
-      description: "ERR_NAME_NOT_RESOLVED",
-    });
-    expect(event.type).toBe("failed");
-    if (event.type === "failed") {
-      expect(event.code).toBe(-105);
+  it("previewImportCookies input refuses more than 5000 cookies and an unknown SameSite", () => {
+    expect(
+      decodeImportInput({
+        profileId: "profile-work",
+        cookies: Array.from({ length: 5000 }, () => cookie),
+      }).cookies,
+    ).toHaveLength(5000);
+    expect(() =>
+      decodeImportInput({
+        profileId: "profile-work",
+        cookies: Array.from({ length: 5001 }, () => cookie),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeImportInput({ profileId: "profile-work", cookies: [{ ...cookie, sameSite: "none" }] }),
+    ).toThrow();
+  });
+
+  it("previewImportCookies result reports imported, skipped and skippedDomains", () => {
+    const result = { imported: 2, skipped: 1, skippedDomains: ["www.paypal.com"] };
+    expect(decodeImportResult(result)).toEqual(result);
+    expect(() => decodeImportResult({ imported: 2, skipped: 1 })).toThrow();
+  });
+
+  it("previewImportCookies refusals are typed by reason", () => {
+    for (const reason of ["incognitoProfile", "unknownProfile"] as const) {
+      const error = new PreviewImportCookiesError({ profileId: "incognito", reason });
+      expect(error._tag).toBe("PreviewImportCookiesError");
+      expect(error.reason).toBe(reason);
     }
-  });
-
-  it("decodes resized with tab viewport state", () => {
-    const event = decodePreviewEvent({
-      type: "resized",
-      threadId: "t",
-      tabId: "preview-t",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      serverEpoch: "server-a",
-      revision: 1,
-      snapshot: {
-        threadId: "t",
-        tabId: "preview-t",
-        navStatus: { _tag: "Idle" },
-        canGoBack: false,
-        canGoForward: false,
-        viewport: { _tag: "freeform", width: 1024, height: 768 },
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-    });
-    expect(event.type).toBe("resized");
-  });
-
-  it("decodes closed without snapshot", () => {
-    const event = decodePreviewEvent({
-      type: "closed",
-      threadId: "t",
-      tabId: "preview-t",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      serverEpoch: "server-a",
-      revision: 1,
-    });
-    expect(event.type).toBe("closed");
-  });
-});
-
-describe("DiscoveredLocalServer", () => {
-  it("decodes a server with process metadata", () => {
-    const server = decodeServer({
-      host: "localhost",
-      port: 5173,
-      url: "http://localhost:5173",
-      processName: "node",
-      pid: 12345,
-      terminal: null,
-    });
-    expect(server.port).toBe(5173);
-    expect(server.processName).toBe("node");
-  });
-
-  it("decodes a server without process metadata", () => {
-    const server = decodeServer({
-      host: "localhost",
-      port: 3000,
-      url: "http://localhost:3000",
-      processName: null,
-      pid: null,
-      terminal: null,
-    });
-    expect(server.processName).toBeNull();
-  });
-
-  it("rejects invalid ports", () => {
-    expect(() =>
-      decodeServer({
-        host: "localhost",
-        port: 0,
-        url: "http://localhost:0",
-        processName: null,
-        pid: null,
-        terminal: null,
-      }),
-    ).toThrow();
-    expect(() =>
-      decodeServer({
-        host: "localhost",
-        port: 70000,
-        url: "http://localhost:70000",
-        processName: null,
-        pid: null,
-        terminal: null,
-      }),
-    ).toThrow();
-  });
-});
-
-describe("ConfiguredLocalServerUrls", () => {
-  it("bounds the number and length of probe candidates", () => {
-    expect(() =>
-      decodeConfiguredLocalServerUrls(
-        Array.from(
-          { length: CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS + 1 },
-          (_, index) => `http://localhost:${3_000 + index}`,
-        ),
-      ),
-    ).toThrow();
-    expect(() =>
-      decodeConfiguredLocalServerUrls([`http://localhost/${"a".repeat(PREVIEW_URL_MAX_LENGTH)}`]),
-    ).toThrow();
   });
 });

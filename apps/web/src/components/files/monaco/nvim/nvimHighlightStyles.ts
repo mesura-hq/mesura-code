@@ -1,17 +1,9 @@
 import type { EditorHighlightDefinition } from "@t3tools/contracts";
 
 /**
- * Neovim's highlight attributes, as CSS.
- *
- * The colours are the developer's own colourscheme. They are read from
- * `hl_attr_define` rather than mapped from a group name, because the drawing
- * refers to an id and nothing else: flash's labels, the search highlight, a
- * plugin's own groups and the colourscheme's all arrive the same way, and a
- * host that recognised only the names it had heard of would draw the rest in
- * the wrong colours or not at all.
- *
- * Scoped by a per-editor prefix class, because two file panels on two threads
- * are two Neovims, and id 7 means something different in each.
+ * Neovim's highlight attributes as CSS. Read from `hl_attr_define` by id, not mapped from group
+ * names, because the drawing refers to an id only and every plugin's groups arrive the same way.
+ * Scoped by a per-editor prefix class: two Neovims give id 7 two meanings.
  */
 
 /** The class a cell carries so a rule can find it. */
@@ -57,11 +49,8 @@ export function highlightRule(
   const selector = `.monaco-editor .${highlightClassName(id)}`;
   const rule = `.${prefix} ${selector} { ${declarations.join("; ")} }`;
   if (background !== undefined) return rule;
-  // While flash waits for a label, every highlight without a background fades:
-  // its backdrop, which covers the text it is not pointing at, and on purpose
-  // anything else drawn that way, such as a diagnostic's virtual text. Its
-  // matches and labels have a background and stay at full strength, so the key
-  // to press is the thing that stands out.
+  // While flash waits for a label, every highlight without a background fades (its backdrop, and on
+  // purpose anything else drawn that way). Matches and labels have a background and stay full.
   return `${rule}\n.${prefix}.${NVIM_JUMPING_CLASS} ${selector} { opacity: ${JUMPING_BACKDROP_OPACITY} }`;
 }
 

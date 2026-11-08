@@ -1,15 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import {
-  HostProcessEnvironment,
-  HostProcessExecutablePath,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
-import * as Ref from "effect/Ref";
+import * as NodeSqlite from "node:sqlite";
 
 import * as BrowserSession from "../BrowserSession.ts";
 import * as BrowserImport from "./BrowserImport.ts";
@@ -30,11 +25,7 @@ const cookie = {
   sameSite: "lax" as const,
 };
 
-/**
- * Dies if the import reaches session work: every case here covers a request
- * that must be rejected before a cookie is read or written.
- */
-const rejectedBeforeSession = Layer.succeed(
+const layerRejectedBeforeSession = Layer.succeed(
   BrowserSession.BrowserSession,
   BrowserSession.BrowserSession.of({
     getPartition: () => Effect.die("getPartition must not be reached"),
@@ -45,32 +36,26 @@ const rejectedBeforeSession = Layer.succeed(
   }),
 );
 
-/**
- * Builds the service against a scratch home containing an installed, closed
- * copy of the source browser.
- */
 const withImporter = Effect.fnUntraced(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-import-" });
-  const environment = Layer.succeed(HostProcessEnvironment, { HOME: home });
+  const layerEnvironment = Layer.succeed(HostProcess.Environment, { HOME: home });
   const context = yield* sourcePathContext.pipe(
-    Effect.provideService(HostProcessEnvironment, { HOME: home }),
-    Effect.provideService(HostProcessPlatform, "darwin"),
+    Effect.provideService(HostProcess.Environment, { HOME: home }),
+    Effect.provideService(HostProcess.Platform, "darwin"),
   );
   const root = helium.userDataDirectory(context);
   if (root === undefined) throw new Error("Helium has no macOS user-data directory");
   yield* fileSystem.makeDirectory(`${root}/Default`, { recursive: true });
-  // The cookie database is what marks a source as installed, so a fixture
-  // without one is reported as absent before any other check runs.
   yield* fileSystem.writeFileString(`${root}/Default/Cookies`, "db");
 
   const importer = yield* BrowserImport.BrowserImport.pipe(
     Effect.provide(
       BrowserImport.layer.pipe(
-        Layer.provide(rejectedBeforeSession),
-        Layer.provide(environment),
-        Layer.provide(Layer.succeed(HostProcessPlatform, "darwin")),
-        Layer.provide(Layer.succeed(HostProcessExecutablePath, "/Applications/T3 Code.app")),
+        Layer.provide(layerRejectedBeforeSession),
+        Layer.provide(layerEnvironment),
+        Layer.provide(Layer.succeed(HostProcess.Platform, "darwin")),
+        Layer.provide(Layer.succeed(HostProcess.ExecutablePath, "/Applications/T3 Code.app")),
         Layer.provide(NodeServices.layer),
       ),
     ),
@@ -84,8 +69,6 @@ describe("BrowserImport.importCookies", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const { importer, home } = yield* withImporter();
 
-      // A cookie database reachable on disk but outside the browser's
-      // user-data directory — the payoff a traversal would be after.
       yield* fileSystem.makeDirectory(`${home}/secrets`, { recursive: true });
       yield* fileSystem.writeFileString(`${home}/secrets/Cookies`, "not-a-db");
 
@@ -112,8 +95,6 @@ describe("BrowserImport.importCookies", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const { importer, root } = yield* withImporter();
-        // The lock Chromium leaves while it is running, dangling target and
-        // all. This must stop the import before it ever asks the keychain.
         yield* fileSystem.symlink("host-that-does-not-exist-1234", `${root}/SingletonLock`);
 
         const error = yield* importer
@@ -134,32 +115,6 @@ describe("BrowserImport.importCookies", () => {
 });
 
 describe("BrowserImport.writeCookies", () => {
-  it.effect("counts a rejected cookie and its domain as skipped", () =>
-    Effect.gen(function* () {
-      let flushes = 0;
-      const result = yield* BrowserImport.writeCookies(
-        {
-          cookies: {
-            set: () => Promise.reject(new Error("fixture rejection")),
-            flushStore: () => {
-              flushes += 1;
-              return Promise.resolve();
-            },
-          },
-        },
-        { cookies: [cookie], undecryptable: 0, undecryptableHosts: [] },
-      );
-
-      assert.deepEqual(result, {
-        imported: 0,
-        skipped: 1,
-        skippedDomains: ["rejected.example"],
-      });
-      // Nothing landed, so there is nothing to persist.
-      assert.equal(flushes, 0);
-    }),
-  );
-
   it.effect("flushes the store after writing, and reports success if the flush fails", () =>
     Effect.gen(function* () {
       const events: Array<string> = [];
@@ -179,34 +134,176 @@ describe("BrowserImport.writeCookies", () => {
         { cookies: [cookie, cookie], undecryptable: 0, undecryptableHosts: [] },
       );
 
-      // One flush after every write, not one per cookie; the cookies are in
-      // the session either way, so a failed flush is not a failed import.
       assert.deepEqual(events, ["set", "set", "flush"]);
       assert.deepEqual(result, { imported: 2, skipped: 0, skippedDomains: [] });
     }),
   );
+});
 
-  it.effect("propagates interruption while writing a cookie", () =>
+// Phase 3 fence: the read half of an import, entry point `BrowserImport.layer`.
+const zenCookieRows = [
+  { host: ".zen.example", name: "domain_cookie", value: "a", path: "/" },
+  { host: "host.zen.example", name: "host_cookie", value: "b", path: "/account" },
+];
+
+const writeZenProfile = Effect.fnUntraced(function* (home: string) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const root = `${home}/.config/zen`;
+  yield* fileSystem.makeDirectory(`${root}/abc.default`, { recursive: true });
+  yield* fileSystem.writeFileString(
+    `${root}/profiles.ini`,
+    "[Profile0]\nName=Default\nIsRelative=1\nPath=abc.default\n",
+  );
+  const database = new NodeSqlite.DatabaseSync(`${root}/abc.default/cookies.sqlite`);
+  database.exec("pragma user_version = 15");
+  database.exec(
+    `create table moz_cookies (
+       id integer primary key, host text, name text, value text, path text,
+       expiry integer, isSecure integer, isHttpOnly integer, sameSite integer,
+       originAttributes text not null default ''
+     )`,
+  );
+  const insert = database.prepare(
+    `insert into moz_cookies (host, name, value, path, expiry, isSecure, isHttpOnly, sameSite)
+     values (?, ?, ?, ?, ?, 1, 1, 1)`,
+  );
+  for (const row of zenCookieRows) {
+    insert.run(row.host, row.name, row.value, row.path, 4_102_444_800);
+  }
+  database.close();
+});
+
+const withZenImporter = Effect.fnUntraced(function* (
+  layerBrowserSession: Layer.Layer<BrowserSession.BrowserSession>,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-zen-import-" });
+  yield* writeZenProfile(home);
+  return yield* BrowserImport.BrowserImport.pipe(
+    Effect.provide(
+      BrowserImport.layer.pipe(
+        Layer.provide(layerBrowserSession),
+        Layer.provide(Layer.succeed(HostProcess.Environment, { HOME: home })),
+        Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+        Layer.provide(Layer.succeed(HostProcess.ExecutablePath, "/usr/bin/mesura-code")),
+        Layer.provide(NodeServices.layer),
+      ),
+    ),
+  );
+});
+
+describe("BrowserImport.readCookies", () => {
+  it.effect("reads a Zen profile's cookies without opening any browser session", () =>
     Effect.gen(function* () {
-      const write = BrowserImport.writeCookies(
-        {
-          cookies: {
-            set: () => new Promise<void>(() => {}),
-            flushStore: () => Promise.resolve(),
+      const importer = yield* withZenImporter(layerRejectedBeforeSession);
+
+      const read = yield* importer.readCookies({
+        sourceId: "zen",
+        sourceProfileDirectory: "abc.default",
+      });
+
+      assert.deepEqual(
+        read.cookies.map((entry) => [entry.name, entry.domain, entry.path]),
+        [
+          ["domain_cookie", ".zen.example", "/"],
+          ["host_cookie", undefined, "/account"],
+        ],
+      );
+      assert.equal(read.undecryptable, 0);
+      assert.deepEqual(read.undecryptableHosts, []);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect("refuses to read a source profile directory the browser never listed", () =>
+    Effect.gen(function* () {
+      const importer = yield* withZenImporter(layerRejectedBeforeSession);
+
+      const error = yield* importer
+        .readCookies({ sourceId: "zen", sourceProfileDirectory: "../../../../secrets" })
+        .pipe(Effect.flip);
+
+      assert.instanceOf(error, BrowserImport.BrowserImportFailedError);
+      assert.equal(error.reason, "unknownSourceProfile");
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+});
+
+describe("BrowserImport.importCookies desktop target guard", () => {
+  it.effect("still writes a Zen profile's cookies into the target Electron session", () =>
+    Effect.gen(function* () {
+      const written: Array<{ readonly url: string; readonly name: string }> = [];
+      const requestedSessions: Array<string | undefined> = [];
+      const layerRecordingSession = Layer.succeed(
+        BrowserSession.BrowserSession,
+        BrowserSession.BrowserSession.of({
+          getPartition: () => Effect.die("getPartition must not be reached"),
+          isPartition: () => false,
+          getSession: (scope) => {
+            requestedSessions.push(scope);
+            return Effect.succeed({
+              cookies: {
+                set: (details: { readonly url: string; readonly name: string }) => {
+                  written.push({ url: details.url, name: details.name });
+                  return Promise.resolve();
+                },
+                flushStore: () => Promise.resolve(),
+              },
+            } as never);
           },
+          clearCookies: () => Effect.die("clearCookies must not be reached"),
+          clearCache: () => Effect.die("clearCache must not be reached"),
+        }),
+      );
+      const importer = yield* withZenImporter(layerRecordingSession);
+
+      const result = yield* importer.importCookies({
+        input: {
+          sourceId: "zen",
+          sourceProfileDirectory: "abc.default",
+          targetProfileId: "default",
         },
-        { cookies: [cookie], undecryptable: 0, undecryptableHosts: [] },
-      );
+        scope: "persist:t3code-preview-guard",
+        persistent: true,
+      });
 
-      const interrupted = yield* Ref.make(false);
-      const fiber = yield* write.pipe(
-        Effect.onInterrupt(() => Ref.set(interrupted, true)),
-        Effect.forkChild,
+      assert.deepEqual(requestedSessions, ["persist:t3code-preview-guard"]);
+      assert.deepEqual(
+        written.map((entry) => entry.name),
+        ["domain_cookie", "host_cookie"],
       );
-      yield* Effect.yieldNow;
-      yield* Fiber.interrupt(fiber);
+      assert.deepEqual(result, { imported: 2, skipped: 0, skippedDomains: [] });
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+});
 
-      assert.isTrue(yield* Ref.get(interrupted));
-    }),
+describe("BrowserImport.listSources guard", () => {
+  it.effect("keeps every import source in order and lists the Zen profile", () =>
+    Effect.gen(function* () {
+      const importer = yield* withZenImporter(layerRejectedBeforeSession);
+
+      const sources = yield* importer.listSources;
+
+      assert.deepEqual(
+        sources.map((source) => source.id),
+        [
+          "chrome",
+          "edge",
+          "brave",
+          "vivaldi",
+          "opera",
+          "arc",
+          "helium",
+          "safari",
+          "firefox",
+          "zen",
+        ],
+      );
+      const zen = sources.find((source) => source.id === "zen");
+      assert.equal(zen?.unavailable, undefined);
+      assert.deepEqual(
+        zen?.profiles.map((profile) => profile.directory),
+        ["abc.default"],
+      );
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 });

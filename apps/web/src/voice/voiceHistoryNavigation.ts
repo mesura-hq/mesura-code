@@ -11,12 +11,9 @@ import { buildThreadRouteParams } from "../threadRoutes";
 type Router = ReturnType<typeof useRouter>;
 
 /**
- * Navigation for voice conversations, kept in one place for every entry point: the thread menu in
- * the header and in the sidebar, and the composer phone when the environment has no key.
- *
- * Opening saved history only reads: it never starts audio, sends a request or changes a turn.
- * The settings detour remembers the thread so the user can return to it, and returning never
- * starts the microphone.
+ * Voice navigation for every entry point: both thread menus and the phone without a key.
+ * Opening saved history only reads: no audio, request or turn change. The settings detour
+ * remembers the thread, and returning never starts the microphone.
  */
 interface VoiceNavigationState {
   /** The thread whose saved voice conversations are open, by scoped key. */

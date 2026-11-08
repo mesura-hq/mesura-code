@@ -7,13 +7,9 @@ import {
 } from "./nvimDecorations.ts";
 
 /**
- * What Neovim drew over the text, kept per row.
- *
- * The rule the whole module exists for is in `rows`: an event fully replaces
- * the rows it lists and says nothing about the rest. A host that took each
- * event as the whole picture would clear every flash label the moment one
- * unrelated row redrew — and under a real configuration a row redraws
- * constantly, so that is not an edge case.
+ * The rule under test is in `rows`: an event fully replaces the rows it lists and says nothing
+ * about the rest. Taking each event as the whole picture clears every flash label whenever an
+ * unrelated row redraws, which under a real configuration is constantly.
  */
 
 const event = (

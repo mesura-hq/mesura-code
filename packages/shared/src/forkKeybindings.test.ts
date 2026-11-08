@@ -5,19 +5,9 @@ import { STATIC_KEYBINDING_COMMANDS } from "@t3tools/contracts";
 import { DEFAULT_KEYBINDINGS } from "./keybindings.ts";
 
 /**
- * The keybindings this fork adds on top of upstream's defaults.
- *
- * `composer.attachFiles` is the one ADR-003 kept when the fork's attachment
- * stack was retired for upstream's: their attach button survives the switch,
- * but upstream ships no keyboard route to attaching at all. `fileTree.toggle`
- * reaches the Symmetria file tree in the files surface and leaves it again;
- * `fileTree.miller` opens the file manager's Miller columns over the window.
- * `thread.rename` opens the header's title rename, which upstream reaches only
- * by double-click and the thread menu.
- *
- * Each is cheap to carry and easy to lose: a sync that takes upstream's
- * command list wholesale drops the command, and the shortcut then resolves to
- * nothing while the mouse route keeps working, so no suite notices.
+ * Keybindings this fork adds on top of upstream's defaults, each a keyboard route upstream lacks.
+ * A sync that takes upstream's command list wholesale drops the command; the shortcut then resolves
+ * to nothing while the mouse route keeps working, so no other suite notices.
  */
 
 const FORK_BINDINGS = [
@@ -29,34 +19,45 @@ const FORK_BINDINGS = [
   // Firefox and Zen keep mod+shift+e. The last one is the label.
   { command: "fileTree.miller", keys: ["mod+alt+e", "mod+shift+e"] },
   { command: "thread.rename", keys: ["mod+alt+r"] },
+  // The Diff surface's Tree diff mode and its mode menu. mod+shift+g, the
+  // chord Symmetria IDE used, is composer.branch here.
+  { command: "treeDiff.toggle", keys: ["alt+g"] },
+  { command: "diff.modeMenu", keys: ["alt+c"] },
+  // Search unification: flips the sidebar between All projects and the last
+  // project. mod+shift+p stays thread.pin; mod+shift+0 types `=` on the Latin
+  // American layout.
+  { command: "projectScope.toggleAll", keys: ["mod+alt+p"] },
+  // The sidebar's Working section. alt+z was free in the app and in the
+  // developer's Hyprland when it was chosen (2026-10-26).
+  { command: "sidebar.toggleWorking", keys: ["alt+z"] },
+  // Upstream ships thread.stop unbound; Escape alone belongs to the composer and vim.
+  { command: "thread.stop", keys: ["alt+esc"] },
 ] as const;
 
 describe("fork keybindings", () => {
-  for (const { command, keys } of FORK_BINDINGS) {
-    describe(command, () => {
-      it(`binds ${keys.join(" and ")} outside the terminal, in that order`, () => {
-        const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command);
+  describe.each(FORK_BINDINGS)("$command", ({ command, keys }) => {
+    it(`binds ${keys.join(" and ")} outside the terminal, in that order`, () => {
+      const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command);
 
-        // Order matters: the last binding is the label.
-        expect(bindings.map((binding) => binding.key)).toEqual(keys);
-        // Not while a terminal owns the keyboard, where the chord belongs to the shell.
-        for (const binding of bindings) expect(binding.when).toBe("!terminalFocus");
-      });
-
-      it("registers the command so a user can rebind it", () => {
-        expect(STATIC_KEYBINDING_COMMANDS).toContain(command);
-      });
-
-      it(`leaves ${keys.join(" and ")} free of any other command`, () => {
-        const collisions = DEFAULT_KEYBINDINGS.filter(
-          (binding) =>
-            (keys as ReadonlyArray<string>).includes(binding.key) && binding.command !== command,
-        );
-
-        expect(collisions).toEqual([]);
-      });
+      // Order matters: the last binding is the label.
+      expect(bindings.map((binding) => binding.key)).toEqual(keys);
+      // Not while a terminal owns the keyboard, where the chord belongs to the shell.
+      for (const binding of bindings) expect(binding.when).toBe("!terminalFocus");
     });
-  }
+
+    it("registers the command so a user can rebind it", () => {
+      expect(STATIC_KEYBINDING_COMMANDS).toContain(command);
+    });
+
+    it(`leaves ${keys.join(" and ")} free of any other command`, () => {
+      const collisions = DEFAULT_KEYBINDINGS.filter(
+        (binding) =>
+          (keys as ReadonlyArray<string>).includes(binding.key) && binding.command !== command,
+      );
+
+      expect(collisions).toEqual([]);
+    });
+  });
 });
 
 // The Hosts dock peeks on alt+s the way the usage dock peeks on alt+u: held,
@@ -77,9 +78,29 @@ describe("hosts.peek", () => {
   });
 
   it("leaves alt+s free of any command but the hosts peek", () => {
+    // Dictation's save mode shares the chord only while a dictation is live, and comes after
+    // the peek so last-wins resolution picks it then and only then.
     const collisions = DEFAULT_KEYBINDINGS.filter(
-      (binding) => binding.key === "alt+s" && binding.command !== "hosts.peek",
+      (binding) =>
+        binding.key === "alt+s" &&
+        binding.command !== "hosts.peek" &&
+        !(binding.command === "dictation.mode.clipboard" && binding.when === "dictationActive"),
     );
     expect(collisions).toEqual([]);
+    const order = DEFAULT_KEYBINDINGS.filter((binding) => binding.key === "alt+s").map(
+      (binding) => binding.command,
+    );
+    expect(order).toEqual(["hosts.peek", "dictation.mode.clipboard"]);
+  });
+});
+
+// Search unification phase 1, criterion 7, guard: the all-projects toggle took
+// a new chord, so the pin keeps its own.
+describe("thread.pin beside projectScope.toggleAll", () => {
+  it("pin guard: mod+shift+p still pins the current thread outside the terminal", () => {
+    const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.key === "mod+shift+p");
+    expect(bindings.map((binding) => [binding.command, binding.when])).toEqual([
+      ["thread.pin", "!terminalFocus"],
+    ]);
   });
 });

@@ -1,12 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * WorkspaceFileWatcher - watches one project file and reports that it changed.
- *
- * Reports a revision rather than contents. The client re-reads through
- * `projects.readFile`, so truncation, binary detection and the path-escape
- * checks keep one definition and the stream stays small.
- *
- * @module WorkspaceFileWatcher
+ * Watches one project file and reports a revision, not contents: the client re-reads through
+ * `projects.readFile`, so truncation, binary detection and the path-escape checks keep one
+ * definition and the stream stays small.
  */
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
@@ -33,12 +29,9 @@ export type ProjectFileWatchEventOut = ProjectFileWatchEvent;
 const WATCH_DEBOUNCE = Duration.millis(100);
 
 /**
- * How often to re-check a file the watch has already reported missing.
- *
- * Deleting the file's parent directory leaves the underlying watch inert on
- * most platforms: it stops reporting and raises neither `error` nor `close`, so
- * recreating that directory would otherwise go unnoticed forever. While the
- * file is present this tick only reads a `Ref` and produces nothing.
+ * How often to re-check a file the watch already reported missing. Deleting the parent directory
+ * leaves the watch inert on most platforms (no `error`, no `close`), so its recreation would go
+ * unnoticed. While the file is present this tick only reads a `Ref`.
  */
 const ABSENT_FILE_RECHECK = Duration.seconds(3);
 
@@ -92,24 +85,10 @@ export const make = Effect.gen(function* () {
         >();
 
         /**
-         * The watch is acquired HERE, before the baseline below is taken.
-         *
-         * The order matters and the obvious arrangement gets it backwards: a
-         * stream that concatenates the baseline in front of the watch only
-         * establishes the watch once the baseline has been pulled, so a write
-         * landing between the two is never seen and the client goes on
-         * believing a stale revision is current.
-         *
-         * The directory is watched rather than the file because editors and git
-         * replace a file by writing a sibling and renaming it over the target;
-         * a watch on the file's own inode goes stale the first time that
-         * happens.
-         *
-         * Deliberately not Effect's `fs.watch`: its Node backend passes
-         * `recursive: true`, so watching the directory of a file at a workspace
-         * root would walk the whole repository, `node_modules` included. The
-         * configuration-directory watchers elsewhere in this server get away
-         * with that because their directories are tiny.
+         * Acquired HERE, before the baseline: a baseline concatenated in front of the watch
+         * arms the watch only once pulled, so a write in between is lost. The directory is
+         * watched because editors and git replace a file by rename. Not Effect's `fs.watch`:
+         * it passes `recursive: true`, which at a workspace root walks the whole repository.
          */
         yield* Effect.acquireRelease(
           Effect.sync(() => {
@@ -170,12 +149,9 @@ export const make = Effect.gen(function* () {
             (name) =>
               name === fileName ||
               path.resolve(directory, name) === realTargetPath ||
-              // An event naming the watched directory itself, which is how a
-              // permission change on that directory arrives. Without this the
-              // subscription goes silent after a `chmod`: the file is still
-              // there as far as the last revision knows, so the absent-file
-              // recheck never runs either. Re-checking costs one stat, and an
-              // unchanged revision emits nothing.
+              // The watched directory itself, which is how a `chmod` on it arrives. Without
+              // this the subscription goes silent: the absent-file recheck never runs for a
+              // file that still exists. One stat per event; an unchanged revision emits nothing.
               name === directoryName,
           ),
           Stream.debounce(WATCH_DEBOUNCE),

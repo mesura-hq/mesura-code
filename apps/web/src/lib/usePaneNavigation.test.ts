@@ -723,12 +723,8 @@ describe("two pane commands on one chord", () => {
 
 describe("the sidebar list claim", () => {
   /**
-   * Opening a thread makes ChatView focus the composer, on every change of
-   * the active thread. That is right when you clicked the row and wrong when
-   * you walked to it with `j`, so the claim puts the keyboard back.
-   *
-   * Both bugs these cases exist for were found by a reviewer reading the
-   * first version, and neither was reachable from any test that existed then.
+   * ChatView focuses the composer on every change of the active thread. That is wrong
+   * when you walked to the row with `j`, so the claim puts the keyboard back.
    */
   function claimFor() {
     const frames: Array<() => void> = [];
@@ -772,11 +768,9 @@ describe("the sidebar list claim", () => {
   });
 
   it("keeps walking when the next chord arrives before the rescue frame", () => {
-    // The second `j` of a fast run lands while the composer holds the
-    // keyboard and the rescue has not run. The first version read that as
-    // "`j` typed somewhere else", disarmed, and left the letter to be typed
-    // into the draft. Moving focus back inside the capture phase is what
-    // makes the sidebar's own handler see a focused sidebar a moment later.
+    // The second `j` lands while the composer holds the keyboard. Read as "typed
+    // elsewhere", it would disarm and type into the draft; moving focus back in the
+    // capture phase lets the sidebar's handler see a focused sidebar.
     const workspace = installWorkspace();
     workspace.focusInto("sidebar");
     const claim = claimFor();

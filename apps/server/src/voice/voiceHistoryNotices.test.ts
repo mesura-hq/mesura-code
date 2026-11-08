@@ -1,58 +1,40 @@
-// Entry point: makeVoiceHistoryNoticeStream, the stream behind orchestration.subscribeVoiceHistory.
-// The composed WebSocket route is covered by VH-I1 in server.test.ts; this file pins the bounded
-// queue's overflow contract, which needs a producer that runs ahead of the reader.
-import { EventId, ThreadId, type OrchestrationEvent } from "@t3tools/contracts";
+// Entry point: `VoiceHistoryNotices`, the service behind `voice.subscribeHistory`. This file pins
+// the bounded queue's overflow contract, which needs a producer that runs ahead of the reader.
+import { ThreadId } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 
-import { makeVoiceHistoryNoticeStream } from "./voiceHistoryNotices.ts";
+import { VoiceHistoryNotices, VoiceHistoryNoticesLive } from "./voiceHistoryNotices.ts";
 
 const threadId = ThreadId.make("thread-voice-notice-overflow");
+const otherThreadId = ThreadId.make("thread-voice-notice-other");
 
-const appended = (sequence: number): OrchestrationEvent =>
-  ({
-    sequence,
-    eventId: EventId.make(`event-voice-notice-${sequence}`),
-    aggregateKind: "thread",
-    aggregateId: threadId,
-    occurredAt: "2026-11-08T10:00:00.000Z",
-    commandId: null,
-    causationEventId: null,
-    correlationId: null,
-    metadata: {},
-    type: "thread.voice-transcript-appended",
-    payload: {
-      threadId,
-      callId: `voice-notice-call-${String(sequence).padStart(4, "0")}`,
-      batchId: `batch-${sequence}`,
-      fragments: [{ fragmentId: `fragment-${sequence}`, sequence: 1, speaker: "user", text: "x" }],
-      appendedAt: "2026-11-08T10:00:01.000Z",
-    },
-  }) as OrchestrationEvent;
+const appended = (sequence: number, thread: ThreadId = threadId) => ({
+  threadId: thread,
+  callId: `voice-notice-call-${String(sequence).padStart(4, "0")}`,
+  change: "appended" as const,
+  sequence,
+});
 
-/** Reads `count` items, after the producer has offered every notice for `events`. */
+/**
+ * Subscribes, publishes every change, lets the delivery fiber drain the hub, then reads `count`
+ * items. The service runs on one Effect scheduler, so yielding lets the forked fiber run first.
+ */
 const readAfterProducerDrained = (
-  events: ReadonlyArray<OrchestrationEvent>,
+  changes: ReadonlyArray<ReturnType<typeof appended>>,
   capacity: number,
   count: number,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const drained = yield* Deferred.make<void>();
-      const stream = yield* makeVoiceHistoryNoticeStream(
-        Stream.concat(
-          Stream.fromIterable(events),
-          Stream.fromEffectDrain(Deferred.succeed(drained, undefined)),
-        ),
-        threadId,
-        capacity,
-      );
-      yield* Deferred.await(drained);
+      const notices = yield* VoiceHistoryNotices;
+      const stream = yield* notices.subscribe(threadId, capacity);
+      for (const change of changes) yield* notices.publish(change);
+      for (let turn = 0; turn < 10; turn += 1) yield* Effect.yieldNow;
       return Array.from(yield* stream.pipe(Stream.take(count), Stream.runCollect));
     }),
-  );
+  ).pipe(Effect.provide(VoiceHistoryNoticesLive));
 
 describe("voice history notice stream", () => {
   it.effect(
@@ -87,6 +69,20 @@ describe("voice history notice stream", () => {
         items.map((item) => item.kind),
         ["subscribed", "call-changed", "call-changed"],
       );
+    }),
+  );
+
+  it.effect("voice history notices for another thread never reach the viewer", () =>
+    Effect.gen(function* () {
+      const items = yield* readAfterProducerDrained(
+        [appended(1, otherThreadId), appended(2), appended(3, otherThreadId)],
+        4,
+        2,
+      );
+      assert.deepEqual(items, [
+        { kind: "subscribed" },
+        { kind: "call-changed", callId: "voice-notice-call-0002", change: "appended", sequence: 2 },
+      ]);
     }),
   );
 });

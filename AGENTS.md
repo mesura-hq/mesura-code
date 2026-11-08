@@ -1,16 +1,16 @@
 # Mesura Code
 
-Mesura Code is a private fork of **T3 Code**, maintained by one developer for one developer's workflow. Upstream lives at https://github.com/pingdotgg/t3code and is worth reading directly.
+Mesura Code is a fork of **T3 Code**, maintained by one developer for one developer's workflow. Upstream lives at https://github.com/pingdotgg/t3code and is worth reading directly.
 
-The product is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients. T3 Code is an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor; this fork inherits all of that and changes very little of it.
+The product is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients — upstream ships native Android and iOS apps, which this fork removed (see principle 4). T3 Code is an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor; this fork inherits all of that and changes very little of it.
 
 ## What this fork is, and is not
 
 Be accurate about the difference, because most of this repository's engineering judgement follows from it.
 
-**T3 Code** is a large open source project: Theo, Julius and a substantial community build it, it has over 200,000 users, its roadmap and code are public, and many of those users run forks of their own.
+**T3 Code** is a large open source project: Theo, Julius and a substantial community build it, it has over 500,000 users, its roadmap and code are public, and many of those users run forks of their own.
 
-**Mesura Code** has none of that. It is a single person's fork, private, with no users but its author. It exists to fit one specific workflow, not to compete with upstream and not to diverge from it. Nothing in this repository should claim otherwise — no user counts, no community, no openness we do not have.
+**Mesura Code** has none of that. It is a single person's fork, with no users but its author. Whether its code is public changes nothing here: nobody else builds it, uses it or steers it. It exists to fit one specific workflow, not to compete with upstream and not to diverge from it. Nothing in this repository should claim otherwise — no user counts, no community, no public roadmap, no contribution process.
 
 Four things follow. The first is this fork's own; the other three are upstream's standards, inherited and worth keeping.
 
@@ -30,14 +30,16 @@ What follows from it, in order of how often it bites:
 
 Where this fork already differs from upstream is listed in `.factory/` and in the commits with a `mesura` scope. Keep that list short.
 
-**Running the sync.** The full procedure is in `.factory/mesura-code-identity-plan.md`. Four things about it are not guessable, and each one failed silently the first time — none of them announced itself as an error:
+**Running the sync.** The full procedure is in `.factory/mesura-code-identity-plan.md`. Five things about it are not guessable, and each one failed silently the first time, or would — none of them announces itself as an error:
+
+- **Delete the native mobile paths right after merging**, before resolving anything else: `node scripts/remove-native-mobile.ts`. About one upstream commit in five touches the native apps this fork removed, so every sync brings some back — as modify/delete conflicts, as new files that merge without any conflict, and as patch entries that break `pnpm install`. The script removes all three; the order of steps and what to do when pnpm names a new native patch are in `docs/mesura/adr-008-remove-native-mobile.md`.
 
 - **Read the conflict surface before merging**, as the intersection of what upstream touched and what we touched: `git diff --name-only <last-sha>..upstream/main` against `…<last-sha>..HEAD`, then `comm -12`. It is far smaller than either side. The first sync had 104 upstream files and 240 of ours, 11 in common, and one real conflict.
-- **Use Node 24 via nvm, never the system's Node 26.** Node 26 breaks `extract-zip` in electron's postinstall and exits 0 having written 548 KB of a 310 MB archive. Skip `pnpm install` entirely when the lockfile did not change.
+- **Use the Node version in `.nvmrc` via nvm.** Node 26.12.1 with Electron 44.9.3 passes installation and extraction. Electron 44 downloads its binary through `node apps/desktop/node_modules/electron/install.js`; verify the extracted directory and `apps/desktop/node_modules/.bin/electron --version`. An older Node 26 install silently truncated an Electron archive, so a successful package install alone is insufficient. Skip `pnpm install` when the lockfile did not change.
 - **Never run bare `pnpm test`** — it exhausts the machine's RAM. Run per package, serially, with `--max-workers`. Watch the path depth: `apps/*` and `packages/*` need `../../node_modules`, but `tests/` and `scripts/` need `../node_modules`. With the wrong depth the command prints nothing and reads as a pass.
 - **gitleaks does not scan merge commits.** Pointing it at one reports `0 commits scanned` and `no leaks found`, which reads as a pass. Scan the upstream range instead, which is where the content came from.
 
-**Pin upstream's facts, do not delete them.** Where our own text has to restate something upstream asserts — a user count, a supported platform, a version — attribute it to T3 rather than dropping it. Then upstream changing that fact is a one-line conflict that shows up, instead of a stale claim that never does. This is how the first sync caught the user count moving from 100,000 to 200,000.
+**Pin upstream's facts, do not delete them.** Where our own text has to restate something upstream asserts — a user count, a supported platform, a version — attribute it to T3 rather than dropping it. Then upstream changing that fact is a one-line conflict that shows up, instead of a stale claim that never does. This is how the first sync caught the user count moving from 100,000 to 200,000; the next one caught it at 400,000.
 
 **A guard may not pin a number that is upstream's to change.** Assert a floor and assert that the suite is green; never an exact count. The first sync broke a guard that pinned upstream's contract-test total at 257 when upstream added one test — everything was green and the guard still failed. See `tests/unit/symmetria-phase-one.test.ts`.
 
@@ -51,14 +53,14 @@ The websocket layer (`npx t3`) is what enables the remote features, and they are
 
 ### 4. Surfaces, and which two matter here
 
-The product has three surfaces: **web**, **desktop**, and **mobile**. Upstream weights them differently than this fork does.
+Upstream ships three surfaces: **web**, **desktop**, and native **mobile** apps for Android and iOS. **This fork removed the native mobile apps** (`docs/mesura/adr-008-remove-native-mobile.md`). On a phone it is used through the web app in the browser. Do not add native mobile work, plan a native phase, or bring `apps/mobile` back to resolve a merge.
 
-**Two are the ones this fork is actually used on**, and they are where a change has to be correct:
+**Two surfaces are the ones this fork is actually used on**, and they are where a change has to be correct:
 
 - **Desktop on Linux.** A full Electron app that bundles the server runner. It is also the host server, so the other surfaces connect to it.
-- **Mobile on Android.** A React Native app, used to drive work remotely against that desktop host.
+- **The web app on a phone.** Chrome on Android, reaching a host over the tailnet, used to drive work remotely. It is the same web client as on the desktop, so a change to it has to work at a phone's width and with touch.
 
-**The rest stay supported, not prioritised**: the web app in both its forms — served locally by `npx t3`, and built for a hosted deployment, which upstream runs at `app.t3.codes` and this fork does not run at all — plus desktop on macOS and Windows, and mobile on iOS. Do not break them, do not remove them, and keep contracts honest across all of them. They simply do not earn the same verification effort, and a change does not need a pass on them before it ships here.
+**The rest stay supported, not prioritised**: the web app in a desktop browser — served locally by `npx t3`, and built for a hosted deployment, which upstream runs at `app.t3.codes` and this fork does not run at all — plus desktop on macOS and Windows. Do not break them, do not remove them, and keep contracts honest across all of them. They simply do not earn the same verification effort, and a change does not need a pass on them before it ships here.
 
 ## Quality decides, merge cost informs
 
@@ -111,7 +113,7 @@ We need to be on the same page with terminology. When communicating, use this la
 - **user** means the person using Mesura Code to direct coding agents. Here that is the same person as the developer.
 - **agent** means the coding agent a user runs inside Mesura Code. Depending on context, that may also include you.
 - **provider** means the agent runtime or harness Mesura Code talks to, such as Codex, Claude, Cursor, or OpenCode.
-- **client** means the web, desktop, or mobile UI.
+- **client** means the web or desktop UI. On a phone, the client is the web UI in a browser; this fork has no native mobile client.
 - **environment** means one running server and the machine, filesystem, provider credentials, and state it owns.
 - **project** means an environment-local workspace record rooted at a directory.
 - **thread** means the durable conversation and work history for a project.
@@ -128,22 +130,26 @@ We need to be on the same page with terminology. When communicating, use this la
 
 The most common defect in this repo is a change that works on the path you tested and is missing everywhere else. Before calling frontend work done, walk this list and say which entries applied:
 
-- **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
-- **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`
+- **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, a keybinding, and the right panel's surface launcher. Fixing one is not fixing the feature.
+- **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and the web app at a phone's width. Shared logic lives in `packages/client-runtime`. There is no native mobile client: never write a native version of a feature.
 - **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here".
-- **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, mobile, and desktop all follow.
+- **Agents.** A capability a user can trigger is usually one an agent should reach through MCP tools, and scheduled tasks run the same paths. That only works when it is a service method, not handler code.
+- **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, and desktop all follow.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
 
 ## Dev servers
 
-- `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
+- `vp i` installs, under Node 26.12.1 (`.nvmrc`). Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run. Where `vp` is not on PATH, the setup fails silently, and its later steps (the `.env` links, the dep-cache warm) never run. Install with the main checkout's copy, `main="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"; "$main/node_modules/.bin/vp" i`, then run the rest of `t3.json`'s `Setup Worktree` command with this worktree's `node_modules/.bin` on PATH and `T3CODE_PROJECT_ROOT="$main"`.
+- Setup runs in the background. While `.t3/setup-running` names a live PID, wait for it and do not run `vp i`. It ends with `.t3/setup-done` or `.t3/setup-failed` (with the error tail). With no marker at all, setup never ran here, so run `vp i` yourself.
 - `vp run dev` starts server and web. In a worktree, state defaults to that worktree's gitignored `.t3`, which deliberately outranks an ambient `T3CODE_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift.
-- Sharing over the tailnet is three steps: run `vp run dev --share` in the background, wait for the `pairingUrl:` line in its output, then give that full URL to an unpaired browser. Do not wire up `tailscale serve` by hand, open the URL yourself, or consume the user's pairing link. A browser with the reusable dev cookie can use the bare origin. If a normal one-time token was consumed, mint a fresh one with `node apps/server/src/bin.ts pair`. It carries standard scopes, while the startup URL carries admin scopes needed for Connections settings.
+- A dev server you hand over must outlive your turn: a `&`, `nohup` or harness-background child dies with the session. Start it under the host's workload runner (`mesura-agent-service` on vigilia hosts, `--memory 4G` with a copied database).
+- Sharing over the tailnet is three steps: run `vp run dev --share`, wait for the `pairingUrl:` line in its output, then give that full URL to an unpaired browser. Never open the URL yourself or consume the user's pairing link. Where `--share` fails with `permission denied` (vigilia-home: a non-root `tailscale serve` gets `401 Unauthorized`), publish the web port yourself with `sudo tailscale serve --bg --https=<webPort> http://localhost:<webPort>` — `localhost`, because Vite binds `::1`; never port 443, which Caddy owns — then mint a token with `node apps/server/src/bin.ts pair` and hand over `https://<tailnet name>:<webPort>/pair#token=<token>` (`pair` prints a localhost URL; the token is not bound to an origin, so rewriting it is safe). Remove the mapping with `sudo tailscale serve --https=<webPort> off` when you stop the server. A browser with the reusable dev cookie can use the bare origin. If a normal one-time token was consumed, mint a fresh one with `node apps/server/src/bin.ts pair`. It carries standard scopes, while the startup URL carries admin scopes needed for Connections settings.
 - To reuse web dev auth across worktrees, configure one fixed `T3CODE_DEV_AUTH_TOKEN` in the main checkout's gitignored `.env`. The `t3.json` setup links that file into worktrees. Never commit or publish the token or a startup URL. See [Reusable dev credential](docs/operations/development.md#reusable-dev-credential).
-- Stop what you started, by the PID you tracked. See rule 1.
+- Stop what you started, by the unit name or the PID you tracked. See rule 1.
+- Need a second checkout? `git worktree add` it next to this worktree, not in `/tmp`. Remove it when done.
 
 ## Test data
 
@@ -155,27 +161,78 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
   ```bash
   mkdir -p .t3/userdata
   rm -f .t3/userdata/state.sqlite*  # VACUUM INTO refuses to overwrite
-  bun -e "new (require('bun:sqlite').Database)(process.env.HOME + '/.mesura-code/userdata/state.sqlite', { readonly: true }).run(\"VACUUM INTO '.t3/userdata/state.sqlite'\")"
+  node -e "new (require('node:sqlite').DatabaseSync)(process.env.HOME + '/.mesura-code/userdata/state.sqlite', { readOnly: true }).exec(\"VACUUM INTO '.t3/userdata/state.sqlite'\")"
   ```
 
-  A plain `cp` is only safe when no server has the source open, and must bring the `-wal` and `-shm` siblings along. A live file copy is a corrupt copy.
+  A plain `cp` is only safe when no server has the source open, and must bring the `-wal` and `-shm` siblings along. A live file copy is a corrupt copy. The copy is several gigabytes: make it once per worktree, never while a typecheck or test run is going.
 
-- Bring `secrets` and `settings.json` only if the flow under test needs them.
+- Bring `secrets`, `settings.json` and `attachments/` only if the flow under test needs them.
+- **A server started on a copy of a live database can resume that database's live provider sessions** with the developer's HOME, binaries and credentials. Never start a copied home before following [Isolating a copied home from live providers](docs/operations/development.md#isolating-a-copied-home-from-live-providers).
+- The orchestrator database is `statev2.sqlite`. The server builds it from `state.sqlite` only when `statev2.sqlite` is missing, so once the source home has a `statev2.sqlite`, snapshot that file instead, the same way. `vp run migrate-dev-db` does this for you with your dev server stopped; never point its source at `~/.t3`.
 - Copy in, never symlink. Data flows one way: into your sandbox, never back out.
 
 ## Verifying
 
-- Smallest proof that the change works. `vp test run <files>` for the tests you touched, targeted lint and typecheck for the scope you changed.
+- Smallest proof that the change works. `vp test run <files>` for the tests you touched, then the [Deterministic Checks](#deterministic-checks) for the change.
+- Run `node -e` snippets from `apps/server` or the owning package. `effect` does not resolve from the repo root.
 - Test meaningful logic or observable behavior. Do not render components to static markup to assert props or attributes, or add tests that merely assert callback wiring or mirror the implementation.
-- **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite.
-- **`pnpm test` can take the machine down, and this is measured, not theoretical.** The root config's `test.maxWorkers` reaches only `apps/server`, because it is the one package that composes the root config; `apps/web`, `apps/mobile`, `apps/desktop` and `infra/relay` each open their own default-sized pool. A full run reached load 38 with swap fully exhausted and had to be killed. If a full run is genuinely asked for, run it package by package with an explicit bound — `vp test run --max-workers=3` from inside each package — and never in parallel with another. Tracked as issue #3.
+- **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite. The exceptions are the gates below: `knip` in [Deterministic Checks](#deterministic-checks), and [Full-Project Checks](#full-project-checks) when `/tech-debt` or an audit runs them.
+- **`pnpm test` can take the machine down, and this is measured, not theoretical.** The root config's `test.maxWorkers` reaches only `apps/server`, because it is the one package that composes the root config; `apps/web`, `apps/desktop` and `infra/relay` each open their own default-sized pool. A full run reached load 38 with swap fully exhausted and had to be killed. If a full run is genuinely asked for, a skill's Harden step included, run it package by package with an explicit bound — `vp test run --max-workers=3` from inside each package — and never in parallel with another, `pnpm -r test` included. Tracked as issue #3.
 - Backend behavior changes ship with focused tests for that behavior.
-- The server is event-sourced and its async flows emit typed receipts. Wait on receipts and worker drains, never on sleeps or polling. A test that needs a timeout to pass is wrong.
-- **Verify a user-visible frontend change before reporting it done**, so what reaches the developer differs on taste rather than on whether it works. The preview tool needs no permission and shows nothing on screen with `open: false`. Its automation channel does not reach Mesura Code's own web app today (issue #36); until it does, this app's own UI is proved by targeted tests plus the instance below. `test-t3-app` and `test-t3-mobile` set the clients up.
-- **Then leave that instance running.** `vp run dev` in the background, handing over the pairing URL with its token — the developer tests from a browser, so that is the default. When only the desktop shell shows the change, do every step up to the window and hand over the exact command; opening a window is theirs to run. Stop only what you started, by the PID you captured.
+- Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test first (the fewest that fail on `main` for that reason, in the module's existing test file), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get before/after captures as their proof and no test: do not add UI tests for nitpicks, and do not ask for one in review when a capture already shows it. A server-only fix with no visible surface ships the test plus a short runtime transcript.
+- The server is event-sourced, and side effects run after the command commits. In tests, drain the effect worker (`OrchestrationEffectWorkerV2.drain`) or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong. Concretely:
+  - `it.effect` runs on a `TestClock`; `Effect.sleep` only advances through `TestClock.adjust`. `it.live` is wall-clock and only for subprocess or network fixtures.
+  - No `yieldNow` or `sleep` polling loops. Await the `Deferred`, take from the `Queue`, or drain the worker.
+  - No per-test timeout argument or `retry`. The project timeout is the ceiling, and flaky tests are fixed, not retried.
+  - No `performance.now()` or `Date.now()` deltas. Assert on events and counts, not elapsed time.
+  - Browser tests assert through `expect.element` or `vi.waitFor`, never `requestAnimationFrame` or `transitionend`.
+  - `vi.mock` factories must not spread a real module that pulls in Shiki or the diff workers.
+  - `it.skip` and friends need a tracking issue on the line above: `// quarantine: #1234 <why>`.
+  - Lint enforces this: `t3code/no-test-timeout-or-unreasoned-skip`, `t3code/no-frame-waits-in-browser-tests`, `t3code/no-wall-clock-in-tests`, `t3code/no-real-time-wait-in-tests`, `t3code/no-polling-loop-in-tests`.
+- Web browser tests are `*.browser.test.tsx` or `*.browser.test.ts` and render with `await using screen = await render(...)` from `apps/web/test/render.tsx`. `t3code/require-disposable-render` errors on the old patterns.
+  - Acquire what the test drives after mounting (fake timers it advances, spies it sets up after mounting) after the render, so it disposes before the unmount. Anything the first render reads comes before it.
+  - A helper that renders and then waits or clicks puts the screen in an `AsyncDisposableStack` and `move()`s it out only on success, so a failed wait still unmounts.
+  - `rerender` needs a fresh element on every call.
+  - No lifecycle hooks and no module-level mutable state. Shared mock state that `vi.mock` factories read is reset by a `setup()` call at the top of the test.
+  - `router` is on by default. Pass `router: false` only with a one-line comment saying why.
+
+  ```tsx
+  it("saves on Enter", async () => {
+    const onSave = vi.fn();
+    using _now = vi.spyOn(Date, "now").mockReturnValue(0);
+    await using screen = await render(<TitleEditor onSave={onSave} />, { router: "/threads/1" });
+    await userEvent.type(screen.getByRole("textbox"), "Title{Enter}");
+    expect(onSave).toHaveBeenCalledWith("Title");
+  });
+  ```
+
+- **Verify a user-visible frontend change before reporting it done**, so what reaches the developer differs on taste rather than on whether it works. The preview tool needs no permission and shows nothing on screen with `open: false`. Its automation channel does not reach Mesura Code's own web app today (issue #36); until it does, this app's own UI is proved by targeted tests plus the instance below. `test-t3-app` sets the client up. Anything a phone shows gets one more look at a phone's viewport in the headless browser (Playwright's `devices['Pixel 7']`), because the phone is a primary surface.
+- **Then leave that instance running** under the workload runner (see Dev servers), handing over the pairing URL with its token — the developer tests from a browser, so that is the default. When only the desktop shell shows the change, do every step up to the window and hand over the exact command; opening a window is theirs to run. Stop only what you started, by the unit name or the PID you captured.
 - Subagents do not launch their own dev servers. A headed browser still needs asking — Playwright `--headed` and headed chrome-devtools put windows on the developer's desktop, which the preview tool never does.
 
-For authorized mobile verification, a missing or outdated native client is a build step, not a blocker. Run `node scripts/mobile-native-client.ts ensure <ios|android> <device-id>` on the simulator host before starting Metro. It checks the local Expo fingerprint and builds/installs when needed. See `test-t3-mobile` for the full workflow.
+## Deterministic Checks
+
+The change gate for `/seal`, `/code-review`, sf-team Checks nodes and ad-hoc review. Substitute `<base>` with the commit the change diffs against: the parent of one reviewed commit, or `<oldest>^` for a range. Without it the script compares against the merge base with `origin/dev`, untracked files included.
+
+```bash
+node scripts/mesura-checks.ts fmt <base>
+node scripts/mesura-checks.ts lint <base>
+node scripts/mesura-checks.ts typecheck <base>
+node scripts/mesura-checks.ts knip
+```
+
+Each line runs alone in a fresh shell and finds `vp` and a Node that satisfies `engines.node` itself; with none installed it exits 2. It changes no tracked file; TypeScript may refresh gitignored `.tsbuildinfo` caches. Exit 0 is clean, 1 is a finding, 2 is a tooling failure (a missing tool, a killed or timed-out check). On 1 or 2, run the remaining lines anyway, then report the gate as failed or incomplete, never as passed. Lint reports errors anywhere in a changed file and warnings only on changed lines. Typecheck covers each package that owns a changed file plus its workspace dependents, one package at a time under the host-wide `/tmp/mesura-typecheck.lock`. `knip` is repository-wide by nature and is the first step of CI's `Check` job. No rule is advisory. Tests are not part of this gate.
+
+## Full-Project Checks
+
+The repository gate for `/tech-debt` and audits, mirroring CI's `Check` job: like CI, `lint --all` fails on errors only, because the repository carries upstream warnings. Run every line even when one fails.
+
+```bash
+node scripts/mesura-checks.ts knip
+node scripts/mesura-checks.ts fmt --all
+node scripts/mesura-checks.ts lint --all
+node scripts/mesura-checks.ts typecheck --all
+```
 
 ## Pull requests
 
@@ -185,8 +242,8 @@ For authorized mobile verification, a missing or outdated native client is a bui
 - Body: the problem in a sentence or two, then how you fixed it. End with the model and harness that did the work.
 - UI changes need before/after images. Motion or timing needs a short video.
 - Upload PR evidence to GitHub. Never commit PR-only screenshots or assets such as `.github/pr-assets/`.
-- One concern per PR. If the description says "also", split it.
-- When babysitting: poll checks and comments newer than the last push, verify each bot finding against the source, fix real ones, dismiss false positives with a written reason. Stay quiet when nothing is new. Stop when the bots are green on the latest commit.
+- One request is one PR. Split it only when the maintainer asks. Outside contributions follow the stricter [one problem per PR](CONTRIBUTING.md#one-problem) rule.
+- When babysitting: call `watch_pull_request` and end your turn. T3 Code wakes you on checks, comments, or conflicts. Do not poll or sleep. Verify each bot finding against the source, fix real ones, dismiss false positives with a written reason. Stay quiet when nothing is new. Stop when the bots are green on the latest commit.
 
 ## Documentation
 
@@ -194,7 +251,7 @@ Most code changes do not need an internal documentation change. Agents can read 
 
 - `docs/internals/` is for architectural decisions and their reasons, constraints that span components, and implementation traps that are hard to discover from the source. Before adding a paragraph, ask what a maintainer would get wrong without it. If reading the relevant code answers the question, leave it out.
 - Do not document every feature, enumerate fields or methods, narrate control flow, maintain file catalogs, or append PR summaries. Types, tests, and code already record the implementation. The glossary defines shared vocabulary; it is not a feature index.
-- Keep a local implementation explanation in a nearby code comment. Use an internal doc when the reasoning crosses boundaries or needs context the code cannot carry well. Link to the relevant source instead of copying it.
+- A local reason the code can't show goes in a short nearby code comment. Use an internal doc when the reasoning crosses boundaries or needs context the code cannot carry well. Link to the relevant source instead of copying it.
 - When a documented decision or constraint changes, rewrite or remove the affected text. Do not append another account of the new behavior. A new internal page needs a distinct, durable reason to exist.
 - `docs/user/` helps users accomplish tasks. Give each major feature a concise section explaining what it does, how to start, and anything unintuitive. A settings path is useful; descriptions of visible buttons, icons, layouts, animations, or every UI state are not. Before adding text, ask what task or decision it helps the user with.
 - Keep user docs in the shipped product's voice, without implementation details or contributor tooling. Update the relevant feature section when how to use it changes. A UI tweak does not need a documentation entry, and a new control does not need its own page.
@@ -209,27 +266,38 @@ Most code changes do not need an internal documentation change. Agents can read 
 
 ## How it works
 
-Clients send typed WebSocket requests. The server turns them into _commands_, a pure _decider_ turns commands into persisted _events_, and a _projector_ derives the read model the UI renders. Provider CLIs run as subprocesses; per-provider _adapters_ translate their native protocols into orchestration events. Side effects run in queue-backed _reactors_ that emit _receipts_ when milestones land. Each turn ends with a _checkpoint_, a hidden git ref, so the app can diff and restore.
+Clients send typed WebSocket requests. The server turns them into _commands_. The _orchestrator_ (`apps/server/src/orchestration-v2/Orchestrator.ts`) serializes commands and decides _events_ without doing any I/O. The _event sink_ commits those events, the _projections_ the UI reads, the _command receipt_, and _outbox_ effects in one transaction. The _effect worker_ then runs the effects, such as starting a provider turn or capturing a checkpoint, and feeds results back as commands. Provider CLIs run as subprocesses; per-provider _adapters_ translate their native protocols into orchestration events. Each turn ends with a _checkpoint_, a hidden git ref, so the app can diff and restore.
 
-Full glossary with file links: `docs/internals/glossary.md`
+Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/internals/glossary.md`
 
 ## Where code lives
 
-- `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read `.repos/effect-smol/LLMS.md` before writing Effect code.
-- `apps/web` - React/Vite UI. `apps/desktop` wraps it, `apps/mobile` is React Native.
+- `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read [Effect services](docs/internals/effect-services.md) before adding server code, and `.repos/effect-smol/LLMS.md` for the Effect library itself.
+- `apps/web` - React/Vite UI, also the phone client. `apps/desktop` wraps it.
 - `apps/marketing` - **upstream's** public site, including the Terms of Service, Privacy Policy and Security Policy of T3 Tools, Inc. This fork does not publish any of it. Never rebrand these pages: a privacy policy carrying our name would be a legal document we never wrote, describing services we do not operate.
 - `infra/relay` - **upstream's** T3 Connect relay, which T3 operates and we do not. Same rule as above.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
-- `packages/client-runtime` - client code shared by web and mobile.
+- `packages/client-runtime` - client code upstream shares between its web and native clients. Here only web uses it, so some modules in it have no caller.
 - `.repos/` - vendored read-only references. Prefer their patterns over invented ones. Never edit or import from them. Sync with `vpr sync:repos` when bumping the matching dependency.
 - `vendor/symmetria-file-manager` - the Symmetria File Manager as a git subtree; four of its packages are workspace members: the web app imports the tree and the file manager's UI (and, from `fm-main`, its channel table and nothing else), the server runs its privileged half. Never format, lint or test it from here; the sync commands and the edits pending push-back are in `docs/operations/vendor-symmetria-file-manager.md`.
+- If `.repos/` is missing in a sparse checkout, read a reference with `git show upstream/main:.repos/<path>`.
 
 ## Taste
 
 - Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
+- Client mutations use `createEnvironmentRpcCommand`. Add protected methods to `CLIENT_GUARDED_RPC_SCOPES` in contracts and use the command's `permissionAtom` for UI availability. Grants are checked at execution against the destination environment; the server remains authoritative. Keep raw RPC clients inside `rpc/`, and extend the permission behavior tests when adding a protected method.
+- Server features are services; transports stay thin. A `ws.ts` RPC handler, HTTP route, or MCP tool decodes input, calls one service method, and maps errors. See [Effect services](docs/internals/effect-services.md).
+- `apps/web/src/components/ui` exports own their look. Pick a `variant` or `size`; do not restyle one with `className`. If none fits and the look is a generic concept, add a variant to the component; a look that belongs to one feature stays in that feature's own component, not in `components/ui`. Layout classes (width, flex, margin, position) belong on the parent. `shadcn/no-restyle` fails lint on violations. See [Web UI](docs/internals/web-ui.md).
+- Reusable Effect functions use `Effect.fn("Service.operation")` with a stable span name, not a
+  function wrapping `Effect.gen`. Keep `Effect.gen` for inline programs and layer construction.
+  Use `Effect.fnUntraced` only when spans would be too frequent (stream chunks, per-event
+  projection, tight loops) or duplicate an existing tracing boundary; explain that choice nearby.
+  Named `Effect.fn` creates a span; the unnamed form does not. Preserve existing span names and
+  options, and pass combinators as additional function-builder arguments.
 - Inferred types over annotations. `any` is the enemy.
-- Comments describe how a thing is used, and move when the code moves. To be used mostly to describe functions, not to annotate every line of behavior.
+- Default to no comment. Write one only for a constraint, an external quirk, or an invariant the code can't show, in one line where you can and four at most. Don't restate names or signatures, narrate steps, record history, or explain the fix you just made; the PR carries that. `t3code/no-low-value-comments` enforces the length cap and the mechanical cases.
+- React effects are for synchronizing with something outside React. Derive in render and act in handlers instead of syncing state, but don't hide real lifecycle work in refs or stores to dodge one. The `t3code/react-effect-budget` lint rule holds each file to its count in `scripts/effect-budget.json`; a new effect states its reason with `// oxlint-disable-next-line t3code/react-effect-budget -- <why>`.
 - This is driven all day, and a dropped frame, a lying spinner and a stale label all get noticed. One user rather than a hundred thousand does not lower the bar — it removes the excuse that someone else would have reported it. No continuously repainting animations; they peg the GPU on high-refresh displays.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
 

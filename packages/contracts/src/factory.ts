@@ -96,15 +96,8 @@ export class FactoryReadSnapshotError extends Schema.TaggedError<FactoryReadSnap
   }
 }
 
-// ---------------------------------------------------------------------------
-// Software Factory runs.
-//
-// A run directory holds `events.jsonl`, one record-version-1 event per line.
-// The single definition of that record is
-// `skills/core/sf-team/bin/run-events.mjs` in the agent-env repository; the
-// schemas below decode the same shape, and `@t3tools/shared/factoryRun` folds
-// it into `FactoryRunState`.
-// ---------------------------------------------------------------------------
+// `events.jsonl` holds one record-version-1 event per line. The single definition of that record is
+// `skills/core/sf-team/bin/run-events.mjs` in the agent-env repository; these schemas decode it.
 
 export const FACTORY_RUN_RECORD_VERSION = 1;
 
@@ -112,6 +105,12 @@ export const factoryRunActivityId = (threadId: string, runId: string) =>
   `factory-run:${threadId}:${runId}`;
 export const factoryReportActivityId = (threadId: string, runId: string) =>
   `factory-report:${threadId}:${runId}`;
+/**
+ * One plan card per plan file in a thread: the id derives from a digest of the
+ * plan's path, not its bytes, so presenting the same file again updates it.
+ */
+export const factoryPlanCardId = (threadId: string, planPathDigest: string) =>
+  `factory-plan:${threadId}:${planPathDigest.slice(0, 16)}`;
 
 export const FactoryRunRole = Schema.Literals(["implementer", "verifier", "reviewer"]);
 export type FactoryRunRole = typeof FactoryRunRole.Type;
@@ -155,18 +154,22 @@ const eventOf = <Type extends string, Fields extends Schema.Struct.Fields>(
 
 /** Every record-version-1 event type, keyed by `type`. */
 export const FactoryRunEventSchemas = {
+  // A skill run (sf-solo, sf-seal-prototype, prototype) dispatches no roles, so it may omit the
+  // routes and the returns budget, and a run without a plan file omits the plan fields.
   "run.started": eventOf("run.started", {
     runId: Schema.String,
     request: Schema.String,
-    planPath: Schema.String,
-    intentPath: Schema.NullOr(Schema.String),
-    planDigest: Schema.String,
-    routes: Schema.Struct({
-      implementer: FactoryRunRoute,
-      verifier: FactoryRunRoute,
-      reviewer: FactoryRunRoute,
-    }),
-    returnsBudget: NonNegativeInt,
+    planPath: Schema.optional(Schema.String),
+    intentPath: Schema.optional(Schema.NullOr(Schema.String)),
+    planDigest: Schema.optional(Schema.String),
+    routes: Schema.optional(
+      Schema.Struct({
+        implementer: FactoryRunRoute,
+        verifier: FactoryRunRoute,
+        reviewer: FactoryRunRoute,
+      }),
+    ),
+    returnsBudget: Schema.optional(NonNegativeInt),
     phases: Schema.Array(
       Schema.Struct({
         index: PhaseNumber,
@@ -466,6 +469,11 @@ export const FactoryRunShellSummary = Schema.Struct({
 });
 export type FactoryRunShellSummary = typeof FactoryRunShellSummary.Type;
 
+/** A running run will wake its coordinator again, so its thread is not Done and not settled. */
+export const factoryRunHoldsCompletion = (
+  run: Pick<FactoryRunShellSummary, "status"> | null | undefined,
+) => run?.status === "running";
+
 /** The compact state a run card draws; replaced in place, and under 4 KiB for an 11-phase run. */
 export const FactoryRunSummary = Schema.Struct({
   runId: Schema.String,
@@ -502,7 +510,6 @@ export const FactoryRunSummary = Schema.Struct({
 });
 export type FactoryRunSummary = typeof FactoryRunSummary.Type;
 
-/** Payload of a `factory.run` activity. */
 export const FactoryRunActivityPayload = Schema.Struct({
   threadId: ThreadId,
   ...FactoryRunSummary.fields,
@@ -519,6 +526,17 @@ export const FactoryReportActivityPayload = Schema.Struct({
   writtenAt: IsoDateTime,
 });
 export type FactoryReportActivityPayload = typeof FactoryReportActivityPayload.Type;
+
+/**
+ * One Software Factory card in a thread's timeline: a `factory_card` turn item, recorded with the
+ * internal `factory_card.record` command and upserted by turn item id.
+ */
+export const FactoryThreadCard = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("plan"), payload: FactoryPlanActivityPayload }),
+  Schema.Struct({ kind: Schema.Literal("run"), payload: FactoryRunActivityPayload }),
+  Schema.Struct({ kind: Schema.Literal("report"), payload: FactoryReportActivityPayload }),
+]);
+export type FactoryThreadCard = typeof FactoryThreadCard.Type;
 
 /** Live progress of one role dispatch, read from its output file while a pane is open. */
 export const FactoryRoleProgress = Schema.Struct({

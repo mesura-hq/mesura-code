@@ -1,14 +1,7 @@
 /**
- * The routes a Software Factory run uses: one harness, model and reasoning
- * level per role, chosen on the plan card and sent with Approve. Web and
- * Android both build their route picker from this module, so the defaults and
- * the routing rules exist once.
- *
- * The shape is exactly sf-team's `--routes` file
- * (`~/.agent-env/skills/core/sf-team/ROUTES.md`), and the two rules are its
- * *Frame*: the verifier runs on Codex, and the reviewer runs on the other
- * family from the implementer. No React and no ES2023 array methods: Android
- * runs this on Hermes.
+ * The shape is exactly sf-team's `--routes` file (`~/.agent-env/skills/core/sf-team/ROUTES.md`),
+ * and the two rules are its *Frame*: the verifier runs on Codex, and the reviewer runs on the
+ * other family from the implementer. Clients build their route picker from here only.
  */
 import {
   defaultInstanceIdForDriver,
@@ -85,19 +78,19 @@ interface FamilyDefault {
   readonly effort: string;
 }
 
-/** Newest Opus at high, Sol at high, Luna at max, as the developer asked. */
+/** Newest Opus at medium, Sol at high, Luna at xhigh, as the developer asked. */
 const ROLE_DEFAULTS: Readonly<
   Record<FactoryRouteRole, Partial<Record<FactoryHarness, FamilyDefault>>>
 > = {
   implementer: {
-    claude: { family: "opus", effort: "high" },
+    claude: { family: "opus", effort: "medium" },
     codex: { family: "sol", effort: "high" },
   },
   reviewer: {
     claude: { family: "opus", effort: "high" },
     codex: { family: "sol", effort: "high" },
   },
-  verifier: { codex: { family: "luna", effort: "max" } },
+  verifier: { codex: { family: "luna", effort: "xhigh" } },
 };
 
 const otherHarness = (harness: FactoryHarness): FactoryHarness =>
@@ -293,7 +286,7 @@ function defaultRouteSlot(
   };
 }
 
-/** The card's starting routes: newest Opus at high with a budget, Sol at high, Luna at max. */
+/** The card's starting routes: newest Opus at medium with a budget, Sol at high, Luna at xhigh. */
 export function defaultFactoryRoutes(providers: ReadonlyArray<ServerProvider>): FactoryRouteSlots {
   return {
     implementer: defaultRouteSlot(providers, "implementer", "claude"),
@@ -375,12 +368,9 @@ export function changeFactoryRouteModel(
 }
 
 /**
- * Holds edited rows to the provider lists as they are now: the card keeps its
- * edits across a provider update, and this runs on every render before Approve
- * reads them. A route whose model is no longer offered to its role becomes
- * unavailable with the reason, so Approve waits for a new choice rather than
- * sending a route the server dropped. A level the model no longer offers falls
- * back as a default does. Returns `slots` itself when nothing changed.
+ * Runs on every render before Approve reads the edited rows. A model no longer offered to its role
+ * makes the route unavailable, so Approve waits instead of sending a route the server dropped; a
+ * level no longer offered falls back as a default does. Returns `slots` itself when unchanged.
  */
 export function reconcileFactoryRouteSlots(
   slots: FactoryRouteSlots,

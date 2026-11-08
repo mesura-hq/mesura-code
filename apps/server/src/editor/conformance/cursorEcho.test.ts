@@ -1,5 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off - locates the real nvim binary before spawning it.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -8,34 +6,14 @@ import * as Layer from "effect/Layer";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { NvimBridge, type NvimBridgeError } from "../NvimBridge.ts";
+import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * A plain cursor motion has to reach the client.
- *
- * `h`, `j`, `k`, `l` and the arrow keys move the cursor and nothing else: no
- * text changes, and on a file taller than the window no line scrolls either.
- * That makes them the one motion whose only evidence is the cursor, and it is
- * why they were the thing that turned out not to work while `G` and `:` looked
- * fine — those two move the viewport and the command line, which travel on
- * their own events.
- *
- * The session's `cursor` is what the manager publishes from, and it compares
- * the value against the last one it sent. A cursor that is never re-read after
- * a key therefore compares equal to itself forever, and the manager stays
- * silent while Neovim's caret walks down the file.
- *
- * `input` is the call under test, not `type`. They settle differently, and
- * `input` is the one a keystroke goes through.
+ * `h`, `j`, `k`, `l` and the arrows change only the cursor, so the session's `cursor` is their only
+ * evidence. The manager publishes `cursor` only when it differs from the last one sent, so a cursor
+ * never re-read after a key keeps the client's caret still. `input` is the call under test, not
+ * `type`: they settle differently, and a keystroke goes through `input`.
  */
-
-const nvimAvailable = (() => {
-  try {
-    NodeChildProcess.execFileSync("nvim", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -57,17 +35,9 @@ const withNvim = <A>(
 const A_FEW_LINES = ["one", "two", "three", "four", "five"];
 
 /**
- * Sends a key and waits for the cursor the session read because of it.
- *
- * The read is forked off the notification fiber on purpose — awaiting an RPC
- * there stops every other notification queued behind it, and Neovim does not
- * always answer — so the cursor lands on a frame *after* the one the key drew.
- * The `cursor` event is what says the read has landed. Counting frames would
- * not do: Neovim sends several redraw batches for one key, so any fixed number
- * is a guess that passes for the wrong reason.
- *
- * Waiting on the drawing frame instead asserts against the cursor as it was
- * *before* the key, which is exactly the defect this file exists to catch.
+ * Waits for the `cursor` event, not a frame: the session forks the cursor read off the notification
+ * fiber, so it lands after the frame the key drew. Neovim sends several redraw batches per key, so
+ * a frame count is a guess, and waiting on the drawing frame asserts the cursor from before the key.
  */
 const pressAndSettle = (bridge: NvimBridge.Session, keys: string) =>
   Effect.gen(function* () {
@@ -81,69 +51,67 @@ const pressAndSettle = (bridge: NvimBridge.Session, keys: string) =>
     stop();
   });
 
-it.layer(layer)("the cursor a key moved", (it) => {
-  it.effect.skipIf(!nvimAvailable)("is what the session reports after `j`", () =>
-    withNvim(A_FEW_LINES, (bridge) =>
-      Effect.gen(function* () {
-        assert.deepStrictEqual(bridge.cursor, { line: 1, col: 1 });
+if (!nvimAvailable) reportMissingNvim("cursor-echo harness");
 
-        // Exactly what a keystroke does: send it, then wait for the drawing it
-        // caused. Nothing here asks Neovim where the cursor is, because the
-        // path a person types does not either.
-        yield* pressAndSettle(bridge, "j");
+if (nvimAvailable)
+  it.layer(layer)("the cursor a key moved", (it) => {
+    it.effect("is what the session reports after `j`", () =>
+      withNvim(A_FEW_LINES, (bridge) =>
+        Effect.gen(function* () {
+          assert.deepStrictEqual(bridge.cursor, { line: 1, col: 1 });
 
-        assert.deepStrictEqual(
-          bridge.cursor,
-          { line: 2, col: 1 },
-          "a `j` moved Neovim's caret and the session still reports the old line, so the manager has nothing to publish and the client's caret never moves",
-        );
-      }),
-    ),
-  );
+          // Exactly what a keystroke does: send it, then wait for the drawing it
+          // caused. Nothing here asks Neovim where the cursor is, because the
+          // path a person types does not either.
+          yield* pressAndSettle(bridge, "j");
 
-  it.effect.skipIf(!nvimAvailable)("is what the session reports after `<Down>`", () =>
-    withNvim(A_FEW_LINES, (bridge) =>
-      Effect.gen(function* () {
-        yield* pressAndSettle(bridge, "<Down>");
+          assert.deepStrictEqual(
+            bridge.cursor,
+            { line: 2, col: 1 },
+            "a `j` moved Neovim's caret and the session still reports the old line, so the manager has nothing to publish and the client's caret never moves",
+          );
+        }),
+      ),
+    );
 
-        assert.deepStrictEqual(bridge.cursor, { line: 2, col: 1 });
-      }),
-    ),
-  );
+    it.effect("is what the session reports after `<Down>`", () =>
+      withNvim(A_FEW_LINES, (bridge) =>
+        Effect.gen(function* () {
+          yield* pressAndSettle(bridge, "<Down>");
 
-  it.effect.skipIf(!nvimAvailable)("follows the mode into insert, having moved nothing", () =>
-    withNvim(A_FEW_LINES, (bridge) =>
-      Effect.gen(function* () {
-        assert.strictEqual(bridge.mode, "n");
+          assert.deepStrictEqual(bridge.cursor, { line: 2, col: 1 });
+        }),
+      ),
+    );
 
-        // `i` at the first column is the case the cursor counter cannot see:
-        // the caret does not move, no text changes, and the only thing that
-        // happened is a mode change. Without `mode_change` in the trigger the
-        // strip goes on saying NORMAL while every key types a letter.
-        yield* pressAndSettle(bridge, "i");
+    it.effect("follows the mode into insert, having moved nothing", () =>
+      withNvim(A_FEW_LINES, (bridge) =>
+        Effect.gen(function* () {
+          assert.strictEqual(bridge.mode, "n");
 
-        assert.strictEqual(bridge.mode, "i", "the strip would still read NORMAL in insert mode");
+          // `i` at the first column is the case the cursor counter cannot see:
+          // the caret does not move, no text changes, and the only thing that
+          // happened is a mode change. Without `mode_change` in the trigger the
+          // strip goes on saying NORMAL while every key types a letter.
+          yield* pressAndSettle(bridge, "i");
 
-        // Leaving insert again is deliberately not asserted here. It needs a
-        // second key in one session, and the first key's trailing frames
-        // trigger their own read whose `cursor` event satisfies the second
-        // key's wait before the second key has been drawn — a test that passes
-        // or fails on timing. `bridge.type` cannot set the state up either:
-        // it feeds keys with `nvim_feedkeys`'s `x` flag, which ends insert
-        // mode the way `:normal! i` does. The trigger itself is held per case
-        // in `NvimBridge.test.ts`, which is where that coverage belongs.
-      }),
-    ),
-  );
+          assert.strictEqual(bridge.mode, "i", "the strip would still read NORMAL in insert mode");
 
-  it.effect.skipIf(!nvimAvailable)("is what the session reports after `l`", () =>
-    withNvim(A_FEW_LINES, (bridge) =>
-      Effect.gen(function* () {
-        yield* pressAndSettle(bridge, "l");
+          // Leaving insert is not asserted here: the first key's trailing `cursor` event would
+          // satisfy a second key's wait early, and `bridge.type` (`nvim_feedkeys` flag `x`) ends
+          // insert mode itself. `NvimBridge.test.ts` holds the `mode_change` trigger per case.
+        }),
+      ),
+    );
 
-        // One column right, in the one-based columns the wire uses.
-        assert.deepStrictEqual(bridge.cursor, { line: 1, col: 2 });
-      }),
-    ),
-  );
-});
+    it.effect("is what the session reports after `l`", () =>
+      withNvim(A_FEW_LINES, (bridge) =>
+        Effect.gen(function* () {
+          yield* pressAndSettle(bridge, "l");
+
+          // One column right, in the one-based columns the wire uses.
+          assert.deepStrictEqual(bridge.cursor, { line: 1, col: 2 });
+        }),
+      ),
+    );
+  });

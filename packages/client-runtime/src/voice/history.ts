@@ -66,7 +66,7 @@ export interface VoiceHistoryRecorderOptions {
   readonly threadId: string;
   readonly callId: string;
   readonly store: VoiceHistoryPendingStore;
-  readonly client: Pick<VoiceHistoryClient, "append">;
+  readonly historyClient: Pick<VoiceHistoryClient, "append">;
   readonly makeId: () => string;
   /** Recording stopped. The host ends the call and shows the message. */
   readonly onFailure: (message: string) => void;
@@ -210,7 +210,7 @@ export function createVoiceHistoryRecorder(options: VoiceHistoryRecorderOptions)
       const head = queue[0]!;
       if (!(await head.stored)) return;
       try {
-        await options.client.append({
+        await options.historyClient.append({
           sessionId: head.batch.callId,
           batchId: head.batch.batchId,
           fragments: head.batch.fragments,
@@ -336,7 +336,7 @@ const lastFragmentSequence = (batch: VoiceHistoryPendingBatch) =>
 export async function resumeVoiceHistoryOutbox(input: {
   readonly owner: VoiceHistoryOwner;
   readonly store: VoiceHistoryPendingStore;
-  readonly client: VoiceHistoryClient;
+  readonly historyClient: VoiceHistoryClient;
   /** Calls a live recorder still owns, such as the call in progress. */
   readonly excludeCallIds?: ReadonlySet<string>;
 }): Promise<VoiceHistoryResumeResult> {
@@ -355,7 +355,7 @@ export async function resumeVoiceHistoryOutbox(input: {
     const threadId = batches[0]!.threadId;
     let summary: VoiceCallSummary | null;
     try {
-      summary = await input.client.readCall({ threadId, callId });
+      summary = await input.historyClient.readCall({ threadId, callId });
     } catch (cause) {
       errors.push(`Voice history for an earlier call is still waiting: ${errorText(cause)}`);
       continue;
@@ -371,7 +371,7 @@ export async function resumeVoiceHistoryOutbox(input: {
       // The server ended the call without the owner's boundary; it accepts no text until one exists.
       const declared = Math.max(summary.lastSequence, lastFragmentSequence(batches.at(-1)!));
       try {
-        await input.client.end({ callId, lastSequence: declared });
+        await input.historyClient.end({ callId, lastSequence: declared });
         boundary = declared;
       } catch (cause) {
         errors.push(`Voice history for an earlier call is still waiting: ${errorText(cause)}`);
@@ -386,7 +386,7 @@ export async function resumeVoiceHistoryOutbox(input: {
         break;
       }
       try {
-        await input.client.append({
+        await input.historyClient.append({
           sessionId: callId,
           batchId: batch.batchId,
           fragments: batch.fragments,

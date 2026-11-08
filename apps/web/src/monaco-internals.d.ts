@@ -1,15 +1,7 @@
 /**
- * The Monaco modules this app reaches into that ship no types.
- *
- * JSON is the only language the file panel colours whose grammar is not under
- * `languages/definitions`. Its tokenizer lives inside the language service, in
- * a module of its own, and taking that module without the service is what lets
- * the panel colour JSON while emitting no JSON worker. The service's public
- * entry has types; this internal one does not.
- *
- * Typed against Monaco's own `TokensProvider`, which is what the call site
- * needs it to be. The import is inside the declaration so this file stays an
- * ambient one rather than becoming a module of its own.
+ * The JSON tokenizer alone, without the language service, colours JSON while emitting no
+ * JSON worker; this internal module ships no types. The import stays inside the
+ * declaration so this file remains ambient rather than a module.
  */
 declare module "monaco-editor/languages/features/json/tokenization.js" {
   export function createTokenizationSupport(

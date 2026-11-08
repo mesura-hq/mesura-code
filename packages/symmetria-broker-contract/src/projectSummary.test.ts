@@ -25,14 +25,9 @@ const decodeChange = Schema.decodeUnknownExit(SymmetriaStreamChange);
 type JsonObject = Readonly<Record<string, unknown>>;
 
 /**
- * The emitted document for one artifact, derived live from the current sources.
- *
- * Navigating to the exact node matters more than it looks. The first version of
- * these two assertions searched the STRINGIFIED document for `"minLength"` and
- * for `"SymmetriaProjectSummary"`, which passed for the wrong reason: the first
- * held only because `name` happens to be the one property in a two-field struct
- * that can emit a length, and the second would hold on a stray `$comment` long
- * after the `$defs` key it exists to check had disappeared. Review caught both.
+ * The emitted document for one artifact, derived live from the current sources. Assertions
+ * navigate to the exact node: a search of the stringified document also matches a stray
+ * `$comment` or an unrelated property, and passes for the wrong reason.
  */
 const documentFor = (file: string): JsonObject => {
   const artifact = buildSymmetriaJsonSchemaArtifacts().find((candidate) => candidate.file === file);
@@ -99,17 +94,8 @@ describe("SymmetriaProjectSummary", () => {
     // a consumer's pinned `$defs` pointer comes to mean a different shape.
     const definitions = definitionsOf(documentFor("streamItem.schema.json"));
     expect(Object.keys(definitions)).toContain("SymmetriaProjectSummary");
-    // NO definition carries a positional name any more, and pinning the count
-    // is what makes this assertion worth having.
-    //
-    // It used to be exactly one: `Objects_`, which was `SymmetriaProtocolVersion`
-    // left un-annotated deliberately (see the WORKAROUND in version.ts — an
-    // annotated root made `toJsonSchemaDocument` emit that root's own document
-    // as a bare `$ref`). Effect 4.0.0-rc.112 stopped emitting it into `$defs`
-    // at all, so zero is the truth now. The hazard the assertion guards is
-    // unchanged: a positional name is numbered by the order Effect met the
-    // struct, so inserting one silently repoints a consumer's pinned `$defs`
-    // pointer at a different shape.
+    // No definition may carry a positional name: Effect numbers it by the order it met the
+    // struct, so an insertion repoints a consumer's pinned `$defs` pointer at another shape.
     expect(Object.keys(definitions).filter((key) => key.startsWith("Objects_"))).toEqual([]);
   });
 
@@ -172,15 +158,9 @@ describe("the stream carries projects", () => {
   });
 
   it("still degrades an entity this build has never heard of", () => {
-    // The mechanism that makes adding `project` a MINOR bump rather than a
-    // major one: a consumer built before this addition meets `"project"` the
-    // way this build meets `"sprocket"`, and the item survives.
-    //
-    // Asserted through an unknown name rather than by simulating an older
-    // build, because nothing in the package can construct one — the plan's
-    // wording ("decodes as unknown under the previous minor") describes a
-    // consumer this repository cannot instantiate. What is testable, and what
-    // the guarantee actually rests on, is that the degradation path is intact.
+    // This degradation is what makes adding `project` a MINOR bump: an older consumer meets
+    // `"project"` the way this build meets `"sprocket"`. The package cannot build an older
+    // consumer, so the test exercises the degradation path through an unknown name.
     const change = decodeChange({ entity: "sprocket", sprocket: { anything: true } });
     expect(change._tag).toBe("Success");
     if (change._tag !== "Success") return;

@@ -1,5 +1,6 @@
 import {
-  ORCHESTRATION_WS_METHODS,
+  isJevUnavailableError,
+  THREAD_SEARCH_WS_METHODS,
   OrchestrationThreadSearchReasoningEvidence,
   OrchestrationThreadSearchReasoningInput,
   THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE,
@@ -9,6 +10,7 @@ import {
   THREAD_SEARCH_REASONING_MAX_INPUT_BYTES,
   THREAD_SEARCH_REASONING_MAX_TERMS,
   THREAD_SEARCH_TITLE_MAX_LENGTH,
+  type ClientGuardedRpcTag,
   type EnvironmentId,
   type OrchestrationThreadSearchCatalogEntry,
   type OrchestrationThreadSearchCatalogPage,
@@ -17,7 +19,9 @@ import {
   type OrchestrationThreadSearchStep,
   type ProjectId,
   type ThreadId,
+  type ThreadSearchToolResult,
 } from "@t3tools/contracts";
+import { THREAD_LINK_PROTOCOL } from "@t3tools/shared/threadLinks";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -29,11 +33,8 @@ import { request, type EnvironmentRpcInput, type EnvironmentUnaryRpcTag } from "
 import { runInEnvironment } from "./runtime.ts";
 import { threadSearchMatchKey } from "./threadSearch.ts";
 
-// Agent thread search: one description searches every connected environment
-// through bounded, read-only RPCs, and the model environment's configured text
-// model steers the reads. Every budget below exists so a search on a large
-// history, a model that never finishes, or many connected environments still
-// ends; hitting one is reported as `budgetExhausted` instead of claiming
+// Every budget below exists so a search on a large history, a model that never finishes, or many
+// connected environments still ends. Hitting one is reported as `budgetExhausted`, never as
 // complete coverage.
 
 /** Catalog and evidence reads in flight at once, across every environment. */
@@ -83,6 +84,13 @@ export interface AgentThreadSearchInput {
   readonly modelEnvironmentId: EnvironmentId;
   /** Local UI feedback. These are observed search steps, not model thoughts. */
   readonly onProgress?: (progress: AgentThreadSearchProgress) => void;
+  /**
+   * Mesura: ask Jev first (ADR-010). When the server reports Jev unavailable
+   * (no key, no connection), the rest of the search uses the configured model
+   * and `onJevUnavailable` is called once.
+   */
+  readonly engine?: "jev";
+  readonly onJevUnavailable?: () => void;
 }
 
 export interface AgentThreadSearchProgress {
@@ -196,7 +204,7 @@ function uniqueEnvironments(
 }
 
 /** Runs one unary RPC in an environment and settles its typed failure. */
-function callEnvironment<TTag extends EnvironmentUnaryRpcTag>(
+function callEnvironment<TTag extends Exclude<EnvironmentUnaryRpcTag, ClientGuardedRpcTag>>(
   environmentId: EnvironmentId,
   tag: TTag,
   input: EnvironmentRpcInput<TTag>,
@@ -396,7 +404,7 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
     const result: Result.Result<OrchestrationThreadSearchCatalogPage, unknown> =
       yield* callEnvironment(
         state.environment.environmentId,
-        ORCHESTRATION_WS_METHODS.listThreadSearchCatalog,
+        THREAD_SEARCH_WS_METHODS.listThreadSearchCatalog,
         { limit: THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE, ...(cursor === undefined ? {} : { cursor }) },
       );
     if (Result.isFailure(result)) {
@@ -446,7 +454,7 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
       if (!takeRead(state)) return;
       const result = yield* callEnvironment(
         state.environment.environmentId,
-        ORCHESTRATION_WS_METHODS.searchThreadEvidence,
+        THREAD_SEARCH_WS_METHODS.searchThreadEvidence,
         {
           query: term,
           limit: EVIDENCE_PAGE_SIZE,
@@ -527,11 +535,9 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
   };
 
   /**
-   * Chooses the evidence for one model step. Each environment offers its
-   * newest message evidence, then catalog titles that contain a searched term,
-   * then the rest of its catalog; environments take turns so none is starved.
-   * The serialized request, JSON overhead included, stays within
-   * THREAD_SEARCH_REASONING_MAX_INPUT_BYTES.
+   * Each environment offers its newest message evidence, then catalog titles containing a searched
+   * term, then the rest of its catalog, taking turns so none is starved. The serialized request,
+   * JSON overhead included, stays within THREAD_SEARCH_REASONING_MAX_INPUT_BYTES.
    */
   const selectModelEvidence = (finalStep: boolean): ReadonlyArray<EvidenceItem> => {
     const lowerTerms = searchedTerms.map((term) => term.toLowerCase());
@@ -561,6 +567,7 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
         searchedTerms: [...searchedTerms],
         evidence: [],
         ...(finalStep ? { finalStep } : {}),
+        ...(engine === undefined ? {} : { engine }),
       }),
     );
     for (const item of candidates) {
@@ -622,6 +629,7 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
   // Without one, a model that keeps asking for reads ends the search with
   // relevant evidence in hand and nothing ranked.
   let finalStep = false;
+  let engine = input.engine;
   for (let round = 0; round < MAX_MODEL_ROUNDS; round += 1) {
     if (round === MAX_MODEL_ROUNDS - 1 && !finalStep) {
       finalStep = true;
@@ -632,14 +640,27 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
     for (const item of selected) issuedRefs.set(item.ref, item);
     const stepResult = yield* callEnvironment(
       input.modelEnvironmentId,
-      ORCHESTRATION_WS_METHODS.reasonThreadSearch,
+      THREAD_SEARCH_WS_METHODS.reasonThreadSearch,
       {
         description,
         searchedTerms: [...searchedTerms],
         evidence: selected.map(toReasoningEvidence),
         ...(finalStep ? { finalStep } : {}),
+        ...(engine === undefined ? {} : { engine }),
       },
     );
+    if (
+      Result.isFailure(stepResult) &&
+      engine !== undefined &&
+      isJevUnavailableError(stepResult.failure)
+    ) {
+      // Jev cannot answer; the same step goes to the configured model, and so
+      // does every later one.
+      engine = undefined;
+      input.onJevUnavailable?.();
+      round -= 1;
+      continue;
+    }
     if (Result.isFailure(stepResult)) {
       return {
         status: "failed",
@@ -721,3 +742,56 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
   yield* confirmConnections;
   return noMatchOrRetrievalFailure();
 });
+
+const TOOL_RESULT_MAX_MATCHES = 8;
+
+const toolResultDetail = (result: AgentThreadSearchResult): string => {
+  switch (result.status) {
+    case "matches":
+      return "Assess the returned evidence and explain the matches. Respect the coverage limits.";
+    case "noConfidentMatch":
+      return "No confident match in the reviewed evidence. Ask a useful clarification or retry with another description.";
+    case "failed":
+      return result.failure === "model"
+        ? "The thread search classifier failed. Report the failure and ask the user to check the server's OpenRouter credential and balance, or its text generation model. Do not retry with another query until the failure is resolved."
+        : "Thread retrieval failed. Report the unavailable hosts and connection failure. Do not treat this as no match.";
+  }
+};
+
+/**
+ * Mesura: answers one `find_threads` request the server's thread search broker
+ * forwarded to this client (ADR-010). Jev decides; when the server reports it
+ * unavailable, the configured text model does, and `engine` says which.
+ */
+export const answerThreadSearchToolRequest = Effect.fn("AgentThreadSearch.answerToolRequest")(
+  function* (
+    input: Pick<AgentThreadSearchInput, "description" | "environments" | "modelEnvironmentId">,
+  ) {
+    let engine: ThreadSearchToolResult["engine"] = "jev";
+    const result = yield* runAgentThreadSearch({
+      ...input,
+      engine: "jev",
+      onJevUnavailable: () => {
+        engine = "text-model";
+      },
+    });
+    return {
+      status:
+        result.status === "matches"
+          ? "matches"
+          : result.status === "noConfidentMatch"
+            ? "no-match"
+            : "failed",
+      matches:
+        result.status === "matches"
+          ? result.matches.slice(0, TOOL_RESULT_MAX_MATCHES).map((match) => ({
+              ...match,
+              url: `${THREAD_LINK_PROTOCOL}://v1/${match.threadId}`,
+            }))
+          : [],
+      coverage: result.coverage,
+      detail: toolResultDetail(result),
+      engine,
+    } satisfies ThreadSearchToolResult;
+  },
+);

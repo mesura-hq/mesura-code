@@ -5,59 +5,49 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   type CodexSettings,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
+  type ProviderInstanceId,
   type ModelSelection,
   type ServerProviderModel,
   TextGenerationError,
 } from "@t3tools/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
-import { expandHomePath } from "../pathExpansion.ts";
-import { codexExecLaunchArgs, resolveCodexLaunchArgs } from "../provider/Layers/codexLaunchArgs.ts";
-import * as TextGeneration from "./TextGeneration.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { codexExecLaunchArgs, resolveCodexLaunchArgs } from "../provider/codexLaunchArgs.ts";
+import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
 import {
-  buildBranchNamePrompt,
-  buildCommitMessagePrompt,
-  buildPrContentPrompt,
-  buildThreadTitlePrompt,
-} from "./TextGenerationPrompts.ts";
+  ProjectIconSelection,
+  ProjectIconSelectionUnavailable,
+  type ProjectIconSelectionInput,
+} from "@t3tools/provider-core/server/projectIconSelection";
 import {
-  buildThreadSearchStepPrompt,
-  THREAD_SEARCH_STEP_TIMEOUT_MS,
-  toThreadSearchStep,
-} from "./ThreadSearchPrompt.ts";
+  makeProjectIconSelectionRequest,
+  offersProjectIconSelectionModel,
+  PROJECT_ICON_SELECTION_MODEL,
+  PROJECT_ICON_SELECTION_TIMEOUT_MS,
+} from "../project/ProjectIconSelection.ts";
 import {
   normalizeCliError,
-  sanitizeCommitSubject,
-  sanitizePrTitle,
-  sanitizeThreadTitle,
   toJsonSchemaObject,
-} from "./TextGenerationUtils.ts";
+} from "@t3tools/provider-core/server/textGenerationUtils";
 import { codexModelFamily, getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 const CODEX_TIMEOUT_MS = 180_000;
 
 /**
- * Arguments for a Codex step that reasons over untrusted text.
- * `--ignore-user-config` skips config.toml (MCP servers, plugins, profiles)
- * while auth still loads from CODEX_HOME. Codex applies `--disable` over any
- * `--enable`, so launch args cannot restore a tool.
- *
- * Checked against real codex-cli 0.156.0 through a local Responses endpoint:
- * the model then sees only `request_user_input` and `apply_patch`. Codex picks
- * `apply_patch` per model and offers no switch for it, so writes rest on the
- * read-only sandbox and the never-approve policy, pinned here after launch args
- * so those cannot relax them; the probe saw every patch rejected. An unknown
- * feature name fails the run, and `tools.view_image` is ignored by that version,
- * which is why `view_image` is disabled as a feature.
+ * Codex args for a step over untrusted text. `--ignore-user-config` skips config.toml but keeps
+ * auth from CODEX_HOME, and `--disable` wins over any `--enable` in launch args. codex-cli 0.156.0
+ * still offers `apply_patch`, so the read-only sandbox and never-approve policy, set after launch
+ * args, block writes. An unknown feature fails the run; 0.156.0 ignores `tools.view_image`.
  */
 const CODEX_NO_TOOLS_ARGS: ReadonlyArray<string> = [
   "--ignore-user-config",
@@ -109,25 +99,42 @@ function withoutMcpServerOverrides(execArgs: ReadonlyArray<string>): ReadonlyArr
   }
   return kept;
 }
+/** Mesura: the shared operations plus the Codex-only project icon search. */
+type CodexOperation = TextGenerationOperations.Operation | "selectProjectIcon";
+const CODEX_MCP_LIST_TIMEOUT_MS = 10_000;
+// Plugins/apps add MCP servers; use trailing config overrides because --disable loses to user -c flags.
+const CODEX_NO_PLUGIN_ARGS = [
+  "--config",
+  "features.plugins=false",
+  "--config",
+  "features.apps=false",
+] as const;
+const CodexMcpServers = Schema.fromJsonString(
+  Schema.Array(Schema.Struct({ name: Schema.String, enabled: Schema.Boolean })),
+);
+const decodeCodexMcpServers = Schema.decodeEffect(CodexMcpServers);
+
+// mcp_servers={} merges instead of replacing; disable named entries and quote dotted names.
+const codexMcpServersOff = (names: ReadonlyArray<string>): string | null =>
+  names.length === 0
+    ? null
+    : `mcp_servers={${names.map((name) => `${JSON.stringify(name)}={enabled=false}`).join(",")}}`;
 const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
-/**
- * Build a Codex text-generation closure bound to a specific `CodexSettings`
- * payload. See `makeCodexAdapter` for the overall per-instance rationale.
- */
 export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(function* (
   codexConfig: CodexSettings,
   environment?: NodeJS.ProcessEnv,
   getModels: Effect.Effect<ReadonlyArray<ServerProviderModel>> = Effect.succeed([]),
+  resolveRuntime?: Effect.Effect<
+    import("../provider/CodexManagedRuntime.ts").CodexEffectiveRuntime,
+    import("@t3tools/contracts").ProviderSetupError,
+    Scope.Scope
+  >,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig.ServerConfig);
   const resolvedEnvironment = environment ?? process.env;
-
-  type MaterializedImageAttachments = {
-    readonly imagePaths: ReadonlyArray<string>;
-  };
 
   const readStreamAsString = <E>(
     operation: string,
@@ -144,17 +151,25 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       ),
     );
 
+  const removeTempFileDir = (filePath: string): Effect.Effect<void, never> =>
+    fileSystem.remove(path.dirname(filePath), { recursive: true }).pipe(Effect.ignore);
+
+  // Background fibers may inherit closed scopes that immediately reap temp files; write unscoped.
   const writeTempFile = (
     operation: string,
     prefix: string,
     content: string,
-  ): Effect.Effect<string, TextGenerationError, Scope.Scope> =>
+  ): Effect.Effect<string, TextGenerationError> =>
     fileSystem
-      .makeTempFileScoped({
+      .makeTempFile({
         prefix: `t3code-${prefix}-${process.pid}-`,
       })
       .pipe(
-        Effect.tap((filePath) => fileSystem.writeFileString(filePath, content)),
+        Effect.tap((filePath) =>
+          fileSystem
+            .writeFileString(filePath, content)
+            .pipe(Effect.onError(() => removeTempFileDir(filePath))),
+        ),
         Effect.mapError(
           (cause) =>
             new TextGenerationError({
@@ -165,16 +180,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         ),
       );
 
-  const safeUnlink = (filePath: string): Effect.Effect<void, never> =>
-    fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
-
   const encodeJsonForOperation = (
-    operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle"
-      | "generateThreadSearchStep",
+    operation: CodexOperation,
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -189,15 +196,10 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     );
 
   const materializeImageAttachments = Effect.fn("materializeImageAttachments")(function* (
-    _operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle",
-    attachments: TextGeneration.BranchNameGenerationInput["attachments"],
-  ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
+    attachments: TextGenerationOperations.Request<Schema.Top>["attachments"],
+  ) {
     if (!attachments || attachments.length === 0) {
-      return { imagePaths: [] };
+      return [];
     }
 
     const imagePaths: string[] = [];
@@ -219,54 +221,118 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       }
       imagePaths.push(resolvedPath);
     }
-    return { imagePaths };
+    return imagePaths;
   });
 
-  const runCodexJson = Effect.fn("runCodexJson")(function* <S extends Schema.Top>({
+  const listEnabledMcpServers = Effect.fn("listEnabledMcpServers")(
+    function* (input: {
+      readonly binary: string;
+      readonly cwd: string;
+      readonly env: NodeJS.ProcessEnv;
+      readonly launchArgs: ReadonlyArray<string>;
+    }) {
+      const spawnCommand = yield* resolveSpawnCommand(
+        input.binary,
+        [...input.launchArgs, ...CODEX_NO_PLUGIN_ARGS, "mcp", "list", "--json"],
+        { env: input.env },
+      );
+      const child = yield* commandSpawner.spawn(
+        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+          env: input.env,
+          cwd: input.cwd,
+          shell: spawnCommand.shell,
+          forceKillAfter: "1 second",
+        }),
+      );
+      const [stdout, , exitCode] = yield* Effect.all(
+        [
+          child.stdout.pipe(Stream.decodeText(), Stream.mkString),
+          child.stderr.pipe(Stream.runDrain),
+          child.exitCode,
+        ],
+        { concurrency: "unbounded" },
+      );
+      if (exitCode !== 0) {
+        yield* Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
+          reason: "exit",
+          exitCode,
+        });
+        return [];
+      }
+      const servers = yield* decodeCodexMcpServers(stdout).pipe(
+        Effect.tapError(() =>
+          Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
+            reason: "decode",
+          }),
+        ),
+      );
+      return servers.filter((server) => server.enabled).map((server) => server.name);
+    },
+    Effect.scoped,
+    Effect.timeoutOption(CODEX_MCP_LIST_TIMEOUT_MS),
+    Effect.flatMap(
+      Option.match({
+        onNone: () =>
+          Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
+            reason: "timeout",
+          }).pipe(Effect.as<ReadonlyArray<string>>([])),
+        onSome: (names) => Effect.succeed(names),
+      }),
+    ),
+    Effect.orElseSucceed((): ReadonlyArray<string> => []),
+  );
+
+  const runCodexCommandJson = Effect.fn("runCodexJson")(function* <S extends Schema.Top>({
     operation,
     cwd,
     prompt,
-    outputSchemaJson,
-    imagePaths = [],
-    cleanupPaths = [],
+    outputSchema: outputSchemaJson,
     modelSelection,
-    timeoutMs = CODEX_TIMEOUT_MS,
+    imagePaths,
+    timeoutMs,
+    investigate,
     isolateTools = false,
   }: {
-    operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle"
-      | "generateThreadSearchStep";
+    readonly operation: CodexOperation;
     /** Undefined runs Codex in an empty temporary directory instead of a project. */
-    cwd: string | undefined;
-    prompt: string;
-    outputSchemaJson: S;
-    imagePaths?: ReadonlyArray<string>;
-    cleanupPaths?: ReadonlyArray<string>;
-    modelSelection: ModelSelection;
-    timeoutMs?: number;
-    /** Run with no tools at all; see `CODEX_NO_TOOLS_ARGS`. */
-    isolateTools?: boolean;
+    readonly cwd: string | undefined;
+    readonly prompt: string;
+    readonly outputSchema: S;
+    readonly modelSelection: ModelSelection;
+    readonly imagePaths: ReadonlyArray<string>;
+    readonly timeoutMs?: number;
+    readonly investigate?: TextGenerationOperations.Request<S>["investigate"];
+    /** Mesura: run with no tools at all; see `CODEX_NO_TOOLS_ARGS`. */
+    readonly isolateTools?: boolean;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const schemaJson = yield* encodeJsonForOperation(
       operation,
       toJsonSchemaObject(outputSchemaJson),
     );
     const schemaPath = yield* writeTempFile(operation, "codex-schema", schemaJson);
-    const outputPath = yield* writeTempFile(operation, "codex-output", "");
+    const outputPath = yield* writeTempFile(operation, "codex-output", "").pipe(
+      Effect.onError(() => removeTempFileDir(schemaPath)),
+    );
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
       const workingDirectory =
         cwd ??
         (yield* fileSystem
-          .makeTempDirectoryScoped({ prefix: "t3code-codex-search-" })
+          .makeTempDirectoryScoped({ prefix: "t3code-codex-isolated-" })
           .pipe(
             Effect.mapError((cause) =>
               normalizeCliError("codex", operation, cause, "Failed to create working directory"),
             ),
           ));
+      const resolved = resolveRuntime
+        ? yield* resolveRuntime.pipe(
+            Effect.mapError(
+              (cause) => new TextGenerationError({ operation, detail: cause.detail }),
+            ),
+          )
+        : undefined;
+      const effectiveConfig = resolved?.config ?? codexConfig;
+      const effectiveEnvironment = resolved?.environment ?? resolvedEnvironment;
       const models = yield* getModels;
       const requestedModel = modelSelection.model;
       const model =
@@ -275,21 +341,45 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           (candidate) => !candidate.isCustom && codexModelFamily(candidate.slug) === requestedModel,
         )?.slug ??
         requestedModel;
-      const launchArgs = resolveCodexLaunchArgs(codexConfig.launchArgs, resolvedEnvironment);
+      const launchArgs = resolveCodexLaunchArgs(effectiveConfig.launchArgs, effectiveEnvironment);
       const reasoningEffort =
         getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
         DEFAULT_TEXT_GENERATION_REASONING_EFFORT;
-      const serviceTier = getCodexServiceTierOptionValue(modelSelection);
+      const serviceTier = resolved ? undefined : getCodexServiceTierOptionValue(modelSelection);
+      const binary = effectiveConfig.binaryPath || "codex";
+      const env = {
+        ...effectiveEnvironment,
+        ...(effectiveConfig.homePath
+          ? {
+              CODEX_HOME: expandHomePath(
+                effectiveConfig.homePath,
+                yield* HostProcess.HomeDirectory,
+              ),
+            }
+          : {}),
+      };
+      const execLaunchArgs = codexExecLaunchArgs(launchArgs);
+      const mcpServersOff = isolateTools
+        ? null
+        : yield* listEnabledMcpServers({
+            binary,
+            cwd: workingDirectory,
+            env,
+            // `codex mcp` rejects --strict-config; the overrides still apply.
+            launchArgs: execLaunchArgs.filter((arg) => arg !== "--strict-config"),
+          }).pipe(Effect.map(codexMcpServersOff));
       const spawnCommand = yield* resolveSpawnCommand(
-        codexConfig.binaryPath || "codex",
+        binary,
         [
           "exec",
           ...(isolateTools
-            ? [
-                ...withoutMcpServerOverrides(codexExecLaunchArgs(launchArgs)),
-                ...CODEX_NO_TOOLS_ARGS,
-              ]
-            : codexExecLaunchArgs(launchArgs)),
+            ? [...withoutMcpServerOverrides(execLaunchArgs), ...CODEX_NO_TOOLS_ARGS]
+            : [
+                ...execLaunchArgs,
+                // A user's MCP server could act on the text-generation prompt.
+                ...CODEX_NO_PLUGIN_ARGS,
+                ...(mcpServersOff ? ["--config", mcpServersOff] : []),
+              ]),
           "--ephemeral",
           "--skip-git-repo-check",
           "-s",
@@ -306,18 +396,16 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
           "-",
         ],
-        { env: resolvedEnvironment },
+        { env: effectiveEnvironment },
       );
       const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        env: {
-          ...resolvedEnvironment,
-          ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
-        },
+        env,
         cwd: workingDirectory,
         shell: spawnCommand.shell,
         stdin: {
           stream: Stream.encodeText(Stream.make(prompt)),
         },
+        forceKillAfter: "1 second",
       });
 
       const child = yield* commandSpawner
@@ -355,17 +443,14 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       }
     });
 
-    const cleanup = Effect.all(
-      [schemaPath, outputPath, ...cleanupPaths].map((filePath) => safeUnlink(filePath)),
-      {
-        concurrency: "unbounded",
-      },
-    ).pipe(Effect.asVoid);
+    const cleanup = Effect.all([removeTempFileDir(schemaPath), removeTempFileDir(outputPath)], {
+      concurrency: "unbounded",
+    }).pipe(Effect.asVoid);
 
     return yield* Effect.gen(function* () {
       yield* runCodexCommand().pipe(
         Effect.scoped,
-        Effect.timeoutOption(timeoutMs),
+        Effect.timeoutOption(timeoutMs ?? investigate?.timeoutMs ?? CODEX_TIMEOUT_MS),
         Effect.flatMap(
           Option.match({
             onNone: () =>
@@ -403,132 +488,71 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     }).pipe(Effect.ensuring(cleanup));
   });
 
-  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
-    Effect.fn("CodexTextGeneration.generateCommitMessage")(function* (input) {
-      const { prompt, outputSchema } = buildCommitMessagePrompt({
-        branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
-        includeBranch: input.includeBranch === true,
-        policy: input.policy,
-      });
+  /**
+   * The shared runner. Mesura: an untrusted prompt (a thread search step) runs
+   * with no tools; see `CODEX_NO_TOOLS_ARGS`.
+   */
+  const runCodexJson = <S extends Schema.Top>(request: TextGenerationOperations.Request<S>) =>
+    materializeImageAttachments(request.attachments).pipe(
+      Effect.flatMap((imagePaths) =>
+        runCodexCommandJson({
+          operation: request.operation,
+          cwd: request.cwd,
+          prompt: request.prompt,
+          outputSchema: request.outputSchema,
+          modelSelection: request.modelSelection,
+          imagePaths,
+          ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}),
+          ...(request.investigate === undefined ? {} : { investigate: request.investigate }),
+          isolateTools: request.untrustedInput === true,
+        }),
+      ),
+    );
 
-      const generated = yield* runCodexJson({
-        operation: "generateCommitMessage",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
+  /**
+   * Mesura: Luna picks a project icon from local candidates. Codex-only, so it
+   * stays off the provider-wide text generation contract; the driver exposes it
+   * as the instance's `selectProjectIcon` capability.
+   */
+  const selectProjectIcon = Effect.fn("CodexTextGeneration.selectProjectIcon")(function* (
+    instanceId: ProviderInstanceId,
+    input: ProjectIconSelectionInput,
+  ) {
+    if (!offersProjectIconSelectionModel(yield* getModels)) {
+      return yield* new ProjectIconSelectionUnavailable({
+        detail: `${PROJECT_ICON_SELECTION_MODEL} is not available on this Codex instance.`,
       });
-
-      return {
-        subject: sanitizeCommitSubject(generated.subject),
-        body: generated.body.trim(),
-        ...("branch" in generated && typeof generated.branch === "string"
-          ? { branch: sanitizeFeatureBranchName(generated.branch) }
-          : {}),
-      };
+    }
+    const request = yield* makeProjectIconSelectionRequest(input).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.mapError(
+        (cause) =>
+          new TextGenerationError({
+            operation: "selectProjectIcon",
+            detail: "Failed to read the candidate images.",
+            cause,
+          }),
+      ),
+    );
+    return yield* runCodexCommandJson({
+      operation: "selectProjectIcon",
+      cwd: undefined,
+      isolateTools: true,
+      prompt: request.prompt,
+      imagePaths: request.imagePaths,
+      timeoutMs: PROJECT_ICON_SELECTION_TIMEOUT_MS,
+      outputSchema: ProjectIconSelection,
+      modelSelection: {
+        instanceId,
+        model: PROJECT_ICON_SELECTION_MODEL,
+        options: [{ id: "reasoningEffort", value: "low" }],
+      },
     });
-
-  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
-    Effect.fn("CodexTextGeneration.generatePrContent")(function* (input) {
-      const { prompt, outputSchema } = buildPrContentPrompt({
-        baseBranch: input.baseBranch,
-        headBranch: input.headBranch,
-        commitSummary: input.commitSummary,
-        diffSummary: input.diffSummary,
-        diffPatch: input.diffPatch,
-        policy: input.policy,
-        changeRequestTemplate: input.changeRequestTemplate,
-      });
-
-      const generated = yield* runCodexJson({
-        operation: "generatePrContent",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizePrTitle(generated.title),
-        body: generated.body.trim(),
-      };
-    });
-
-  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
-    Effect.fn("CodexTextGeneration.generateBranchName")(function* (input) {
-      const { imagePaths } = yield* materializeImageAttachments(
-        "generateBranchName",
-        input.attachments,
-      );
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-      });
-
-      const generated = yield* runCodexJson({
-        operation: "generateBranchName",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        imagePaths,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        branch: sanitizeBranchFragment(generated.branch),
-      };
-    });
-
-  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
-    Effect.fn("CodexTextGeneration.generateThreadTitle")(function* (input) {
-      const { imagePaths } = yield* materializeImageAttachments(
-        "generateThreadTitle",
-        input.attachments,
-      );
-      const { prompt, outputSchema } = buildThreadTitlePrompt({
-        message: input.message,
-        previousTitle: input.previousTitle,
-        linkedContext: input.linkedContext,
-        attachments: input.attachments,
-      });
-
-      const generated = yield* runCodexJson({
-        operation: "generateThreadTitle",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        imagePaths,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizeThreadTitle(generated.title),
-        ...(generated.needsRefinement ? { needsRefinement: true } : {}),
-      } satisfies TextGeneration.ThreadTitleGenerationResult;
-    });
-
-  const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
-    Effect.fn("CodexTextGeneration.generateThreadSearchStep")(function* (input) {
-      const { prompt, outputSchema } = yield* buildThreadSearchStepPrompt(input);
-      const generated = yield* runCodexJson({
-        operation: "generateThreadSearchStep",
-        cwd: undefined,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-        timeoutMs: THREAD_SEARCH_STEP_TIMEOUT_MS,
-        isolateTools: true,
-      });
-      return yield* toThreadSearchStep("Codex", generated);
-    });
+  });
 
   return {
-    generateCommitMessage,
-    generatePrContent,
-    generateBranchName,
-    generateThreadTitle,
-    generateThreadSearchStep,
-  } satisfies TextGeneration.TextGeneration["Service"];
+    ...TextGenerationOperations.fromRunner("CodexTextGeneration", runCodexJson),
+    selectProjectIcon,
+  };
 });

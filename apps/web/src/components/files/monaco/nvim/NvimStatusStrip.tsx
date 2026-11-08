@@ -6,18 +6,9 @@ import { isErrorMessageKind } from "./nvimMessages.ts";
 import { describeFallback, isSettingsFixable, type NvimFallback } from "./nvimFallback.ts";
 
 /**
- * One row under the editor: the mode, the command line, and the last message.
- *
- * A modal editor that does not show its mode is a trap — the same keystroke
- * deletes a line or types a letter, and the only way to find out which is to
- * press it. The command line is the same problem one level up: `:` and `/`
- * take the keyboard entirely, and a host that does not draw them leaves the
- * developer typing into something they cannot see. Phase 8 adds the notice for
- * when Neovim could not start.
- *
- * Deliberately still: no transition, no animation. This is driven all day and
- * an indicator that moved on every `i` would be the most repetitive thing on
- * the screen.
+ * One row under the editor: the mode, the command line, the last message, and the notice when
+ * Neovim could not start. A modal editor must show its mode, and `:` and `/` must be visible.
+ * Deliberately still (no transition, no animation): an indicator moving on every `i` is noise.
  */
 export function NvimStatusStrip({
   mode,
@@ -26,6 +17,7 @@ export function NvimStatusStrip({
   message,
   fallback,
   onRetry,
+  keysDelivery,
 }: {
   readonly mode: string;
   readonly jumping: boolean;
@@ -33,6 +25,8 @@ export function NvimStatusStrip({
   readonly message: { readonly kind: string; readonly text: string } | null;
   readonly fallback: NvimFallback | null;
   readonly onRetry: () => void;
+  /** Keys that are not reaching Neovim; see `editorKeyLane`. */
+  readonly keysDelivery: "retrying" | "lost" | null;
 }) {
   if (fallback !== null) {
     // The panel still edits — it is the plain editor it was before modal
@@ -42,7 +36,7 @@ export function NvimStatusStrip({
       <div
         data-nvim-status-strip
         data-nvim-fallback
-        className="flex h-6 shrink-0 items-center gap-2 border-t border-border/50 px-2 text-[11px] text-muted-foreground"
+        className="flex h-6 shrink-0 items-center gap-2 border-t border-border/50 px-2 text-search-label text-muted-foreground"
       >
         <span className="font-mono font-medium tracking-wide text-foreground">NEOVIM OFF</span>
         <span className="truncate">{describeFallback(fallback)}</span>
@@ -63,14 +57,14 @@ export function NvimStatusStrip({
   return (
     <div
       data-nvim-status-strip
-      className="flex h-6 shrink-0 items-center gap-2 border-t border-border/50 px-2 text-[11px] text-muted-foreground"
+      className="flex h-6 shrink-0 items-center gap-2 border-t border-border/50 px-2 text-search-label text-muted-foreground"
     >
       {jumping ? (
         // Neovim still reports normal mode while flash waits for a label, so
         // the strip says what the next key actually does.
         <span
           data-nvim-jumping
-          className="flex items-center gap-1 font-mono font-medium tracking-wide text-amber-600 dark:text-amber-400"
+          className="flex items-center gap-1 font-mono font-medium tracking-wide text-editor-warning"
         >
           <ZapIcon aria-hidden className="size-3 fill-current" />
           FLASH
@@ -78,6 +72,13 @@ export function NvimStatusStrip({
       ) : (
         <span className="font-mono font-medium tracking-wide text-foreground">
           {describeMode(mode)}
+        </span>
+      )}
+      {keysDelivery === null ? null : (
+        // Said, not hidden: a key that did not arrive changes what the next
+        // one does, so the developer has to know before they type on.
+        <span data-nvim-input-lost className="shrink-0 font-mono text-destructive">
+          {keysDelivery === "retrying" ? "KEYS NOT SENT, RETRYING" : "KEYS LOST"}
         </span>
       )}
       {cmdline === null ? null : <NvimCmdlineText cmdline={cmdline} />}

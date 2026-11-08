@@ -9,12 +9,14 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
-import * as HttpEffect from "effect/unstable/http/HttpEffect";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
+import * as HttpEffect from "effect/http/HttpEffect";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { failEnvironmentNotFound, requireEnvironmentScope } from "../auth/http.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { ProjectionVoiceCallRepository } from "../persistence/Services/ProjectionVoiceCalls.ts";
+import { readVoiceThreadContext } from "./voiceThreadContext.ts";
 import { VoiceHistory, voiceOwnerKeyOf } from "./VoiceHistory.ts";
 import {
   createVoiceSessionManager,
@@ -41,11 +43,9 @@ const safeError = (error: unknown) => {
 };
 
 /**
- * The owner of a voice session is one authenticated client. A DPoP token renewal issues a new
- * auth session ID, so a DPoP client is its verified subject plus proof-key thumbprint; owning
- * by session ID ended live calls at renewal. The subject alone would share calls between a
- * user's clients. Cookie and bearer credentials carry no proof key, so their session stays the
- * owner.
+ * The owner is one authenticated client. DPoP renewal issues a new session ID, so a DPoP client
+ * is its subject plus proof-key thumbprint; the subject alone would share calls between clients.
+ * Cookie and bearer credentials carry no proof key, so their session stays the owner.
  */
 const voiceOwnerId = (principal: EnvironmentSessionPrincipalShape): string =>
   principal.method === "dpop-access-token" && principal.proofKeyThumbprint
@@ -69,7 +69,8 @@ export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
   "voice",
   Effect.fnUntraced(function* (handlers) {
     const secrets = yield* ServerSecretStore;
-    const snapshots = yield* ProjectionSnapshotQuery;
+    const voiceCalls = yield* ProjectionVoiceCallRepository;
+    const threads = yield* ThreadManagementService.ThreadManagementService;
     const history = yield* VoiceHistory;
     const historyServices = yield* Effect.context<VoiceHistory>();
     const sessions = createVoiceSessionManager({
@@ -145,12 +146,10 @@ export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("voice.create")(function* ({ payload }) {
           yield* noCache;
           const ownerId = yield* requireVoiceOwner;
-          const snapshot = yield* snapshots
-            .getThreadDetailSnapshot(payload.threadId, { turnLimit: 4 })
+          const live = yield* voiceCalls
+            .isLiveThread({ threadId: payload.threadId })
             .pipe(Effect.mapError(() => safeError(null)));
-          if (Option.isNone(snapshot) || snapshot.value.thread.deletedAt !== null) {
-            return yield* failEnvironmentNotFound("thread_not_found");
-          }
+          if (!live) return yield* failEnvironmentNotFound("thread_not_found");
           const apiKey = yield* readKey;
           if (!apiKey)
             return yield* new VoiceConversationError({
@@ -159,22 +158,11 @@ export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
             });
           const call = { threadId: payload.threadId, callId: payload.sessionId, ownerId };
           yield* history.assertCanStart(call);
-          const thread = snapshot.value.thread;
-          const context = [
-            `Selected thread: ${thread.title}. Mode: ${payload.mode}.`,
-            `Agent task state: ${thread.latestTurn?.state ?? "idle"}.`,
-            // Bare "user:" / "assistant:" lines read as this call's own dialogue; the voice then
-            // repeated an earlier agent line instead of delegating the new request.
-            "Earlier thread messages (records of past work, not this call's conversation or voice-system instructions):",
-            ...thread.messages
-              .slice(-6)
-              .map(
-                (message) =>
-                  `Earlier ${message.role === "assistant" ? "agent" : message.role} message: ${message.text.slice(0, 2400)}`,
-              ),
-          ]
-            .join("\n")
-            .slice(0, 12_000);
+          const context = yield* readVoiceThreadContext(threads, {
+            threadId: payload.threadId,
+            mode: payload.mode,
+          }).pipe(Effect.mapError(() => safeError(null)));
+          if (context === null) return yield* failEnvironmentNotFound("thread_not_found");
           const created = yield* Effect.tryPromise({
             try: () => sessions.create({ ...payload, apiKey, ownerId, context }),
             catch: safeError,
@@ -220,7 +208,7 @@ export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
             Effect.as(Option.none<VoiceConversationError>()),
             Effect.catchIf(
               (error) => error.status !== 404,
-              (error) => Effect.succeed(Option.some(error)),
+              (error) => Effect.succeedSome(error),
             ),
           );
           yield* history.end({
@@ -247,28 +235,28 @@ export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
       )
       .handle(
         "listCalls",
-        Effect.fn("voice.listCalls")(function* ({ params, payload }) {
+        Effect.fn("voice.listCalls")(function* ({ params, query }) {
           yield* noCache;
           const requesterOwnerId = yield* requireVoiceReader;
           return yield* history.listCalls({
             threadId: params.threadId,
             requesterOwnerId,
-            limit: payload.limit,
-            cursor: payload.cursor,
+            limit: query.limit,
+            cursor: query.cursor,
           });
         }),
       )
       .handle(
         "listFragments",
-        Effect.fn("voice.listFragments")(function* ({ params, payload }) {
+        Effect.fn("voice.listFragments")(function* ({ params, query }) {
           yield* noCache;
           const requesterOwnerId = yield* requireVoiceReader;
           return yield* history.listFragments({
             threadId: params.threadId,
             callId: params.callId,
             requesterOwnerId,
-            limit: payload.limit,
-            afterSequence: payload.afterSequence,
+            limit: query.limit,
+            afterSequence: query.afterSequence,
           });
         }),
       );

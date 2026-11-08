@@ -2,20 +2,24 @@ import {
   FactorySnapshotDigest,
   McpCapabilityUnavailableError,
   NonNegativeInt,
+  OrchestratorMcpFailure,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import * as Tool from "effect/unstable/ai/Tool";
-import * as Toolkit from "effect/unstable/ai/Toolkit";
+import * as Tool from "effect/ai/Tool";
+import * as Toolkit from "effect/ai/Toolkit";
 
 import * as FactoryRunTracker from "../../../factory/FactoryRunTracker.ts";
 import * as FactorySnapshotStore from "../../../factory/FactorySnapshotStore.ts";
-import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
+import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
-  OrchestrationEngine.OrchestrationEngineService,
+  // The access gate (`McpToolAccess.actsAsCaller`) reads the calling thread through it.
+  ThreadManagementService.ThreadManagementService,
+  Orchestrator.OrchestratorV2,
   FactorySnapshotStore.FactorySnapshotStore,
   FactoryRunTracker.FactoryRunTracker,
 ];
@@ -25,7 +29,7 @@ export const FACTORY_DOCUMENT_MAX_BYTES = FactorySnapshotStore.FACTORY_SNAPSHOT_
 
 /**
  * The most UTF-8 bytes a plan's title, headings and phase titles may take together.
- * They travel in the plan activity, which every client replays; a plan in the
+ * They travel in the plan card, which every client replays; a plan in the
  * heading contract uses about 1 KiB of it.
  */
 export const FACTORY_PLAN_METADATA_MAX_BYTES = 16 * 1024;
@@ -116,6 +120,8 @@ export const AttachFactoryRunResult = Schema.Struct({
 export type AttachFactoryRunResult = typeof AttachFactoryRunResult.Type;
 
 export const FactoryToolError = Schema.Union([
+  // The access gate's refusal: no calling thread, or its run is not live.
+  OrchestratorMcpFailure,
   McpCapabilityUnavailableError,
   FactoryPresentPlanError,
   FactoryPresentPlanFailedError,

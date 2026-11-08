@@ -1,12 +1,7 @@
 /**
- * The one Monaco worker this app runs.
- *
- * It serves word-based operations and link detection, knows no language, and is
- * about a hundred kilobytes. Every other worker Monaco can start belongs to a
- * bundled language service, and those are exactly what this app does not want:
- * code intelligence comes from a language server on the backend, so a second
- * analysis running in the browser would ship the largest part of the bundle to
- * disagree with the first one.
+ * The one Monaco worker this app runs: word-based operations and link detection, no language,
+ * about 100 KB. Every other worker belongs to a language service, which this app leaves out
+ * because code intelligence comes from the backend language server.
  */
 export const EDITOR_WORKER_LABEL = "editorWorkerService";
 
@@ -16,12 +11,8 @@ export interface MonacoWorkerFactories {
 }
 
 /**
- * Chooses a worker for a label Monaco asks about.
- *
- * A guard rather than the mechanism: with every language feature switched off
- * below, the language modes never ask for a worker at all. This is what catches
- * it if one ever does — a new Monaco version registering a feature this app did
- * not know to disable, for instance.
+ * Chooses a worker for a label Monaco asks about. A guard: no language mode asks for a worker
+ * today, so this catches a future Monaco feature this app did not know to disable.
  */
 export function workerForLabel(label: string, factories: MonacoWorkerFactories): Worker {
   return label === EDITOR_WORKER_LABEL ? factories.editorWorker() : factories.inertWorker();

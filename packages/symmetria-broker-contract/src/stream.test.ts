@@ -81,11 +81,9 @@ describe("SymmetriaStreamItem", () => {
   });
 
   it("admits exactly the change entities it publishes", () => {
-    // Read by decoding rather than by reflection, because the fallback member
-    // reaches its tag through a transformation and has no literal to inspect.
-    // The exhaustive record is half the pin: a name added to the published list
-    // has to be given a payload here, and the member count is the other half, so
-    // neither the list nor the union can grow without the other.
+    // Decoding, not reflection: the fallback member reaches its tag through a transformation.
+    // The exhaustive record and the member count together stop the published list and the
+    // union from growing apart.
     const probes: Record<SymmetriaStreamChangeEntity, unknown> = {
       thread: { entity: "thread", thread: goldenEntity("threads") },
       surface: { entity: "surface", surface: goldenEntity("surfaces") },

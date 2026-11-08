@@ -11,7 +11,7 @@ const LAYOUTS: ReadonlyArray<readonly [VoiceCallLayout, string]> = [
 ];
 
 // Touch targets reach 44px on narrow screens, where the call is driven by touch.
-const TOUCH_TARGET = "max-sm:h-11 max-sm:w-11 max-sm:min-w-11 max-sm:px-0";
+const TOUCH_TARGET = "max-sm:h-11 max-sm:w-11 max-sm:min-w-11";
 
 /**
  * The only control surface of a live call: one row with the view, mute and hang up. It exists

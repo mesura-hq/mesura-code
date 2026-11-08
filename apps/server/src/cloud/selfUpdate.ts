@@ -2,11 +2,12 @@ import {
   ServerSelfUpdateError,
   type ServerSelfUpdateCapability,
   type ServerSelfUpdateInput,
+  type ServerSelfUpdateProgressEvent,
   type ServerSelfUpdateProgressStage,
   type ServerSelfUpdateResult,
   type ThreadId,
 } from "@t3tools/contracts";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import { PUBLISHED_RELEASE_BASE_URL } from "@t3tools/shared/stateHome";
@@ -19,10 +20,13 @@ import * as Ref from "effect/Ref";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import { HttpClient } from "effect/unstable/http";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
+import { HttpClient } from "effect/http";
 
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 
+import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -30,7 +34,9 @@ import {
   ensurePinnedRuntimeInstalled,
   pinnedRuntimeCommand,
   PinnedRuntimeInstallError,
+  pinnedRuntimePaths,
   PinnedRuntimePreflightBlockedError,
+  prunePinnedRuntimes,
 } from "./pinnedRuntime.ts";
 import { decodeServicePreflightResult } from "./servicePreflight.ts";
 import * as ServiceLauncherClient from "./serviceLauncherClient.ts";
@@ -39,18 +45,10 @@ import { isExactServiceVersion, SERVICE_LAUNCHER_PROTOCOL } from "./serviceProto
 const PREFLIGHT_TIMEOUT = Duration.seconds(30);
 
 /**
- * What update path this server can honour, or `null` when it can only be
- * replaced by hand.
- *
- * This is the only gate. Every caller must ask here rather than re-deriving the
- * answer from `mode` and `launcher.managed`, because the fork adds a condition
- * that has nothing to do with either: a `boot-service` update installs the
- * server from a published release archive, and the fork publishes none. While
- * `PUBLISHED_RELEASE_BASE_URL` is null that download resolves *upstream's*
- * release server, so accepting an update would swap this server for a different product —
- * one that does not implement the fork's own RPC methods — and would report
- * success while doing it. Advertise nothing rather than a capability the fork
- * cannot honour; the client then shows manual guidance instead of a button.
+ * The only self-update gate; callers ask here instead of re-deriving it from `mode` and `launcher.managed`.
+ * A `boot-service` update installs a published release archive, and the fork publishes none. While
+ * `PUBLISHED_RELEASE_BASE_URL` is null that download would resolve upstream's server and swap this one
+ * for a different product, so advertise nothing and let the client show manual guidance.
  */
 export function resolveServerSelfUpdateCapability(input: {
   readonly desktopManaged: boolean;
@@ -58,12 +56,8 @@ export function resolveServerSelfUpdateCapability(input: {
   /** Defaults to the fork's real answer; tests pass an origin to exercise the machinery. */
   readonly publishedReleaseBaseUrl?: string | null;
 }): ServerSelfUpdateCapability | null {
-  // Check for `undefined`, not falsiness. `??` would treat an explicit null as
-  // "not supplied" and fall back to the constant, while `make` below uses a
-  // destructuring default that only fires on `undefined`. Once the constant is
-  // a real name the two hops would disagree, and this resolver would advertise
-  // `boot-service` for a service whose own failure message says there is no
-  // package to install.
+  // Check `undefined`, not falsiness: `make` uses a destructuring default that fires only on
+  // `undefined`, so `??` here would let the two hops disagree about an explicit null.
   const publishedReleaseBaseUrl =
     input.publishedReleaseBaseUrl === undefined
       ? PUBLISHED_RELEASE_BASE_URL
@@ -166,46 +160,70 @@ export const withRunningThreadContinuation = Effect.fn(
 
   return ServerSelfUpdate.of({
     update,
-    commitDesktopUpdate: (requestId) =>
-      Effect.gen(function* () {
-        const shouldContinue = yield* Ref.modify(desktopContinuationTokens, (tokens) => [
-          HashSet.has(tokens, requestId),
-          HashSet.remove(tokens, requestId),
-        ]);
-        let handoffAccepted = false;
-        let continuationThreadIds: ReadonlyArray<ThreadId> = [];
-        return yield* clearOnError(
-          Effect.gen(function* () {
-            continuationThreadIds = shouldContinue ? yield* input.prepare : [];
-            return yield* input.selfUpdate.commitDesktopUpdate(requestId, () =>
-              Effect.sync(() => {
-                handoffAccepted = true;
-              }),
-            );
-          }),
-          () => continuationThreadIds,
-          () => handoffAccepted,
-        ).pipe(
-          Effect.catchCause((cause) =>
-            (shouldContinue && !handoffAccepted
-              ? Ref.update(desktopContinuationTokens, HashSet.add(requestId))
-              : Effect.void
-            ).pipe(Effect.andThen(Effect.failCause(cause))),
-          ),
-        );
-      }),
+    commitDesktopUpdate: Effect.fn("selfUpdate.commitDesktopUpdate")(function* (requestId) {
+      const shouldContinue = yield* Ref.modify(desktopContinuationTokens, (tokens) => [
+        HashSet.has(tokens, requestId),
+        HashSet.remove(tokens, requestId),
+      ]);
+      let handoffAccepted = false;
+      let continuationThreadIds: ReadonlyArray<ThreadId> = [];
+      return yield* clearOnError(
+        Effect.gen(function* () {
+          continuationThreadIds = shouldContinue ? yield* input.prepare : [];
+          return yield* input.selfUpdate.commitDesktopUpdate(requestId, () =>
+            Effect.sync(() => {
+              handoffAccepted = true;
+            }),
+          );
+        }),
+        () => continuationThreadIds,
+        () => handoffAccepted,
+      ).pipe(
+        Effect.catchCause((cause) =>
+          (shouldContinue && !handoffAccepted
+            ? Ref.update(desktopContinuationTokens, HashSet.add(requestId))
+            : Effect.void
+          ).pipe(Effect.andThen(Effect.failCause(cause))),
+        ),
+      );
+    }),
   });
 });
+
+/**
+ * A server starting from the runtime its launcher settled on means runtimes left by earlier
+ * updates can go. The boot service says so through its IPC context. The SSH launcher and the
+ * install script's `t3` start this home's pinned runtime directly, without one.
+ */
+export const pruneRuntimesOnStart = Effect.fn("cloud.server_self_update.prune_on_start")(
+  function* (input: { readonly baseDir: string; readonly managed: boolean }) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const platform = yield* HostProcess.Platform;
+    const executablePath = yield* HostProcess.ExecutablePath;
+    const { entryPath } = pinnedRuntimePaths(path, input.baseDir, packageJson.version, platform);
+    // The executable path is resolved, so it names the real path of a symlinked T3 home.
+    const realEntryPath = yield* fs.realPath(entryPath).pipe(Effect.orElseSucceed(() => entryPath));
+    if (!input.managed && executablePath !== entryPath && executablePath !== realEntryPath) {
+      return [];
+    }
+    const removed = yield* prunePinnedRuntimes({
+      baseDir: input.baseDir,
+      keep: [packageJson.version],
+    });
+    if (removed.length > 0) {
+      yield* Effect.logInfo("Removed unused t3 runtimes.", { versions: removed });
+    }
+    return removed;
+  },
+);
 
 export const make = Effect.fn("cloud.server_self_update.make")(function* ({
   publishedReleaseBaseUrl = PUBLISHED_RELEASE_BASE_URL,
 }: {
   /**
-   * Which origin a release-archive update would install from. Production takes
-   * the default, which is the fork's real answer: none. Tests pass an origin so
-   * the staging, preflight and single-flight machinery stays covered — the fork
-   * disabled that path, it did not delete it, and an upstream merge has to keep
-   * finding it here.
+   * The origin a release-archive update installs from. Production keeps the fork's answer, none;
+   * tests pass an origin so the disabled staging, preflight and single-flight path stays covered.
    */
   readonly publishedReleaseBaseUrl?: string | null;
 } = {}) {
@@ -215,23 +233,20 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* ({
   const runner = yield* ProcessRunner.ProcessRunner;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const platform = yield* HostProcessPlatform;
-  const arch = yield* HostProcessArchitecture;
-  // Archive-distributed targets download from GitHub Releases. The client is
-  // optional so callers without one (tests, npm-only hosts) still construct.
+  const platform = yield* HostProcess.Platform;
+  const arch = yield* HostProcess.Architecture;
   const httpClient = yield* HttpClient.HttpClient;
   const releaseBaseUrl = Option.getOrUndefined(
-    yield* Config.string(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option),
+    yield* Config.String(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option),
   );
   const inFlight = yield* Ref.make(false);
 
-  // Ask the gate above rather than re-deriving the answer here. This branch
-  // used to duplicate the resolver's logic, so the descriptor a client reads
-  // and the check this service enforces could disagree — and did, the moment
-  // the fork added the unpublished-package condition to only one of them.
-  // A configured mirror is an origin this server may install from, so it counts
-  // here too — otherwise `T3CODE_RELEASE_BASE_URL` would be honoured by the
-  // installer and ignored by the capability a client reads.
+  yield* pruneRuntimesOnStart({ baseDir: serverConfig.baseDir, managed: launcher.managed }).pipe(
+    Effect.forkScoped,
+  );
+
+  // Ask the gate above so the descriptor a client reads and the check enforced here cannot disagree.
+  // A configured mirror (`T3CODE_RELEASE_BASE_URL`) is an origin this server may install from too.
   const installOrigin = releaseBaseUrl ?? publishedReleaseBaseUrl;
   const capability = resolveServerSelfUpdateCapability({
     desktopManaged: serverConfig.mode === "desktop",
@@ -247,9 +262,6 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* ({
     "cloud.server_self_update.update",
   )(function* (input, reportProgress = () => Effect.void, onHandoffAccepted = () => Effect.void) {
     if (capability === "desktop-managed") {
-      // input.targetVersion is meaningless here: the desktop app's own
-      // update feed decides what it downloads, and the result carries what
-      // it actually got.
       if (desktopAppUpdate.available) {
         return yield* desktopAppUpdate.run(reportProgress);
       }
@@ -396,11 +408,35 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* ({
 
   return ServerSelfUpdate.of({
     update,
-    commitDesktopUpdate: (requestId, onHandoffAccepted) =>
-      desktopAppUpdate.commit(requestId, onHandoffAccepted),
+    commitDesktopUpdate: Effect.fn("ServerSelfUpdate.commitDesktopUpdate")(
+      function (requestId, onHandoffAccepted) {
+        return desktopAppUpdate.commit(requestId, onHandoffAccepted);
+      },
+    ),
   });
 });
 
 export const layer = Layer.effect(ServerSelfUpdate, make()).pipe(
   Layer.provide(ProcessRunner.layer),
 );
+
+// The update outlives client sockets; progress offers to a closed queue are ignored.
+export const updateProgressStream = (
+  selfUpdate: ServerSelfUpdate["Service"],
+  input: ServerSelfUpdateInput,
+) =>
+  Stream.callback<ServerSelfUpdateProgressEvent, ServerSelfUpdateError>((queue) => {
+    const offer = (event: ServerSelfUpdateProgressEvent) =>
+      Queue.offer(queue, event).pipe(Effect.ignore);
+
+    return selfUpdate
+      .update(input, (stage) => offer({ type: "progress", stage }))
+      .pipe(
+        Effect.flatMap((result) => offer({ type: "complete", result })),
+        Effect.catchTags({
+          ServerSelfUpdateError: (error) => Queue.fail(queue, error).pipe(Effect.ignore),
+        }),
+        Effect.andThen(Queue.end(queue).pipe(Effect.ignore)),
+        Effect.forkDetach,
+      );
+  });

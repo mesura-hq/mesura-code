@@ -1,11 +1,7 @@
 /**
- * Guard for what the host stats atom can rely on from the shared subscription
- * factory (`createEnvironmentSubscriptionAtomFamily` in `../state/runtime.ts`),
- * mounted through `environmentSubscriptionHarness.ts`. The factory holds only
- * the latest value: messages that land one at a time each reach a listener,
- * and a burst in one chunk reaches it as its last message only. That second
- * fact is why the host stats history is folded inside the stream, not in an
- * atom fed from the subscription.
+ * The shared subscription factory holds only the latest value: messages landing one at a time each
+ * reach a listener, but a burst in one chunk reaches it as its last message only. That is why the
+ * host stats history is folded inside the stream, not in an atom fed from the subscription.
  */
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import * as Stream from "effect/Stream";

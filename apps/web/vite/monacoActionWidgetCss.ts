@@ -1,23 +1,10 @@
 import type { Plugin } from "vite-plus";
 
 /**
- * Rewrites the one `:has()` in Monaco's CSS that reads the `style` attribute.
- *
- * Monaco's action widget (the code-action menu) lays out rows that carry a
- * detail line with
- * `.monaco-list-row.action:has(.detail:not([style*="display: none"]))`.
- * A `:has()` whose argument depends on `style` makes Chromium re-check it on
- * every inline-style change anywhere in the document, and upstream's
- * `group-has-*` utilities turn each re-check into a whole-subtree restyle. The
- * app writes inline styles constantly (list row positions, label animations),
- * so while this rule is loaded — from the first file opened until the window
- * closes — every thread switch pays for it.
- *
- * Monaco empties the detail whenever it hides it (`actionList.js` sets
- * `textContent = ''` with `display = 'none'`), so `:not(:empty)` selects the
- * same rows without reading `style`. Measured 2026-09-26 on the same data and
- * scripted thread switches: whole-page restyles 46 → 36, elements restyled
- * 104k → 84k, style work −18%, identical to deleting the rule.
+ * Monaco's action widget selects detail rows with a `:has()` that reads `style`, so Chromium re-checks
+ * it on every inline-style change and upstream's `group-has-*` turns each into a subtree restyle.
+ * Monaco empties the detail whenever it hides it (`actionList.js`), so `:not(:empty)` selects the same
+ * rows without reading `style` (measured: style work -18%, the same as deleting the rule).
  */
 
 export const MONACO_STYLE_ATTRIBUTE_HAS = ':has(.detail:not([style*="display: none"]))';

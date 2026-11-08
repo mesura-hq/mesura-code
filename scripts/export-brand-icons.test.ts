@@ -33,6 +33,12 @@ describe("cross-platform brand icon export", () => {
     expect(() => assertPinnedImageRenderer()).not.toThrow();
   });
 
+  it("reproduces every committed generated asset byte for byte", async () => {
+    const generated = await collectGeneratedBrandAssets(REPOSITORY_ROOT);
+
+    expect(await findStaleGeneratedAssetPaths(REPOSITORY_ROOT, generated)).toEqual([]);
+  });
+
   it("keeps the deferred macOS handoff free of an unreachable native exporter", () => {
     const exporterSource = NodeFS.readFileSync(
       NodePath.join(REPOSITORY_ROOT, "scripts/export-brand-icons.ts"),
@@ -62,6 +68,8 @@ describe("cross-platform brand icon export", () => {
           variant.outputs.ios,
           variant.outputs.universal,
           variant.outputs.appleTouch,
+          variant.outputs.webIcon192,
+          variant.outputs.webIcon512,
           variant.outputs.favicon16,
           variant.outputs.favicon32,
           variant.outputs.faviconIco,
@@ -86,28 +94,6 @@ describe("cross-platform brand icon export", () => {
       ]);
       expect(NodeFS.readFileSync(NodePath.join(temporaryRoot, "existing.bin"), "utf8")).toBe("old");
       expect(NodeFS.existsSync(NodePath.join(temporaryRoot, "missing.bin"))).toBe(false);
-    } finally {
-      NodeFS.rmSync(temporaryRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("owns every generated mobile system asset", async () => {
-    const generated = await collectGeneratedBrandAssets(REPOSITORY_ROOT);
-    const mobilePaths = [
-      BRAND_ASSET_PATHS.mobileAndroidMonochromeIconPng,
-      BRAND_ASSET_PATHS.mobileAndroidNotificationIconPng,
-      BRAND_ASSET_PATHS.mobileWidgetMarkSvg,
-    ];
-    expect([...generated.keys()]).toHaveLength(33);
-    expect(mobilePaths.every((relativePath) => generated.has(relativePath))).toBe(true);
-
-    const temporaryRoot = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "mesura-mobile-icons-"),
-    );
-    try {
-      await expect(findStaleGeneratedAssetPaths(temporaryRoot, generated)).resolves.toEqual(
-        expect.arrayContaining(mobilePaths),
-      );
     } finally {
       NodeFS.rmSync(temporaryRoot, { recursive: true, force: true });
     }

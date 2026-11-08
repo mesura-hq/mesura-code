@@ -1,11 +1,6 @@
 /**
- * Account subscription-limit contract.
- *
- * Providers meter subscription use through rolling windows. The window list
- * stays data-driven because providers add, remove, and scope meters without a
- * client release.
- *
- * @module accountLimits
+ * Account subscription limits. The window list stays data-driven because providers add, remove
+ * and scope meters without a client release.
  */
 import * as Schema from "effect/Schema";
 
@@ -36,24 +31,17 @@ export const AccountLimitsWindow = Schema.Struct({
   windowMinutes: Schema.NullOr(Schema.Number),
   meter: Schema.optional(AccountLimitsMeter),
   /**
-   * When this window's number was read, on the reporting environment's clock.
-   *
-   * Windows in one observation can carry different times: a provider event
-   * refreshes the single window it names and leaves the others untouched.
-   * Absent on readings taken before this field existed; callers fall back to
-   * the observation's `observedAt`.
+   * When this window was read, on the reporting environment's clock. A provider event refreshes only
+   * the window it names, so windows in one observation can differ. Absent on older readings; callers
+   * fall back to the observation's `observedAt`.
    */
   observedAt: Schema.optional(Schema.String),
 });
 export type AccountLimitsWindow = typeof AccountLimitsWindow.Type;
 
 /**
- * The vendor account system a subscription is metered against.
- *
- * This is deliberately not the driver that read the numbers. One subscription
- * can be driven by more than one agent — a ChatGPT plan reached through Codex
- * and through OpenCode is one plan with one allowance — so keying by reader
- * would list it twice and halve the apparent spend of each row.
+ * The vendor account system, not the driver that read the numbers: a ChatGPT plan reached through
+ * Codex and OpenCode is one allowance, and keying by reader would list it twice.
  */
 export const AccountLimitsNamespace = Schema.Literals([
   "anthropic",
@@ -64,15 +52,8 @@ export const AccountLimitsNamespace = Schema.Literals([
 export type AccountLimitsNamespace = typeof AccountLimitsNamespace.Type;
 
 /**
- * Identity of one subscription, across every environment and every reader.
- *
- * The only place this formula exists. The server writes keys with it and the
- * client groups rows by them, so a second copy is a second chance for the two
- * to disagree and for one subscription to render as two rows.
- *
- * The identifier is lowercased here rather than at each call site: vendors
- * report an address with whatever casing the user typed at signup, and two
- * environments must not disagree about the same account because of it.
+ * The only copy of this formula: the server writes keys with it and the client groups rows by them.
+ * It lowercases the identifier because vendors report an address in the casing typed at signup.
  */
 export function accountLimitsSubscriptionKey(input: {
   readonly namespace: AccountLimitsNamespace;
@@ -94,16 +75,9 @@ export const AccountLimitsReader = Schema.Struct({
 export type AccountLimitsReader = typeof AccountLimitsReader.Type;
 
 /**
- * The subscription a reading belongs to. Always present.
- *
- * `key` identifies the subscription across environments: two environments that
- * report the same key share one account, so the client folds them into one row
- * instead of listing the same limits once per machine.
- *
- * A reading whose provider named no account still needs a key, and it gets an
- * unfoldable one — see `unfoldableInstanceSubscription`. Two machines reporting
- * no account are two machines, and folding them would report one's numbers as
- * the other's.
+ * `key` identifies the subscription across environments, so the client folds equal keys into one
+ * row. A reading with no named account gets an unfoldable key (`unfoldableInstanceSubscription`):
+ * two machines reporting no account are two machines.
  */
 export const AccountLimitsAccount = Schema.Struct({
   key: AccountLimitsIdentifier,
@@ -145,12 +119,9 @@ export function unfoldableInstanceSubscription(input: {
 }
 
 /**
- * What each vendor is called, wherever a subscription of theirs is shown.
- *
- * One map, because the server labels a discovered subscription with it and the
- * client titles the row with it. Two copies would drift, and the client decides
- * whether to repeat the label as a subtitle by comparing the two — a comparison
- * that is only sound while both sides say exactly the same thing.
+ * Shared by the server (labels a discovered subscription) and the client (titles the row). The
+ * client compares the two to decide whether to repeat the label as a subtitle, which is only sound
+ * while both sides use this one map.
  */
 export const ACCOUNT_LIMITS_VENDOR_NAME: Readonly<Record<AccountLimitsNamespace, string>> = {
   anthropic: "Claude",
@@ -195,13 +166,8 @@ export const AccountLimitsObservation = Schema.Struct({
 export type AccountLimitsObservation = typeof AccountLimitsObservation.Type;
 
 /**
- * Why a read failed, from a closed set the client can branch on.
- *
- * `unrecognized` is the one that matters: it means the reading arrived and this
- * version of Mesura Code could not parse it, which is our bug rather than the
- * vendor's outage. Without the distinction the panel says "Refresh failed" for
- * a dead network and for a renamed field alike, and the two need opposite
- * responses.
+ * `unrecognized` means the reading arrived and this version could not parse it: our bug, not the
+ * vendor's outage. A dead network and a renamed field need opposite responses.
  */
 export const AccountLimitsFailureReason = Schema.Literals([
   "unreachable",
@@ -225,12 +191,8 @@ export const AccountLimitsAttempt = Schema.Struct({
 export type AccountLimitsAttempt = typeof AccountLimitsAttempt.Type;
 
 /**
- * One subscription's readings, whoever produced them.
- *
- * The subscription is the identity and the reader is a detail of provenance —
- * the inversion of what this carried at contract version 1, where the provider
- * instance was the identity and the subscription an optional decoration used
- * only for client-side folding.
+ * One subscription's readings. The subscription is the identity and the reader is provenance, the
+ * inverse of contract version 1, which keyed by provider instance.
  */
 export const AccountLimitsSnapshot = Schema.Struct({
   subscription: AccountLimitsAccount,

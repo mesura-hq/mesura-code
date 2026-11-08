@@ -12,11 +12,34 @@ import {
   type AssistantCitationSourceAnchor,
 } from "~/lib/assistantTextSelection";
 import {
+  isSelectionRectVisible,
   observeSelectionActions,
   resolveSelectionActionPosition,
   type SelectionActionPoint,
 } from "~/lib/selectionActions";
+import { subscribeChatCiteRequest } from "~/keys/chat/chatCiteBus";
+import { citeAndFlash } from "~/keys/chat/citeFlash";
 import { Button } from "../ui/button";
+
+/** The citation for the current native selection, when it is citable assistant text. */
+function captureCitation(
+  viewport: HTMLElement,
+  threadRef: ScopedThreadRef,
+  nativeSelection: Selection | null,
+): { citation: AssistantCitation; sourceAnchor: AssistantCitationSourceAnchor } | null {
+  const captured = captureAssistantTextSelection(viewport, nativeSelection);
+  const messageId = captured?.source.dataset.assistantCitationSource;
+  if (!captured || !messageId) return null;
+  return {
+    sourceAnchor: { source: captured.source, range: captured.range, viewport },
+    citation: {
+      version: 1,
+      ...threadRef,
+      messageId: MessageId.make(messageId),
+      ...captured.selector,
+    },
+  };
+}
 
 export function AssistantSelectionToolbar({
   viewport,
@@ -47,32 +70,80 @@ export function AssistantSelectionToolbar({
     if (!viewport) return;
     const clear = () => setSelection(null);
     const update = (pointer: SelectionActionPoint | null) => {
-      const nativeSelection = window.getSelection();
-      const captured = captureAssistantTextSelection(viewport, nativeSelection);
-      const messageId = captured?.source.dataset.assistantCitationSource;
-      if (!captured || !messageId) {
+      const captured = captureCitation(viewport, threadRef, window.getSelection());
+      if (!captured) {
         clear();
         return;
       }
-      const rect = captured.range.getBoundingClientRect();
+      const range = captured.sourceAnchor.range;
+      const rect = range.getBoundingClientRect();
       const viewportRect = viewport.getBoundingClientRect();
-      if (rect.bottom < viewportRect.top || rect.top > viewportRect.bottom || rect.width === 0) {
+      if (!isSelectionRectVisible(rect, [viewportRect])) {
         clear();
         return;
       }
-      const rects = captured.range.getClientRects();
+      // A selection can cross blocks with different clipping ancestors.
+      const common = captured.sourceAnchor.range.commonAncestorContainer;
+      const walker = document.createTreeWalker(common, NodeFilter.SHOW_TEXT);
+      let node = common.nodeType === Node.TEXT_NODE ? common : walker.nextNode();
+      let visible = false;
+      for (; node && !visible; node = walker.nextNode()) {
+        if (!captured.sourceAnchor.range.intersectsNode(node)) continue;
+        if (node.parentElement && getComputedStyle(node.parentElement).userSelect === "none")
+          continue;
+        const fragment = document.createRange();
+        fragment.selectNodeContents(node);
+        if (node === captured.sourceAnchor.range.startContainer) {
+          fragment.setStart(node, captured.sourceAnchor.range.startOffset);
+        }
+        if (node === captured.sourceAnchor.range.endContainer) {
+          fragment.setEnd(node, captured.sourceAnchor.range.endOffset);
+        }
+        if (!fragment.toString().trim()) continue;
+        const lines = Array.from(fragment.getClientRects());
+        if (!lines.some((line) => isSelectionRectVisible(line, [viewportRect]))) continue;
+        const clips: Pick<DOMRect, "left" | "right" | "top" | "bottom">[] = [viewportRect];
+        for (
+          let element = node.parentElement;
+          element && element !== viewport;
+          element = element.parentElement
+        ) {
+          const style = getComputedStyle(element);
+          const clipX = style.overflowX !== "visible";
+          const clipY = style.overflowY !== "visible";
+          if (!clipX && !clipY) continue;
+          const bounds = element.getBoundingClientRect();
+          const left = bounds.left + element.clientLeft;
+          const top = bounds.top + element.clientTop;
+          clips.push({
+            left: clipX ? left : -Infinity,
+            right: clipX ? left + element.clientWidth : Infinity,
+            top: clipY ? top : -Infinity,
+            bottom: clipY ? top + element.clientHeight : Infinity,
+          });
+        }
+        visible = lines.some((line) => isSelectionRectVisible(line, clips));
+      }
+      if (!visible) {
+        clear();
+        return;
+      }
+      const rects = captured.sourceAnchor.range.getClientRects();
+      const pointerOnText =
+        pointer !== null &&
+        Array.from(rects).some(
+          (line) =>
+            pointer.x >= line.left - 8 &&
+            pointer.x <= line.right + 8 &&
+            pointer.y >= line.top - 8 &&
+            pointer.y <= line.bottom + 8,
+        );
       setSelection({
-        sourceAnchor: { source: captured.source, range: captured.range, viewport },
-        citation: {
-          version: 1,
-          ...threadRef,
-          messageId: MessageId.make(messageId),
-          ...captured.selector,
-        },
+        ...captured,
         position: resolveSelectionActionPosition({
           bounds: viewportRect,
           selectionRect: rects.item(rects.length - 1) ?? rect,
-          pointer,
+          pointer: pointerOnText ? pointer : null,
           viewport: { width: window.innerWidth, height: window.innerHeight },
         }),
       });
@@ -80,6 +151,7 @@ export function AssistantSelectionToolbar({
     const actions = observeSelectionActions({
       element: viewport,
       getActionElement: () => toolbarRef.current,
+      restoreAfterScroll: true,
       onSelection: update,
       onDismiss: clear,
     });
@@ -114,6 +186,19 @@ export function AssistantSelectionToolbar({
     };
   }, [threadRef, viewport]);
 
+  // Mesura: the chat buffer's visual mode cites by key. Its selection is set
+  // by code, which the toolbar's pointer-driven observer does not track, so
+  // the request captures the current native selection itself.
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to the chat buffer's cite requests while the viewport is mounted
+  useEffect(() => {
+    if (!viewport) return;
+    return subscribeChatCiteRequest((request) => {
+      const captured = captureCitation(viewport, threadRef, window.getSelection());
+      if (!captured || captured.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH) return;
+      request.cited = citeAndFlash(onCite, captured.citation, captured.sourceAnchor);
+    });
+  }, [onCite, threadRef, viewport]);
+
   if (!selection) return null;
   const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
   const dismiss = () => {
@@ -121,7 +206,7 @@ export function AssistantSelectionToolbar({
     setSelection(null);
   };
   const cite = () => {
-    if (tooLong || !onCite(selection.citation, selection.sourceAnchor)) return false;
+    if (tooLong || !citeAndFlash(onCite, selection.citation, selection.sourceAnchor)) return false;
     window.getSelection()?.removeAllRanges();
     dismiss();
     return true;
@@ -134,7 +219,7 @@ export function AssistantSelectionToolbar({
       variant="glass"
       disabled={tooLong}
       aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
-      className="fixed z-50 max-w-[calc(100vw-1rem)] rounded-full px-2.5"
+      className="fixed z-50 max-w-[calc(100vw-1rem)]"
       style={{ left: selection.position.x, top: selection.position.y }}
       onPointerDown={(event) => event.preventDefault()}
       onClick={cite}

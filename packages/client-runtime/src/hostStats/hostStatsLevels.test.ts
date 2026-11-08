@@ -27,8 +27,9 @@ const AGREED_LEVELS: ReadonlyArray<{
 ];
 
 describe("host stats levels", () => {
-  for (const { metric, warn, crit } of AGREED_LEVELS) {
-    it(`host stats level ${metric} is ok below ${warn}, warn from ${warn}, crit from ${crit}`, () => {
+  it.each(AGREED_LEVELS)(
+    "host stats level $metric is ok below $warn, warn from $warn, crit from $crit",
+    ({ metric, warn, crit }) => {
       expect(hostStatsLevel(metric, 0)).toBe("ok");
       expect(hostStatsLevel(metric, warn - 0.01)).toBe("ok");
       expect(hostStatsLevel(metric, warn)).toBe("warn");
@@ -36,8 +37,8 @@ describe("host stats levels", () => {
       expect(hostStatsLevel(metric, crit - 0.01)).toBe("warn");
       expect(hostStatsLevel(metric, crit)).toBe("crit");
       expect(hostStatsLevel(metric, crit * 2)).toBe("crit");
-    });
-  }
+    },
+  );
 
   it("host stats stale threshold is 150 seconds of host time", () => {
     expect(HOST_STATS_STALE_AFTER_MS).toBe(150_000);

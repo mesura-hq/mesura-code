@@ -83,7 +83,7 @@ const makeServer = () => {
     return { lastSequence: Math.max(0, ...fragments.keys()) };
   });
   return {
-    client: { append },
+    historyClient: { append },
     append,
     requests,
     stored: () => [...fragments.values()].toSorted((a, b) => a.sequence - b.sequence),
@@ -139,7 +139,7 @@ const makeHost = (options: HostOptions) => {
       owner: options.owner,
       threadId: `${options.idPrefix}-thread`,
       store: options.store ?? memory.store,
-      client: server.client,
+      historyClient: server.historyClient,
       makeId,
     },
     ...(options.prepare ? { prepare: options.prepare } : {}),

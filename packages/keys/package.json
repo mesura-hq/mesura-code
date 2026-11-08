@@ -1,0 +1,31 @@
+{
+  "name": "@mesura/keys",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./keyToken": {
+      "types": "./src/keyToken.ts",
+      "import": "./src/keyToken.ts"
+    },
+    "./keymap": {
+      "types": "./src/keymap.ts",
+      "import": "./src/keymap.ts"
+    },
+    "./sequence": {
+      "types": "./src/sequence.ts",
+      "import": "./src/sequence.ts"
+    },
+    "./flash": {
+      "types": "./src/flash.ts",
+      "import": "./src/flash.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

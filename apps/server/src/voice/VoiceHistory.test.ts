@@ -1,23 +1,21 @@
 // @effect-diagnostics nodeBuiltinImport:off - the replay spec edits the closed SQLite file directly.
 // Phase 2 fence: persisted voice history, exercised through the real voice HTTP entry point
 // (`voiceConversationHttpApiLayer` served by `HttpApiBuilder.layer` + `HttpRouter.toWebHandler`)
-// over the real `OrchestrationEngineLive`, `OrchestrationProjectionPipelineLive`, event store,
-// command receipts and a SQLite file that survives a simulated server restart. Only the
-// authentication middleware (principals the real middleware would produce), the secret store and
-// the OpenAI Live endpoint are test doubles.
+// over the real application event store, the voice projection, the server's migrations and a
+// SQLite file that survives a simulated server restart. Test doubles: the authentication
+// middleware (principals the real middleware would produce), the secret store, the OpenAI Live
+// endpoint, and the thread reads behind the call context (`ThreadManagementService`). Threads
+// are v2 projection rows and v2 `thread.created` / `thread.deleted` event rows, as the v2
+// projector writes them.
 import * as NodeSqlite from "node:sqlite";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
-  CommandId,
-  DEFAULT_PROVIDER_INTERACTION_MODE,
   EnvironmentHttpApi,
   type EnvironmentSessionPrincipalShape,
-  type OrchestrationEvent,
   ProjectId,
-  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -30,28 +28,20 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as Etag from "effect/unstable/http/Etag";
-import * as HttpPlatform from "effect/unstable/http/HttpPlatform";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpApi from "effect/unstable/httpapi/HttpApi";
-import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
+import * as Etag from "effect/http/Etag";
+import * as HttpPlatform from "effect/http/HttpPlatform";
+import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpApi from "effect/http-api/HttpApi";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
+import * as SqlClient from "effect/sql/SqlClient";
 import { expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../config.ts";
-import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
-import { OrchestrationProjectionPipelineLive } from "../orchestration/Layers/ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as ThreadBackgroundLiveness from "../orchestration/ThreadBackgroundLiveness.ts";
-import * as ThreadPlanProgress from "../orchestration/ThreadPlanProgress.ts";
-import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
-import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
-import { ProjectionVoiceCallRepositoryLive } from "../persistence/Layers/ProjectionVoiceCalls.ts";
-import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
-import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { voiceConversationHttpApiLayer } from "./http.ts";
 import { VoiceHistoryLive } from "./VoiceHistory.ts";
 import { VoiceSessionManagerConfig } from "./VoiceSessionManager.ts";
@@ -61,7 +51,6 @@ const API_KEY = `sk-${"voice-history-".repeat(3)}`;
 const PROJECT_ID = ProjectId.make("project-voice-history");
 const THREAD_ID = ThreadId.make("thread-voice-history");
 const OTHER_THREAD_ID = ThreadId.make("thread-voice-history-other");
-const VOICE_PROJECTOR = "projection.voice-calls";
 const VOICE_EVENT_TYPES = new Set([
   "thread.voice-call-started",
   "thread.voice-transcript-appended",
@@ -131,31 +120,28 @@ const fakeOpenAiLive: typeof fetch = async (input) => {
   });
 };
 
-const makeCoreLayer = (databasePath: string) =>
-  Layer.mergeAll(
-    OrchestrationEngineLive.pipe(
-      Layer.provide(OrchestrationProjectionSnapshotQueryLive),
-      Layer.provide(OrchestrationProjectionPipelineLive),
+/** Threads the context double reports; a thread is live while its v2 row is not deleted. */
+const knownThreads = new Set<string>();
+
+const threadContextLayer = Layer.mock(ThreadManagementService.ThreadManagementService)({
+  getThreadShell: (threadId) =>
+    Effect.succeed(
+      knownThreads.has(threadId)
+        ? ({ id: threadId, title: "Voice history thread", status: "idle" } as never)
+        : null,
     ),
-    OrchestrationProjectionSnapshotQueryLive,
-  ).pipe(
-    Layer.provideMerge(ThreadBackgroundLiveness.layer),
-    Layer.provide(ThreadPlanProgress.layer),
-    Layer.provide(OrchestrationEventStoreLive),
-    Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
-    Layer.provide(RepositoryIdentityResolver.layer),
-    Layer.provideMerge(makeSqlitePersistenceLive(databasePath)),
+  getTimelinePage: () => Effect.succeed({ items: [], totalItems: 0, hasMore: false }),
+});
+
+const makeServerLayer = (databasePath: string) =>
+  VoiceHistoryLive.pipe(
+    Layer.provideMerge(OrchestrationEventStore.layer),
+    Layer.provideMerge(SqlitePersistence.layerFromPath(databasePath)),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-voice-history-test-" })),
     Layer.provideMerge(NodeServices.layer),
   );
 
-const makeServerLayer = (databasePath: string) =>
-  VoiceHistoryLive.pipe(
-    Layer.provide(ProjectionVoiceCallRepositoryLive),
-    Layer.provideMerge(makeCoreLayer(databasePath)),
-  );
-
-type ServerServices = OrchestrationEngineService | ProjectionSnapshotQuery;
+type ServerServices = OrchestrationEventStore.OrchestrationEventStore | SqlClient.SqlClient;
 
 interface RunningServer {
   readonly request: (request: Request) => Effect.Effect<Response>;
@@ -170,8 +156,9 @@ interface CallClock {
 }
 
 /**
- * One server process: engine, projections, voice history and the voice HTTP routes, all owned by
- * one scope. Closing that scope and starting again on the same file is a server restart.
+ * One server process: migrations, event store, voice projection, voice history and the voice
+ * HTTP routes, all owned by one scope. Closing that scope and starting again on the same file is
+ * a server restart.
  */
 const startServer = Effect.fn("startServer")(function* (databasePath: string, clock: CallClock) {
   const scope = yield* Scope.make();
@@ -191,6 +178,7 @@ const startServer = Effect.fn("startServer")(function* (databasePath: string, cl
     ),
     Layer.provide(authLayer),
     Layer.provide(secretStoreLayer),
+    Layer.provide(threadContextLayer),
     Layer.provide(Layer.succeedContext(services)),
     Layer.provideMerge(
       HttpPlatform.layer.pipe(
@@ -201,7 +189,7 @@ const startServer = Effect.fn("startServer")(function* (databasePath: string, cl
     Layer.provide(NodeServices.layer),
   );
   const web = HttpRouter.toWebHandler(routesLayer, { disableLogger: true });
-  // Finalizers run in reverse: the HTTP routes and their call manager close before the engine.
+  // Finalizers run in reverse: the HTTP routes and their call manager close before the store.
   yield* Scope.addFinalizer(
     scope,
     Effect.promise(() => web.dispose()),
@@ -255,40 +243,67 @@ const makeHarness = Effect.gen(function* () {
   return { databasePath, boot, stop, restart, advanceCallClock };
 });
 
-const createThread = (server: RunningServer, threadId: ThreadId, createProject: boolean) =>
+/**
+ * The v2 projection row of a created thread. Its `thread.created` event is left out: the real
+ * application reader decodes every v2 row, and these specs read that stream to prove it holds no
+ * voice event.
+ */
+const createThread = (server: RunningServer, threadId: ThreadId, _createProject: boolean) =>
   server.run(
     Effect.gen(function* () {
-      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
       const createdAt = DateTime.formatIso(yield* DateTime.now);
-      const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
-      if (createProject) {
-        yield* engine.dispatch({
-          type: "project.create",
-          commandId: CommandId.make(`cmd-project-${threadId}`),
-          projectId: PROJECT_ID,
-          title: "Voice history project",
-          workspaceRoot: "/tmp/voice-history-project",
-          defaultModelSelection: modelSelection,
-          createdAt,
-        });
-      }
-      yield* engine.dispatch({
-        type: "thread.create",
-        commandId: CommandId.make(`cmd-thread-${threadId}`),
-        threadId,
-        projectId: PROJECT_ID,
-        title: "Voice history thread",
-        modelSelection,
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        branch: null,
-        worktreePath: null,
-        createdAt,
-      });
+      const payload = JSON.stringify({ id: threadId, projectId: PROJECT_ID, title: "Voice" });
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_threads (
+          thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+          created_at, updated_at, payload_json
+        ) VALUES (
+          ${threadId}, ${PROJECT_ID}, 'Voice history thread', 'codex', 'approval-required',
+          'default', ${createdAt}, ${createdAt}, ${payload}
+        )
+      `;
+      knownThreads.add(threadId);
+    }),
+  );
+
+/**
+ * Commit a v2 thread deletion as the v2 projector does: the deletion event row and the projection
+ * row's `deleted_at`, then publish the committed event to application stream subscribers.
+ */
+const deleteThread = (server: RunningServer, threadId: ThreadId) =>
+  server.run(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const eventStore = yield* OrchestrationEventStore.OrchestrationEventStore;
+      const deletedAt = DateTime.formatIso(yield* DateTime.now);
+      const rows = yield* sql<{ readonly sequence: number }>`
+        INSERT INTO orchestration_events (
+          event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at,
+          actor_kind, payload_json, metadata_json, application_event_version
+        ) VALUES (
+          ${`event:deleted:${threadId}`}, 'thread', ${threadId}, 1, 'thread.deleted',
+          ${deletedAt}, 'client', '{}', '{}', 2
+        )
+        RETURNING sequence
+      `;
+      yield* sql`
+        UPDATE orchestration_v2_projection_threads SET deleted_at = ${deletedAt}
+        WHERE thread_id = ${threadId}
+      `;
+      // Only the type and thread are read by the voice follower.
+      yield* eventStore.publishCommitted([
+        {
+          sequence: rows[0]!.sequence,
+          commandId: null,
+          event: { type: "thread.deleted", threadId },
+        } as never,
+      ]);
     }),
   );
 
 const bootWithThread = Effect.gen(function* () {
+  knownThreads.clear();
   const harness = yield* makeHarness;
   const server = yield* harness.boot;
   yield* createThread(server, THREAD_ID, true);
@@ -412,13 +427,38 @@ const readAllFragments = Effect.fn("readAllFragments")(function* (
   return yield* Effect.die(new Error("Fragment pagination did not terminate."));
 });
 
+interface StoredRow {
+  readonly sequence: number;
+  readonly aggregateKind: string;
+  readonly type: string;
+  readonly payloadJson: string;
+}
+
+/** Every event store row after a sequence: voice, project and thread events alike. */
 const readEvents = (server: RunningServer, fromSequenceExclusive: number) =>
   server.run(
     Effect.gen(function* () {
-      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      return yield* sql<StoredRow>`
+        SELECT sequence, aggregate_kind AS "aggregateKind", event_type AS "type",
+          payload_json AS "payloadJson"
+        FROM orchestration_events WHERE sequence > ${fromSequenceExclusive}
+        ORDER BY sequence ASC
+      `;
+    }),
+  );
+
+/** The application event stream that agent, shell and thread clients replay. */
+const readApplicationEvents = (server: RunningServer) =>
+  server.run(
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore.OrchestrationEventStore;
+      const head = yield* eventStore.latestApplicationSequence;
       return Array.from(
-        yield* Stream.runCollect(engine.readEvents(fromSequenceExclusive, 10_000)),
-      ) as OrchestrationEvent[];
+        yield* Stream.runCollect(
+          eventStore.readApplicationEvents({ afterSequence: 0, throughSequence: head }),
+        ),
+      );
     }),
   );
 
@@ -432,7 +472,7 @@ const dropVoiceProjection = (databasePath: string) => {
     database.exec("DELETE FROM projection_voice_fragments");
     database.exec("DELETE FROM projection_voice_batches");
     database.exec("DELETE FROM projection_voice_calls");
-    database.prepare("DELETE FROM projection_state WHERE projector = ?").run(VOICE_PROJECTOR);
+    database.exec("DELETE FROM mesura_voice_projection_state");
     return projectedRows.count;
   } finally {
     database.close();
@@ -459,15 +499,55 @@ const setVoiceEndWriteFailure = (databasePath: string, failing: boolean) => {
 };
 
 /**
- * Put a stopped server's file back in the state of a database that ran migration 53 but not 54:
- * the batch identity table and its migration record are removed, while events, receipts, voice
- * rows and the voice projector cursor stay as they are.
+ * Put a stopped server's file back in the shape the voice prototype left: its voice events as v1
+ * thread rows, its 053/054 ledger rows under upstream's ids, its projection rows in place and no
+ * voice projection cursor.
  */
-const rollBackToMigration53 = (databasePath: string) => {
+const rollBackToPrototype = (databasePath: string) => {
   const database = new NodeSqlite.DatabaseSync(databasePath);
   try {
-    database.exec("DROP TABLE projection_voice_batches");
-    database.exec("DELETE FROM effect_sql_migrations WHERE migration_id = 54");
+    database.exec(
+      `UPDATE orchestration_events SET aggregate_kind = 'thread', application_event_version = 1
+       WHERE aggregate_kind = 'voice'`,
+    );
+    database.exec(
+      "UPDATE effect_sql_migrations SET name = 'ProjectionVoiceCalls' WHERE migration_id = 53",
+    );
+    database.exec(
+      "UPDATE effect_sql_migrations SET name = 'ProjectionVoiceBatches' WHERE migration_id = 54",
+    );
+    database.exec("DELETE FROM mesura_voice_projection_state");
+  } finally {
+    database.close();
+  }
+};
+
+/** The voice events of the file, by aggregate kind; reads a stopped server's file. */
+const voiceRowsByKind = (databasePath: string) => {
+  const database = new NodeSqlite.DatabaseSync(databasePath);
+  try {
+    return database
+      .prepare(
+        `SELECT event_id AS eventId, sequence, aggregate_kind AS aggregateKind
+         FROM orchestration_events WHERE event_type LIKE 'thread.voice-%' ORDER BY sequence`,
+      )
+      .all() as Array<{ eventId: string; sequence: number; aggregateKind: string }>;
+  } finally {
+    database.close();
+  }
+};
+
+/** Voice projection row counts of a stopped server's file. */
+const voiceProjectionCounts = (databasePath: string) => {
+  const database = new NodeSqlite.DatabaseSync(databasePath);
+  try {
+    const count = (table: string) =>
+      (database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
+    return {
+      calls: count("projection_voice_calls"),
+      fragments: count("projection_voice_fragments"),
+      batches: count("projection_voice_batches"),
+    };
   } finally {
     database.close();
   }
@@ -721,20 +801,17 @@ it.layer(NodeServices.layer, { excludeTestServices: true })(
           expect(pageThree.nextAfterSequence).toBeNull();
           yield* expectStatus(voice(server).listFragments("viewer", callId, "?limit=1000"), 400);
 
-          const snapshots = yield* server.run(
+          // Agent, shell and thread clients replay the application stream. The store holds only
+          // voice events here, and that stream returns none of them.
+          expect((yield* readEvents(server, 0)).length).toBeGreaterThan(0);
+          expect(yield* readApplicationEvents(server)).toEqual([]);
+          const threadRows = yield* server.run(
             Effect.gen(function* () {
-              const query = yield* ProjectionSnapshotQuery;
-              return {
-                detail: yield* query.getThreadDetailSnapshot(THREAD_ID),
-                shell: yield* query.getShellSnapshot(),
-                full: yield* query.getSnapshot(),
-              };
+              const sql = yield* SqlClient.SqlClient;
+              return yield* sql`SELECT * FROM orchestration_v2_projection_threads`;
             }),
           );
-          expect(Option.isSome(snapshots.detail)).toBe(true);
-          expect(asJsonText(snapshots.detail)).not.toContain("marcador-voz");
-          expect(asJsonText(snapshots.shell)).not.toContain("marcador-voz");
-          expect(asJsonText(snapshots.full)).not.toContain("marcador-voz");
+          expect(asJsonText(threadRows)).not.toContain("marcador-voz");
         }),
     );
 
@@ -789,16 +866,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })(
         );
         yield* expectJson<CallPage>(voice(server).listCalls("viewer"));
 
-        yield* server.run(
-          Effect.gen(function* () {
-            const engine = yield* OrchestrationEngineService;
-            yield* engine.dispatch({
-              type: "thread.delete",
-              commandId: CommandId.make("cmd-voice-history-delete"),
-              threadId: THREAD_ID,
-            });
-          }),
-        );
+        yield* deleteThread(server, THREAD_ID);
 
         yield* expectStatus(voice(server).listCalls("viewer"), 404);
         yield* expectStatus(voice(server).listFragments("viewer", callId), 404);
@@ -806,9 +874,20 @@ it.layer(NodeServices.layer, { excludeTestServices: true })(
           voice(server).append("owner", callId, "batch-0002", [fragment(2, "Ya no.")]),
           404,
         );
+        yield* expectStatus(voice(server).start("owner", "voice-call-deleted-0002"), 404);
         const restarted = yield* harness.restart(server);
         yield* expectStatus(voice(restarted).listCalls("owner"), 404);
         yield* expectStatus(voice(restarted).listFragments("owner", callId), 404);
+        // The projection dropped the thread's history; replay from the store drops it again.
+        yield* harness.stop(restarted);
+        expect(voiceProjectionCounts(harness.databasePath)).toEqual({
+          calls: 0,
+          fragments: 0,
+          batches: 0,
+        });
+        dropVoiceProjection(harness.databasePath);
+        yield* harness.stop(yield* harness.boot);
+        expect(voiceProjectionCounts(harness.databasePath).calls).toBe(0);
       }),
     );
 
@@ -859,23 +938,18 @@ it.layer(NodeServices.layer, { excludeTestServices: true })(
         Effect.gen(function* () {
           const { server } = yield* bootWithThread;
           const readWorkState = () =>
-            server.run(
-              Effect.gen(function* () {
-                const query = yield* ProjectionSnapshotQuery;
-                const detail = yield* query.getThreadDetailSnapshot(THREAD_ID);
-                const shell = yield* query.getThreadShellById(THREAD_ID);
-                const thread = Option.getOrThrow(detail).thread;
-                return {
-                  messages: thread.messages,
-                  latestTurn: thread.latestTurn,
-                  activities: thread.activities,
-                  session: thread.session,
-                  proposedPlans: thread.proposedPlans,
-                  checkpoints: thread.checkpoints,
-                  shellLatestTurn: Option.getOrThrow(shell).latestTurn,
-                };
-              }),
-            );
+            Effect.gen(function* () {
+              const applicationEvents = yield* readApplicationEvents(server);
+              const threadRows = yield* server.run(
+                Effect.gen(function* () {
+                  const sql = yield* SqlClient.SqlClient;
+                  return yield* sql`
+                    SELECT * FROM orchestration_v2_projection_threads ORDER BY thread_id
+                  `;
+                }),
+              );
+              return { applicationEvents, threadRows };
+            });
           const before = yield* readWorkState();
           const startSequence = yield* headSequence(server);
 
@@ -897,6 +971,10 @@ it.layer(NodeServices.layer, { excludeTestServices: true })(
             "thread.voice-call-ended",
           ]);
           expect(events.every((event) => VOICE_EVENT_TYPES.has(event.type))).toBe(true);
+          // Voice events have their own aggregate kind, outside agent and shell replay.
+          expect(events.every((event) => event.aggregateKind === "voice")).toBe(true);
+          // The stored text is the spoken text, not a provider prompt.
+          expect(events[1]!.payloadJson).toContain("Arreglá el bug del login.");
           const after = yield* readWorkState();
           expect(after).toEqual(before);
         }),
@@ -980,38 +1058,46 @@ it.layer(NodeServices.layer, { excludeTestServices: true })(
       }),
     );
 
-    it.effect("VH-H14 a checkpoint revert keeps the voice history as a conversation record", () =>
-      Effect.gen(function* () {
-        const { server } = yield* bootWithThread;
-        const callId = "voice-call-revert-0001";
-        yield* expectStatus(voice(server).start("owner", callId), 200);
-        yield* expectStatus(
-          voice(server).append("owner", callId, "batch-0001", [
-            fragment(1, "Probá el cambio."),
-            fragment(2, " Lo pruebo."),
-          ]),
-          200,
-        );
-        yield* expectStatus(voice(server).end("owner", callId, 2), 200);
-        const before = yield* readAllFragments(server, "viewer", callId);
+    it.effect(
+      "VH-H14 thread events other than deletion keep the voice history as a conversation record",
+      () =>
+        Effect.gen(function* () {
+          const { harness, server } = yield* bootWithThread;
+          const callId = "voice-call-revert-0001";
+          yield* expectStatus(voice(server).start("owner", callId), 200);
+          yield* expectStatus(
+            voice(server).append("owner", callId, "batch-0001", [
+              fragment(1, "Probá el cambio."),
+              fragment(2, " Lo pruebo."),
+            ]),
+            200,
+          );
+          yield* expectStatus(voice(server).end("owner", callId, 2), 200);
+          const before = yield* readAllFragments(server, "viewer", callId);
 
-        yield* server.run(
-          Effect.gen(function* () {
-            const engine = yield* OrchestrationEngineService;
-            yield* engine.dispatch({
-              type: "thread.revert.complete",
-              commandId: CommandId.make("cmd-voice-history-revert"),
-              threadId: THREAD_ID,
-              turnCount: 0,
-              createdAt: DateTime.formatIso(yield* DateTime.now),
-            });
-          }),
-        );
-        const events = yield* readEvents(server, 0);
-        expect(events.at(-1)?.type).toBe("thread.reverted");
-        const after = yield* readAllFragments(server, "viewer", callId);
-        expect(after).toEqual(before);
-      }),
+          // A v2 thread change between voice events: the voice projector ignores it.
+          yield* server.run(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient;
+              const occurredAt = DateTime.formatIso(yield* DateTime.now);
+              yield* sql`
+                INSERT INTO orchestration_events (
+                  event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at,
+                  actor_kind, payload_json, metadata_json, application_event_version
+                ) VALUES (
+                  'event:archived', 'thread', ${THREAD_ID}, 1, 'thread.archived',
+                  ${occurredAt}, 'client', '{}', '{}', 2
+                )
+              `;
+            }),
+          );
+          yield* expectStatus(voice(server).start("owner", "voice-call-revert-0002"), 200);
+          expect(yield* readAllFragments(server, "viewer", callId)).toEqual(before);
+          yield* harness.stop(server);
+          dropVoiceProjection(harness.databasePath);
+          const replayed = yield* harness.boot;
+          expect(yield* readAllFragments(replayed, "viewer", callId)).toEqual(before);
+        }),
     );
 
     it.effect(
@@ -1308,42 +1394,66 @@ it.layer(NodeServices.layer, { excludeTestServices: true })(
     );
 
     it.effect(
-      "VH-H21 an upgrade to migration 54 keeps the identity of batches accepted under 53",
+      "VH-H21 an upgrade from the voice prototype keeps its events, history and batch identities",
       () =>
         Effect.gen(function* () {
           const { harness, server } = yield* bootWithThread;
           const callId = "voice-call-upgrade-0001";
           const accepted = [fragment(1, "Antes de la migración."), fragment(2, " Aceptado.")];
           yield* expectStatus(voice(server).start("owner", callId), 200);
-          // A batch of only new fragments: its event is the same under 53 and 54, so its complete
-          // request can be rebuilt from the event store.
           yield* expectStatus(voice(server).append("owner", callId, "batch-a", accepted), 200);
+          // A no-op re-send under a new batch ID is an accepted identity of its own.
+          yield* expectStatus(voice(server).append("owner", callId, "batch-b", accepted), 200);
+          yield* expectStatus(voice(server).end("owner", callId, 2), 200);
           yield* harness.stop(server);
+          const storedRows = voiceRowsByKind(harness.databasePath);
+          expect(storedRows).toHaveLength(4);
 
-          // Return the file to its state before 54 existed: 053 applied, the append event and its
-          // accepted receipt stored, the voice rows projected and the voice cursor at the end.
-          rollBackToMigration53(harness.databasePath);
+          rollBackToPrototype(harness.databasePath);
           const upgraded = yield* harness.boot;
 
           const assertUpgradedIdentity = Effect.fn("assertUpgradedIdentity")(function* (
             running: RunningServer,
           ) {
-            const retried = yield* expectJson<{ lastSequence: number }>(
-              voice(running).append("owner", callId, "batch-a", accepted),
-            );
-            expect(retried.lastSequence).toBe(2);
-            yield* expectStatus(
-              voice(running).append("owner", callId, "batch-a", [accepted[0]!]),
-              409,
-            );
-            const history = yield* readAllFragments(running, "viewer", callId);
+            for (const batchId of ["batch-a", "batch-b"]) {
+              const retried = yield* expectJson<{ lastSequence: number }>(
+                voice(running).append("owner", callId, batchId, accepted),
+              );
+              expect(retried.lastSequence).toBe(2);
+              yield* expectStatus(
+                voice(running).append("owner", callId, batchId, [accepted[0]!]),
+                409,
+              );
+            }
+            const history = yield* readAllFragments(running, "owner", callId);
             expect(history.fragments).toEqual(accepted);
+            expect(history.call.endReason).toBe("hangup");
+            expect(history.call.finalSequence).toBe(2);
+            expect(history.call.ownedByRequester).toBe(true);
           });
           yield* assertUpgradedIdentity(upgraded);
+          yield* harness.stop(upgraded);
+          // Every prototype event keeps its ID and sequence, now under the voice aggregate.
+          expect(voiceRowsByKind(harness.databasePath)).toEqual(
+            storedRows.map((row) => ({ ...row, aggregateKind: "voice" })),
+          );
+          const migrationNames = (() => {
+            const database = new NodeSqlite.DatabaseSync(harness.databasePath);
+            try {
+              return database
+                .prepare(
+                  "SELECT name FROM effect_sql_migrations WHERE migration_id IN (53, 54) ORDER BY migration_id",
+                )
+                .all();
+            } finally {
+              database.close();
+            }
+          })();
+          expect(migrationNames).toEqual([
+            { name: "PullRequestFilesViewed" },
+            { name: "ProjectionThreadsAutoSettleDisabledAt" },
+          ]);
 
-          const restarted = yield* harness.restart(upgraded);
-          yield* assertUpgradedIdentity(restarted);
-          yield* harness.stop(restarted);
           expect(dropVoiceProjection(harness.databasePath)).toBe(2);
           const replayed = yield* harness.boot;
           yield* assertUpgradedIdentity(replayed);

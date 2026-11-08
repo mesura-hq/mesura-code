@@ -14,10 +14,10 @@ import {
   type EnvironmentId,
   type ProviderDriverKind,
   type ServerProvider,
+  type ServerProviderResetCredits,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
-import { useCallback } from "react";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import {
@@ -73,6 +73,13 @@ export interface AccountLimitsRowWindow {
   readonly ageMs: number | null;
 }
 
+/** Banked resets, which the reading agent's provider reports apart from the windows. */
+export interface AccountLimitsRowResetCredits {
+  readonly credits: ServerProviderResetCredits;
+  /** The reporting environment's current time, for the expiry countdowns. */
+  readonly environmentNowMs: number | null;
+}
+
 export interface AccountLimitsRowEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -100,6 +107,8 @@ export interface AccountLimitsRow {
   readonly subtitle: string | null;
   readonly environments: ReadonlyArray<AccountLimitsRowEnvironment>;
   readonly windows: ReadonlyArray<AccountLimitsRowWindow>;
+  /** Null when no agent reading this subscription reports banked resets. */
+  readonly resetCredits: AccountLimitsRowResetCredits | null;
   readonly state: AccountLimitsRowState;
   /** Age of the freshest number in this row. */
   readonly readingAgeMs: number | null;
@@ -128,12 +137,8 @@ function timestampMillis(value: string): number {
 }
 
 /**
- * The newest reading of each subscription an environment reported.
- *
- * Keyed by the subscription, never by the instance that read it. Keying by the
- * instance collapses two DIFFERENT subscriptions that one agent reads into one
- * — which is the whole OpenCode case, where a single instance drives several
- * plans and the second silently replaced the first.
+ * Keyed by the subscription, never by the instance that read it: one OpenCode instance
+ * drives several plans, and keying by instance let the second replace the first.
  */
 function newestSnapshotsBySubscription(
   snapshots: ReadonlyArray<AccountLimitsSnapshot>,
@@ -214,15 +219,9 @@ function ageMillis(observedAt: string | undefined, currentEnvironmentTime: numbe
 }
 
 /**
- * What a subscription is called, and the account it belongs to.
- *
- * The vendor names the row — "Claude", not the address it is registered to —
- * because that is what a person recognises at a glance. The address is a
- * disambiguator, so it becomes the subtitle and only shows when two rows of the
- * same vendor would otherwise read alike.
- *
- * A subscription the vendor named itself, like a plan, already carries the
- * right title in its label and keeps it.
+ * The vendor titles the row ("Claude", not the account address). The address is only a
+ * disambiguator, shown as the subtitle when two rows of one vendor would read alike.
+ * A subscription the vendor named itself, like a plan, keeps its label as the title.
  */
 function subscriptionPresentation(subscription: { readonly key: string; readonly label: string }): {
   readonly title: string;
@@ -244,32 +243,18 @@ function subscriptionPresentation(subscription: { readonly key: string; readonly
 }
 
 /**
- * Whether this agent ever reports account limits, and so deserves a row saying
- * it has not reported one yet.
- *
- * HACK: the client should not know which drivers these are. The honest answer
- * is a capability on the provider snapshot the server already builds, since the
- * server is the only side that knows which drivers implement the reader. This
- * list exists because adding that capability means touching the provider
- * contract and every driver's snapshot, which is more than this change carries.
- * Remove it once `ServerProvider` carries the capability.
- *
- * Note this gate applies ONLY to the placeholder pass. A reading that actually
- * arrived is shown whatever produced it — the server does not send one for a
- * driver it cannot read, so the readings need no allowlist and must not get one.
+ * WORKAROUND: a client-side driver list, because the capability belongs on `ServerProvider`
+ * and adding it touches every driver's snapshot. Remove once `ServerProvider` carries it.
+ * It gates ONLY the "no reading yet" placeholder; a reading that arrived is always shown.
  */
 function reportsAccountLimits(driver: ProviderDriverKind): boolean {
   return driver === "claudeAgent" || driver === "codex";
 }
 
 /**
- * Whether this instance belongs in the panel at all.
- *
- * An instance whose CLI is missing answers every read with a failure, and a row
- * that says "Refresh failed" forever reads as a broken subscription rather than
- * as a provider that is not installed here. But `ready` is a narrow bar — an
- * instance can sit at `warning` and still be the one metering the account — so
- * a reading we already hold keeps its row whatever the probe currently says.
+ * Hides an instance whose CLI is missing, which would show "Refresh failed" forever. A
+ * reading already held keeps its row whatever the probe says: an instance at `warning`
+ * can still be the one metering the account.
  */
 function canReportAccountLimits(
   entry: ProviderInstanceEntry | undefined,
@@ -291,6 +276,9 @@ interface AccountLimitsCandidate {
   readonly displayName: string;
   readonly accentColor?: string | undefined;
   readonly snapshot: AccountLimitsSnapshot | null;
+  readonly resetCredits?: ServerProviderResetCredits | undefined;
+  /** Age of the `resetCredits` reading, which the dock's window reading does not date. */
+  readonly resetCreditsAgeMs?: number | null;
   readonly state: AccountLimitsRowState;
   /** The account the provider named, when it named one. */
   readonly accountName: string | null;
@@ -335,6 +323,25 @@ function freshestWindows(
   return [...chosen.values()];
 }
 
+/**
+ * Credits are read apart from the dock's windows, so a fresh window says nothing about the count
+ * beside it: the freshest credit reading wins. An explicit zero is a reading too.
+ */
+function freshestResetCredits(
+  candidates: ReadonlyArray<AccountLimitsCandidate>,
+): AccountLimitsCandidate | undefined {
+  let freshest: AccountLimitsCandidate | undefined;
+  for (const candidate of candidates) {
+    if (candidate.resetCredits === undefined) continue;
+    const age = candidate.resetCreditsAgeMs ?? null;
+    const incumbentAge = freshest?.resetCreditsAgeMs ?? null;
+    if (freshest === undefined || (age !== null && (incumbentAge === null || age < incumbentAge))) {
+      freshest = candidate;
+    }
+  }
+  return freshest;
+}
+
 function smallestAge(ages: ReadonlyArray<number | null>): number | null {
   let smallest: number | null = null;
   for (const age of ages) {
@@ -360,13 +367,9 @@ function leadCandidate(candidates: ReadonlyArray<AccountLimitsCandidate>): Accou
 }
 
 /**
- * Fold every environment's readings into one row per subscription.
- *
- * Two environments that drive the same account report the same account key, and
- * their readings are the same subscription seen at two moments — so they become
- * one row whose every window shows the freshest of the two. A reading with no
- * account key is never folded: it keeps its own row, labelled by environment,
- * which is what an environment too old to report an account still gets.
+ * Readings with the same account key from several environments fold into one row, each
+ * window showing the freshest. A reading with no account key is never folded: it keeps
+ * its own row, labelled by environment.
  */
 export function projectAccountLimits(
   inputs: ReadonlyArray<EnvironmentAccountLimitsInput>,
@@ -391,6 +394,9 @@ export function projectAccountLimits(
     // Every instance that reported anything, taken before the dedup: one whose
     // reading lost to a fresher one for the same subscription still reported,
     // and giving it a second "no reading yet" row would double the account.
+    const providersByInstance = new Map(
+      environment.providers.map((provider) => [String(provider.instanceId), provider]),
+    );
     const readInstances = new Set(
       environment.summary.snapshots.flatMap((snapshot) =>
         snapshot.reader === undefined ? [] : [String(snapshot.reader.providerInstanceId)],
@@ -404,16 +410,18 @@ export function projectAccountLimits(
       // its existence: the numbers are still a real subscription's, and
       // dropping it would blink a row out on a reconnect race.
       if (entry !== undefined && !canReportAccountLimits(entry, snapshot)) continue;
-      // A reading the server marked unfoldable keys on the environment plus its
-      // own key, never on the instance that read it. The server already tells
-      // several unnamed plans from one instance apart by an ordinal in that
-      // key, and keying on the instance would throw that away and merge two
-      // subscriptions' windows under one label. The `#env:` prefix keeps these
-      // apart from real keys, which always start with a vendor namespace.
+      // An unfoldable reading keys on environment plus its own key, never the instance:
+      // the key's ordinal tells one instance's unnamed plans apart. `#env:` cannot
+      // collide with real keys, which start with a vendor namespace.
       const foldable = isFoldableSubscriptionKey(snapshot.subscription.key)
         ? snapshot.subscription
         : null;
       const presentation = subscriptionPresentation(snapshot.subscription);
+      const readerLimits =
+        reader === undefined
+          ? undefined
+          : providersByInstance.get(String(reader.providerInstanceId))?.usageLimits;
+      const resetCredits = readerLimits?.resetCredits;
       const partial = {
         groupKey: foldable?.key ?? `#env:${environment.environmentId}:${snapshot.subscription.key}`,
         environmentId: environment.environmentId,
@@ -424,6 +432,17 @@ export function projectAccountLimits(
         displayName: presentation.title,
         ...(entry?.accentColor ? { accentColor: entry.accentColor } : {}),
         snapshot,
+        ...(resetCredits
+          ? {
+              resetCredits,
+              // An environment that predates `readAt` dates them by the probe, which window
+              // events advance; it can overstate how fresh the count is.
+              resetCreditsAgeMs: ageMillis(
+                resetCredits.readAt ?? readerLimits?.checkedAt,
+                currentEnvironmentTime,
+              ),
+            }
+          : {}),
         state: rowState(snapshot, currentEnvironmentTime),
         accountName: presentation.accountName,
       } satisfies Omit<AccountLimitsCandidate, "windows" | "readingAgeMs">;
@@ -438,13 +457,9 @@ export function projectAccountLimits(
       else groups.set(candidate.groupKey, [candidate]);
     }
 
-    // An agent that is configured but has produced no reading yet still gets a
-    // row, saying so. Walking only the subscriptions would drop it, and a
-    // freshly configured Claude vanishing from the panel reads as broken.
-    //
-    // Only agents that actually report limits, though. An agent that never
-    // will — Cursor, Grok — would otherwise hold a "No reading yet" row for
-    // ever, since the thing that clears one is a reading arriving.
+    // A configured agent with no reading yet still gets a row, or a fresh Claude would
+    // vanish from the panel. Only agents that report limits: Cursor or Grok would hold
+    // "No reading yet" forever, since only a reading clears it.
     for (const entry of deriveProviderInstanceEntries(environment.providers)) {
       if (!reportsAccountLimits(entry.driverKind)) continue;
       if (readInstances.has(String(entry.instanceId))) continue;
@@ -475,6 +490,7 @@ export function projectAccountLimits(
   const rows = [...groups].map(([key, candidates]) => {
     const lead = leadCandidate(candidates);
     const windows = freshestWindows(candidates);
+    const creditsSource = freshestResetCredits(candidates);
     return {
       key,
       driver: lead.driver,
@@ -488,6 +504,12 @@ export function projectAccountLimits(
         label: candidate.environmentLabel,
       })),
       windows,
+      resetCredits: creditsSource?.resetCredits
+        ? {
+            credits: creditsSource.resetCredits,
+            environmentNowMs: creditsSource.environmentNowMs,
+          }
+        : null,
       state: candidates.map((candidate) => candidate.state).reduce(bestRowState),
       readingAgeMs: smallestAge(windows.map((rowWindow) => rowWindow.ageMs)),
       accountName: lead.accountName,
@@ -565,7 +587,7 @@ const environmentAccountLimitsAtom = Atom.make(
         environmentId,
         label: presentation.entry.target.label,
         connectionPhase: presentation.connection.phase,
-        providers: presentation.serverConfig?.providers ?? [],
+        providers: get(serverEnvironment.providersValueAtom(environmentId)) ?? [],
         isPending: result.waiting,
         error:
           result._tag === "Failure" ? "This environment could not report account limits." : null,
@@ -577,19 +599,23 @@ const environmentAccountLimitsAtom = Atom.make(
   },
 ).pipe(Atom.withLabel("web-account-limits:environments"));
 
+// Ages are measured when the readings change; no timer re-projects them.
+const accountLimitsProjectionAtom = Atom.make((get): AccountLimitsProjection =>
+  projectAccountLimits(get(environmentAccountLimitsAtom), Date.now()),
+).pipe(Atom.withLabel("web-account-limits:projection"));
+
 export interface AccountLimitsView extends AccountLimitsProjection {
   readonly refresh: () => void;
 }
 
 export function useAccountLimits(): AccountLimitsView {
-  const inputs = useAtomValue(environmentAccountLimitsAtom);
-  const projection = projectAccountLimits(inputs, Date.now());
-  const refresh = useCallback(() => {
-    for (const environment of inputs) {
+  const projection = useAtomValue(accountLimitsProjectionAtom);
+  const refresh = () => {
+    for (const environment of projection.environments) {
       appAtomRegistry.refresh(
         serverEnvironment.accountLimits({ environmentId: environment.environmentId, input: {} }),
       );
     }
-  }, [inputs]);
+  };
   return { ...projection, refresh };
 }

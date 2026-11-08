@@ -1,0 +1,155 @@
+# Dictation
+
+Mesura Code owns dictation end to end. A client records audio, the server transcribes it, and the
+client that holds the draft places the text. Web and desktop use the same path, and a phone uses it
+through the web app in its browser; this fork has no native mobile client (ADR-008).
+
+## The server job
+
+Transcription runs only on the server, in [`DictationJobs`](../../apps/server/src/dictation/DictationJobs.ts).
+A client uploads the recording through the existing signed `file` upload, then starts a job that
+names the upload, the recording length, the mode and the target. The server calls OpenAI with the
+key from server settings and pushes every job's state and text to subscribed clients.
+
+The server owns transcription for two reasons:
+
+- A phone browser has no reliable transcription engine, and every device must give the same
+  quality in Spanish and English.
+- The OpenAI key is set once per host, in Settings, and every client of that host uses it. The
+  key stays in the secret store and never reaches a client.
+
+Jobs live in memory for 24 hours. A server restart forgets them, including text not yet
+delivered. Every published job state and every snapshot carries the server run's `epoch` and a
+rising `revision`, and the start response carries the job's. A client can then tell a list that
+is only older than its job (a snapshot can overtake the start response) from one that lost it (a
+new epoch, or a snapshot revision at or past the job's), and release the mode keys, which
+otherwise hold `Alt+S` from the Hosts peek. Only a snapshot proves a job absent: pending upserts
+coalesce per job, so an upsert's revision does not mean every earlier change arrived. The engine
+choice in [`openAiTranscription.ts`](../../apps/server/src/dictation/openAiTranscription.ts)
+matches Symmetria Shell's: `gpt-4o-transcribe` silently truncates long audio, so recordings over
+420 s use `whisper-1`. No language parameter is sent, because the user mixes Spanish and English.
+
+## The marker token
+
+When a recording stops, the client drops a marker into the draft at the caret. The marker is an
+ordinary context link, `[Transcribing](t3-context://v1/dictation/<jobId>)`, defined in
+[`dictationSlots.ts`](../../packages/shared/src/dictationSlots.ts). It is text in the prompt, not an
+editor node, so a draft that is not mounted can still be filled: another thread, a reloaded tab, or
+another device.
+
+Two traps follow from that choice:
+
+- The link never has a context record. Code that walks context links must skip the `dictation`
+  kind, or it reports a missing record or sends the link to a provider. The send state refuses a
+  prompt that still holds a marker.
+- The web editor draws the marker as the stepped wave.
+
+## The thread a recording belongs to
+
+A recording belongs to the server thread whose composer, or question card, holds dictation when
+the recording starts (`bindRecordingThread` in
+[`dictationController.ts`](../../apps/web/src/dictation/dictationController.ts)). A composer of
+another thread that mounts during the recording never takes the marker, so every stop path (the
+strip, the toggle key, the desktop command line, the sidebar's wave) places it in the starting
+thread: at its caret when that thread is on screen, else at the end of its draft. Composers of the
+starting thread still trade it among themselves, so a question card of that thread can take it.
+
+A recording started in a new-thread draft has no thread and follows the composer that holds
+dictation when it stops. Sending the draft turns it into a server thread while the recording
+runs, and a marker pinned to the draft would land in a draft nobody shows.
+
+The session carries the thread, so the sidebar row can show the recording
+([`threadDictationActivity.ts`](../../apps/web/src/dictation/threadDictationActivity.ts)).
+
+## Filling is idempotent by job id
+
+A completed job replaces the marker whose id is its job id. A filled marker is gone, so a second
+fill for the same job finds nothing and reports `missing`. Every tab and every device can
+therefore fill wherever its own copy of the draft still holds the marker, with no coordination.
+
+The one-off effects of a job happen once per client, through the delivery ledger in
+[`session.ts`](../../packages/client-runtime/src/dictation/session.ts). These effects are the
+clipboard copy in save mode, the send, and the notice for a deleted marker. A job whose marker the
+user deleted keeps its text in the Transcriptions list.
+
+## Send when ready
+
+A draft is armed in two ways: a recording stops in send mode, or the user presses Send while a
+marker is pending. An armed draft stays editable. After every fill or discard, the client checks
+the draft: with no marker left, it sends. The marker count in the text decides, not the job list. A
+failed marker keeps the draft armed and unsent until a retry fills it or the user discards it.
+
+A marker the user deletes by hand disarms the draft instead of sending it, because the text around
+the marker was written to wait for that transcript. The armed state records the marker ids seen at
+the last check, and the controller notes each marker it takes out itself (a fill, a Discard, a
+switch to save). A marker that vanished without such a note was deleted by hand. A send that waits
+on its uploads reads the armed state again just before it consumes the draft: a disarm during the
+uploads can leave the text exactly as the send saw it, so comparing the text does not catch it.
+
+The armed state has no banner. Every marker in an armed draft draws the send glyph as a button,
+and pressing it disarms the draft. Selecting insert (Alt+I) for the last job does the same; Escape
+is not used, because Vim mode takes it in the composer. A question card shows its armed state on
+its Submit button, which cancels it. Whatever disarms a draft or answer, the controller turns the
+send-mode jobs whose markers still wait there to insert, so the job record, the glyph and the mode
+keys agree.
+
+The armed state is per tab and per device. A cancel in one tab does not reach another tab that
+armed the same draft, and a device cannot cancel a send another device armed.
+
+A sent message gets one `[voiced] ` prefix when any part of it was dictated, never one per
+insertion. Mid-sentence insertions would otherwise scatter tags through the message.
+
+A draft for a thread that is not on screen sends through the directed submission path in
+[`directedComposerSubmission.ts`](../../apps/web/src/dictation/directedComposerSubmission.ts). That
+path refuses to send while a button approval is pending, because free text cannot answer one.
+
+## The desktop widget
+
+When another app has focus, a small Electron window titled `mesura-dictation-overlay` shows the
+recording and its transcription. The main window's renderer publishes the state, so the widget
+opens no server connection of its own. Under Hyprland, the desktop applies named runtime rules
+for that title through one `hyprctl` batch before the window first maps (`hyprlandWidgetRules.ts`):
+a base rule (float, pin, no focus, no frame, a fixed `size`, and a `move` to the bottom centre)
+and, per monitor, a placement rule selected by `match:workspace m[<monitor>]` whose `move` adds
+that monitor's reserved bottom edge, because `monitor_h` is the whole monitor. The monitors are
+read once per process; one connected later gets the base rule's plain margin. A named rule is
+replaced when the next app process sets it again, where anonymous runtime rules would stack until
+Hyprland reloads. The `move` uses the widget's own size, because Hyprland 0.56.2 evaluates
+`window_w`/`window_h` from the client's requested geometry on first map. Elsewhere the widget
+places itself with `dictationWidgetBounds`.
+
+While a recording or its transcription exists, the desktop binds Alt+S, Alt+I, Alt+Enter,
+Alt+Space, Alt+R and Alt+X through `hyprctl`. Every session start unbinds before it binds, so binds
+that leaked after a crash cannot stack.
+
+Each bind writes its `--dictation …` words as one line to the session's command socket,
+`$XDG_RUNTIME_DIR/mesura-dictation-<pid>.sock` (mode 0600, in userData when the variable is
+unset). The client is `socat`, else `python3`. The session resolves the client to an absolute
+path when it installs the binds: Hyprland runs binds with its own PATH, and the app's PATH has
+been extended from the login shell. A socket path that socat's address grammar would split
+(a `,`, `:`, quote or space) goes through `python3`. The socket exists only during the session,
+and the binds point at it only while it listens; teardown waits for a start still running.
+
+Every socket bind ends in `|| <launcher> --dictation …`, so a client that fails relaunches the
+app with the same words, and the single-instance lock hands them to the running instance. With
+neither client, or when the socket cannot listen, that relaunch is the whole bind. It costs a
+full Electron start per key press (250-340 ms measured headless), which the developer saw as a
+mode change that lagged by about a second. Both paths end in
+[`forwardDictationCommand`](../../apps/desktop/src/dictation/dictationCommandForwarding.ts).
+
+Hyprlang reads a `#` as the start of a comment, even inside shell quotes, so every value sent
+through `hyprctl keyword` writes a literal hash as `##`. That includes the binds put back at
+session end, because `hyprctl -j binds` reports them unescaped.
+
+## Why the Symmetria Shell link was removed
+
+Desktop dictation used to be a protocol between two processes. Shell recorded and transcribed, and
+a broker in Electron main reserved a composer target and applied the transcript. The link existed
+only on the laptop, so the phone had no dictation. Its timeouts turned any delay into a silent
+clipboard fallback, which lost automatic sends. Mesura now records itself, so the broker, its two
+sockets, the renderer bridge and the persisted command ledger are gone.
+[`symmetria-dictation-integration.test.ts`](../../tests/unit/symmetria-dictation-integration.test.ts)
+fails if any of them returns. The Symmetria thread feed is a separate socket and stays.
+
+Shell still records for other apps. When Mesura does not answer on the old socket, Shell copies the
+transcript to the clipboard.

@@ -1,20 +1,14 @@
 /**
- * Disposable environment fakes for thread search tests. Each fake environment
- * answers the real orchestration RPC tags through a fake `RpcSession`, and the
- * fake `EnvironmentRegistry` routes `registry.run` to that environment's
- * supervisor. Code under test therefore reaches the fakes through the same
- * `request(tag, input)` path it uses against a real server.
- *
- * The evidence fake mirrors the server contract from phase 1: newest message
- * first, a fixed scan window per request, case-insensitive contiguous match,
- * pages that can be empty while `nextCursor` is set, and cursors bound to one
- * query and thread scope.
+ * Fakes answer the real orchestration RPC tags through the same `request(tag, input)` path as a
+ * server. The evidence fake mirrors the server: newest message first, a fixed scan window, case
+ * insensitive contiguous match, empty pages with a `nextCursor`, cursors bound to one query.
  */
 import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   MessageId,
-  ORCHESTRATION_WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
+  THREAD_SEARCH_WS_METHODS,
   OrchestrationSearchThreadsError,
   ProjectId,
   THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH,
@@ -285,14 +279,14 @@ export const makeFakeEnvironments = Effect.fn("ThreadSearchFakes.makeFakeEnviron
       });
     const sessionRef = yield* SubscriptionRef.make(Option.none<RpcSession>());
     const client = {
-      [ORCHESTRATION_WS_METHODS.searchThreads]: (input: OrchestrationSearchThreadsInput) =>
-        record(ORCHESTRATION_WS_METHODS.searchThreads, input).pipe(
+      [ORCHESTRATION_V2_WS_METHODS.searchThreads]: (input: OrchestrationSearchThreadsInput) =>
+        record(ORCHESTRATION_V2_WS_METHODS.searchThreads, input).pipe(
           Effect.andThen(serveLexicalSearch(spec.threads, input)),
         ),
-      [ORCHESTRATION_WS_METHODS.listThreadSearchCatalog]: (
+      [THREAD_SEARCH_WS_METHODS.listThreadSearchCatalog]: (
         input: OrchestrationThreadSearchCatalogInput,
       ) =>
-        record(ORCHESTRATION_WS_METHODS.listThreadSearchCatalog, input).pipe(
+        record(THREAD_SEARCH_WS_METHODS.listThreadSearchCatalog, input).pipe(
           Effect.andThen(
             measureRead(
               spec.override?.listThreadSearchCatalog?.(input) ?? serveCatalog(spec.threads, input),
@@ -304,20 +298,20 @@ export const makeFakeEnvironments = Effect.fn("ThreadSearchFakes.makeFakeEnviron
               : Effect.void,
           ),
         ),
-      [ORCHESTRATION_WS_METHODS.searchThreadEvidence]: (
+      [THREAD_SEARCH_WS_METHODS.searchThreadEvidence]: (
         input: OrchestrationThreadSearchEvidenceInput,
       ) =>
-        record(ORCHESTRATION_WS_METHODS.searchThreadEvidence, input).pipe(
+        record(THREAD_SEARCH_WS_METHODS.searchThreadEvidence, input).pipe(
           Effect.andThen(
             measureRead(
               spec.override?.searchThreadEvidence?.(input) ?? serveEvidence(spec.threads, input),
             ),
           ),
         ),
-      [ORCHESTRATION_WS_METHODS.reasonThreadSearch]: (
+      [THREAD_SEARCH_WS_METHODS.reasonThreadSearch]: (
         input: OrchestrationThreadSearchReasoningInput,
       ) =>
-        record(ORCHESTRATION_WS_METHODS.reasonThreadSearch, input).pipe(
+        record(THREAD_SEARCH_WS_METHODS.reasonThreadSearch, input).pipe(
           Effect.andThen(
             spec.reason?.(input) ??
               Effect.die(new Error(`${spec.environmentId} does not run the configured model.`)),

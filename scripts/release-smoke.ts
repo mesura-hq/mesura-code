@@ -16,11 +16,6 @@ const workspaceFiles = [
   "apps/server/package.json",
   "apps/desktop/package.json",
   "apps/web/package.json",
-  "apps/mobile/package.json",
-  "apps/mobile/deps/react-native-nitro-markdown-0.5.0.tgz",
-  "apps/mobile/modules/t3-markdown-text/package.json",
-  "apps/mobile/modules/t3-review-diff/package.json",
-  "apps/mobile/modules/t3-terminal/package.json",
   "apps/marketing/package.json",
   "infra/relay/package.json",
   "oxlint-plugin-t3code/package.json",
@@ -29,17 +24,36 @@ const workspaceFiles = [
   "packages/shared/package.json",
   "packages/ssh/package.json",
   "packages/tailscale/package.json",
+  "packages/provider-core/package.json",
+  "packages/provider-testing/package.json",
+  "packages/provider-pi/package.json",
+  "packages/provider-acp/package.json",
+  "packages/provider-acp-registry/package.json",
+  "packages/provider-cursor/package.json",
+  "packages/provider-grok/package.json",
+  "packages/provider-muse/package.json",
+  "packages/provider-opencode/package.json",
+  "packages/source-control-azure-devops/package.json",
+  "packages/source-control-bitbucket/package.json",
+  "packages/source-control-core/package.json",
+  "packages/source-control-definitions/package.json",
+  "packages/source-control-forgejo/package.json",
+  "packages/source-control-gitcafe/package.json",
+  "packages/source-control-github/package.json",
+  "packages/source-control-gitlab/package.json",
+  "packages/source-control-testing/package.json",
   "packages/effect-acp/package.json",
   "packages/effect-codex-app-server/package.json",
   // Fork-owned, and required here because `apps/desktop` depends on it: this
   // fixture copies MANIFESTS ONLY, so a workspace dependency whose manifest is
   // absent makes the regenerated lockfile fail to resolve.
   "packages/symmetria-broker-contract/package.json",
-  // Same rule, for the vendored file manager. All four are workspace members
-  // and all four are depended on — `apps/web` takes every one, `apps/server`
-  // takes fm-core and fm-main — so every manifest has to be here or the
-  // regenerated lockfile fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND. Adding a
-  // fifth workspace member under vendor/ means adding it here too.
+  // Same rule: `apps/web` depends on the fork's modal key engine.
+  "packages/keys/package.json",
+  // Same rule, for the vendored file manager: all four packages are depended-on workspace members
+  // (`apps/web` takes every one, `apps/server` fm-core and fm-main), so a missing manifest fails
+  // the regenerated lockfile with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND. Add any new vendor/ member
+  // here too.
   "vendor/symmetria-file-manager/packages/fm-core/package.json",
   "vendor/symmetria-file-manager/packages/fm-ui/package.json",
   "vendor/symmetria-file-manager/packages/fm-search/package.json",
@@ -201,6 +215,12 @@ function assertMissing(path: string, message: string): void {
 const tempRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-release-smoke-"));
 
 try {
+  NodeChildProcess.execFileSync(
+    process.execPath,
+    ["--test", NodePath.resolve(repoRoot, ".github/scripts/relay-state-output.test.cjs")],
+    { stdio: "inherit" },
+  );
+
   copyWorkspaceManifestFixture(tempRoot);
 
   NodeChildProcess.execFileSync(

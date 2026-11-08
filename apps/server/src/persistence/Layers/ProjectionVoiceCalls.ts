@@ -9,8 +9,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqlSchema from "effect/unstable/sql/SqlSchema";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as SqlSchema from "effect/sql/SqlSchema";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
@@ -114,8 +114,11 @@ const makeProjectionVoiceCallRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionVoiceCallRepository.insertCall:query")),
     );
 
-  const appendFragments: ProjectionVoiceCallRepositoryShape["appendFragments"] = (input) =>
-    Effect.gen(function* () {
+  // The voice projector runs this inside the event append transaction.
+  const appendFragments: ProjectionVoiceCallRepositoryShape["appendFragments"] = Effect.fn(
+    "ProjectionVoiceCallRepository.appendFragments",
+  )(
+    function* (input) {
       yield* sql`
         INSERT INTO projection_voice_batches (call_id, batch_id, content_digest)
         VALUES (${input.callId}, ${input.batchId}, ${voiceBatchContentDigest(input.fragments)})
@@ -145,17 +148,19 @@ const makeProjectionVoiceCallRepository = Effect.gen(function* () {
         SET last_sequence = MAX(last_sequence, ${highest})
         WHERE call_id = ${input.callId}
       `;
-    }).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionVoiceCallRepository.appendFragments:query")),
-    );
+    },
+    Effect.mapError(toPersistenceSqlError("ProjectionVoiceCallRepository.appendFragments:query")),
+  );
 
   const markEnded: ProjectionVoiceCallRepositoryShape["markEnded"] = (input) =>
     markEndedRow(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionVoiceCallRepository.markEnded:query")),
     );
 
-  const deleteByThreadId: ProjectionVoiceCallRepositoryShape["deleteByThreadId"] = ({ threadId }) =>
-    Effect.gen(function* () {
+  const deleteByThreadId: ProjectionVoiceCallRepositoryShape["deleteByThreadId"] = Effect.fn(
+    "ProjectionVoiceCallRepository.deleteByThreadId",
+  )(
+    function* ({ threadId }) {
       yield* sql`
         DELETE FROM projection_voice_fragments
         WHERE call_id IN (SELECT call_id FROM projection_voice_calls WHERE thread_id = ${threadId})
@@ -165,10 +170,18 @@ const makeProjectionVoiceCallRepository = Effect.gen(function* () {
         WHERE call_id IN (SELECT call_id FROM projection_voice_calls WHERE thread_id = ${threadId})
       `;
       yield* sql`DELETE FROM projection_voice_calls WHERE thread_id = ${threadId}`;
-    }).pipe(
-      Effect.mapError(
-        toPersistenceSqlError("ProjectionVoiceCallRepository.deleteByThreadId:query"),
-      ),
+    },
+    Effect.mapError(toPersistenceSqlError("ProjectionVoiceCallRepository.deleteByThreadId:query")),
+  );
+
+  // Mesura: reads the v2 thread row directly; a missing or deleted thread holds no voice history.
+  const isLiveThread: ProjectionVoiceCallRepositoryShape["isLiveThread"] = ({ threadId }) =>
+    sql<{ readonly deletedAt: string | null }>`
+      SELECT deleted_at AS "deletedAt" FROM orchestration_v2_projection_threads
+      WHERE thread_id = ${threadId}
+    `.pipe(
+      Effect.map((rows) => rows.length > 0 && rows[0]!.deletedAt === null),
+      Effect.mapError(toPersistenceSqlError("ProjectionVoiceCallRepository.isLiveThread:query")),
     );
 
   const getCall: ProjectionVoiceCallRepositoryShape["getCall"] = (input) =>
@@ -252,6 +265,7 @@ const makeProjectionVoiceCallRepository = Effect.gen(function* () {
     appendFragments,
     markEnded,
     deleteByThreadId,
+    isLiveThread,
     getCall,
     listCalls,
     listOpenCalls,

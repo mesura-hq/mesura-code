@@ -1,20 +1,7 @@
 /**
- * Phase 11 fence, criteria 2, 3, 5 and 6: the one report view model the web
- * Report tab, the Android Report tab and both report cards draw from. The
- * frame (clock, verification table, coverage, degraded count, cost, step
- * record) comes from the run state; the prose comes from `report.md`.
- *
- * Entry point: `deriveFactoryReportView` in `reportView.ts`
- * (`@t3tools/client-runtime/factory/report-view`), fed the state the server's
- * run tracker folds from the recorder's fixture
- * (`packages/shared/src/fixtures/factory-events.v1.jsonl`, a two-phase run
- * whose phase 2 closed degraded) and the report that run wrote
- * (`packages/shared/src/fixtures/invoice-csv-export.report.md`), plus
- * synthetic reports with an unknown heading, a missing section and a changed
- * order, and synthetic event lines for a run with two stops. The clients that
- * render it are mounted in `apps/web/src/factory/FactoryRunCard.test.tsx`,
- * `apps/mobile/src/features/factory/FactoryRouteScreen.test.tsx` and
- * `apps/mobile/src/features/threads/mobileInlineScreen.test.tsx`.
+ * Fixtures: the run folded from `factory-events.v1.jsonl` (phase 2 closes degraded) and the
+ * report that run wrote, plus synthetic reports with an unknown heading, a missing section and a
+ * changed order, and synthetic event lines for a run with two stops.
  */
 /// <reference types="vite-plus/client" />
 import type { FactoryRunState } from "@t3tools/contracts";

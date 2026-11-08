@@ -8,21 +8,15 @@ import * as Stream from "effect/Stream";
 import { makeNvimRpc, packNvimFrame, type NvimRpcDuplex } from "./NvimRpc.ts";
 
 /**
- * A response frame carrying the three handle types, as real msgpack extension
- * bytes rather than as objects this code packed itself.
- *
- * Written by hand on purpose. An earlier version of this test packed a plain
- * object and asserted it came back, which agreed with itself and proved
- * nothing: the extension codec was registered under the wrong key the whole
- * time, and the first real handle from Neovim — the answer to
- * `nvim_get_current_buf` — threw inside the decoder and hung the call.
+ * A response frame carrying the three handle types, as hand-written msgpack extension bytes.
+ * Bytes packed by this code agreed with a codec registered under the wrong key.
  */
 const HANDLE_RESPONSE_BYTES = new Uint8Array([
-  0x94, // array of 4: a response frame
-  0x01, // kind: response
-  0x00, // message id 0
-  0xc0, // no error
-  0x93, // array of 3 results
+  0x94, // response frame: kind 1, message id 0, no error, array of 3 results
+  0x01,
+  0x00,
+  0xc0,
+  0x93,
   0xd4,
   0x00,
   0x01, // fixext1, type 0 (Buffer), payload: fixint 1
@@ -188,16 +182,9 @@ describe("NvimRpc", () => {
       const pending = yield* Effect.forkChild(Effect.result(rpc.request("nvim_get_mode", [])));
       yield* Effect.yieldNow;
 
-      // An extension type nobody registered. This is not a hypothetical: the
-      // handle codec was registered under the wrong key while this bridge was
-      // being built, and every real handle from Neovim threw here.
-      //
-      // The distinction that matters is against a frame that is merely short.
-      // A short frame completes on the next read, so it is kept and waited on.
-      // One that can never be read would sit at the head of the tail forever:
-      // every later chunk is appended behind it, no response or notification is
-      // ever delivered again, and the tail grows without bound — a silent,
-      // permanent stall. So it fails the channel instead.
+      // An unregistered extension type. Unlike a short frame, which the next read completes,
+      // this one can never be read: kept at the head of the tail, it would stall the channel
+      // silently and forever, so the channel fails instead.
       yield* Queue.offer(inbound, new Uint8Array([0x94, 0x01, 0x00, 0xc0, 0xd4, 0x09, 0x01]));
 
       const settled = yield* Fiber.join(pending);

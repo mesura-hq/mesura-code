@@ -7,24 +7,10 @@ import { assert, it } from "vite-plus/test";
 import { repositoryRoot } from "./contractHarness.ts";
 
 /**
- * File comments are drawn as Monaco view zones, and three of the things that
- * make them work are facts about Monaco rather than properties of this code.
- * Each one was written the obvious way first, shipped, and was found only by
- * driving a browser — every unit test passed and every screenshot looked right
- * in all three cases.
- *
- * - **Monaco stops emitting `onMouseMove` once a button is down.** It routes
- *   those moves into its own drag handling, and it offers no drag event of its
- *   own. A gutter selection built on `onMouseMove` therefore never grows: the
- *   range collapses to the line the drag started on, while the highlight still
- *   looks alive. The gesture has to follow the pointer through the window and
- *   ask the editor what is under it.
- * - **Monaco paints `.view-lines` above the view-zone layer.** A form inside a
- *   zone renders, lays out and reads correctly while every real mouse click
- *   lands on the syntax token behind it. The zone has to raise itself.
- * - **A submitted comment's line range lives in the composer too.** Moving the
- *   anchor updates the zone; unless the composer is told, its chip keeps
- *   quoting the line the comment was made on.
+ * Three Monaco facts that unit tests and screenshots missed: Monaco stops emitting `onMouseMove`
+ * once a button is down, so a gutter drag follows the window pointer; it paints `.view-lines` above
+ * view zones, so a zone raises itself to take clicks; and a moved anchor must update the composer
+ * chip too, or the chip quotes the old line.
  */
 
 const read = (relativePath: string) =>

@@ -4,16 +4,9 @@ import { joinPath } from "@symmetria/fm-core/pane";
 import type { ProjectEntry, ProjectListEntriesResult } from "@t3tools/contracts";
 
 /**
- * The server's flat file list, as the file manager's folder map.
- *
- * `projects.listEntries` answers with every path below the project root, files
- * and directories alike, relative to that root. The Symmetria tree renders an
- * `OverviewModel` whose folders are keyed by absolute path, so this is the one
- * place the two shapes meet. It is pure: the same list gives the same map.
- *
- * Every folder is `Loaded`. The file manager's own scanner has budgets and
- * partial states because it discovers a filesystem incrementally; the server
- * already holds the whole index, so those states have nothing to describe.
+ * The server's flat, root-relative `projects.listEntries` list as the file manager's
+ * folder map, keyed by absolute path. Every folder is `Loaded`: the scanner's partial
+ * states describe incremental discovery, and the server already holds the whole index.
  */
 export function overviewFoldersFromEntries(
   rawCwd: string,

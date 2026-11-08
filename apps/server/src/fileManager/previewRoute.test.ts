@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import { HttpRouter, HttpServerResponse } from "effect/http";
 
 import { FILE_MANAGER_PREVIEW_ROUTE_PREFIX } from "./FileManagerHost.ts";
 import { fileManagerPreviewRouteLayer, previewResponse } from "./previewRoute.ts";

@@ -58,12 +58,8 @@ describe("host chords while the file manager is open", () => {
         linux,
       ),
     ).toBe("fileTree.miller");
-    // `editor.openFavorite` answers to alt+o, not mod+o. The pane-navigation
-    // work moved it there to free mod+k for `pane.focusUp`, which pushed
-    // `commandPalette.toggle` onto mod+o. Asserting mod+o here instead would
-    // pass for the wrong reason once the command moved, which is exactly what
-    // happened: this line read `chord("o")` and went false when the two
-    // changes met.
+    // `editor.openFavorite` answers to alt+o; mod+o belongs to `commandPalette.toggle`.
+    // Asserting mod+o here would pass for the wrong reason, as it once did.
     expect(isOpenFavoriteEditorShortcut(altChord("o"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
       true,
     );
@@ -80,15 +76,9 @@ describe("host chords while the file manager is open", () => {
   });
 
   /**
-   * Ctrl+O is the file manager's overview chord, so the host must not answer it
-   * while the file manager is up.
-   *
-   * Asserted through `resolveShortcutCommand` rather than through
-   * `isOpenFavoriteEditorShortcut`, because that helper now reports false for
-   * mod+o in BOTH states — `editor.openFavorite` lives on alt+o. A guard that
-   * cannot fail is worse than no guard: it reads as coverage and proves
-   * nothing. The host command competing for mod+o today is
-   * `commandPalette.toggle`.
+   * Ctrl+O is the file manager's overview chord, so the host must not answer it then.
+   * Asserted through `resolveShortcutCommand`: `isOpenFavoriteEditorShortcut` reports
+   * false for mod+o in both states, so a guard through it could not fail.
    */
   it("leaves Ctrl+O to the file manager's overview while it is open", () => {
     expect(resolveShortcutCommand(chord("o"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(

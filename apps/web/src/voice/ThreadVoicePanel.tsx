@@ -13,9 +13,10 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
 import { getClientSettings } from "~/hooks/useSettings";
+import { useStableCallback } from "~/hooks/useStableCallback";
 import { runtime } from "~/lib/runtime";
-import { cn, randomUUID } from "~/lib/utils";
-import { useThread, useThreadShell } from "~/state/entities";
+import { randomUUID } from "~/lib/utils";
+import { useThreadProjection, useThreadShell } from "~/state/entities";
 import { readPreparedConnection, usePreparedConnection } from "~/state/session";
 import { connectLiveVoice } from "@t3tools/client-runtime/voice-conversation/browser";
 import {
@@ -27,6 +28,10 @@ import type {
   VoiceAgentRequest,
   VoiceQueuedRequest,
 } from "@t3tools/client-runtime/voice-conversation/controller";
+import {
+  voiceConversationSnapshotFromThread,
+  type VoiceThreadProjection,
+} from "@t3tools/client-runtime/voice-conversation/thread-snapshot";
 
 import {
   appendVoiceCaption,
@@ -63,6 +68,27 @@ function reportVoiceError(message: string) {
   if (lastVoiceError?.message === message && now - lastVoiceError.at < 2000) return;
   lastVoiceError = { message, at: now };
   toastManager.add({ type: "error", title: "Voice call", description: message });
+}
+
+interface VoiceThreadSource {
+  readonly projection:
+    | (VoiceThreadProjection & { readonly thread: { readonly id: string } })
+    | null;
+  readonly hasPendingApprovals: boolean;
+  readonly hasPendingUserInput: boolean;
+}
+
+/** Sends the call the thread as the voice controller sees it, following its request in flight. */
+function updateCallSnapshot(call: VoiceCall, source: VoiceThreadSource) {
+  if (!source.projection) return;
+  call.update(
+    voiceConversationSnapshotFromThread({
+      projection: source.projection,
+      ownedMessageId: call.activeMessageId,
+      hasPendingApprovals: source.hasPendingApprovals,
+      hasPendingUserInput: source.hasPendingUserInput,
+    }),
+  );
 }
 
 /** The panel's phase for a call state. The call reaches `ended` only after history settles. */
@@ -102,22 +128,29 @@ export function ThreadVoicePanel({
   threadRef: ScopedThreadRef;
   dispatchRequest: (request: VoiceAgentRequest, isCallActive: () => boolean) => Promise<void>;
 }) {
-  // Detail deltas can omit latestTurn.userMessageId. The shell restores that link,
-  // which the voice controller needs to return only this request's result.
-  const thread = useThread(threadRef);
+  // The live projection, not the quiet one: spoken progress needs streamed assistant text.
+  const projection = useThreadProjection(threadRef)?.projection ?? null;
+  // The shell carries the pending approval and input flags the call must not act through.
   const shell = useThreadShell(threadRef);
+  const hasPendingApprovals = shell?.hasPendingApprovals ?? false;
+  const hasPendingUserInput = shell?.hasPendingUserInput ?? false;
   const router = useRouter();
   const supported = useEnvironmentSupportsVoiceHistory(threadRef.environmentId);
   const microphoneBlocked = useMicrophoneBlocker("call");
   const preparedConnection = Option.getOrNull(usePreparedConnection(threadRef.environmentId));
-  const dispatchRequestRef = useRef(dispatchRequest);
-  const onLayoutChangeRef = useRef(onLayoutChange);
+  // A call outlives renders and composer selections: its callbacks reach the current props.
+  const dispatchCurrentRequest = useStableCallback(dispatchRequest);
+  const changeLayout = useStableCallback(onLayoutChange);
   const audioRef = useRef<HTMLAudioElement>(null);
   const callRef = useRef<VoiceCall | null>(null);
   // Set while history storage and ownership are checked, before the call exists.
   const startingRef = useRef<{ cancelled: boolean; releaseMicrophone: () => void } | null>(null);
   const mountedRef = useRef(true);
-  const threadRefValue = useRef(thread);
+  const threadSourceRef = useRef<VoiceThreadSource>({
+    projection,
+    hasPendingApprovals,
+    hasPendingUserInput,
+  });
   const [phase, setPhase] = useState<CallPhase>("idle");
   const [status, setStatus] = useState("Connecting…");
   const [settings, setSettings] = useState<VoiceConversationSettings | null>(null);
@@ -127,22 +160,14 @@ export function ThreadVoicePanel({
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const [captions, setCaptions] = useState<ReadonlyArray<VoiceCaption>>([]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- pushes thread changes into the live call, which runs outside React
   useEffect(() => {
-    // A call can outlive composer selections. Resolve each request through the current composer.
-    dispatchRequestRef.current = dispatchRequest;
-    onLayoutChangeRef.current = onLayoutChange;
-  }, [dispatchRequest, onLayoutChange]);
+    threadSourceRef.current = { projection, hasPendingApprovals, hasPendingUserInput };
+    const call = callRef.current;
+    if (call) updateCallSnapshot(call, threadSourceRef.current);
+  }, [projection, hasPendingApprovals, hasPendingUserInput]);
 
-  useEffect(() => {
-    threadRefValue.current = thread;
-    if (thread)
-      callRef.current?.update({
-        ...thread,
-        hasPendingApprovals: shell?.hasPendingApprovals ?? false,
-        hasPendingUserInput: shell?.hasPendingUserInput ?? false,
-      });
-  }, [thread, shell?.hasPendingApprovals, shell?.hasPendingUserInput]);
-
+  // oxlint-disable-next-line t3code/react-effect-budget -- loads this connection's voice settings from the environment
   useEffect(() => {
     // Environments without voice support have no voice routes; never ask them.
     if (!preparedConnection || !supported) return;
@@ -160,6 +185,7 @@ export function ThreadVoicePanel({
     };
   }, [preparedConnection, supported]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- sends stored history to the environment on mount and reconnect
   useEffect(() => {
     // On mount and on every reconnect, send the history this browser kept for earlier calls.
     // The environment's fresh owner decides; a call still recording is skipped.
@@ -183,6 +209,7 @@ export function ThreadVoicePanel({
     };
   }, [preparedConnection, supported, threadRef.environmentId]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- ends the live call and its microphone claim on unmount
   useEffect(() => {
     mountedRef.current = true;
     // ChatView keys this panel by environment and thread, so navigation unmounts it. The call
@@ -200,7 +227,7 @@ export function ThreadVoicePanel({
 
   /** Hang up or cancel. The view returns to Work at once; cleanup continues outside React. */
   function stopCall() {
-    onLayoutChangeRef.current("work");
+    changeLayout("work");
     if (startingRef.current) {
       startingRef.current.cancelled = true;
       startingRef.current.releaseMicrophone();
@@ -216,8 +243,9 @@ export function ThreadVoicePanel({
     const audio = audioRef.current;
     const environmentId = threadRef.environmentId;
     const prepared = readPreparedConnection(environmentId);
-    const currentThread = threadRefValue.current;
-    if (!prepared || !currentThread) {
+    const currentThread = threadSourceRef.current.projection?.thread;
+    const projectId = shell?.projectId;
+    if (!prepared || !currentThread || !projectId) {
       reportVoiceError("Connect to this environment and wait for the thread to load.");
       return;
     }
@@ -237,13 +265,13 @@ export function ThreadVoicePanel({
     // Preferences apply to the next call: this call keeps the copy taken now.
     const preferences = resolveVoiceCallPreferences(getClientSettings().voiceConversation, {
       environmentId,
-      projectId: currentThread.projectId,
+      projectId,
     });
     const starting = { cancelled: false, releaseMicrophone };
     startingRef.current = starting;
     setPhase("connecting");
     setStatus("Checking voice history…");
-    onLayoutChangeRef.current("call");
+    changeLayout("call");
     let history: Awaited<ReturnType<typeof prepareVoiceHistory>>;
     try {
       // Storage and ownership are checked before the microphone is requested.
@@ -257,7 +285,7 @@ export function ThreadVoicePanel({
         startingRef.current = null;
         releaseMicrophone();
         setPhase("idle");
-        onLayoutChangeRef.current("work");
+        changeLayout("work");
         reportVoiceError(errorMessage(cause));
       }
       return;
@@ -270,7 +298,7 @@ export function ThreadVoicePanel({
     if (!history.settings.configured) {
       releaseMicrophone();
       setPhase("idle");
-      onLayoutChangeRef.current("work");
+      changeLayout("work");
       openVoiceSettings(router, threadRef);
       return;
     }
@@ -302,10 +330,10 @@ export function ThreadVoicePanel({
           // suspended in ChatView's settings persistence after hangup starts.
           const canDispatch = () => callRef.current === call && call.acceptsRequests;
           if (!canDispatch()) throw new Error("The call ended before the request was sent.");
-          const state = threadRefValue.current;
+          const state = threadSourceRef.current.projection?.thread;
           if (!state || state.id !== threadRef.threadId)
             throw new Error("The selected thread is no longer available.");
-          await dispatchRequestRef.current(request, canDispatch);
+          await dispatchCurrentRequest(request, canDispatch);
         },
         onStatus: (next) => {
           controllerStatus = next;
@@ -319,7 +347,7 @@ export function ThreadVoicePanel({
         owner: history.owner,
         threadId: threadRef.threadId,
         store: history.store,
-        client: history.client,
+        historyClient: history.historyClient,
         makeId: randomUUID,
       },
       connect: (handlers) =>
@@ -353,7 +381,7 @@ export function ThreadVoicePanel({
         }),
       // The end declares the final transcript boundary, so it is a history request: it is sent
       // only while the environment still confirms the owner the call recorded under.
-      endSession: (lastSequence) => history.client.end({ callId: sessionId, lastSequence }),
+      endSession: (lastSequence) => history.historyClient.end({ callId: sessionId, lastSequence }),
       onEvent: (event) => {
         // Final captions keep arriving while the call drains; the controller already stopped.
         if (!mountedRef.current || callRef.current !== call) return;
@@ -386,7 +414,7 @@ export function ThreadVoicePanel({
         if (state.error) reportVoiceError(state.error);
         if (state.phase === "ending" || state.phase === "ended") {
           // Whatever ended the call, the thread returns to Work and the bar goes away.
-          onLayoutChangeRef.current("work");
+          changeLayout("work");
           setQueuedRequests([]);
         }
         if (state.phase === "active") connected = true;
@@ -398,11 +426,7 @@ export function ThreadVoicePanel({
       },
     });
     callRef.current = call;
-    call.update({
-      ...currentThread,
-      hasPendingApprovals: shell?.hasPendingApprovals ?? false,
-      hasPendingUserInput: shell?.hasPendingUserInput ?? false,
-    });
+    updateCallSnapshot(call, threadSourceRef.current);
     setCaptions([]);
     setCaptionSessionId(sessionId);
     setQueuedRequests([]);
@@ -474,17 +498,14 @@ export function ThreadVoicePanel({
               render={
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant={active ? "secondary" : "ghost"}
                   size="icon-sm"
+                  inactive={unavailableReason !== null}
                   aria-label={callControlLabel}
                   aria-pressed={active}
                   aria-disabled={unavailableReason !== null || undefined}
-                  disabled={!thread || phase === "ending"}
-                  className={cn(
-                    "max-sm:size-11",
-                    active && "bg-primary/10 text-primary hover:bg-primary/20",
-                    unavailableReason !== null && "cursor-default opacity-45",
-                  )}
+                  disabled={!projection || phase === "ending"}
+                  className="max-sm:size-11"
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => {
                     if (unavailableReason === null) pressPhone();
@@ -520,7 +541,7 @@ export function ThreadVoicePanel({
           }}
           followUps={queuedRequests.length}
           onClearFollowUps={() => callRef.current?.discardQueuedRequests()}
-          agentRequestWaiting={Boolean(shell?.hasPendingApprovals || shell?.hasPendingUserInput)}
+          agentRequestWaiting={hasPendingApprovals || hasPendingUserInput}
         />
       ) : null}
     </>

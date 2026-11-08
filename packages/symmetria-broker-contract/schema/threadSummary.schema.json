@@ -182,7 +182,20 @@
                 "autoCompactThreshold": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "cacheCreationTokens": {
+                  "anyOf": [
+                    {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -193,6 +206,7 @@
                 "cachedInputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -211,9 +225,33 @@
                     }
                   ]
                 },
+                "cost": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "properties": {
+                        "amount": {
+                          "type": "number"
+                        },
+                        "currency": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "amount",
+                        "currency"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "durationMs": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -225,6 +263,19 @@
                 "inputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "lastCacheCreationTokens": {
+                  "anyOf": [
+                    {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -236,6 +287,7 @@
                 "lastCachedInputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -247,6 +299,7 @@
                 "lastInputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -258,6 +311,7 @@
                 "lastOutputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -269,6 +323,7 @@
                 "lastReasoningOutputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -280,6 +335,7 @@
                 "lastUsedTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -291,6 +347,7 @@
                 "maxTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 1,
                       "type": "integer"
                     },
@@ -302,6 +359,7 @@
                 "outputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -313,6 +371,7 @@
                 "reasoningOutputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -324,6 +383,7 @@
                 "toolUses": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -335,6 +395,7 @@
                 "totalProcessedTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -344,6 +405,7 @@
                   ]
                 },
                 "usedTokens": {
+                  "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
                 }

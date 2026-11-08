@@ -1,8 +1,5 @@
 export const BRAND_ASSET_PATHS = {
   monochromeSourceSvg: "assets/mesura-code/monochrome.svg",
-  mobileAndroidMonochromeIconPng: "apps/mobile/assets/android-icon-mark.png",
-  mobileAndroidNotificationIconPng: "apps/mobile/assets/android-notification-icon.png",
-  mobileWidgetMarkSvg: "apps/mobile/assets/widget/T3Mark.svg",
   desktopMasterPng: "assets/mesura-code/desktop-master.png",
   // The boot splash draws the cube alone, with no channel container behind it,
   // so one mark serves every channel. The stage label is rendered as text next
@@ -25,6 +22,9 @@ export const BRAND_ASSET_PATHS = {
   productionWebFavicon16Png: "assets/prod/t3-black-web-favicon-16x16.png",
   productionWebFavicon32Png: "assets/prod/t3-black-web-favicon-32x32.png",
   productionWebAppleTouchIconPng: "assets/prod/t3-black-web-apple-touch-180.png",
+  // Mesura: the 192 and 512 pixel icons the web app manifest and push notifications use.
+  productionWebIcon192Png: "assets/prod/t3-black-web-icon-192.png",
+  productionWebIcon512Png: "assets/prod/t3-black-web-icon-512.png",
 
   nightlyMasterPng: "assets/mesura-code/nightly-master.png",
   nightlyIconComposerProject: "assets/nightly/app-icon.icon",
@@ -36,6 +36,8 @@ export const BRAND_ASSET_PATHS = {
   nightlyWebFavicon16Png: "assets/nightly/nightly-web-favicon-16x16.png",
   nightlyWebFavicon32Png: "assets/nightly/nightly-web-favicon-32x32.png",
   nightlyWebAppleTouchIconPng: "assets/nightly/nightly-web-apple-touch-180.png",
+  nightlyWebIcon192Png: "assets/nightly/nightly-web-icon-192.png",
+  nightlyWebIcon512Png: "assets/nightly/nightly-web-icon-512.png",
 
   developmentDesktopIconPng: "assets/dev/blueprint-macos-1024.png",
   developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
@@ -43,22 +45,17 @@ export const BRAND_ASSET_PATHS = {
   developmentWebFavicon16Png: "assets/dev/blueprint-web-favicon-16x16.png",
   developmentWebFavicon32Png: "assets/dev/blueprint-web-favicon-32x32.png",
   developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
+  developmentWebIcon192Png: "assets/dev/blueprint-web-icon-192.png",
+  developmentWebIcon512Png: "assets/dev/blueprint-web-icon-512.png",
 } as const;
 
 /** Side of the square channel masters in `assets/mesura-code/`. */
 export const MASTER_RASTER_SIZE = 1254;
 
 /**
- * First row of the strip a channel master may treat as its own. Above it the
- * development and nightly masters are the production artwork verbatim, which
- * is what rules out a coloured frame around the cube; below it they carry the
- * uppercase channel wordmark. Guards in `brand-icon-source.test.ts` and
- * `mobile-brand-assets.test.ts` both derive their bounds from this, so the
- * two cannot drift apart.
- *
- * The band sits outside Android's adaptive-icon safe zone, so an adaptive
- * launcher clips the wordmark. That is not a regression: the coloured frame
- * this replaced sat further out still and was clipped too.
+ * First row a channel master may own: above it the development and nightly masters must equal the
+ * production artwork; below it they carry the channel wordmark. `brand-icon-source.test.ts` reads it.
+ * Android adaptive launchers clip this band; that is expected, not a regression.
  */
 export const CHANNEL_WORDMARK_BAND_TOP = 1097;
 
@@ -80,26 +77,10 @@ export function resolveDesktopLinuxIdentity(isDevelopment: boolean) {
 }
 
 /**
- * Electron scopes its single-instance lock to the userData directory. Upstream
- * names that directory `t3code`, which the separately installed T3 Code claims
- * too, so whichever application started second read itself as a secondary
- * instance and quit before opening a window — silently, because
- * `DesktopClerk.configure` exits through `Effect.interrupt` on that path.
- *
- * `legacyUserDataDirName` repeats `userDataDirName` on purpose, and
- * `resolveUserDataPath` adopts the legacy directory whenever it exists. Mesura
- * Code shared `t3code` with the installed T3 Code rather than owning a
- * directory of its own, so there is nothing to migrate: the old Chromium
- * profile stays with T3 Code and Mesura Code starts a fresh one, which costs a
- * one-time renderer-state reset. Pointing the field at `t3code`, or at
- * upstream's older `T3 Code (Alpha)`, would hand both applications the same
- * directory again and restore the collision this exists to remove.
- *
- * Equal names leave `resolveUserDataPath` probing a directory it returns
- * either way. The probe cannot change the result, but it can still fail: an
- * unreadable userData directory surfaces as a boot-time
- * `DesktopUserDataPathResolutionError` rather than a window. That trade keeps
- * the upstream resolver untouched, and the error names the real problem.
+ * Electron scopes its single-instance lock to the userData directory; sharing upstream's `t3code`
+ * with the installed T3 Code made the second app to start quit silently. `legacyUserDataDirName`
+ * repeats `userDataDirName` on purpose: pointing it at `t3code` or `T3 Code (Alpha)` would make
+ * `resolveUserDataPath` adopt T3 Code's directory and restore that collision.
  */
 export const DESKTOP_USER_DATA_IDENTITY = {
   development: {
@@ -142,6 +123,8 @@ const WEB_ICON_TARGET_FILENAMES = {
   favicon16Png: "favicon-16x16.png",
   favicon32Png: "favicon-32x32.png",
   appleTouchIconPng: "apple-touch-icon.png",
+  icon192Png: "icon-192.png",
+  icon512Png: "icon-512.png",
 } as const;
 
 const WEB_ICON_SOURCE_PATHS_BY_BRAND = {
@@ -150,18 +133,24 @@ const WEB_ICON_SOURCE_PATHS_BY_BRAND = {
     favicon16Png: BRAND_ASSET_PATHS.developmentWebFavicon16Png,
     favicon32Png: BRAND_ASSET_PATHS.developmentWebFavicon32Png,
     appleTouchIconPng: BRAND_ASSET_PATHS.developmentWebAppleTouchIconPng,
+    icon192Png: BRAND_ASSET_PATHS.developmentWebIcon192Png,
+    icon512Png: BRAND_ASSET_PATHS.developmentWebIcon512Png,
   },
   nightly: {
     faviconIco: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
     favicon16Png: BRAND_ASSET_PATHS.nightlyWebFavicon16Png,
     favicon32Png: BRAND_ASSET_PATHS.nightlyWebFavicon32Png,
     appleTouchIconPng: BRAND_ASSET_PATHS.nightlyWebAppleTouchIconPng,
+    icon192Png: BRAND_ASSET_PATHS.nightlyWebIcon192Png,
+    icon512Png: BRAND_ASSET_PATHS.nightlyWebIcon512Png,
   },
   production: {
     faviconIco: BRAND_ASSET_PATHS.productionWebFaviconIco,
     favicon16Png: BRAND_ASSET_PATHS.productionWebFavicon16Png,
     favicon32Png: BRAND_ASSET_PATHS.productionWebFavicon32Png,
     appleTouchIconPng: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
+    icon192Png: BRAND_ASSET_PATHS.productionWebIcon192Png,
+    icon512Png: BRAND_ASSET_PATHS.productionWebIcon512Png,
   },
 } as const satisfies Record<WebAssetBrand, Record<keyof typeof WEB_ICON_TARGET_FILENAMES, string>>;
 
@@ -186,6 +175,14 @@ export function resolveWebIconOverrides(
     {
       sourceRelativePath: sourcePaths.appleTouchIconPng,
       targetRelativePath: `${targetDirectory}/${WEB_ICON_TARGET_FILENAMES.appleTouchIconPng}`,
+    },
+    {
+      sourceRelativePath: sourcePaths.icon192Png,
+      targetRelativePath: `${targetDirectory}/${WEB_ICON_TARGET_FILENAMES.icon192Png}`,
+    },
+    {
+      sourceRelativePath: sourcePaths.icon512Png,
+      targetRelativePath: `${targetDirectory}/${WEB_ICON_TARGET_FILENAMES.icon512Png}`,
     },
   ];
 }

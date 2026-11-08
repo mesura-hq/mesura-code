@@ -16,23 +16,14 @@ export interface CodeFont {
 const FALLBACK_FONT_SIZE_PX = 13;
 
 /**
- * The scratch surface `toMonacoColor` paints on.
- *
- * One canvas for the process, because every colour the app resolves goes
- * through it: `willReadFrequently` asks the browser for a software-backed
- * surface, which is the right trade for many one-pixel reads and the wrong one
- * for a canvas that is thrown away after a single read.
+ * The scratch surface `toMonacoColor` paints on. One canvas for the process: `willReadFrequently`
+ * gives a software-backed surface, right for many one-pixel reads and wrong for a throwaway canvas.
  */
 let colorProbe: CanvasRenderingContext2D | null | undefined;
 
 /**
- * Throws the probe canvas away, so the next read builds a new one.
- *
- * For tests only. The canvas is memoised for the life of the process, so a
- * test that installs its own fake `document` gets the fake built by whichever
- * test ran first — every case then shares one pixel, and the isolation they
- * appear to have is not real. That matters here specifically: the defect these
- * tests exist to catch is a canvas carrying state between reads.
+ * Test-only: throws the memoised probe canvas away, so a test's fake `document` is used rather than
+ * the first test's fake. The defect these tests catch is a canvas carrying state between reads.
  */
 export function resetColorProbeForTest(): void {
   colorProbe = undefined;
@@ -49,49 +40,24 @@ function colorProbeContext(): CanvasRenderingContext2D | null {
 }
 
 /**
- * Resolves any CSS colour to the `#rrggbb` Monaco insists on.
- *
- * This app's computed colours come back as `oklch(...)`, which Monaco's theme
- * registry rejects outright — it throws "Illegal value for token color", and
- * because the theme is defined while the editor mounts, the throw takes the
- * whole panel down rather than degrading to a wrong colour.
- *
- * A one-pixel canvas is the conversion: the browser already knows how to paint
- * every colour syntax it accepts, so painting one and reading the bytes back
- * needs no colour-space arithmetic here and cannot drift from what the rest of
- * the interface actually shows.
- *
- * Every failure answers with the fallback rather than throwing. This function
- * exists because a bad colour crashed the panel on mount, and a conversion that
- * can itself throw would reintroduce exactly that.
+ * Resolves any CSS colour to the `#rrggbb` Monaco requires: Monaco's theme registry throws on the
+ * app's `oklch(...)` colours and takes the panel down on mount. A one-pixel canvas paint does the
+ * conversion. Every failure returns the fallback, because a throw here would crash the panel again.
  */
 function toMonacoColor(cssColor: string, fallback: string): string {
   return paintedColor(cssColor) ?? fallback;
 }
 
 /**
- * The colour a CSS value paints, or `null` when it paints nothing.
- *
- * `null` rather than a sentinel colour. A sentinel has to be a value no theme
- * would choose, which is a guess — and an element that genuinely painted it
- * would be read as transparent and walked past.
- *
- * Partial alpha is reported as the colour alone, not composited with whatever
- * is behind it: `rgba(0, 0, 0, 0.5)` over white answers black rather than the
- * grey on screen. Only full transparency continues the walk. Every surface
- * this reads today is opaque or absent, and compositing a chain of
- * translucent ancestors is more machinery than the case has earned — but it
- * is a limitation rather than a decision, and this is where it would go.
+ * The colour a CSS value paints, or `null` when it paints nothing (no sentinel colour a theme could
+ * really use). Limitation: partial alpha reports the colour alone, not composited over what is
+ * behind it; only full transparency continues the walk. Surfaces read today are opaque or absent.
  */
 function paintedColor(cssColor: string): string | null {
   const context = colorProbeContext();
   if (context === null) return null;
-  // Cleared first, because the canvas outlives the call. A colour with any
-  // transparency composites over whatever the previous call left on the pixel,
-  // so a fully transparent input used to come back as the last colour read —
-  // and an element with no background of its own is exactly that input. The
-  // editor took its background from whichever colour happened to be read
-  // before it.
+  // Cleared first: the canvas outlives the call, and a translucent input composites over the last
+  // colour read. Uncleared, a transparent background read back as the previous colour.
   context.clearRect(0, 0, 1, 1);
   // An unparseable value leaves `fillStyle` untouched. Seeded transparent, so
   // a colour the browser cannot read answers "nothing painted" rather than
@@ -115,13 +81,9 @@ function paintedColor(cssColor: string): string | null {
 }
 
 /**
- * Reads the app's code-surface colours off a mounted element.
- *
- * Taken from the element rather than from the token names because the tokens
- * resolve differently under a custom theme: `--code-background` is a colour-mix
- * of other tokens by default, and an app theme overrides it with a flat value.
- * Asking the browser for the computed value is the only way to get what the
- * user is actually looking at.
+ * Reads the code-surface colours off a mounted element, because an app theme can override the
+ * tokens (`--code-background` is a colour-mix by default) and only the computed value is what the
+ * user sees.
  */
 export function readCodeSurfaceColors(element: Element): CodeSurfaceColors {
   const computed = getComputedStyle(element);
@@ -132,16 +94,9 @@ export function readCodeSurfaceColors(element: Element): CodeSurfaceColors {
 }
 
 /**
- * The colour actually behind an element.
- *
- * `backgroundColor` is not inherited, so an element that paints nothing
- * answers `rgba(0, 0, 0, 0)` however dark the page behind it is. The editor's
- * host is one of those — it is a flex box with no background of its own — so
- * asking it directly never described what the developer sees, and the editor
- * ended up on a colour of Monaco's choosing rather than the app's.
- *
- * Walking up is what the browser does to paint it, so it is what this does to
- * read it. The document element is the last stop and has one by construction.
+ * The colour actually behind an element. `backgroundColor` is not inherited and the editor host
+ * paints none, so this walks up the ancestors as the browser does when painting; the document
+ * element is the last stop.
  */
 function readPaintedBackground(element: Element, computed: CSSStyleDeclaration): string {
   let current: Element | null = element;
@@ -172,13 +127,9 @@ export function readCodeFont(root: HTMLElement = document.documentElement): Code
 }
 
 /**
- * Defines the two themes the file surface uses.
- *
- * They inherit Monaco's own `vs` and `vs-dark` token colours and override only
- * the surface, so the editor sits on the app's background instead of Monaco's.
- * Matching the token palette to the shiki themes the diff surfaces use is a
- * separate job and is not attempted here: following light and dark is the
- * requirement, and palette parity is not.
+ * Defines the file surface's two themes: Monaco's `vs` and `vs-dark` token colours with only the
+ * surface overridden to the app's background. Matching the diff surfaces' shiki palette is out of
+ * scope; following light and dark is the requirement.
  */
 export function defineMesuraMonacoThemes(
   monaco: typeof Monaco,

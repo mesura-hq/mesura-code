@@ -26,11 +26,11 @@ export const FactoryPhaseRail = memo(function FactoryPhaseRail({
           ) : null}
           <button
             type="button"
-            aria-label={`Phase ${item.index}: ${item.status} — ${item.title}`}
+            aria-label={`Phase ${item.index}: ${item.status}, ${item.title}`}
             aria-pressed={item.selected}
             onClick={() => onSelect(item.index)}
             className={cn(
-              "flex min-w-0 items-center gap-1 rounded-sm text-left border px-1.5 py-0.5 font-mono text-[.65rem]",
+              "flex min-w-0 items-center gap-1 rounded-sm text-left border px-1.5 py-0.5 font-mono text-phase-label",
               FACTORY_MARK_CLASS_BY_TONE[factoryRailTone(item.status)],
               item.selected && "bg-accent",
             )}

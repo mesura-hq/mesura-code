@@ -237,6 +237,10 @@ export function createVoiceCall(options: VoiceCallOptions) {
     update(snapshot: VoiceConversationSnapshot) {
       conversation.update(snapshot);
     },
+    /** The user message of the voice request in flight, which the host snapshot follows. */
+    get activeMessageId() {
+      return conversation.activeMessageId;
+    },
     /** Sends a provider event, buffered until the transport connects and dropped after hangup. */
     send,
     /** Revoked synchronously on hangup, including host dispatches awaiting settings. */

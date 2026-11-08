@@ -2,18 +2,9 @@ import type * as monaco from "monaco-editor";
 import { languages } from "monaco-editor/editor/editor.api.js";
 
 /**
- * Astro, coloured as the HTML it mostly is.
- *
- * Monaco ships no Astro grammar, and with modal editing on Neovim's own
- * highlighter is stopped, so an `.astro` file had no colour at all. An Astro
- * component is HTML with two additions that matter for colour: a `---` fenced
- * frontmatter block of TypeScript at the top, and `{ }` expressions in the
- * markup. This takes Monaco's HTML grammar whole and adds those two.
- *
- * Deliberately approximate: an expression's contents stay as plain text rather
- * than being parsed as TypeScript, because they routinely hold markup of their
- * own (`{items.map((item) => <li>{item}</li>)}`) that a TypeScript tokenizer
- * would colour as operators.
+ * Astro as Monaco's HTML grammar plus `---` TypeScript frontmatter and `{ }` expressions, since
+ * Monaco ships no Astro grammar. Expression contents stay plain text on purpose: they often hold
+ * markup (`{items.map((item) => <li>{item}</li>)}`) a TypeScript tokenizer would colour wrongly.
  */
 export function astroMonarchLanguage(
   html: monaco.languages.IMonarchLanguage,

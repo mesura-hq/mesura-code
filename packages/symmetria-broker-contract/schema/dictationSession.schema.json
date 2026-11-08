@@ -65,12 +65,14 @@
           ]
         },
         "elapsedMs": {
+          "maximum": 9007199254740991,
           "minimum": 0,
           "type": "integer"
         },
         "graceRemainingMs": {
           "anyOf": [
             {
+              "maximum": 9007199254740991,
               "minimum": 0,
               "type": "integer"
             },
@@ -145,6 +147,7 @@
                   "type": "string"
                 },
                 "index": {
+                  "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
                 }
@@ -224,6 +227,7 @@
               "type": "number"
             },
             "minor": {
+              "maximum": 9007199254740991,
               "minimum": 0,
               "type": "integer"
             }

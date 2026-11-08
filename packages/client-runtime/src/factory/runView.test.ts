@@ -1,17 +1,7 @@
 /**
- * Phase 10 fence, criterion 4: the one run view model both clients draw from.
- * The phase 9 coverage of the web Run tab's model, moved onto the shared
- * module, so the web pane and the Android Factory screen read the same phase
- * states, return edges, role sessions and totals.
- *
- * Entry point: `deriveFactoryRunView` and `deriveFactoryRunTotals` in
- * `runView.ts` (`@t3tools/client-runtime/factory/run-view`), fed the state the
- * server's run tracker folds from the recorder's fixture
- * (`packages/shared/src/fixtures/factory-events.v1.jsonl`, a two-phase run
- * whose phase 1 has a repair and a rework) and synthetic event lines for a
- * phase with two repairs, a stopped run, a finished run and a Codex-only
- * cost. The Android screen that renders it is mounted in
- * `apps/mobile/src/features/factory/FactoryRouteScreen.test.tsx`.
+ * Fed the run folded from `factory-events.v1.jsonl` (phase 1 has a repair and a rework) and
+ * synthetic event lines for a phase with two repairs, a stopped run, a finished run and a
+ * Codex-only cost.
  */
 /// <reference types="vite-plus/client" />
 import type { FactoryRoleProgress, FactoryRunState } from "@t3tools/contracts";
@@ -134,7 +124,7 @@ describe("phase10 shared run view from phase9 AC2 node spine", () => {
         kind: "repair",
         signal:
           "pnpm lint failed on an unused import in the CSV serializer; the import was removed",
-        text: "repair 1/5 — Build checks: pnpm lint failed on an unused import in the CSV serializer; the import was removed",
+        text: "repair 1/5 (Build checks): pnpm lint failed on an unused import in the CSV serializer; the import was removed",
         pending: false,
       },
       {
@@ -142,7 +132,7 @@ describe("phase10 shared run view from phase9 AC2 node spine", () => {
         to: "regression",
         kind: "rework",
         signal: "P1-1 repaired: rows stream through a cursor; P3-1 rejected",
-        text: "rework 2/5 — Review: P1-1 repaired: rows stream through a cursor; P3-1 rejected",
+        text: "rework 2/5 (Review): P1-1 repaired: rows stream through a cursor; P3-1 rejected",
         pending: false,
       },
     ]);
@@ -212,13 +202,13 @@ describe("phase10 shared run view from phase9 AC2 node spine", () => {
           "checks-build",
           "checks-build",
           "repair",
-          "repair 1/5 — Build checks: pnpm lint failed on an unused import",
+          "repair 1/5 (Build checks): pnpm lint failed on an unused import",
         ],
         [
           "verify-1",
           "checks-build",
           "repair",
-          "repair 2/5 — Verify ①: the export applied the page's filter after the row limit",
+          "repair 2/5 (Verify ①): the export applied the page's filter after the row limit",
         ],
       ],
     );
@@ -732,5 +722,68 @@ describe("phase10 shared run view review regressions", () => {
     expect(second.spine).toBe(first.spine);
     expect(second.detail).toBe(first.detail);
     expect(second.rail[0]).toBe(first.rail[0]);
+  });
+});
+
+describe("phase 4 skill run spine", () => {
+  // A prototype run as the prototype skill records it: no route table, its own node names.
+  const prototypeStarted = event("2026-10-24T10:00:00.000Z", "run.started", {
+    runId: "prototype-mailbox",
+    request: "Does a one-slot mailbox drop frames?",
+    phases: [{ index: 1, title: "Try a one-slot mailbox", acceptance: [] }],
+  });
+  const prototypeLines = [
+    prototypeStarted,
+    event("2026-10-24T10:01:00.000Z", "phase.started", { phase: 1 }),
+    event("2026-10-24T10:02:00.000Z", "node.entered", { phase: 1, node: "experiment" }),
+    event("2026-10-24T10:03:00.000Z", "node.entered", { phase: 1, node: "observe" }),
+    event("2026-10-24T10:04:00.000Z", "node.entered", { phase: 1, node: "discuss" }),
+    event("2026-10-24T10:05:00.000Z", "node.entered", { phase: 1, node: "experiment" }),
+    event("2026-10-24T10:06:00.000Z", "node.entered", { phase: 1, node: "observe" }),
+  ];
+  const nodeRows = (result: ReturnType<typeof view>) =>
+    (result.spine?.stages ?? []).flatMap((stage) =>
+      stage.nodes.map((node) => [stage.stage, node.label, node.status] as const),
+    );
+
+  it("skill run spine: a prototype phase draws its own recorded nodes once each, the latest current", () => {
+    const result = view(foldFactoryRunTestLines(prototypeLines));
+
+    expect(nodeRows(result)).toEqual([
+      ["Steps", "Experiment", "done"],
+      ["Steps", "Observe", "current"],
+      ["Steps", "Discuss", "done"],
+    ]);
+  });
+
+  it("skill run spine: a closed prototype phase shows its own nodes done and no sf-team node", () => {
+    const result = view(
+      foldFactoryRunTestLines([
+        ...prototypeLines,
+        event("2026-10-24T10:07:00.000Z", "phase.closed", { phase: 1, close: "clean" }),
+        event("2026-10-24T10:08:00.000Z", "run.finished", { status: "done" }),
+      ]),
+    );
+
+    expect(nodeRows(result)).toEqual([
+      ["Steps", "Experiment", "done"],
+      ["Steps", "Observe", "done"],
+      ["Steps", "Discuss", "done"],
+    ]);
+  });
+
+  it("skill run spine: the node a stopped prototype run stopped at reads stopped", () => {
+    const result = view(
+      foldFactoryRunTestLines([
+        ...prototypeLines,
+        event("2026-10-24T10:07:00.000Z", "run.finished", { status: "stopped" }),
+      ]),
+    );
+
+    expect(nodeRows(result).map(([, label, status]) => [label, status])).toEqual([
+      ["Experiment", "done"],
+      ["Observe", "stopped"],
+      ["Discuss", "done"],
+    ]);
   });
 });

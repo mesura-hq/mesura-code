@@ -1,27 +1,8 @@
 /**
- * The editor state that has to outlive a route.
- *
- * A file's undo stack lives in its Monaco model, so whoever owns the model
- * owns the undo stack. The panel that owned it unmounts for three ordinary
- * things — opening Settings, switching to a thread in another project, and the
- * spinner shown while a file is read — and a developer who types, opens
- * Settings and comes back expects `Ctrl+Z` to still mean something.
- *
- * The cache was already hoisted once, from the surface to the panel, to
- * survive the spinner. This hoists it once more, out of React entirely,
- * because the other two are route changes and no component survives a route.
- * A module-level holder is the app's own pattern for that — the right panel,
- * the thread selection and the theme editor all keep their state this way —
- * and it costs no edit to the root route or to the chat view, which are two of
- * the files upstream changes most.
- *
- * Bounded twice over: the cache inside each project keeps a fixed number of
- * models, and this keeps a fixed number of projects. A project somebody still
- * has open is never one of the ones let go — which means the bound holds only
- * while the number of projects open at one moment stays under the limit. It
- * does today, because the chat view draws one file panel for one project; a
- * split view showing two projects at once would need this to say what it does
- * when every entry is in use.
+ * Editor models held outside React so undo survives a route change (Settings, a thread in another
+ * project), which no component survives. Bounded per project and by project count, but a project
+ * still open is never let go: the bound holds only while fewer projects than the limit are open at
+ * once. One file panel per chat view keeps that true; a two-project split view would break it.
  */
 
 /** How many projects keep their models while nobody is looking at them. */

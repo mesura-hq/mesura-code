@@ -9,12 +9,9 @@ import * as Result from "effect/Result";
 import { checkNvimVersion, resolveNvimLaunch, type NvimLaunchInput } from "./NvimLaunch.ts";
 
 /**
- * Launching the developer's own Neovim, decided before anything is spawned.
- *
- * Every case here runs against a real temporary directory rather than a mocked
- * filesystem, because the whole point of the resolution is what is on disk:
- * whether the configuration directory is there, whether it holds an
- * `init.lua`, and whether the scratch config home can be written.
+ * Launch resolution for the developer's own Neovim, against a real temporary directory:
+ * the resolution exists to read what is on disk (the configuration, its `init.lua`, a writable
+ * scratch config home), so a mocked filesystem would test nothing.
  */
 
 const layer = NodeServices.layer;
@@ -341,11 +338,8 @@ it.layer(layer, { excludeTestServices: true })("resolveNvimLaunch", (it) => {
       const { configDirectory, stateDir, runtimeDir } = yield* scratch();
       const plan = yield* resolveNvimLaunch(input({ configDirectory, stateDir, runtimeDir }));
       assert.strictEqual(plan.executable, "nvim");
-      // The host plugin is sourced by name rather than found on the runtime
-      // path, and that is measured rather than stylistic: lazy.nvim replaces
-      // `runtimepath` while `init.lua` runs, so a `plugin/` or `after/plugin/`
-      // file under a directory added with `--cmd` is never sourced and every
-      // forced option quietly does nothing.
+      // The host plugin is sourced by name: lazy.nvim replaces `runtimepath` while `init.lua`
+      // runs, so a `plugin/` file under a `--cmd` directory is never sourced.
       assert.deepStrictEqual(plan.args, [
         "--embed",
         "-n",

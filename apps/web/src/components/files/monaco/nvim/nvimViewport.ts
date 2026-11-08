@@ -1,22 +1,11 @@
 /**
- * What Neovim's window should be, read off the editor the developer sees.
- *
- * Two authorities over one window. Monaco owns the scrolling a pointer or a
- * wheel caused, because that is a gesture Neovim never saw; Neovim owns the
- * scrolling a key caused, because that is a command Monaco never ran. Each
- * tells the other what it did, and the whole difficulty is that a message in
- * one direction looks exactly like a message in the other — so without a rule
- * the two scroll each other forever.
- *
- * The rule is `shouldEchoViewport`: a topline this client recently sent, or one
- * Neovim recently sent, is an echo, and an echo is dropped. Recently rather
- * than last, because a wheel outruns the round trip — see `REMEMBERED_TOPLINES`.
- *
- * The grid's size is not decoration. Neovim draws nothing past the grid's
- * width, so a flash label placed at the end of a long line is simply never
- * drawn on a grid sized to the text, and a label that is never drawn is a jump
- * target the developer cannot see.
+ * Neovim's window, read off the editor the developer sees. Monaco owns pointer and wheel scrolling,
+ * Neovim owns key scrolling, and each tells the other. `shouldEchoViewport` drops a topline either
+ * side sent recently (see `REMEMBERED_TOPLINES`). Neovim draws nothing past the grid's width, so a
+ * grid sized to the text hides flash labels at line ends.
  */
+
+import { EDITOR_VIEWPORT_MAX_COLS, type EditorViewportSource } from "@t3tools/contracts";
 
 /** A line range Monaco reports as visible, in Monaco's one-based terms. */
 export interface VisibleRange {
@@ -41,6 +30,8 @@ export interface NvimViewport {
   readonly topline: number;
   readonly rows: number;
   readonly cols: number;
+  /** Who moved the window; see `EditorViewportSource`. Absent means keys. */
+  readonly source?: EditorViewportSource;
 }
 
 export interface ViewportHistory {
@@ -53,14 +44,9 @@ export interface ViewportHistory {
 export const EMPTY_VIEWPORT_HISTORY: ViewportHistory = { sentToplines: [], neovimToplines: [] };
 
 /**
- * How many toplines each side remembers.
- *
- * One is not enough, and that is a measured shape rather than a cautious
- * guess. A wheel produces scrolls faster than the round trip answers them, so
- * the developer can scroll away and back before the first echo lands; with one
- * slot the stale echo fails the test and scrolls the editor back to where they
- * just left. Eight covers a burst without remembering a position long enough
- * for a genuine jump back to the same place to be mistaken for an echo.
+ * How many toplines each side remembers. One is too few (measured): a wheel outruns the round trip,
+ * and a stale echo scrolls the editor back. Eight covers a burst without mistaking a real jump
+ * back.
  */
 export const REMEMBERED_TOPLINES = 8;
 
@@ -73,12 +59,8 @@ export function rememberTopline(
 }
 
 /**
- * The floor on grid width.
- *
- * Wide enough that a flash label at the end of an ordinary line of code is
- * still inside the grid, which is what makes it drawn at all. Costs nothing:
- * the cells beyond the text are blanks, and blanks are neither an overlay nor
- * a highlight run.
+ * The floor on grid width, so a flash label at the end of an ordinary line is inside the grid and
+ * gets drawn. Blank cells past the text cost nothing.
  */
 export const MINIMUM_VIEWPORT_COLUMNS = 200;
 
@@ -118,7 +100,26 @@ export function viewportFromEditor(
     }
   }
 
-  return { topline, rows, cols: widest };
+  // Clamped to what the contract accepts: a request past it is refused whole,
+  // topline and rows included. The host widens the grid past the widest line
+  // itself, so the clamp costs no column the developer can see.
+  return { topline, rows, cols: Math.min(widest, EDITOR_VIEWPORT_MAX_COLS) };
+}
+
+/**
+ * Whether scrolling Monaco to `targetTop` would hide the caret: Monaco may wrap and Neovim does
+ * not, so following Neovim's topline can leave the caret below Monaco's last row. The caret wins.
+ */
+export function followingHidesCaret(input: {
+  readonly targetTop: number;
+  readonly caretTop: number;
+  readonly lineHeight: number;
+  readonly height: number;
+}): boolean {
+  return (
+    input.caretTop < input.targetTop ||
+    input.caretTop + input.lineHeight > input.targetTop + input.height
+  );
 }
 
 export function shouldEchoViewport(history: ViewportHistory, topline: number): boolean {

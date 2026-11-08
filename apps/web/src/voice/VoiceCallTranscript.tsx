@@ -2,7 +2,9 @@ import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowDown } from "lucide-react";
 import type { VoiceCaption } from "@t3tools/client-runtime/voice-conversation/captions";
 import { Button } from "~/components/ui/button";
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
+import "./voiceCallTranscript.css";
 
 export type VoiceCallLayout = "call" | "split" | "work";
 
@@ -20,6 +22,7 @@ export function VoiceCallTranscript({
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
+  // oxlint-disable-next-line t3code/react-effect-budget -- follows the latest caption as the DOM resizes
   useLayoutEffect(() => {
     const node = scrollRef.current;
     const content = contentRef.current;
@@ -27,15 +30,13 @@ export function VoiceCallTranscript({
     const scrollToLatest = () => node.scrollTo({ top: node.scrollHeight, behavior: "instant" });
     scrollToLatest();
     // Both live text and layout changes can move the bottom of the captions.
-    const observer = new ResizeObserver(scrollToLatest);
-    observer.observe(node);
-    observer.observe(content);
-    return () => observer.disconnect();
+    return observeResize([node, content], scrollToLatest);
   }, [following, layout]);
 
   return (
     <section
       aria-label="Spoken conversation"
+      data-voice-layout={layout}
       className="relative flex min-h-0 flex-1 flex-col"
       style={{ "--voice-composer-inset": `${bottomInset}px` } as CSSProperties}
     >
@@ -50,7 +51,7 @@ export function VoiceCallTranscript({
         role="region"
         aria-label="Spoken captions"
         tabIndex={0}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="scrollbar-gutter-both min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
         onScroll={(event) => {
           if (layout === "work") return;
           const node = event.currentTarget;
@@ -59,12 +60,8 @@ export function VoiceCallTranscript({
       >
         <div
           ref={contentRef}
-          className={cn(
-            "mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 pt-7 sm:gap-10 sm:px-8 sm:pt-9",
-            layout === "split"
-              ? "pb-6 lg:pb-[calc(var(--voice-composer-inset)+1.5rem)]"
-              : "pb-[calc(var(--voice-composer-inset)+1.5rem)]",
-          )}
+          data-voice-captions-content
+          className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 pt-7 sm:gap-10 sm:px-8 sm:pt-9"
         >
           {/* Only provider captions: the view stays blank until the first one arrives. */}
           {captions.map((caption) => (
@@ -82,7 +79,7 @@ export function VoiceCallTranscript({
               <p
                 data-voice-caption-text
                 // Neutral provider captions, larger than Work's text: 18px narrow, 20px wide.
-                className="text-[18px] leading-8 whitespace-pre-wrap break-words text-foreground [overflow-wrap:anywhere] sm:text-[20px] sm:leading-9"
+                className="text-lg leading-8 whitespace-pre-wrap break-words text-foreground [overflow-wrap:anywhere] sm:text-xl sm:leading-9"
               >
                 {caption.text.trimStart()}
               </p>
@@ -92,12 +89,8 @@ export function VoiceCallTranscript({
       </div>
       {!following && (
         <div
-          className={cn(
-            "pointer-events-none absolute inset-x-0 flex justify-center",
-            layout === "split"
-              ? "bottom-3 lg:bottom-[calc(var(--voice-composer-inset)+0.75rem)]"
-              : "bottom-[calc(var(--voice-composer-inset)+0.75rem)]",
-          )}
+          data-voice-latest-captions
+          className="pointer-events-none absolute inset-x-0 flex justify-center"
         >
           <Button
             variant="glass"

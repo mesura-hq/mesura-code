@@ -7,20 +7,9 @@ export interface MinimalTextEdit {
 }
 
 /**
- * The smallest single replacement that turns `before` into `after`.
- *
- * Written for the caret. Replacing a document's whole range with new contents
- * produces the right text and the wrong cursor: every position maps through an
- * edit that covered everything, so a caret on line 50 does not come back on
- * line 50, and the user is moved for a change that happened elsewhere in the
- * file. Trimming the edit down to the part that actually differs leaves every
- * position outside it untouched, which is the common case when an agent rewrites
- * one function.
- *
- * One span, not a real diff. Two distant edits in one write produce a span that
- * covers both, which moves a caret between them; a caret outside the pair still
- * survives. A proper diff would narrow that, and is not worth its cost here
- * until something shows that it is.
+ * The smallest single replacement that turns `before` into `after`, so positions outside the
+ * changed span (the caret above all) keep their place; a whole-range replace moves them. One span,
+ * not a real diff: two distant edits yield one span covering both.
  */
 export function minimalTextEdit(before: string, after: string): MinimalTextEdit | null {
   if (before === after) return null;

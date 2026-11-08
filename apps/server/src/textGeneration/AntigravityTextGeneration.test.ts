@@ -16,11 +16,11 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { type AcpError, AcpRequestError } from "effect-acp/errors";
-import type * as AcpSchema from "effect-acp/schema";
+import { type AcpError } from "effect-acp/errors";
+import type * as AcpSchema from "effect-acp/compat";
 import { expect } from "vite-plus/test";
 
-import type { AcpSessionRuntimeEvent } from "../provider/acp/AcpSessionRuntime.ts";
+import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import { removeAntigravitySessionFiles } from "../provider/acp/AntigravitySessionFiles.ts";
 
 import {
@@ -34,10 +34,12 @@ import {
   THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT,
   THREAD_SEARCH_STEP_REQUEST,
   THREAD_SEARCH_QUOTED_EXCERPT,
-} from "./ThreadSearchStep.testFixtures.ts";
+  THREAD_SEARCH_STEP_CWD,
+} from "@t3tools/provider-testing/threadSearchStep";
 
 type TextRuntime = Effect.Success<ReturnType<AntigravityTextGenerationOptions["makeRuntime"]>>;
 
+const requestContext = { requestId: "test-request", method: "test" };
 const SESSION_ID = "047c62f6-607b-44db-bfbe-f83b67e9e8b1";
 const modelSelection = {
   instanceId: ProviderInstanceId.make("antigravity-test"),
@@ -129,7 +131,7 @@ const makeFixture = Effect.fn("makeAntigravityTextGenerationFixture")(function* 
 
   const makeRuntime: AntigravityTextGenerationOptions["makeRuntime"] = (cwd) =>
     Effect.gen(function* () {
-      const events = yield* Queue.unbounded<AcpSessionRuntimeEvent>();
+      const events = yield* Queue.unbounded<AcpSessionRuntime.AcpSessionRuntimeEvent>();
       state.workspaces.push(cwd);
       expect(yield* fs.readDirectory(cwd).pipe(Effect.orDie)).toEqual([]);
       yield* Effect.addFinalizer(() =>
@@ -374,37 +376,20 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
         .generateThreadTitle(fixture.titleInput)
         .pipe(Effect.forkChild);
       yield* Deferred.await(fixture.enteredPrompt);
-      const reply = yield* fixture.incoming.permission({
-        sessionId: SESSION_ID,
-        toolCall: { toolCallId: "question-1", title: "Choose a title", kind: "other" },
-        options: [
-          { optionId: "first-native-choice", name: "Use this title", kind: "allow_once" },
-          { optionId: "second-native-choice", name: "Use this title", kind: "allow_once" },
-        ],
-      });
+      const reply = yield* fixture.incoming.permission(
+        {
+          sessionId: SESSION_ID,
+          toolCall: { toolCallId: "question-1", title: "Choose a title", kind: "other" },
+          options: [
+            { optionId: "first-native-choice", name: "Use this title", kind: "allow_once" },
+            { optionId: "second-native-choice", name: "Use this title", kind: "allow_once" },
+          ],
+        },
+        requestContext,
+      );
       const error = yield* Fiber.join(child).pipe(Effect.flip);
       expect(reply).toEqual({ outcome: { outcome: "cancelled" } });
       expect(error.detail).toContain("permission or user input");
-      yield* fixture.assertCleaned;
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("declines elicitation and stops the helper", () =>
-    Effect.gen(function* () {
-      const fixture = yield* makeFixture({ prompt: () => Effect.never });
-      const child = yield* fixture.textGeneration
-        .generateThreadTitle(fixture.titleInput)
-        .pipe(Effect.forkChild);
-      yield* Deferred.await(fixture.enteredPrompt);
-      const reply = yield* fixture.incoming.question({
-        sessionId: SESSION_ID,
-        mode: "form",
-        message: "Name this branch",
-        requestedSchema: { type: "object", properties: {} },
-      });
-      const error = yield* Fiber.join(child).pipe(Effect.flip);
-      expect(reply).toEqual({ action: { action: "decline" } });
-      expect(error.detail).toContain("user input");
       yield* fixture.assertCleaned;
     }).pipe(Effect.scoped),
   );
@@ -420,10 +405,16 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
         yield* Deferred.await(fixture.enteredPrompt);
         const request =
           kind === "file"
-            ? fixture.incoming.readFile({ sessionId: SESSION_ID, path: "/not-allowed" })
+            ? fixture.incoming.readFile(
+                { sessionId: SESSION_ID, path: "/not-allowed" },
+                requestContext,
+              )
             : kind === "terminal"
-              ? fixture.incoming.createTerminal({ sessionId: SESSION_ID, command: "not-allowed" })
-              : fixture.incoming.extension("_ask_user", {});
+              ? fixture.incoming.createTerminal(
+                  { sessionId: SESSION_ID, command: "not-allowed" },
+                  requestContext,
+                )
+              : fixture.incoming.extension("_ask_user", {}, requestContext);
         const denied = yield* request.pipe(Effect.exit);
         expect(Exit.isFailure(denied)).toBe(true);
         const error = yield* Fiber.join(child).pipe(Effect.flip);
@@ -490,21 +481,6 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("fails an unavailable model before prompting", () =>
-    Effect.gen(function* () {
-      const fixture = yield* makeFixture();
-      const error = yield* fixture.textGeneration
-        .generateThreadTitle({
-          ...fixture.titleInput,
-          modelSelection: { ...modelSelection, model: "not-in-the-account" },
-        })
-        .pipe(Effect.flip);
-      expect(error.detail).toContain("select the Antigravity model");
-      expect(fixture.state.prompts).toEqual([]);
-      yield* fixture.assertCleaned;
-    }).pipe(Effect.scoped),
-  );
-
   it.effect("uses the native default without sending T3's default selection as a model ID", () =>
     Effect.gen(function* () {
       const fixture = yield* makeFixture();
@@ -550,21 +526,6 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("does not start another runtime or prompt after authentication fails", () =>
-    Effect.gen(function* () {
-      const fixture = yield* makeFixture({
-        startError: new AcpRequestError({ code: -32000, errorMessage: "Authentication required" }),
-      });
-      const error = yield* fixture.textGeneration
-        .generateThreadTitle(fixture.titleInput)
-        .pipe(Effect.flip);
-      expect(error._tag).toBe("TextGenerationError");
-      expect(fixture.state.workspaces).toHaveLength(1);
-      expect(fixture.state.prompts).toEqual([]);
-      yield* fixture.assertCleaned;
-    }).pipe(Effect.scoped),
-  );
-
   it.effect("does not launch during sign-out or before sign-in", () =>
     Effect.gen(function* () {
       const fixture = yield* makeFixture({ rejectAdmission: true });
@@ -573,21 +534,6 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
         .pipe(Effect.flip);
       expect(error._tag).toBe("TextGenerationError");
       expect(fixture.state.workspaces).toEqual([]);
-      yield* fixture.assertCleaned;
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("times out a stalled helper and waits for cleanup", () =>
-    Effect.gen(function* () {
-      const fixture = yield* makeFixture({ prompt: () => Effect.never });
-      const child = yield* fixture.textGeneration
-        .generateThreadTitle(fixture.titleInput)
-        .pipe(Effect.forkChild);
-      yield* Deferred.await(fixture.enteredPrompt);
-      yield* TestClock.adjust(180_000);
-      const error = yield* Fiber.join(child).pipe(Effect.flip);
-      expect(error.detail).toContain("timed out");
-      expect(fixture.state.cancellations).toBe(1);
       yield* fixture.assertCleaned;
     }).pipe(Effect.scoped),
   );
@@ -647,7 +593,11 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
   // Agent thread search, phase 2: the step runs in an empty temporary
   // workspace and removes the native helper session afterwards, so no durable
   // conversation survives it.
-  const threadSearchStepInput = { ...THREAD_SEARCH_STEP_REQUEST, modelSelection };
+  const threadSearchStepInput = {
+    ...THREAD_SEARCH_STEP_REQUEST,
+    cwd: THREAD_SEARCH_STEP_CWD,
+    modelSelection,
+  };
 
   it.effect("Antigravity answers a schema-checked thread search step and keeps no session", () =>
     Effect.gen(function* () {

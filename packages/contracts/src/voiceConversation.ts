@@ -177,16 +177,22 @@ const VoiceTranscriptFragments = Schema.Array(VoiceTranscriptFragment).check(
   Schema.isMaxLength(VOICE_TRANSCRIPT_MAX_BATCH_FRAGMENTS),
 );
 
-/** Voice history events never change messages, work, turns, or the sidebar summary. */
+/** Mesura: the voice history notice stream. It lives outside upstream's orchestration methods. */
+export const VOICE_WS_METHODS = {
+  subscribeVoiceHistory: "voice.subscribeHistory",
+} as const;
+
+/**
+ * Voice history events. They are stored in the application event store under their own
+ * aggregate kind, so they never reach agent or shell streams, messages, work, turns, or the
+ * sidebar summary. The type names are the ones the voice prototype persisted.
+ */
 export const VOICE_HISTORY_EVENT_TYPES = [
   "thread.voice-call-started",
   "thread.voice-transcript-appended",
   "thread.voice-call-ended",
 ] as const;
 export type VoiceHistoryEventType = (typeof VOICE_HISTORY_EVENT_TYPES)[number];
-const voiceHistoryEventTypes: ReadonlySet<string> = new Set(VOICE_HISTORY_EVENT_TYPES);
-export const isVoiceHistoryEventType = (type: string): type is VoiceHistoryEventType =>
-  voiceHistoryEventTypes.has(type);
 
 export const VoiceCallStartedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -268,17 +274,17 @@ const VoiceHistoryPageLimit = Schema.FiniteFromString.check(
   Schema.isLessThanOrEqualTo(VOICE_HISTORY_MAX_PAGE_SIZE),
 );
 export const VoiceCallListParams = Schema.Struct({ threadId: ThreadId });
-export const VoiceCallListQuery = {
+export const VoiceCallListQuery = Schema.Struct({
   limit: Schema.optional(VoiceHistoryPageLimit),
   cursor: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))),
-};
+});
 export const VoiceTranscriptListParams = Schema.Struct({ threadId: ThreadId, callId: VoiceCallId });
-export const VoiceTranscriptListQuery = {
+export const VoiceTranscriptListQuery = Schema.Struct({
   limit: Schema.optional(VoiceHistoryPageLimit),
   afterSequence: Schema.optional(
     Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
   ),
-};
+});
 
 export class VoiceConversationError extends Schema.TaggedError<VoiceConversationError>()(
   "VoiceConversationError",
@@ -333,3 +339,20 @@ export const VOICE_HISTORY_CALL_CHANGES: Readonly<
   "thread.voice-transcript-appended": "appended",
   "thread.voice-call-ended": "ended",
 };
+
+/** A voice history event as the event store holds it. */
+export const VoiceHistoryEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("thread.voice-call-started"),
+    payload: VoiceCallStartedPayload,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.voice-transcript-appended"),
+    payload: VoiceTranscriptAppendedPayload,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.voice-call-ended"),
+    payload: VoiceCallEndedPayload,
+  }),
+]);
+export type VoiceHistoryEvent = typeof VoiceHistoryEvent.Type;

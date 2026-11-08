@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Mesura: the id and this file's name stay upstream's, so the .deb fpm path in
+  scripts/build-desktop-artifact.ts keeps matching. The names below follow
+  DESKTOP_LINUX_IDENTITY in scripts/lib/brand-assets.ts.
+-->
+<component type="desktop-application">
+  <id>com.t3tools.t3code</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Mesura Code</name>
+  <summary>Desktop GUI for coding agents</summary>
+  <developer id="hq.mesura">
+    <name>Mesura</name>
+  </developer>
+  <description>
+    <p>
+      Mesura Code is a desktop app for coding agents, forked from T3 Code. Work
+      with your existing agent subscriptions, review code changes, and run
+      commands in your projects.
+    </p>
+    <p>
+      Connect from desktop or a web browser to continue working remotely.
+    </p>
+  </description>
+  <launchable type="desktop-id">mesura-code.desktop</launchable>
+  <icon type="stock">mesura-code</icon>
+  <provides>
+    <binary>mesura-code</binary>
+  </provides>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <url type="homepage">https://github.com/mesura-hq/mesura-code</url>
+  <url type="vcs-browser">https://github.com/mesura-hq/mesura-code</url>
+</component>

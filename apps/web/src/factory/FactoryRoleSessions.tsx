@@ -34,7 +34,7 @@ const FactoryRoleSession = memo(function FactoryRoleSession({
           <span className="text-muted-foreground tabular-nums">{row.cost}</span>
         )}
       </div>
-      <p className="mt-1 truncate font-mono text-[.65rem] text-muted-foreground/80">
+      <p className="mt-1 truncate font-mono text-phase-label text-muted-foreground/80">
         session {row.sessionId ?? "not reported yet"}
       </p>
       {row.status === "running" ? (

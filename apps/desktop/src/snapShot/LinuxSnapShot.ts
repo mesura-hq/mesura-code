@@ -17,7 +17,7 @@ import {
 import * as Schema from "effect/Schema";
 import { isKdeCaptureSession, type KdeCapturePaths } from "./KdeSnapShot.ts";
 import { isGnomeCaptureSession, readPortalPng, resizeLinuxCapture } from "./linuxCaptureSession.ts";
-export { readPortalPng, resizeLinuxCapture } from "./linuxCaptureSession.ts";
+export { readPortalPng } from "./linuxCaptureSession.ts";
 import { isHyprlandCaptureSession, type HyprlandCapturePaths } from "./HyprlandSnapShot.ts";
 
 const PORTAL = "org.freedesktop.portal.Desktop";
@@ -98,7 +98,7 @@ function unavailable(error: unknown): boolean {
 }
 
 /** One connection per operation: portal registration and request ownership stay together. */
-export class LinuxCaptureConnection {
+class LinuxCaptureConnection {
   private readonly bus: MessageBus;
   private readonly disconnected: Promise<never>;
   private uniqueName = "";
@@ -172,7 +172,6 @@ export class LinuxCaptureConnection {
       });
       if (kde !== undefined && decodeKde(kde).Version.value >= 2) return "kde";
     }
-    // Sandboxed apps already have an identity. Host apps register before any portal calls.
     if (!process.env.FLATPAK_ID && !process.env.SNAP) {
       await this.call({
         destination: PORTAL,
@@ -297,7 +296,6 @@ export class LinuxCaptureConnection {
           }),
         );
       }
-      // Closing this dedicated connection also removes the signal match.
     }
   }
 
@@ -306,7 +304,7 @@ export class LinuxCaptureConnection {
       this.bus.requestName(`${appId}.SnapShot`, NameFlag.DO_NOT_QUEUE),
     );
     if (result !== RequestNameReply.PRIMARY_OWNER) {
-      throw new Error("Another T3 Code instance is capturing a window. Try again.");
+      throw new Error("Another Mesura Code instance is capturing a window. Try again.");
     }
     const withFeedback = this.feedbackAvailable && options !== undefined;
     const reply = await this.call({

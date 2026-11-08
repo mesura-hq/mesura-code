@@ -1,9 +1,6 @@
 /**
- * Mesura: formatting and view logic for host stats, shared by the web Hosts
- * dock and the mobile Hosts screen so both say the same thing in the same
- * words. Every decision about whether a number can be trusted is the
- * projection's (`projectHostStats`); this module only says it in words and
- * turns series into sparkline geometry.
+ * Mesura: whether a number can be trusted is decided by `projectHostStats`. This module only says
+ * it in words and turns series into sparkline geometry.
  */
 import type { HostStatsHostView, HostStatsRow, HostStatsRowId } from "./projectHostStats.ts";
 
@@ -164,14 +161,14 @@ export function hostRowDisplay(rowId: HostsDockRowId, row: HostStatsRow): HostRo
     case "gpu":
       return {
         label,
-        value: value === null ? "—" : percent(value),
+        value: value === null ? "n/a" : percent(value),
         suffix: secondary === null ? null : `vram ${percent(secondary)}`,
         title: "Busy · video memory used",
       };
     case "network":
       return {
         label,
-        value: `↓${value === null ? "—" : formatCompactRate(value)}`,
+        value: `↓${value === null ? "n/a" : formatCompactRate(value)}`,
         suffix: secondary === null ? null : `↑${formatCompactRate(secondary)}`,
         title: `↓ ${value === null ? "n/a" : formatRate(value)} received · ↑ ${
           secondary === null ? "n/a" : formatRate(secondary)

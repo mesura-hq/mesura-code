@@ -1,29 +1,8 @@
 /**
- * The version gate for the Symmetria broker contract.
- *
- * A consumer opens a stream by announcing the protocol version it speaks. The
- * contract refuses an unsupported major outright and accepts any minor, because
- * a minor bump is additive by definition and a consumer that ignores unknown
- * fields keeps working across one. Phase five wires this gate into the stream
- * framing; here it only states the rule.
- *
- * ⚠ **The minor promise runs in one direction, and the 1.1 addition is what
- * made that worth saying out loud.** A NEWER producer talking to an OLDER
- * consumer is the case the rule describes and the case the contract handles:
- * unknown fields are dropped and an unknown stream entity degrades rather than
- * failing the payload. The reverse is not promised. `SymmetriaStreamSnapshot`
- * gained a required `projects` array in 1.1, so a snapshot from a genuine 1.0
- * producer now announces a minor this gate accepts and then fails to decode on
- * the missing key.
- *
- * That was a deliberate choice rather than an oversight, and it rests on a fact
- * about this deployment rather than on the shape of the contract: there is
- * exactly one producer, it ships in the same repository as its schema, and no
- * older one exists anywhere. An optional key would have bought nothing real and
- * cost every consumer a `?? []` at the point where it needs a project's name.
- * If a second producer ever appears — a phone, a server, anything that upgrades
- * on its own schedule — this is the decision to revisit FIRST, because the
- * failure mode is a stream that opens and then refuses its own opening item.
+ * The gate refuses an unsupported major and accepts any minor, because a minor bump is additive.
+ * ⚠ Only a NEWER producer with an OLDER consumer is promised: a 1.0 snapshot lacks the required
+ * `projects` array and fails to decode. That holds only while one producer ships with this
+ * schema; revisit it FIRST if a producer that upgrades on its own schedule appears.
  */
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -43,19 +22,10 @@ export const SYMMETRIA_PROTOCOL_MINOR = 5;
  * A protocol version this build accepts. The major is pinned to a literal, so
  * decoding is itself the gate: an unsupported major never produces a value.
  */
-// WORKAROUND: this struct carries no `identifier` annotation, and every other
-// shared Symmetria struct does. What the annotation buys is a stable name in
-// the emitted JSON Schema — `#/$defs/SymmetriaProtocolVersion` instead of the
-// positional `#/$defs/Objects_` Effect falls back to. It is left off here
-// because annotating a root makes `Schema.toJsonSchemaDocument` emit that
-// root's own document as a bare `$ref` into `$defs`, and the approved test
-// `keeps every non-negative field aligned in generated JSON Schema`
-// (tests/unit/symmetria-phase-one.test.ts) reads
-// `toJsonSchemaDocument(SymmetriaProtocolVersion).schema.properties.minor`
-// directly and fails on the reference. Removing this once that test resolves a
-// top-level `$ref` through `definitions`, the way the phase-five test already
-// does, is the whole fix; the emitted key then changes and the checksum moves
-// once, deliberately.
+// WORKAROUND: no `identifier` annotation, unlike every other shared struct. An annotated root
+// emits as a bare `$ref`, which breaks `keeps every non-negative field aligned in generated JSON
+// Schema` in tests/unit/symmetria-phase-one.test.ts. Add it once that test resolves a top-level
+// `$ref` through `definitions`; the checksum then moves once, deliberately.
 export const SymmetriaProtocolVersion = Schema.Struct({
   major: Schema.Literal(SYMMETRIA_PROTOCOL_MAJOR),
   minor: NonNegativeInteger,

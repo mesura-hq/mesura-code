@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import type { ChatAttachment } from "@t3tools/contracts";
+import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
 
 import {
   normalizeAttachmentRelativePath,
@@ -42,8 +43,7 @@ export function toSafeThreadAttachmentSegment(threadId: string): string | null {
 
 export function attachmentFileExtension(fileName: string): string {
   const extension = NodePath.extname(fileName).toLowerCase();
-  // ".part" is reserved for in-flight uploads; a stored "archive.part" would
-  // look stale to sweepStalePendingAttachments and get deleted.
+  // .part is reserved for pending uploads; the stale-upload sweep would delete stored files.
   if (extension === ".part" || !/^\.[a-z0-9]{1,10}$/.test(extension)) {
     return ".bin";
   }
@@ -88,6 +88,30 @@ export function createAttachmentId(threadId: string, extension?: string): string
   return `${threadSegment}-${NodeCrypto.randomUUID()}${attachmentIdExtensionSuffix(extension)}`;
 }
 
+export function createDeterministicAttachmentId(
+  threadId: string,
+  stableKey: string,
+): string | null {
+  const threadSegment = toSafeThreadAttachmentSegment(threadId);
+  if (!threadSegment) return null;
+  const hash = NodeCrypto.createHash("sha256")
+    .update(JSON.stringify([threadId, stableKey]))
+    .digest("hex")
+    .slice(0, 32);
+  const uuid = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20)}`;
+  return `${threadSegment}-${uuid}`;
+}
+
+/** Retries keep ids; changed bytes must get new ids because clients cache images by id. */
+export function chatAttachmentStableKey(
+  messageId: string,
+  index: number,
+  bytes: Uint8Array,
+): string {
+  const digest = NodeCrypto.createHash("sha256").update(bytes).digest("hex");
+  return `${messageId}:${index}:${digest}`;
+}
+
 export function parseThreadSegmentFromAttachmentId(attachmentId: string): string | null {
   const normalizedId = normalizeAttachmentRelativePath(attachmentId);
   if (!normalizedId || normalizedId.includes("/") || normalizedId.includes(".")) {
@@ -100,7 +124,23 @@ export function parseThreadSegmentFromAttachmentId(attachmentId: string): string
   return match[1]?.toLowerCase() ?? null;
 }
 
-/** Null for attachment types this build does not know; callers skip those. */
+/** Only this thread's ids qualify, preserving source pages when deleting a fork. */
+export function threadHtmlRenderAttachmentIds(
+  threadId: string,
+  items: Iterable<{ readonly toolName: string | null | undefined; readonly output?: unknown }>,
+) {
+  const segment = toSafeThreadAttachmentSegment(threadId);
+  if (segment === null) return [];
+  return Array.from(items).flatMap((item) => {
+    const attachmentId =
+      htmlRenderFromToolItem(item)?.attachmentId ?? mcpAppFromToolItem(item)?.attachmentId;
+    return attachmentId !== undefined &&
+      parseThreadSegmentFromAttachmentId(attachmentId) === segment
+      ? [attachmentId]
+      : [];
+  });
+}
+
 export function attachmentRelativePath(attachment: ChatAttachment): string | null {
   switch (attachment.type) {
     case "image": {
@@ -133,15 +173,9 @@ export function resolveAttachmentPath(input: {
 }
 
 /**
- * Fork addition (ADR-003), kept when this fork's own attachment stack was
- * retired for upstream's. Every provider reaches an attachment through
- * `resolveAttachmentPath` — five adapters, `ProviderService`, and both
- * text-generation modules — so the check sits here rather than at each caller,
- * and a call site added later is covered without being touched.
- *
- * It rejects only what is actually on disk. `Normalizer` resolves the path of
- * an attachment it is about to write, so a path with nothing at it stays valid;
- * rejecting those would stop attachments from ever being stored.
+ * Fork addition (ADR-003). Every provider reaches an attachment through `resolveAttachmentPath`,
+ * so this check covers every caller, later ones included. It rejects only what is on disk:
+ * `Normalizer` resolves a path before it writes the attachment, so an empty path stays valid.
  */
 function isSafeAttachmentTarget(attachmentPath: string): boolean {
   let target: NodeFS.Stats;
@@ -255,7 +289,9 @@ export function sweepStalePendingAttachments(input: {
   for (const entry of entries) {
     const isPartial = entry.endsWith(".part");
     if (!isPartial) {
-      const attachmentId = parseAttachmentIdFromRelativePath(entry);
+      const attachmentId = parseAttachmentIdFromRelativePath(
+        entry.endsWith(".txt") && entry.slice(0, -4).includes(".") ? entry.slice(0, -4) : entry,
+      );
       if (
         !attachmentId ||
         parseThreadSegmentFromAttachmentId(attachmentId) !== PENDING_ATTACHMENT_THREAD_SEGMENT
@@ -285,7 +321,7 @@ export function sweepStalePendingAttachments(input: {
   return { deleted };
 }
 
-export function parseAttachmentIdFromRelativePath(relativePath: string): string | null {
+function parseAttachmentIdFromRelativePath(relativePath: string): string | null {
   const normalized = normalizeAttachmentRelativePath(relativePath);
   if (!normalized || normalized.includes("/")) {
     return null;

@@ -6,7 +6,7 @@ import { resolveElectronLaunchCommand } from "./electron-launcher.mjs";
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const desktopDir = NodePath.resolve(__dirname, "..");
-const mainJs = NodePath.resolve(desktopDir, "dist-electron/main.cjs");
+const mainJs = NodePath.resolve(desktopDir, "dist-electron/boot.cjs");
 const preloadJs = NodePath.resolve(desktopDir, "dist-electron/preload.cjs");
 
 const preloadSource = NodeFS.readFileSync(preloadJs, "utf8");

@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { Switch } from "~/components/ui/switch";
-import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import { updateClientSettings, useClientSettings } from "~/hooks/useSettings";
 import { runtime } from "~/lib/runtime";
 import { readPreparedConnection, usePreparedConnection } from "~/state/session";
 import {
@@ -73,7 +73,6 @@ export function VoiceSettings() {
   const router = useRouter();
   const returnTo = useVoiceSettingsReturn();
   const preferences = useClientSettings((settings) => settings.voiceConversation);
-  const updateClientSettings = useUpdateClientSettings();
   const { scope, environment } = useSettingsScope();
   const update = (next: Partial<typeof preferences>) =>
     void updateClientSettings({ voiceConversation: { ...preferences, ...next } });
@@ -242,6 +241,7 @@ function VoiceKeySetting({
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- loads the environment's voice settings for this connection
   useEffect(() => {
     // Environments without voice support have no voice routes; never ask them.
     if (!supported || !connected || !prepared) return;
@@ -265,14 +265,15 @@ function VoiceKeySetting({
     if (!current) return;
     setSaving(true);
     setError(null);
-    try {
-      setSettings(await runtime.runPromise(configureVoiceConversation(current, nextKey)));
-      setApiKey("");
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setSaving(false);
-    }
+    // No try/finally: React Compiler cannot compile it and would skip this whole component.
+    await runtime.runPromise(configureVoiceConversation(current, nextKey)).then(
+      (saved) => {
+        setSettings(saved);
+        setApiKey("");
+      },
+      (cause: unknown) => setError(errorMessage(cause)),
+    );
+    setSaving(false);
   };
 
   const status = !environmentId

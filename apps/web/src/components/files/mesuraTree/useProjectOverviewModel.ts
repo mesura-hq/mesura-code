@@ -1,6 +1,8 @@
 import type { OverviewModel } from "@symmetria/fm-ui/tree";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
+
+import { useStableCallback } from "~/hooks/useStableCallback";
 
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
 
@@ -35,13 +37,12 @@ export function useProjectOverviewModel(
   const folders = useMemo(() => foldersForListing(cwd, data), [cwd, data]);
   const truncated = data?.truncated ?? false;
   const isPending = entriesQuery.isPending;
-  const onRefreshRef = useRef(onRefresh);
-  onRefreshRef.current = onRefresh;
+  const notifyRefresh = useStableCallback(() => onRefresh?.());
   const queryRefresh = entriesQuery.refresh;
   const refresh = useCallback(() => {
     queryRefresh();
-    onRefreshRef.current?.();
-  }, [queryRefresh]);
+    notifyRefresh();
+  }, [notifyRefresh, queryRefresh]);
   const model = useMemo<OverviewModel>(
     () => ({
       folders,

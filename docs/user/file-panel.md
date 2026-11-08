@@ -161,3 +161,32 @@ document and its source; you edit in the source view.
 
 Changes made by an agent are a different view. Use **Diff** in the right panel to review what a
 thread changed, rather than comparing files by eye.
+
+## Tree diff and Files diff
+
+**Tree diff** answers "what is uncommitted, and where is it?". It is the first mode of **Diff** in the
+right panel, and it lists every changed file in the working tree as a tree. Each file carries a
+letter for how it changed — `M` modified, `A` added, `D` deleted, `R` renamed, `?` untracked — and
+its added and removed line counts. Above the tree, the branch and a summary show how many files and
+lines are staged, unstaged and untracked.
+
+Tree diff follows the disk by itself. When an agent, a shell, or a `git add` or `git commit` changes
+the working tree, the tree updates without waiting for a turn to end. A change usually
+shows within about a second; in a very large repository it can take several seconds.
+
+Click a file to open it in its own tab, beside the Diff tab. That tab opens without the explorer, so
+the file has the whole column. To bring the explorer back on that tab, use the folder button in the
+file's header, or press `Ctrl+E` (`Cmd+E` on macOS). Only a file that still exists inside the
+project opens: a deleted file, or a changed file outside the project's folder, stays in the list but
+does not open. Read those changes in Files diff.
+
+**Files diff** shows the same uncommitted work as full patches: every changed line of every file, in
+one scroll. Use Tree diff to see where the changes are, and Files diff to read them.
+
+Two keys reach both modes from anywhere in a thread, the editor included:
+
+- `Alt+G` opens Diff on Tree diff. Press it again on Tree diff to close the panel.
+- `Alt+C` opens the menu of Diff modes. Type a mode's first letter and press `Enter`. `T` selects
+  Tree diff, and a second `T` moves to Turn.
+
+Tree diff is also in the command palette, as **Show tree diff**.

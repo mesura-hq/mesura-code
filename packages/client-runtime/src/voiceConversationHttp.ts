@@ -7,11 +7,11 @@ import * as Effect from "effect/Effect";
 import * as Data from "effect/Data";
 import { RemoteEnvironmentAuthorization } from "./authorization/service.ts";
 import type { PreparedConnection } from "./connection/model.ts";
-import { environmentEndpointUrl } from "./environment/endpoint.ts";
 import { ManagedRelayDpopSigner } from "./relay/managedRelay.ts";
 import {
   executeEnvironmentHttpRequest,
   makeEnvironmentHttpApiGroupClient,
+  makeEnvironmentHttpApiUrlBuilder,
   RemoteEnvironmentAuthFetchError,
   type RemoteEnvironmentRequestError,
 } from "./rpc/http.ts";
@@ -24,6 +24,8 @@ import {
 type VoiceHttpClient = Effect.Success<
   ReturnType<typeof makeEnvironmentHttpApiGroupClient<"voice">>
 >;
+/** The voice group's contract URL builder. It encodes params like the client, so DPoP proofs match. */
+type VoiceHttpUrls = ReturnType<typeof makeEnvironmentHttpApiUrlBuilder>["voice"];
 
 const REQUEST_TIMEOUT_MS = 40_000;
 const OWNER_CHANGED_MESSAGE =
@@ -31,31 +33,30 @@ const OWNER_CHANGED_MESSAGE =
 const CONNECTION_GONE_MESSAGE =
   "Voice history was not sent because this connection is no longer in use. It stays saved in this browser.";
 
-const request = <A, E>(
+const request = Effect.fn("clientRuntime.voice.request")(function* <A, E>(
   prepared: PreparedConnection,
-  path: string,
+  url: (urls: VoiceHttpUrls) => string,
   method: "GET" | "POST",
   execute: (args: {
     client: VoiceHttpClient;
     headers: EnvironmentHttpAuthHeaders;
   }) => Effect.Effect<A, E>,
   owner?: VoiceHistoryOwnerGuard,
-) =>
-  Effect.gen(function* () {
-    const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
-    const remoteAuthorization = yield* Effect.serviceOption(RemoteEnvironmentAuthorization);
-    return yield* executeAuthenticatedEnvironmentHttpRequest({
-      prepared,
-      signer,
-      remoteAuthorization,
-      group: "voice",
-      method,
-      url: (base) => environmentEndpointUrl(base, path),
-      timeoutMs: REQUEST_TIMEOUT_MS,
-      request: execute,
-      ...(owner ? { authorizeAttempt: owner } : {}),
-    });
+) {
+  const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
+  const remoteAuthorization = yield* Effect.serviceOption(RemoteEnvironmentAuthorization);
+  return yield* executeAuthenticatedEnvironmentHttpRequest({
+    prepared,
+    signer,
+    remoteAuthorization,
+    group: "voice",
+    method,
+    url,
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    request: execute,
+    ...(owner ? { authorizeAttempt: owner } : {}),
   });
+});
 
 /** History text was not sent: the connection no longer proves the owner it was saved under. */
 export class VoiceHistoryOwnerChangedError extends Data.TaggedError(
@@ -74,12 +75,10 @@ export type VoiceHistoryOwnerGuard = (
 ) => Effect.Effect<void, RemoteEnvironmentRequestError>;
 
 /**
- * Binds history requests to one verified owner. Before every attempt, including a credential
- * retry, the environment must report `historyOwnerId` for that attempt's own authorization;
- * otherwise nothing is sent. A header credential the server already confirmed for this owner is
- * not asked again, because the server binds it to one identity. A browser cookie is invisible to
- * the client, so cookie requests are confirmed every time, immediately before each request.
- * `isCurrent` ends the guard's lifetime, for example when the view that started a resume closes.
+ * Before every attempt, including a credential retry, the environment must report `historyOwnerId`
+ * for that attempt's authorization, or nothing is sent. A confirmed header credential is not asked
+ * again (the server binds it to one identity); an invisible cookie is confirmed before each
+ * request. `isCurrent` ends the guard, for example when the resuming view closes.
  */
 export const createVoiceHistoryOwnerGuard = (input: {
   readonly historyOwnerId: string;
@@ -90,7 +89,7 @@ export const createVoiceHistoryOwnerGuard = (input: {
     Effect.gen(function* () {
       if (!input.isCurrent()) return yield* ownerRefused(CONNECTION_GONE_MESSAGE);
       if (attempt.credentialKey !== null && attempt.credentialKey === confirmedCredential) return;
-      const url = environmentEndpointUrl(attempt.httpBaseUrl, "/api/voice/settings");
+      const url = makeEnvironmentHttpApiUrlBuilder(attempt.httpBaseUrl).voice.settings();
       const headers = yield* attempt.headersFor("GET", url);
       const settings = yield* executeEnvironmentHttpRequest(
         url,
@@ -105,26 +104,38 @@ export const createVoiceHistoryOwnerGuard = (input: {
 };
 
 export const voiceConversationSettings = (prepared: PreparedConnection) =>
-  request(prepared, "/api/voice/settings", "GET", ({ client, headers }) =>
-    client.settings({ headers }),
+  request(
+    prepared,
+    (urls) => urls.settings(),
+    "GET",
+    ({ client, headers }) => client.settings({ headers }),
   );
 
 export const configureVoiceConversation = (prepared: PreparedConnection, apiKey: string) =>
-  request(prepared, "/api/voice/settings", "POST", ({ client, headers }) =>
-    client.configure({ headers, payload: { apiKey } }),
+  request(
+    prepared,
+    (urls) => urls.configure(),
+    "POST",
+    ({ client, headers }) => client.configure({ headers, payload: { apiKey } }),
   );
 
 export const createVoiceConversation = (
   prepared: PreparedConnection,
   payload: VoiceConversationCreateInput,
 ) =>
-  request(prepared, "/api/voice/sessions", "POST", ({ client, headers }) =>
-    client.create({ headers, payload }),
+  request(
+    prepared,
+    (urls) => urls.create(),
+    "POST",
+    ({ client, headers }) => client.create({ headers, payload }),
   );
 
 export const heartbeatVoiceConversation = (prepared: PreparedConnection, sessionId: string) =>
-  request(prepared, "/api/voice/sessions/heartbeat", "POST", ({ client, headers }) =>
-    client.heartbeat({ headers, payload: { sessionId } }),
+  request(
+    prepared,
+    (urls) => urls.heartbeat(),
+    "POST",
+    ({ client, headers }) => client.heartbeat({ headers, payload: { sessionId } }),
   );
 
 /** Ends the call. `lastSequence` declares its final transcript boundary. */
@@ -136,7 +147,7 @@ export const endVoiceConversation = (
 ) =>
   request(
     prepared,
-    "/api/voice/sessions/end",
+    (urls) => urls.end(),
     "POST",
     ({ client, headers }) =>
       client.end({
@@ -155,7 +166,7 @@ export const appendVoiceTranscript = (
 ) =>
   request(
     prepared,
-    "/api/voice/sessions/transcript",
+    (urls) => urls.appendTranscript(),
     "POST",
     ({ client, headers }) => client.appendTranscript({ headers, payload }),
     owner,
@@ -166,46 +177,48 @@ export const readVoiceCall = (
   prepared: PreparedConnection,
   input: { readonly threadId: string; readonly callId: string },
   owner: VoiceHistoryOwnerGuard,
-) =>
-  request(
+) => {
+  const endpoint = {
+    params: { threadId: ThreadId.make(input.threadId), callId: input.callId },
+    query: { limit: 1 },
+  };
+  return request(
     prepared,
-    `/api/voice/threads/${encodeURIComponent(input.threadId)}/calls/${encodeURIComponent(input.callId)}/fragments`,
+    (urls) => urls.listFragments(endpoint),
     "GET",
-    ({ client, headers }) =>
-      client.listFragments({
-        headers,
-        params: { threadId: ThreadId.make(input.threadId), callId: input.callId },
-        payload: { limit: 1 },
-      }),
+    ({ client, headers }) => client.listFragments({ ...endpoint, headers }),
     owner,
   ).pipe(
     Effect.map((page) => page.call),
-    Effect.catchTag("VoiceConversationError", (error) =>
-      error.status === 404 ? Effect.succeed(null) : Effect.fail(error),
-    ),
+    Effect.catchTags({
+      VoiceConversationError: (error) =>
+        error.status === 404 ? Effect.succeed(null) : Effect.fail(error),
+    }),
   );
+};
 
 // Mesura: the saved-history viewer. These only read, so any client with orchestration:read may
 // open a finished call, including one another client recorded: they never use the owner guard,
 // which authorizes writing pending history, not reading it.
-const voiceCallsPath = (threadId: string) =>
-  `/api/voice/threads/${encodeURIComponent(threadId)}/calls`;
-
 /** One page of a thread's saved calls, newest first; pass `nextCursor` back for the next page. */
 export const listVoiceCalls = (
   prepared: PreparedConnection,
   input: { readonly threadId: string; readonly cursor?: string; readonly limit?: number },
-) =>
-  request(prepared, voiceCallsPath(input.threadId), "GET", ({ client, headers }) =>
-    client.listCalls({
-      headers,
-      params: { threadId: ThreadId.make(input.threadId) },
-      payload: {
-        ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
-        ...(input.limit === undefined ? {} : { limit: input.limit }),
-      },
-    }),
+) => {
+  const endpoint = {
+    params: { threadId: ThreadId.make(input.threadId) },
+    query: {
+      ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
+    },
+  };
+  return request(
+    prepared,
+    (urls) => urls.listCalls(endpoint),
+    "GET",
+    ({ client, headers }) => client.listCalls({ ...endpoint, headers }),
   );
+};
 
 /** One page of a saved call's transcript after `afterSequence`, with the call's summary. */
 export const listVoiceTranscript = (
@@ -216,18 +229,18 @@ export const listVoiceTranscript = (
     readonly afterSequence?: number;
     readonly limit?: number;
   },
-) =>
-  request(
+) => {
+  const endpoint = {
+    params: { threadId: ThreadId.make(input.threadId), callId: input.callId },
+    query: {
+      ...(input.afterSequence === undefined ? {} : { afterSequence: input.afterSequence }),
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
+    },
+  };
+  return request(
     prepared,
-    `${voiceCallsPath(input.threadId)}/${encodeURIComponent(input.callId)}/fragments`,
+    (urls) => urls.listFragments(endpoint),
     "GET",
-    ({ client, headers }) =>
-      client.listFragments({
-        headers,
-        params: { threadId: ThreadId.make(input.threadId), callId: input.callId },
-        payload: {
-          ...(input.afterSequence === undefined ? {} : { afterSequence: input.afterSequence }),
-          ...(input.limit === undefined ? {} : { limit: input.limit }),
-        },
-      }),
+    ({ client, headers }) => client.listFragments({ ...endpoint, headers }),
   );
+};

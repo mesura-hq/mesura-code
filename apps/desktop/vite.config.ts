@@ -1,16 +1,12 @@
 import "vite-plus/test/config";
-import { defineConfig } from "vite-plus";
+import { defaultInclude, defineConfig } from "vite-plus";
 
 import { isDesktopRuntimeExternalDependency } from "../../scripts/lib/desktop-external-packages.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
 const repoEnv = loadRepoEnv();
 
-// The main process is bundled the same way the server CLI is: every JS
-// dependency is inlined and only packages Node must load from disk stay
-// external. The packaged app then installs just those externals, instead of a
-// full production install of apps/desktop's dependency tree next to a server
-// bundle that already carries its own copy of the same libraries.
+// Install only bundle externals; the server bundle already carries its dependency tree.
 const isMainProcessExternal = (id: string) =>
   id === "electron" || id.startsWith("electron/") || isDesktopRuntimeExternalDependency(id);
 const shouldLaunchElectronAfterPack = process.env.T3CODE_DESKTOP_DEV === "1";
@@ -45,6 +41,11 @@ export default defineConfig({
         dependsOn: ["t3#build"],
         cache: false,
       },
+      // tsc (tsc-rs) rewrites the tsbuildinfo it reads, which keeps a task out of the cache.
+      typecheck: {
+        command: "tsc --noEmit",
+        cache: { input: [{ auto: true }, "!*.tsbuildinfo"] },
+      },
     },
   },
   pack: [
@@ -59,16 +60,9 @@ export default defineConfig({
       entry: ["src/main.ts"],
       clean: true,
       deps: {
-        // v0.0.42 inlines everything that is not a main-process external, so
-        // `@t3tools/` and `@symmetria/` are covered by the rule below rather
-        // than named. Keep it that way: these workspace packages export
-        // TypeScript SOURCE (`"import": "./src/index.ts"`) with no built
-        // artifact and no `require` condition, so leaving one external
-        // produces a packed bundle that resolves fine at typecheck and at test
-        // time — vitest reads the source directly — and then throws
-        // ERR_PACKAGE_PATH_NOT_EXPORTED the moment Electron actually starts.
-        // Found by launching the application, which is the only thing that
-        // exercises this path.
+        // Workspace packages (`@t3tools/`, `@symmetria/`) export TypeScript source with no
+        // `require` condition, so one left external passes typecheck and vitest, then throws
+        // ERR_PACKAGE_PATH_NOT_EXPORTED when Electron starts. Only a real launch exercises this.
         alwaysBundle: (id) => !id.startsWith("node:") && !isMainProcessExternal(id),
         neverBundle: isMainProcessExternal,
         onlyBundle: false,
@@ -96,6 +90,19 @@ export default defineConfig({
       },
     },
     {
+      // boot.cjs requires the other two at runtime, so all three stay separate files.
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: ["src/boot.ts", "src/compileCache.ts"],
+      clean: false,
+      deps: {
+        neverBundle: (id) => id === "./main.cjs" || id === "./compileCache.cjs",
+      },
+    },
+    {
       format: "cjs",
       outDir: "dist-electron",
       dts: false,
@@ -104,9 +111,7 @@ export default defineConfig({
       define: publicConfigDefine,
       entry: ["src/preload.ts"],
       deps: {
-        // Sandboxed Electron preloads cannot reliably resolve package imports
-        // from inside the packaged ASAR. Bundle Clerk's preload bridge into the
-        // preload artifact instead of leaving a runtime require() behind.
+        // Sandboxed preloads cannot resolve imports inside ASAR; bundle Clerk's bridge.
         alwaysBundle: (id) => id === "@clerk/electron" || id.startsWith("@clerk/electron/"),
       },
     },
@@ -140,9 +145,13 @@ export default defineConfig({
     },
   ],
   test: {
+    include: [...defaultInclude, "../../native/kde-snap-shot/src/*.test.ts"],
     // The Windows lane runs workspace suites concurrently; filesystem-heavy
     // desktop integration tests can exceed Vitest's 5 second default there.
     testTimeout: 15_000,
-    setupFiles: ["../../packages/shared/src/testing/longTempDir.ts"],
+    setupFiles: [
+      "../../packages/shared/src/testing/longTempDir.ts",
+      "../../packages/shared/src/testing/providerEnv.ts",
+    ],
   },
 });

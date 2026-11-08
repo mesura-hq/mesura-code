@@ -1,22 +1,21 @@
+import { RunId } from "@t3tools/contracts";
 /**
- * Phase 2 fence, acceptance criterion 3: Open shows the plan in the Factory
- * surface of the right panel, maximized; the surface never opens by itself.
- *
- * Entry point: the card's Open callback in `ChatView`, which is
- * `openFactoryPlanInRightPanel` with ChatView's own maximize setter, acting
- * on the real `useRightPanelStore`. What only a browser shows: the pane
- * filling the chat area while maximized, and the panel's existing Restore
- * control (`toggleRightPanelMaximized`) returning it to side width.
+ * Open shows the plan in the right panel's Factory surface, maximized, through
+ * `openFactoryPlanInRightPanel` on the real `useRightPanelStore`; the surface never opens by
+ * itself. The maximized pane's layout and the Restore control are left to a real browser.
  */
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { deriveTimelineEntriesWithState, deriveWorkLogEntries } from "../session-logic";
+import { deriveTimelineEntriesFromVisibleTurnItems } from "../session-logic";
+import { projectFactoryTurnItems } from "./factoryTestFixtures";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
-import { makeFactoryPlanActivity } from "@t3tools/client-runtime/factory/testing";
+import {
+  makeFactoryCardTurnItem,
+  makeFactoryPlanPayload,
+} from "@t3tools/client-runtime/factory/testing";
 import { openFactoryPlanInRightPanel } from "./factoryRightPanel";
-import { deriveFactoryPlanTimelineItems } from "@t3tools/client-runtime/factory/plan-activities";
 
 const ref = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("factory-thread"));
 const planId = "factory-plan:plan-md";
@@ -74,14 +73,18 @@ describe("factory surface in the right panel (phase 2 fence)", () => {
   });
 
   it("never opens the Factory surface when a plan is presented, and counts Open as the user's choice", () => {
-    const activities = [makeFactoryPlanActivity({ createdAt: "2026-09-28T10:00:05.000Z" })];
-    deriveTimelineEntriesWithState(
-      [],
-      [],
-      deriveWorkLogEntries(activities),
-      null,
-      deriveFactoryPlanTimelineItems(activities),
-    );
+    const items = [
+      makeFactoryCardTurnItem({
+        id: planId,
+        threadId: ref.threadId,
+        createdAt: "2026-09-28T10:00:05.000Z",
+        card: { kind: "plan", payload: makeFactoryPlanPayload() },
+      }),
+    ];
+    deriveTimelineEntriesFromVisibleTurnItems({
+      visibleTurnItems: projectFactoryTurnItems(items),
+      optimisticMessages: [],
+    });
     expect(panelState().isOpen).toBe(false);
     expect(panelState().surfaces).toEqual([]);
 
@@ -91,7 +94,11 @@ describe("factory surface in the right panel (phase 2 fence)", () => {
     expect(
       useRightPanelStore
         .getState()
-        .openProactive(ref, { id: "diff", kind: "diff" }, revisionBeforeOpen),
+        .openProactive(
+          ref,
+          { kind: "diff", turnId: RunId.make("automatic-diff") },
+          revisionBeforeOpen,
+        ),
     ).toBe(false);
     expect(panelState().activeSurfaceId).toBe("factory");
   });

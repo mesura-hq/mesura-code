@@ -24,7 +24,7 @@ import {
   initialTargetSelection,
   canCloseWizard,
   isRetryableReason,
-  formatSkippedDomains,
+  formatImportResult,
   fullDiskAccessRecheckStep,
   outcomeToStep,
   refreshedSourceProfileDirectory,
@@ -41,40 +41,28 @@ export type { WizardTarget } from "./browserImportWizard.logic";
 
 interface BrowserImportWizardProps {
   readonly source: BrowserImportSource;
-  /** Captured when the wizard opens so destination copy and writes stay stable. */
   readonly destinationEnvironmentName: string;
-  /** Existing profiles the import can go into. Incognito is excluded upstream. */
   readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
-  /** Whether a new profile can still be created (profile cap). */
+  /** Empty when the environment has no server browser. */
+  readonly serverTargetProfiles: ReadonlyArray<WizardTargetProfile>;
+  readonly serverTargetNotice?: string | undefined;
   readonly canCreateProfile: boolean;
-  /**
-   * Runs the import and returns how it went. For a new target the caller only
-   * registers the profile once the import succeeds, so a blocked attempt never
-   * leaves an empty profile behind.
-   */
   readonly onImport: (input: {
     readonly sourceProfileDirectory: string;
     readonly target: WizardTarget;
   }) => Promise<ImportOutcome>;
-  /** Re-checks the source's availability after the user quits the browser. */
   readonly onRefreshSource: () => Promise<BrowserImportSource | undefined>;
-  /** Opens the OS setting that grants access to a protected cookie store. */
   readonly onOpenFullDiskAccessSettings: () => void | Promise<void>;
   readonly onCheckFullDiskAccess?: (() => Promise<boolean>) | undefined;
   readonly onClose: () => void;
 }
 
-/**
- * Guides one browser's cookies into a profile.
- *
- * Every state the import can be in — the browser is open, a profile has to be
- * chosen, the read failed — is a screen the user can move forward from, rather
- * than a disabled row that only says no.
- */
 export function BrowserImportWizard({
   source: initialSource,
   destinationEnvironmentName,
   targetProfiles,
+  serverTargetProfiles,
+  serverTargetNotice,
   canCreateProfile,
   onImport,
   onRefreshSource,
@@ -91,18 +79,18 @@ export function BrowserImportWizard({
     initialTargetSelection(canCreateProfile, targetProfiles),
   );
   const [targetError, setTargetError] = useState<string>();
-  // Stable across retries so a keychain re-approval lands in one profile, not
-  // a new one each time.
   const newProfileId = useRef(`profile-${randomUUID()}`);
-  // A second Import click before React has left the configure screen would
-  // start a second run; the parent refuses it, and applying that refusal here
-  // would drop the wizard out of the importing step while the first write is
-  // still going. The ref settles synchronously where state does not.
+  // Guard synchronously so a second click's refusal cannot leave the importing step during the first write.
   const importInFlight = useRef(false);
 
   const runImport = () => {
     if (importInFlight.current) return;
-    const chosen = resolveWizardTarget(target, newProfileId.current, targetProfiles);
+    const chosen = resolveWizardTarget(
+      target,
+      newProfileId.current,
+      targetProfiles,
+      serverTargetProfiles,
+    );
     if (chosen === undefined) {
       setTargetError("That profile is no longer available. Choose where to import these cookies.");
       setStep({ step: "configure" });
@@ -119,8 +107,6 @@ export function BrowserImportWizard({
       });
   };
 
-  // Re-lists the source after the user did something outside the app (quit the
-  // browser, granted access) and routes to wherever the refreshed source says.
   const recheckSource = (
     check: "browser" | "fullDiskAccess",
     nextStep: (refreshed: BrowserImportSource | undefined) => WizardStep,
@@ -183,6 +169,8 @@ export function BrowserImportWizard({
             source={source}
             destinationEnvironmentName={destinationEnvironmentName}
             targetProfiles={targetProfiles}
+            serverTargetProfiles={serverTargetProfiles}
+            serverTargetNotice={serverTargetNotice}
             canCreateProfile={canCreateProfile}
             sourceProfileDirectory={sourceProfileDirectory}
             onSourceProfileChange={setSourceProfileDirectory}
@@ -228,14 +216,9 @@ function QuitStep({
   );
 }
 
-/** "5,065 cookies", or "no cookies", or nothing when the store is unreadable. */
 function cookieCountLabel(count: number | undefined): string | undefined {
   if (count === undefined) return undefined;
   if (count === 0) return "no cookies";
-  return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
-}
-
-function cookieResultCount(count: number): string {
   return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
 }
 
@@ -243,6 +226,8 @@ type ConfigureStepProps = {
   readonly source: BrowserImportSource;
   readonly destinationEnvironmentName: string;
   readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
+  readonly serverTargetProfiles: ReadonlyArray<WizardTargetProfile>;
+  readonly serverTargetNotice: string | undefined;
   readonly canCreateProfile: boolean;
   readonly sourceProfileDirectory: string;
   readonly onSourceProfileChange: (directory: string) => void;
@@ -288,7 +273,7 @@ function FullDiskAccessStep({
         <DialogTitle>Let T3 Code read {source.name}&rsquo;s cookies</DialogTitle>
         <DialogDescription>
           To import cookies from {source.name}, T3 Code needs Full Disk Access. Turn it on in System
-          Settings, then come back to finish the import — you can revoke it again once the import is
+          Settings, then come back to finish the import. You can revoke it again once the import is
           done.
         </DialogDescription>
       </DialogHeader>
@@ -319,8 +304,8 @@ function FullDiskAccessStep({
         {!permission.isReady(["fullDiskAccess"]) ? (
           <p className="mt-3 text-xs text-muted-foreground">
             {stillRequired
-              ? "Access is still required. Quit and reopen T3 Code if you just allowed it, then retry the import."
-              : "If access doesn't update after you allow it, quit and reopen T3 Code, then retry the import."}
+              ? "Access is still required. Quit and reopen Mesura Code if you just allowed it, then retry the import."
+              : "If access doesn't update after you allow it, quit and reopen Mesura Code, then retry the import."}
           </p>
         ) : null}
       </DialogPanel>
@@ -343,6 +328,8 @@ function ConfigureStep({
   source,
   destinationEnvironmentName,
   targetProfiles,
+  serverTargetProfiles,
+  serverTargetNotice,
   canCreateProfile,
   sourceProfileDirectory,
   onSourceProfileChange,
@@ -353,11 +340,8 @@ function ConfigureStep({
   onImport,
 }: ConfigureStepProps) {
   const targetMissing =
-    target.kind === "existing" &&
-    !targetProfiles.some((profile) => profile.id === target.profileId);
-  // The "New profile" tile is unrendered once the cap is reached, so a target
-  // chosen before that leaves nothing selected in "Into" — say so, the same
-  // way a vanished existing target is explained.
+    target.kind !== "new" &&
+    resolveWizardTarget(target, "", targetProfiles, serverTargetProfiles) === undefined;
   const targetUncreatable = target.kind === "new" && !canCreateProfile;
   const targetFeedback =
     targetError ??
@@ -375,7 +359,6 @@ function ConfigureStep({
         </DialogDescription>
       </DialogHeader>
       <DialogPanel>
-        {/* Side by side when the dialog has room, stacked when it doesn't. */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
           <section className="flex-1 space-y-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -416,6 +399,18 @@ function ConfigureStep({
                 onSelect={() => onTargetChange({ kind: "existing", profileId: profile.id })}
               />
             ))}
+            {serverTargetProfiles.map((profile) => (
+              <SelectableTile
+                key={`server-${profile.id}`}
+                selected={target.kind === "server" && target.profileId === profile.id}
+                title={profile.name}
+                subtitle={`Server browser on ${destinationEnvironmentName}`}
+                onSelect={() => onTargetChange({ kind: "server", profileId: profile.id })}
+              />
+            ))}
+            {serverTargetNotice ? (
+              <p className="text-xs text-muted-foreground">{serverTargetNotice}</p>
+            ) : null}
           </section>
         </div>
         {targetFeedback ? (
@@ -439,7 +434,6 @@ function ConfigureStep({
   );
 }
 
-/** One selectable option: a name, an optional detail line, and a check. */
 function SelectableTile({
   selected,
   title,
@@ -457,7 +451,7 @@ function SelectableTile({
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+        "flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
         selected
           ? "border-primary bg-primary/8"
           : "border-border/60 hover:border-border hover:bg-muted/40",
@@ -490,9 +484,11 @@ function ImportingStep() {
         <DialogTitle>Importing cookies</DialogTitle>
         <DialogDescription>This may take a moment.</DialogDescription>
       </DialogHeader>
-      <DialogPanel className="flex items-center gap-3 py-6">
-        <Spinner className="size-4 text-muted-foreground" />
-        <span className="text-sm text-muted-foreground">Importing…</span>
+      <DialogPanel>
+        <div className="flex items-center gap-3 py-2">
+          <Spinner size="md" tone="muted" />
+          <span className="text-sm text-muted-foreground">Importing…</span>
+        </div>
       </DialogPanel>
     </>
   );
@@ -515,55 +511,39 @@ function CheckingStep({
             : "Checking whether the browser has closed."}
         </DialogDescription>
       </DialogHeader>
-      <DialogPanel className="flex items-center gap-3 py-6">
-        <Spinner className="size-4 text-muted-foreground" />
-        <span className="text-sm text-muted-foreground">
-          {check === "fullDiskAccess" ? "Checking access…" : "Checking…"}
-        </span>
+      <DialogPanel>
+        <div className="flex items-center gap-3 py-2">
+          <Spinner size="md" tone="muted" />
+          <span className="text-sm text-muted-foreground">
+            {check === "fullDiskAccess" ? "Checking access…" : "Checking…"}
+          </span>
+        </div>
       </DialogPanel>
     </>
   );
 }
 
 function DoneStep({
-  imported,
-  skipped,
-  skippedDomains,
-  targetName,
   destinationEnvironmentName,
   onClose,
-}: {
-  readonly imported: number;
-  readonly skipped: number;
-  readonly skippedDomains: ReadonlyArray<string>;
-  readonly targetName: string;
+  ...result
+}: Parameters<typeof formatImportResult>[0] & {
   readonly destinationEnvironmentName: string;
   readonly onClose: () => void;
 }) {
+  const summary = formatImportResult(result, destinationEnvironmentName);
   return (
     <>
       <DialogHeader>
-        <DialogTitle>
-          {imported > 0
-            ? `Imported ${cookieResultCount(imported)}`
-            : skipped > 0
-              ? `Skipped ${cookieResultCount(skipped)}`
-              : "No cookies found"}
-        </DialogTitle>
-        <DialogDescription>
-          {imported > 0
-            ? `Added to ${targetName} for ${destinationEnvironmentName}.${skipped > 0 ? ` ${cookieResultCount(skipped)} skipped.` : ""}`
-            : skipped > 0
-              ? `No cookies were imported for ${destinationEnvironmentName}.`
-              : `There were no cookies to import for ${destinationEnvironmentName}.`}
-        </DialogDescription>
+        <DialogTitle>{summary.title}</DialogTitle>
+        <DialogDescription>{summary.description}</DialogDescription>
       </DialogHeader>
-      {skippedDomains.length > 0 ? (
+      {summary.skippedDomains !== "" ? (
         <DialogPanel>
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Skipped
           </p>
-          <p className="mt-1 text-sm text-foreground">{formatSkippedDomains(skippedDomains)}</p>
+          <p className="mt-1 text-sm text-foreground">{summary.skippedDomains}</p>
         </DialogPanel>
       ) : null}
       <DialogFooter>

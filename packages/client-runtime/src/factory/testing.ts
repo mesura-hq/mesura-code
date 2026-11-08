@@ -1,24 +1,24 @@
 /**
- * Test data for the Factory specs on every client: `factory.plan` activities
- * as the server's `present_plan` handler writes them, and `factory.run`
- * activities as its run tracker writes them. Each test reads the plan and
- * events fixtures itself, since web, mobile and this package load a file
- * differently.
+ * `factory.plan` and `factory.run` activities as the server writes them. Each test reads the plan
+ * and events fixtures itself, since web and this package load a file differently.
  */
 import {
-  EventId,
   FACTORY_PLAN_ACTIVITY_KIND,
   FACTORY_REPORT_ACTIVITY_KIND,
   FACTORY_RUN_ACTIVITY_KIND,
   factoryReportActivityId,
   factoryRunActivityId,
+  RunId,
+  ThreadId,
+  TurnItemId,
+  type FactoryThreadCard,
+  type OrchestrationV2TurnItem,
   ProviderDriverKind,
   ProviderInstanceId,
   type FactoryPlanActivityPayload,
   type FactoryReportActivityPayload,
   type FactoryRunState,
   type FactoryRunSummary,
-  type OrchestrationThreadActivity,
   type ServerProvider,
   type ServerProviderModel,
   type TurnId,
@@ -29,7 +29,13 @@ import {
   summarizeFactoryRun,
 } from "@t3tools/shared/factoryRun";
 
+import * as DateTime from "effect/DateTime";
+
 import type { FactoryRoutes } from "./routes.ts";
+import type { FactoryCardActivity } from "./runActivities.ts";
+
+/** A card activity as the v1 tests built it, with the turn it was recorded in. */
+type FactoryTestActivity = FactoryCardActivity & { readonly turnId: TurnId | null };
 
 export const FACTORY_PLAN_DIGEST = "a".repeat(64);
 export const FACTORY_INTENT_DIGEST = "b".repeat(64);
@@ -61,12 +67,10 @@ export function makeFactoryPlanActivity(input: {
   readonly createdAt: string;
   readonly turnId?: TurnId | null;
   readonly payload?: unknown;
-}): OrchestrationThreadActivity {
+}): FactoryTestActivity {
   return {
-    id: EventId.make(input.id ?? "factory-plan:plan-md"),
-    tone: "info",
+    id: input.id ?? "factory-plan:plan-md",
     kind: FACTORY_PLAN_ACTIVITY_KIND,
-    summary: "Presented a plan",
     payload: input.payload ?? makeFactoryPlanPayload({ presentedAt: input.createdAt }),
     turnId: input.turnId ?? null,
     createdAt: input.createdAt,
@@ -216,9 +220,9 @@ export function makeFactoryRouteProviders(
 
 /** The routes the card offers by default for `makeFactoryRouteProviders()`. */
 export const FACTORY_DEFAULT_TEST_ROUTES: FactoryRoutes = {
-  implementer: { harness: "claude", model: "claude-opus-5-5", effort: "high", budgetUsd: 25 },
+  implementer: { harness: "claude", model: "claude-opus-5-5", effort: "medium", budgetUsd: 25 },
   reviewer: { harness: "codex", model: "gpt-6-sol", effort: "high" },
-  verifier: { harness: "codex", model: "gpt-6-luna", effort: "max" },
+  verifier: { harness: "codex", model: "gpt-6-luna", effort: "xhigh" },
 };
 
 /**
@@ -262,16 +266,10 @@ export function readFactoryApprovalMessage(text: string): {
 export const FACTORY_RUN_TEST_DIR = "/srv/factory-runs/invoice-csv-export";
 
 /**
- * A point in the fixture run:
- * - `attached`: attached before any event, the provisional activity;
- * - `framed`: started and framed, no phase yet;
- * - `verify`: phase 1 at `verify-1`, one return used, $10.03 spent;
- * - `review`: phase 1 at `review`, the next event after `verify`'s verdict;
- * - `waiting`: phase 2 stopped at a question;
- * - `answered`: the question answered, phase 2 running again;
- * - `degraded`: finished with phase 2 closed degraded (the fixture's end);
- * - `done`: finished with both phases clean;
- * - `stopped`: finished by the coordinator after the answer.
+ * A point in the fixture run: `attached` (before any event), `framed` (no phase yet), `verify`
+ * (phase 1 at `verify-1`, one return, $10.03 spent), `review`, `waiting` (phase 2 at a question),
+ * `answered`, `degraded` (the fixture's end: phase 2 closed degraded), `done` (both phases clean)
+ * and `stopped` (by the coordinator after the answer).
  */
 export type FactoryRunFixturePoint =
   | "attached"
@@ -352,12 +350,10 @@ export function makeFactoryRunActivity(input: {
   /** Defaults to the tracker's choice: the run's start, else the attach time. */
   readonly createdAt?: string;
   readonly turnId?: TurnId | null;
-}): OrchestrationThreadActivity {
+}): FactoryTestActivity {
   return {
-    id: EventId.make(factoryRunActivityId(input.threadId, input.summary.runId)),
-    tone: "info",
+    id: factoryRunActivityId(input.threadId, input.summary.runId),
     kind: FACTORY_RUN_ACTIVITY_KIND,
-    summary: "Software Factory run",
     payload: { threadId: input.threadId, ...input.summary },
     turnId: input.turnId ?? null,
     createdAt: input.createdAt ?? input.summary.startedAt ?? "2026-09-28T08:59:00.000Z",
@@ -402,15 +398,45 @@ export function makeFactoryReportActivity(input: {
   readonly payload?: FactoryReportActivityPayload;
   readonly createdAt?: string;
   readonly turnId?: TurnId | null;
-}): OrchestrationThreadActivity {
+}): FactoryTestActivity {
   const payload = input.payload ?? makeFactoryReportPayload();
   return {
-    id: EventId.make(factoryReportActivityId(input.threadId, payload.runId)),
-    tone: "info",
+    id: factoryReportActivityId(input.threadId, payload.runId),
     kind: FACTORY_REPORT_ACTIVITY_KIND,
-    summary: "Report: Export the invoice list as CSV",
     payload,
     turnId: input.turnId ?? null,
     createdAt: input.createdAt ?? payload.writtenAt,
+  };
+}
+
+/** A Factory card at the v2 transport boundary, with an immutable item identity. */
+export function makeFactoryCardTurnItem(input: {
+  readonly id: string;
+  readonly card: FactoryThreadCard;
+  readonly createdAt: string;
+  readonly updatedAt?: string;
+  readonly threadId?: ThreadId;
+  readonly runId?: RunId;
+  readonly ordinal?: number;
+}): Extract<OrchestrationV2TurnItem, { readonly type: "factory_card" }> {
+  const at = DateTime.makeUnsafe(input.createdAt);
+  const updatedAt = DateTime.makeUnsafe(input.updatedAt ?? input.createdAt);
+  return {
+    id: TurnItemId.make(input.id),
+    threadId: input.threadId ?? ThreadId.make("factory-thread"),
+    runId: input.runId ?? RunId.make("factory-coordinator-run"),
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+    ordinal: input.ordinal ?? 0,
+    status: "completed",
+    title: null,
+    startedAt: at,
+    completedAt: updatedAt,
+    updatedAt,
+    type: "factory_card",
+    card: input.card,
   };
 }

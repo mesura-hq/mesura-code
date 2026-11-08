@@ -88,7 +88,7 @@ const makeEnvironment = (reported: () => VoiceConversationSettings) => {
   const clientOwners: VoiceHistoryClientOwner[] = [];
   const environment: VoiceHistoryEnvironment = {
     settings: settingsFor,
-    client: (_prepared, owner) => {
+    makeHistoryClient: (_prepared, owner) => {
       clientOwners.push(owner);
       return { append, end, readCall };
     },

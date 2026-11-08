@@ -21,21 +21,10 @@ import {
 import { randomUUID } from "~/lib/utils";
 
 /**
- * The browser side of the file manager's bridge.
- *
- * The file manager's UI reaches its host through one object of channels
- * (`window.symmetriaFm`, typed by `@symmetria/fm-core/bridge`) and decodes
- * every reply itself. This object answers those channels over the server's
- * `fileManager.*` RPCs: a read channel is a query, a write channel a mutate,
- * and the four push channels arrive on one event stream per session. Three
- * calls never reach the server, because the browser owns them: the clipboard,
- * the window (closing the layer), and the picker, which this host has no use
- * for.
- *
- * The session exists on the server only once its event stream is open, so
- * every call waits for the stream's ready marker before it is sent. A stream
- * that fails afterwards is reported once through `onSessionLost`; the layer
- * decides whether to rebuild the bridge.
+ * The browser side of `window.symmetriaFm`, over the server's `fileManager.*` RPCs; the
+ * clipboard, the window and the picker stay in the browser. The server session exists only
+ * once its event stream is open, so every call waits for the ready marker. A later stream
+ * failure is reported once through `onSessionLost`.
  */
 
 /** A session's event stream, as the transport hands it back. */

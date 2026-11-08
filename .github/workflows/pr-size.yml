@@ -229,17 +229,14 @@ jobs:
               `${baseSha}...${resolvedHeadSha}`,
             ];
 
+            // Upstream sync diffs can exceed execFileSync's default 1 MiB output buffer.
+            const numstatOptions = { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 };
+
             const totalChangedLines = sumNumstat(
-              execFileSync(
-                "git",
-                diffArgs,
-                { encoding: "utf8" },
-              ),
+              execFileSync("git", diffArgs, numstatOptions),
             );
             const nonTestChangedLines = sumNumstat(
-              execFileSync("git", [...diffArgs, "--", ".", ...testExcludePathspecs], {
-                encoding: "utf8",
-              }),
+              execFileSync("git", [...diffArgs, "--", ".", ...testExcludePathspecs], numstatOptions),
             );
             const testChangedLines = Math.max(0, totalChangedLines - nonTestChangedLines);
 

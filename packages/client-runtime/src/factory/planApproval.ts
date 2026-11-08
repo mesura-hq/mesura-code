@@ -1,30 +1,8 @@
 /**
- * Approve on a plan card is one user message in the thread. The planning skill
- * (`sf-plan`) parses it to start the build, and both clients read it back to
- * show a plan as approved, so its format is a contract. It is, line by line:
- *
- * 1. `Approve plan sha256:<digest>` — the whole first line, the digest as 64
- *    lowercase hex characters. A message whose first line is anything else is
- *    not an approval.
- * 2. `Plan: <absolute path of plan.md>`
- * 3. `Intent: <absolute path of intent.md>`
- * 4. `Build it with sf-team in this thread, with these routes:` — the routes
- *    instruction.
- * 5. The routes block: a fence opened by a line that is exactly ```` ```json ````
- *    and closed by the next line that is exactly ```` ``` ````, holding one JSON
- *    object in sf-team's `--routes` shape (`implementer`, `reviewer`,
- *    `verifier`, each `harness`, `model`, `effort`, and `budgetUsd` for a Claude
- *    implementer only).
- *
- * Reading is stricter than writing, because a person may edit the message:
- *
- * - `Plan:` and `Intent:` are read from the lines between the first line and
- *   the routes instruction (or the end of the message when it has none).
- * - The routes block is the one `json` fence after the routes instruction.
- *   Fences before the instruction are text, never routes.
- * - No routes instruction means the message carries no routes (`absent`):
- *   sf-team chooses them. An instruction followed by no `json` fence, by more
- *   than one, or by one that is not a valid routes object is `invalid`.
+ * The Approve message is a contract: `sf-plan` parses it to start the build, and clients read it
+ * back to show a plan as approved. Reading is stricter than writing, since a person may edit it:
+ * routes are the one `json` fence after the routes instruction. No instruction is `absent` (sf-team
+ * picks routes); no fence, several, or an invalid routes object after it is `invalid`.
  */
 import * as Schema from "effect/Schema";
 
@@ -154,16 +132,9 @@ export type FactoryPlanApprovalState =
   | { readonly kind: "changed" };
 
 /**
- * Where a plan card stands.
- *
- * - Approved: an approval names these bytes and this plan file. Two plan files
- *   with identical bytes share a digest, so an approval with a `Plan:` path
- *   approves only that path. An approval without one (typed by hand) is
- *   matched on the digest alone.
- * - Changed: only an older digest of the same plan file was approved. A plan
- *   file keeps one activity whose digest moves on, so the `Plan:` path is what
- *   ties an older approval to it.
- * - Open: neither.
+ * Two plan files with identical bytes share a digest, so an approval with a `Plan:` path approves
+ * only that path; one without (typed by hand) matches on the digest alone. `changed` means only an
+ * older digest of the same plan file was approved: the `Plan:` path ties it to the moved activity.
  */
 export function resolvePlanApprovalState(
   approvals: ReadonlyArray<FactoryPlanApproval>,

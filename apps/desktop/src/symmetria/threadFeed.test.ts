@@ -39,13 +39,9 @@ const decodedFrames = (frames: ReadonlyArray<FeedFrame>): ReadonlyArray<unknown>
 
 describe("createFeed", () => {
   it("numbers deltas one at a time, whatever upstream's own sequence does", () => {
-    // ⚠ This corrects the previous phase. `revision` used to be upstream's
-    // `snapshotSequence`, which the contract calls the position a snapshot
-    // reflects — but the projector sets it from `event.sequence`, so it
-    // advances on EVERY orchestration event including the transcript ones this
-    // projection drops. Numbering deltas with it would make a consumer read a
-    // gap on nearly every one and resnapshot each time, which is the opposite
-    // of what the framing is for. The publisher owns the numbering instead.
+    // The publisher owns the numbering, not upstream's `snapshotSequence`: the projector sets that
+    // from `event.sequence`, so it advances on every event, including the ones this projection drops,
+    // and a consumer would read a gap and resnapshot on nearly every delta.
     const feed = createFeed();
     feed.accept("gen-1", model(thread("thr_a", "A")));
     const frames = feed.accept("gen-1", model(thread("thr_a", "A"), thread("thr_b", "B")));
@@ -102,12 +98,9 @@ describe("createFeed", () => {
   });
 
   it("sends a snapshot when a thread stops being listed, not a silent drop", () => {
-    // The subtlest branch in the module, and it had no test: the contract has
-    // no removal member, so an entity that simply stops appearing cannot be
-    // expressed as a delta. Same generation on purpose — a generation change
-    // would take the discontinuity path for the other reason and prove nothing
-    // about this one. The replacement keeps the LENGTH equal too, so a check
-    // written on count alone would not catch it.
+    // The contract has no removal member, so a thread that stops appearing needs a snapshot. Same
+    // generation on purpose (a generation change takes the other discontinuity path), and the same
+    // length, so a check on count alone would not catch it.
     const feed = createFeed();
     feed.accept("gen-1", model(thread("thr_a", "A"), thread("thr_b", "B")));
     const frames = feed.accept("gen-1", model(thread("thr_a", "A"), thread("thr_c", "C")));

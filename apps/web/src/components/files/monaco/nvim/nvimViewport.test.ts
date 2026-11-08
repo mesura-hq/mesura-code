@@ -1,3 +1,5 @@
+import { EditorSessionViewportInput } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -10,16 +12,9 @@ import {
 } from "./nvimViewport.ts";
 
 /**
- * Two authorities over one window, and the rule that keeps them apart.
- *
- * Monaco owns scrolling the pointer and the wheel caused; Neovim owns
- * scrolling a key caused. Each tells the other, and without a rule the two
- * tell each other forever: Monaco scrolls, Neovim is moved, Neovim reports its
- * new window, Monaco is moved to it, Monaco reports its new window.
- *
- * The grid's size is not decoration either. Neovim draws nothing beyond the
- * grid's width, so a flash label past the last column of a narrow grid is a
- * label the developer never sees.
+ * Monaco owns pointer and wheel scrolling, Neovim owns key scrolling, and each tells the other;
+ * without the echo rule they scroll each other forever. Neovim draws nothing beyond the grid's
+ * width, so a flash label past a narrow grid's last column is never seen.
  */
 
 const range = (start: number, end: number) => ({ startLineNumber: start, endLineNumber: end });
@@ -77,6 +72,25 @@ describe("viewportFromEditor", () => {
   it("never reports fewer than one row", () => {
     const viewport = viewportFromEditor([], { height: 0, lineHeight: 20 }, model);
     expect(viewport.rows).toBe(1);
+  });
+});
+
+describe("viewportFromEditor against the viewport contract", () => {
+  it("asks for a viewport the contract accepts whatever the length of a visible line", () => {
+    // Phase 2, criterion 5: the contract bounds `cols`, but a line can be longer than any bound
+    // (1,087-character Markdown, megabyte minified lines). A refused request never reaches Neovim.
+    const accepts = Schema.is(EditorSessionViewportInput);
+    for (const length of [1087, 1_000_000]) {
+      const wide = {
+        getLineCount: () => 300,
+        getLineContent: (line: number) => "x".repeat(line === 231 ? length : 600),
+      };
+      const viewport = viewportFromEditor([range(228, 234)], { height: 140, lineHeight: 20 }, wide);
+      expect(
+        accepts({ threadId: "thread", ...viewport }),
+        `a visible line of ${length} characters asks for cols ${viewport.cols}`,
+      ).toBe(true);
+    }
   });
 });
 

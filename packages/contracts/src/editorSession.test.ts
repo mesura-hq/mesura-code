@@ -14,12 +14,8 @@ import {
 } from "./editorSession.ts";
 
 /**
- * The editor session's wire shape.
- *
- * Every bound here is a refusal the server would otherwise have to make later,
- * with a worse error and after doing work. The caps matter more than they look:
- * an editor session carries whole files and whole screens, so an unbounded
- * field is an unbounded message on a link that may be a phone on mobile data.
+ * Every bound is a refusal the server would otherwise make later, after work, with a worse error.
+ * An editor session carries whole files and screens, possibly to a phone on mobile data.
  */
 
 const decodeOpen = Schema.decodeUnknownSync(EditorSessionOpenInput);

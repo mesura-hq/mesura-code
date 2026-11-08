@@ -117,7 +117,7 @@ export interface VoiceHistoryClientOwner {
 export interface VoiceHistoryEnvironment {
   readonly settings: (prepared: PreparedConnection) => Promise<VoiceConversationSettings>;
   /** Every request first proves, with its own authorization, that the owner is unchanged. */
-  readonly client: (
+  readonly makeHistoryClient: (
     prepared: PreparedConnection,
     owner: VoiceHistoryClientOwner,
   ) => VoiceHistoryClient;
@@ -125,7 +125,7 @@ export interface VoiceHistoryEnvironment {
 
 export const voiceHistoryEnvironment: VoiceHistoryEnvironment = {
   settings: (prepared) => runtime.runPromise(voiceConversationSettings(prepared)),
-  client: (prepared, owner) => {
+  makeHistoryClient: (prepared, owner) => {
     const guard = createVoiceHistoryOwnerGuard(owner);
     return {
       append: (payload) => runtime.runPromise(appendVoiceTranscript(prepared, payload, guard)),
@@ -165,8 +165,11 @@ async function resolveVoiceHistoryOwner(input: VoiceHistoryHostInput, sendWhile:
     prepared,
     settings,
     owner,
-    client: owner
-      ? environment.client(prepared, { historyOwnerId: owner.clientIdentity, isCurrent: sendWhile })
+    historyClient: owner
+      ? environment.makeHistoryClient(prepared, {
+          historyOwnerId: owner.clientIdentity,
+          isCurrent: sendWhile,
+        })
       : null,
   };
 }
@@ -182,8 +185,8 @@ export async function prepareVoiceHistory(input: VoiceHistoryHostInput) {
   // environment still confirms the same owner on every request.
   const resolved = await resolveVoiceHistoryOwner(input, () => true);
   if (!resolved) throw new Error(CONNECTION_CHANGED_MESSAGE);
-  if (!resolved.owner || !resolved.client) throw new Error(HISTORY_UNSUPPORTED_MESSAGE);
-  return { ...resolved, owner: resolved.owner, client: resolved.client, store };
+  if (!resolved.owner || !resolved.historyClient) throw new Error(HISTORY_UNSUPPORTED_MESSAGE);
+  return { ...resolved, owner: resolved.owner, historyClient: resolved.historyClient, store };
 }
 
 /** Calls whose recorder still sends its own batches, even after their panel unmounted. */
@@ -217,7 +220,7 @@ export async function resumePendingVoiceHistory(
     () => input.isCurrent() && input.readPrepared()?.environmentId === input.environmentId,
   );
   if (!resolved) return null;
-  if (!resolved.owner || !resolved.client) {
+  if (!resolved.owner || !resolved.historyClient) {
     // Unverifiable ownership keeps everything this browser stored for the environment.
     const retained = (await store.list()).filter(
       (batch) => batch.owner.environmentId === input.environmentId,
@@ -229,7 +232,7 @@ export async function resumePendingVoiceHistory(
   return resumeVoiceHistoryOutbox({
     owner: resolved.owner,
     store,
-    client: resolved.client,
+    historyClient: resolved.historyClient,
     excludeCallIds: new Set([...liveVoiceHistoryCalls, ...(input.excludeCallIds ?? [])]),
   });
 }

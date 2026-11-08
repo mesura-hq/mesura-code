@@ -1,0 +1,968 @@
+import { act, fakeTimers, render as renderBrowser, type Screen } from "../test/render";
+/**
+ * Entry point: AppRoot with its memory router, real ChatView, MessagesTimeline,
+ * and ChatComposer. Environment reads and RPC commands use the phase fixture.
+ */
+import { dispatchPickerAction } from "./lib/pickerActionBus";
+
+import { useSyncExternalStore, type ReactNode, type ComponentProps } from "react";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
+import { expect, it, vi } from "vite-plus/test";
+import { page, userEvent } from "vite-plus/test/browser";
+import {
+  EnvironmentId,
+  ThreadId,
+  ProjectId,
+  type OrchestrationV2ThreadProjection,
+  ApprovalRequestId,
+} from "@t3tools/contracts";
+import {
+  makeFenceThreadProjection,
+  makeFenceThreadShell,
+  makeFenceUserInput,
+  FENCE_USER_INPUT_QUESTIONS,
+  readFenceUserInputItem,
+} from "./test/fenceThreadShell";
+import {
+  appRootFence,
+  FENCE_ENVIRONMENT_ID,
+  FENCE_PROJECT_ID,
+  installFenceFontEvents,
+} from "./test/appRootFenceMocks";
+import { publishFenceThreadProjection, addFenceThread, makeMessage } from "./test/appRootFenceApp";
+import * as Option from "effect/Option";
+import * as DateTime from "effect/DateTime";
+import type { AppRouter } from "./router";
+
+const fixture = vi.hoisted(() => ({
+  markdownRenders: 0,
+  pendingRowsVisible: true,
+  projection: null as OrchestrationV2ThreadProjection | null,
+  commands: new Map<unknown, unknown>(),
+  noopCommand: vi.fn(async () => ({ _tag: "Success", value: { providers: [] } })),
+  dismiss: vi.fn(async () => ({ _tag: "Success", value: undefined })),
+  respond: vi.fn(async () => ({ _tag: "Success", value: undefined })),
+  startTurn: vi.fn(async () => ({ _tag: "Success", value: undefined })),
+  threadListeners: new Set<() => void>(),
+}));
+
+vi.mock("./components/ChatMarkdown", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./components/ChatMarkdown")>();
+  return {
+    ...actual,
+    default: (props: ComponentProps<typeof actual.default>) => {
+      fixture.markdownRenders += 1;
+      return <actual.default {...props} />;
+    },
+  };
+});
+vi.mock("./lib/attachmentUploadQueue", { spy: true });
+
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await fenceMocks()).mockRuntimeSession(original),
+);
+vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
+vi.mock("./state/environments", async (original) =>
+  (await fenceMocks()).mockEnvironments(original),
+);
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
+vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
+vi.mock("./state/use-atom-command", () => ({
+  useAtomCommand: (command: unknown) => fixture.commands.get(command) ?? fixture.noopCommand,
+}));
+vi.mock("./state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => fixture.noopCommand }));
+vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
+vi.mock("./hooks/useHandleNewThread", async () => ({
+  ...(await (await fenceMocks()).mockHandleNewThread()),
+  useNewThreadHandler: () => fixture.noopCommand,
+}));
+vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
+vi.mock("./components/preview/PreviewAutomationHosts", () => ({
+  PreviewAutomationHosts: () => null,
+}));
+vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
+vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
+vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
+vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
+
+// Keep application routing and timeline projection real. Replace the virtual
+// list boundary to keep every pending request mounted during the interaction.
+vi.mock("@legendapp/list/react", () => ({
+  LegendList: ({
+    data,
+    renderItem,
+    ListHeaderComponent,
+    ListFooterComponent,
+  }: {
+    data: Array<{ id: string }>;
+    renderItem: (input: { item: { id: string } }) => ReactNode;
+    ListHeaderComponent?: ReactNode;
+    ListFooterComponent?: ReactNode;
+  }) => {
+    const pendingRowsVisible = useSyncExternalStore(
+      (listener) => {
+        fixture.threadListeners.add(listener);
+        return () => {
+          fixture.threadListeners.delete(listener);
+        };
+      },
+      () => fixture.pendingRowsVisible,
+    );
+    return (
+      <div>
+        {ListHeaderComponent}
+        {data
+          .filter((item) => pendingRowsVisible || !item.id.startsWith("pending-user-input:"))
+          .map((item) => (
+            <div key={item.id}>{renderItem({ item })}</div>
+          ))}
+        {ListFooterComponent}
+      </div>
+    );
+  },
+}));
+import { usePendingUserInputDraftStore } from "./pendingUserInputDraftStore";
+
+import { threadEnvironment } from "./state/threads";
+import { useComposerDraftStore } from "./composerDraftStore";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { questionAttachmentDraftId, useQuestionAttachmentPreparation } from "./questionAttachments";
+import * as attachmentUploads from "./lib/attachmentUploadQueue";
+
+const { AppRoot } = await import("./AppRoot");
+const { default: ChatView } = await import("./components/ChatView");
+const { SidebarProvider } = await import("./components/ui/sidebar");
+
+const environmentId = EnvironmentId.make(FENCE_ENVIRONMENT_ID);
+const threadId = ThreadId.make("phase-two-thread");
+const requestId = "phase-two-request";
+const now = "2026-09-22T12:00:00.000Z";
+
+async function setupBrowserFixture0() {
+  fixture.pendingRowsVisible = true;
+  usePendingUserInputDraftStore.setState({ requests: {} });
+
+  appRootFence.environments[0]!.connection.phase = "connected";
+  fixture.respond.mockReset();
+  fixture.respond.mockResolvedValue({ _tag: "Success", value: undefined });
+  fixture.startTurn.mockClear();
+  fixture.dismiss.mockReset();
+  fixture.dismiss.mockResolvedValue({ _tag: "Success", value: undefined });
+  fixture.commands.set(threadEnvironment.dismissUserInput, fixture.dismiss);
+  fixture.commands.set(threadEnvironment.respondToUserInput, fixture.respond);
+  fixture.commands.set(threadEnvironment.startTurn, fixture.startTurn);
+  installFenceFontEvents();
+  Object.assign(appRootFence.environments[0]!.serverConfig.environment.capabilities, {
+    questionAttachments: true,
+    attachmentUploads: true,
+    fileAttachments: { maxUploadBytes: 1048576 },
+  });
+  const shell = makeFenceThreadShell({
+    id: threadId,
+    environmentId,
+    projectId: ProjectId.make(FENCE_PROJECT_ID),
+    title: "Question fence",
+    createdAt: now,
+  });
+  const { request, item } = makeFenceUserInput({
+    threadId,
+    requestId,
+    createdAt: now,
+    questions: FENCE_USER_INPUT_QUESTIONS,
+  });
+  fixture.projection = makeFenceThreadProjection(shell, {
+    runtimeRequests: [request],
+    turnItems: [item],
+  });
+  const container = document.createElement("div");
+  document.body.append(container);
+
+  async function mountApp({ discardMountTimers = false } = {}) {
+    publishFenceThreadProjection(fixture.projection!, environmentId);
+    const route = createRootRoute({
+      component: () => (
+        <SidebarProvider>
+          <ChatView environmentId={environmentId} threadId={threadId} routeKind="server" />
+        </SidebarProvider>
+      ),
+    });
+    const index = createRoute({ getParentRoute: () => route, path: "/" });
+    const router = createRouter({
+      routeTree: route.addChildren([index]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    await router.load();
+    await using resources = new AsyncDisposableStack();
+    if (discardMountTimers) {
+      const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+      resources.defer(() => page.viewport(previousViewport.width, previousViewport.height));
+      await page.viewport(412, 915);
+    }
+    const screen = resources.use(await renderAppRoot());
+
+    async function renderAppRoot() {
+      // Discard every timer and frame scheduled during mount, including
+      // ChatView's autofocus, so the phone composer starts collapsed.
+      // Pending fake timers never run. Picker interactions use real timers.
+      using _timers = discardMountTimers ? fakeTimers() : undefined;
+      // AppRoot owns this fixture's memory router.
+      return await renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {
+        container,
+        router: false,
+      });
+    }
+    if (discardMountTimers) {
+      expect(
+        container
+          .querySelector("[data-chat-composer-mobile-collapsed]")
+          ?.getAttribute("data-chat-composer-mobile-collapsed"),
+      ).toBe("true");
+    }
+    const lifetime = resources.move();
+    return { ...screen, [Symbol.asyncDispose]: () => lifetime.disposeAsync() };
+  }
+
+  async function expandNormalComposer(screen: Screen) {
+    // ChatView schedules autofocus in requestAnimationFrame. At phone width the
+    // footer does not mount until expansion, so querying it after render races
+    // that frame. Expand through the visible control before querying the footer.
+    const expand = screen.container.querySelector<HTMLButtonElement>(
+      '[data-normal-composer] button[aria-label="Expand composer"]',
+    );
+    if (expand) await act(async () => expand.click());
+    await expect
+      .element(screen.getByRole("button", { name: "Attach files", exact: true }))
+      .toBeVisible();
+  }
+
+  function button(text: string) {
+    const match = [...container.querySelectorAll("button")].find((entry) =>
+      entry.textContent?.includes(text),
+    );
+    expect(match, `Expected button ${text}; rendered: ${container.textContent}`).toBeDefined();
+    return match!;
+  }
+
+  function questionField(questionId: string) {
+    return container.querySelector<HTMLTextAreaElement>(
+      `[data-question-id="${questionId}"] textarea`,
+    );
+  }
+
+  async function typeQuestion(questionId: string, text: string) {
+    const field = questionField(questionId)!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        field,
+        text,
+      );
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  return {
+    container,
+    mountApp,
+    expandNormalComposer,
+    button,
+    questionField,
+    typeQuestion,
+    async [Symbol.asyncDispose]() {
+      container.remove();
+      appRootFence.threads.clear();
+      appRootFence.threadStates.clear();
+      useComposerDraftStore
+        .getState()
+        .clearComposerContent(scopeThreadRef(environmentId, threadId));
+      useQuestionAttachmentPreparation.setState({ counts: {} });
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+
+const questionItem = () => readFenceUserInputItem(fixture.projection!);
+
+it("phase two inline card shows every pending question in one conversation row", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, questionField } = _browserFixture0;
+
+  await using _screen = await mountApp();
+  const cards = container.querySelectorAll(
+    '[data-pending-user-input-request-id="phase-two-request"]',
+  );
+  expect(cards).toHaveLength(1);
+  expect(cards[0]?.textContent).toContain("Which scope first?");
+  expect(cards[0]?.textContent).toContain("When should it run?");
+  expect(cards[0]?.textContent).toContain("Workspace");
+  expect(cards[0]?.textContent).toContain("Now");
+  expect(questionField("scope")).not.toBeNull();
+  expect(questionField("timing")).not.toBeNull();
+});
+
+it("phase two incomplete inline request focuses its missing question and retains both drafts", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, button, questionField } = _browserFixture0;
+
+  await using _screen = await mountApp();
+  await act(async () => button("Workspace").click());
+  await act(async () => button("Submit").click());
+  expect(fixture.respond).not.toHaveBeenCalled();
+  expect(questionField("timing")).toBe(document.activeElement);
+  expect(questionField("scope")?.disabled).toBe(false);
+  expect(questionField("timing")?.disabled).toBe(false);
+});
+
+it("phase two pending row survives a thread refresh and remains outside collapsed work", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp } = _browserFixture0;
+
+  await using _screen = await mountApp();
+  await act(async () => {
+    fixture.projection = {
+      ...fixture.projection!,
+      runtimeRequests: [...fixture.projection!.runtimeRequests],
+    };
+    publishFenceThreadProjection(fixture.projection!, environmentId);
+    for (const listener of fixture.threadListeners) listener();
+  });
+  expect(
+    container.querySelectorAll('[data-pending-user-input-request-id="phase-two-request"]'),
+  ).toHaveLength(1);
+});
+
+it("phase two normal composer keeps its own message draft during a pending request", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, expandNormalComposer, questionField } = _browserFixture0;
+
+  const target = scopeThreadRef(environmentId, threadId);
+  useComposerDraftStore.getState().setPrompt(target, "A separate normal message");
+  await using _screen = await mountApp();
+  await expandNormalComposer(_screen);
+  expect(questionField("scope")).not.toBeNull();
+  expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
+    "A separate normal message",
+  );
+  expect(container.querySelector("[data-normal-composer]")?.textContent).toContain(
+    "A separate normal message",
+  );
+  const send = container.querySelector<HTMLButtonElement>(
+    '[data-normal-composer] button[aria-label="Submit message"], [data-normal-composer] button[aria-label="Queue message"]',
+  );
+  expect(send).not.toBeNull();
+  await act(async () => send!.click());
+  // V2 queues messages as server runs rather than in the removed local queuedMessageStore.
+  expect(fixture.startTurn).toHaveBeenCalledOnce();
+  expect(fixture.startTurn).toHaveBeenCalledWith(
+    expect.objectContaining({
+      environmentId,
+      input: expect.objectContaining({ threadId, dispatchMode: "queue" }),
+    }),
+  );
+  expect(fixture.respond).not.toHaveBeenCalled();
+});
+
+it("phase two per-question upload state appears beside its own text field", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, questionField } = _browserFixture0;
+
+  const key = questionAttachmentDraftId(
+    environmentId,
+    threadId,
+    ApprovalRequestId.make(requestId),
+    "timing",
+  );
+  useQuestionAttachmentPreparation.setState({ counts: { [key]: 1 } });
+  await using _screen = await mountApp();
+  const field = questionField("timing");
+  expect(field).not.toBeNull();
+  expect(field?.parentElement?.textContent).toMatch(/upload|prepar/i);
+});
+
+it("phase two failed answer retains an inline retry and resolved request keeps history", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, button } = _browserFixture0;
+
+  fixture.respond.mockRejectedValue(new Error("Provider refused"));
+  await using _screen = await mountApp();
+  await act(async () => button("Workspace").click());
+  await act(async () => button("Now").click());
+  await act(async () => button("Submit").click());
+  expect(
+    container.querySelector('[data-pending-user-input-request-id="phase-two-request"]'),
+  ).not.toBeNull();
+  fixture.respond.mockResolvedValue({ _tag: "Success", value: undefined });
+  await act(async () => button("Retry").click());
+  expect(fixture.respond).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    fixture.projection = {
+      ...fixture.projection!,
+      runtimeRequests: fixture.projection!.runtimeRequests.map((request) => ({
+        ...request,
+        status: "resolved",
+        resolvedAt: DateTime.makeUnsafe("2026-09-22T12:00:02.000Z"),
+        answers: { scope: ["Workspace"], timing: ["Now"] },
+      })),
+      visibleTurnItems: [
+        {
+          item: questionItem(),
+          position: 0,
+          visibility: "local",
+          sourceThreadId: threadId,
+          sourceItemId: questionItem().id,
+        },
+      ],
+    };
+    publishFenceThreadProjection(fixture.projection!, environmentId);
+    for (const listener of fixture.threadListeners) listener();
+  });
+  expect(
+    container.querySelector('[data-pending-user-input-request-id="phase-two-request"]'),
+  ).toBeNull();
+  expect(container.textContent).toContain("Workspace");
+});
+
+it("phase two guard keeps a normal message draft while an option is selected", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, button } = _browserFixture0;
+
+  const target = scopeThreadRef(environmentId, threadId);
+  useComposerDraftStore.getState().setPrompt(target, "Keep the normal message");
+  await using _screen = await mountApp();
+  await act(async () => button("Workspace").click());
+  expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
+    "Keep the normal message",
+  );
+  expect(fixture.respond).not.toHaveBeenCalled();
+});
+
+it("phase two guard keeps attachment drafts separate by question", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  const first = questionAttachmentDraftId(
+    environmentId,
+    threadId,
+    ApprovalRequestId.make(requestId),
+    "scope",
+  );
+  const second = questionAttachmentDraftId(
+    environmentId,
+    threadId,
+    ApprovalRequestId.make(requestId),
+    "timing",
+  );
+  useComposerDraftStore.getState().setPrompt(first, "First answer");
+  useComposerDraftStore.getState().setPrompt(second, "Second answer");
+  expect(useComposerDraftStore.getState().getComposerDraft(first)?.prompt).toBe("First answer");
+  expect(useComposerDraftStore.getState().getComposerDraft(second)?.prompt).toBe("Second answer");
+  useComposerDraftStore.getState().clearComposerContent(first);
+  useComposerDraftStore.getState().clearComposerContent(second);
+});
+
+it("phase two inline keyboard choices and multiline text submit one complete request", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, button, questionField, typeQuestion } = _browserFixture0;
+
+  await using _screen = await mountApp();
+  await act(async () => {
+    const option = button("Workspace");
+    option.focus();
+    option.dispatchEvent(new KeyboardEvent("keydown", { key: "1", bubbles: true }));
+  });
+  expect(button("Workspace").getAttribute("aria-pressed")).toBe("true");
+  await typeQuestion("timing", "Tomorrow\nAfter the backup");
+  expect(questionField("timing")?.value).toBe("Tomorrow\nAfter the backup");
+  expect(fixture.respond).not.toHaveBeenCalled();
+  await act(async () => button("Submit").click());
+  expect(fixture.respond).toHaveBeenCalledOnce();
+  expect(fixture.respond.mock.calls[0]).toEqual([
+    expect.objectContaining({
+      environmentId,
+      input: expect.objectContaining({
+        threadId,
+        requestId,
+        answers: { scope: ["Workspace"], timing: "Tomorrow\nAfter the backup" },
+      }),
+    }),
+  ]);
+});
+
+it("phase two inline drafts survive app remount without entering the normal composer", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, questionField, typeQuestion } = _browserFixture0;
+
+  await using _screen = await mountApp();
+  await typeQuestion("scope", "Keep this answer");
+  await _screen.unmount();
+  await using _remountedScreen = await mountApp();
+  expect(questionField("scope")?.value).toBe("Keep this answer");
+  expect(container.querySelector("[data-normal-composer]")?.textContent).not.toContain(
+    "Keep this answer",
+  );
+});
+
+it("phase two independent requests keep their own submit and dismissal boundaries", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp } = _browserFixture0;
+
+  const item = questionItem();
+  const secondRequest = makeFenceUserInput({
+    threadId,
+    requestId: "second-request",
+    createdAt: now,
+    questions: item.questions,
+    responseMode: "message",
+    ordinal: 1,
+  });
+  fixture.projection = {
+    ...fixture.projection!,
+    runtimeRequests: [...fixture.projection!.runtimeRequests, secondRequest.request],
+    turnItems: [item, secondRequest.item],
+  };
+  await using _screen = await mountApp();
+  expect(container.querySelectorAll("[data-pending-user-input-request-id]")).toHaveLength(2);
+  const second = container.querySelector('[data-pending-user-input-request-id="second-request"]')!;
+  const dismiss = second.querySelector<HTMLButtonElement>(
+    'button[aria-label="Dismiss question without answering"]',
+  );
+  expect(dismiss).not.toBeNull();
+  fixture.dismiss.mockRejectedValueOnce(new Error("Disconnected"));
+  await act(async () => dismiss!.click());
+  expect(dismiss!.disabled).toBe(false);
+  expect(second.textContent).toContain("Could not dismiss");
+  expect(
+    [...second.querySelectorAll("button")].find((button) => button.textContent === "Submit"),
+  ).toBeDefined();
+  expect(second.textContent).not.toContain("Retry");
+  const persisted = JSON.parse(localStorage.getItem("mesura-pending-question-drafts")!);
+  expect(JSON.stringify(persisted)).not.toContain("Could not dismiss");
+  await act(async () => dismiss!.click());
+  expect(fixture.dismiss).toHaveBeenLastCalledWith({
+    environmentId,
+    input: { threadId, requestId: "second-request" },
+  });
+  await act(async () => {
+    fixture.projection = {
+      ...fixture.projection!,
+      runtimeRequests: fixture.projection!.runtimeRequests.map((request) =>
+        request.id === "second-request"
+          ? { ...request, status: "resolved", resolvedAt: DateTime.makeUnsafe(now) }
+          : request,
+      ),
+    };
+    publishFenceThreadProjection(fixture.projection!, environmentId);
+    for (const listener of fixture.threadListeners) listener();
+  });
+  expect(container.querySelectorAll("[data-pending-user-input-request-id]")).toHaveLength(1);
+  expect(
+    container.querySelector('[data-pending-user-input-request-id="phase-two-request"]'),
+  ).not.toBeNull();
+  expect(fixture.respond).not.toHaveBeenCalled();
+});
+
+it("phase two question upload failure stays beside its field and blocks request submission", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, button, questionField } = _browserFixture0;
+
+  vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
+  const key = questionAttachmentDraftId(
+    environmentId,
+    threadId,
+    ApprovalRequestId.make(requestId),
+    "timing",
+  );
+  useComposerDraftStore.getState().addFiles(
+    key,
+    [
+      {
+        type: "file",
+        id: "inline-failed-file",
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 12,
+        file: new File(["useful notes"], "notes.txt", { type: "text/plain" }),
+      },
+    ],
+    { appendReference: false },
+  );
+  attachmentUploads.useAttachmentUploadStore.setState({
+    uploadsByImageId: {
+      "inline-failed-file": { status: "failed", environmentId, reason: "Connection lost" },
+    },
+  });
+  await using _screen = await mountApp();
+  expect(questionField("timing")?.parentElement?.textContent).toContain("Connection lost");
+  expect(questionField("scope")?.parentElement?.textContent).not.toContain("notes.txt");
+  expect(button("Submit").disabled).toBe(true);
+  const retry = vi.spyOn(attachmentUploads, "retryAttachmentUpload").mockImplementation(() => {});
+  await act(async () => button("Retry upload").click());
+  expect(retry).toHaveBeenCalledWith(expect.objectContaining({ environmentId, draftTarget: key }));
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('button[aria-label="Remove notes.txt"]')!.click(),
+  );
+  expect(button("Submit").disabled).toBe(false);
+  expect(questionField("timing")?.parentElement?.textContent).not.toContain("notes.txt");
+});
+
+it("phase two remote reconnect keeps editable answers and resumes the same request", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, button, questionField, typeQuestion } = _browserFixture0;
+
+  appRootFence.environments[0]!.connection.phase = "reconnecting";
+  await using _screen = await mountApp();
+  await typeQuestion("scope", "Remote draft");
+  expect(questionField("scope")?.disabled).toBe(false);
+  expect(button("Submit").disabled).toBe(true);
+  expect(container.textContent).toContain("Reconnecting. Your answers are saved.");
+  await act(async () => {
+    appRootFence.environments[0]!.connection.phase = "connected";
+    fixture.projection = {
+      ...fixture.projection!,
+      runtimeRequests: [...fixture.projection!.runtimeRequests],
+    };
+    publishFenceThreadProjection(fixture.projection!, environmentId);
+    for (const listener of fixture.threadListeners) listener();
+  });
+  expect(questionField("scope")?.value).toBe("Remote draft");
+  expect(button("Submit").disabled).toBe(false);
+  expect(fixture.respond).not.toHaveBeenCalled();
+});
+
+it("phase two picked question file uses the shared upload draft and request attachment map", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, button, questionField } = _browserFixture0;
+
+  const upload = vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
+  await using _screen = await mountApp();
+  const input = container.querySelector<HTMLInputElement>(
+    '[data-question-id="timing"] input[type="file"]',
+  )!;
+  expect(input).not.toBeNull();
+  await act(async () => {
+    Object.defineProperty(input, "files", {
+      value: [new File(["notes"], "context.txt", { type: "text/plain" })],
+      configurable: true,
+    });
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const key = questionAttachmentDraftId(
+    environmentId,
+    threadId,
+    ApprovalRequestId.make(requestId),
+    "timing",
+  );
+  const attachment = useComposerDraftStore.getState().getComposerDraft(key)?.files[0];
+  expect(attachment?.name).toBe("context.txt");
+  expect(upload).toHaveBeenCalledWith(expect.objectContaining({ environmentId, draftTarget: key }));
+  expect(button("Submit").disabled).toBe(true);
+  await act(async () => {
+    attachmentUploads.useAttachmentUploadStore.setState({
+      uploadsByImageId: {
+        [attachment!.id]: {
+          status: "ready",
+          environmentId,
+          attachmentId: "uploaded-question-file",
+        },
+      },
+    });
+    button("Workspace").click();
+  });
+  expect(questionField("timing")?.parentElement?.textContent).toContain("Ready");
+  await act(async () => button("Submit").click());
+  expect(fixture.respond).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({
+        attachmentsByQuestionId: {
+          timing: [expect.objectContaining({ id: "uploaded-question-file", name: "context.txt" })],
+        },
+      }),
+    }),
+  );
+  useComposerDraftStore.getState().clearComposerContent(key);
+});
+
+it("phase two rework clears missing-answer feedback as soon as a choice answers it", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, button, questionField } = _browserFixture0;
+
+  await using _screen = await mountApp();
+  await act(async () => button("Submit").click());
+  expect(questionField("scope")?.getAttribute("aria-invalid")).toBe("true");
+  await act(async () => button("Workspace").click());
+  expect(questionField("scope")?.getAttribute("aria-invalid")).toBeNull();
+  expect(questionField("scope")?.parentElement?.textContent).not.toContain(
+    "Answer this question before submitting.",
+  );
+});
+
+it("phase two rework question shortcut focuses the first unanswered inline field", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp, button, questionField } = _browserFixture0;
+
+  await using _screen = await mountApp();
+  await act(async () => button("Workspace").click());
+  await act(async () => dispatchPickerAction("question"));
+  expect(document.activeElement).toBe(questionField("timing"));
+});
+
+it("phase two rework unrelated v2 detail update leaves existing Markdown rows unrendered", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { mountApp } = _browserFixture0;
+
+  addFenceThread(threadId, "Question fence", [
+    makeMessage("stable-assistant", "assistant", "Stable **answer**"),
+  ]);
+  fixture.projection = Option.getOrThrow(appRootFence.threadStates.get(threadId)!.data);
+  await using _screen = await mountApp();
+  const before = fixture.markdownRenders;
+  expect(before).toBeGreaterThan(0);
+  await act(async () => {
+    // An unrelated v2 detail update keeps the same visible item identities.
+    fixture.projection = {
+      ...fixture.projection!,
+      updatedAt: DateTime.makeUnsafe("2026-09-22T12:00:01.000Z"),
+    };
+    publishFenceThreadProjection(fixture.projection!, environmentId);
+    for (const listener of fixture.threadListeners) listener();
+  });
+  expect(fixture.markdownRenders).toBe(before);
+});
+
+it("phase two regression long request keeps answers across virtual scrolling", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, questionField, typeQuestion } = _browserFixture0;
+
+  const item = questionItem();
+  const questions = Array.from({ length: 12 }, (_, index) => ({
+    id: `long-${index}`,
+    header: `Question ${index + 1}`,
+    question: `Describe part ${index + 1} of the long request`,
+    options: [],
+    multiSelect: false,
+  }));
+  fixture.projection = { ...fixture.projection!, turnItems: [{ ...item, questions }] };
+  await using _screen = await mountApp();
+  expect(container.querySelectorAll("[data-question-id] textarea")).toHaveLength(12);
+  await typeQuestion("long-11", "Last answer\nWith more detail");
+  await act(async () => {
+    fixture.pendingRowsVisible = false;
+    publishFenceThreadProjection(fixture.projection!, environmentId);
+    for (const listener of fixture.threadListeners) listener();
+  });
+  expect(questionField("long-11")).toBeNull();
+  expect(container.querySelector("[data-normal-composer]")).not.toBeNull();
+  await act(async () => {
+    fixture.pendingRowsVisible = true;
+    publishFenceThreadProjection(fixture.projection!, environmentId);
+    for (const listener of fixture.threadListeners) listener();
+  });
+  expect(questionField("long-11")?.value).toContain("Last answer\nWith more detail");
+  expect(fixture.respond).not.toHaveBeenCalled();
+  expect(fixture.startTurn).not.toHaveBeenCalled();
+});
+
+it("phase two regression both file pickers preserve normal and question attachment ownership", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, expandNormalComposer, questionField } = _browserFixture0;
+
+  vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
+  await using _screen = await mountApp({ discardMountTimers: true });
+  await expandNormalComposer(_screen);
+  const normalInput = container.querySelector<HTMLInputElement>(
+    '[data-normal-composer] input[type="file"]',
+  )!;
+  const questionInput = container.querySelector<HTMLInputElement>(
+    '[data-question-id="scope"] input[type="file"]',
+  )!;
+  expect(normalInput).not.toBeNull();
+  expect(questionInput).not.toBeNull();
+  for (const [input, name] of [
+    [normalInput, "normal.txt"],
+    [questionInput, "question.txt"],
+  ] as const) {
+    await act(async () => {
+      Object.defineProperty(input, "files", {
+        value: [new File([name], name, { type: "text/plain" })],
+        configurable: true,
+      });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+  const normalTarget = scopeThreadRef(environmentId, threadId);
+  const questionTarget = questionAttachmentDraftId(
+    environmentId,
+    threadId,
+    ApprovalRequestId.make(requestId),
+    "scope",
+  );
+  expect(
+    useComposerDraftStore
+      .getState()
+      .getComposerDraft(normalTarget)
+      ?.files.map((file) => file.name),
+  ).toEqual(["normal.txt"]);
+  expect(
+    useComposerDraftStore
+      .getState()
+      .getComposerDraft(questionTarget)
+      ?.files.map((file) => file.name),
+  ).toEqual(["question.txt"]);
+  for (const input of [normalInput, questionInput]) {
+    await act(async () => {
+      Object.defineProperty(input, "files", {
+        // SVG attaches as a file now; a PSD is still an image type no provider accepts.
+        value: [new File(["psd"], "layers.psd", { type: "image/vnd.adobe.photoshop" })],
+        configurable: true,
+      });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+  expect(questionField("scope")?.parentElement?.textContent).toContain(
+    "Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.",
+  );
+  expect(useComposerDraftStore.getState().getComposerDraft(normalTarget)?.images).toHaveLength(0);
+  expect(useComposerDraftStore.getState().getComposerDraft(questionTarget)?.images).toHaveLength(0);
+  useComposerDraftStore.getState().clearComposerContent(questionTarget);
+});
+
+const ONE_PIXEL_PNG = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+  ),
+  (character) => character.charCodeAt(0),
+);
+
+/** Reports a coarse pointer, as a phone does; every other query keeps its real answer. */
+function emulateTouchPointer() {
+  const nativeMatchMedia = window.matchMedia.bind(window);
+  vi.spyOn(window, "matchMedia").mockImplementation((query) =>
+    nativeMatchMedia(query === "(pointer: coarse)" ? "(min-width: 0px)" : query),
+  );
+}
+
+async function pickFiles(input: HTMLInputElement, files: File[]) {
+  await act(async () => {
+    Object.defineProperty(input, "files", { value: files, configurable: true });
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+function openMenuItems() {
+  return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+}
+
+it.each([
+  {
+    scope: "[data-normal-composer]",
+    trigger: 'button[aria-label="Attach files"]',
+    draftTarget: () => scopeThreadRef(environmentId, threadId),
+  },
+  {
+    scope: '[data-question-id="scope"]',
+    trigger: 'button[aria-label^="Attach files to"]',
+    draftTarget: () =>
+      questionAttachmentDraftId(
+        environmentId,
+        threadId,
+        ApprovalRequestId.make(requestId),
+        "scope",
+      ),
+  },
+])(
+  "a touch device opens the media picker first from $scope, and its photos attach like Files",
+  async ({ scope, trigger, draftTarget }) => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const { container, mountApp, expandNormalComposer } = _browserFixture0;
+    vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
+    emulateTouchPointer();
+    expect(window.matchMedia("(pointer: coarse)").matches).toBe(true);
+    await using _screen = await mountApp({ discardMountTimers: true });
+    await expandNormalComposer(_screen);
+
+    const triggerButton = container.querySelector<HTMLButtonElement>(`${scope} ${trigger}`)!;
+    expect(triggerButton).not.toBeNull();
+    const mediaInput = container.querySelector<HTMLInputElement>(
+      `${scope} input[data-attachment-media-input]`,
+    )!;
+    const fileInput = container.querySelector<HTMLInputElement>(
+      `${scope} input[type="file"]:not([data-attachment-media-input])`,
+    )!;
+    // Android Chrome uses its photo picker only for media-only types without `capture`.
+    expect(mediaInput.accept).toBe("image/*,video/*");
+    expect(mediaInput.multiple).toBe(true);
+    expect(mediaInput.hasAttribute("capture")).toBe(false);
+    expect(fileInput.hasAttribute("accept")).toBe(false);
+    expect(fileInput.multiple).toBe(true);
+
+    using mediaClick = vi.spyOn(mediaInput, "click").mockImplementation(() => {});
+    using fileClick = vi.spyOn(fileInput, "click").mockImplementation(() => {});
+    // A real press, not `.click()`: Base UI opens the menu on `mousedown`, which
+    // a `pointerdown` handler calling preventDefault would suppress.
+    await userEvent.click(triggerButton);
+    await vi.waitFor(() =>
+      expect(openMenuItems().map((item) => item.textContent)).toEqual([
+        "Photos and videos",
+        "Files",
+      ]),
+    );
+    await act(async () => openMenuItems()[0]!.click());
+    expect(mediaClick).toHaveBeenCalledTimes(1);
+    expect(fileClick).not.toHaveBeenCalled();
+
+    await userEvent.click(triggerButton);
+    await vi.waitFor(() => expect(openMenuItems()).toHaveLength(2));
+    await act(async () => openMenuItems()[1]!.click());
+    expect(fileClick).toHaveBeenCalledTimes(1);
+    expect(mediaClick).toHaveBeenCalledTimes(1);
+
+    await pickFiles(mediaInput, [new File([ONE_PIXEL_PNG], "gallery.png", { type: "image/png" })]);
+    await pickFiles(fileInput, [new File([ONE_PIXEL_PNG], "files.png", { type: "image/png" })]);
+    await vi.waitFor(() =>
+      expect(
+        useComposerDraftStore
+          .getState()
+          .getComposerDraft(draftTarget())
+          ?.images.map((image) => [image.name, image.mimeType]),
+      ).toEqual([
+        ["gallery.png", "image/png"],
+        ["files.png", "image/png"],
+      ]),
+    );
+    expect(mediaInput.value).toBe("");
+    useComposerDraftStore.getState().clearComposerContent(draftTarget());
+  },
+);
+
+it("a fine pointer keeps one tap from the attach button to the file dialog", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+  const { container, mountApp, expandNormalComposer } = _browserFixture0;
+  await using _screen = await mountApp({ discardMountTimers: true });
+  await expandNormalComposer(_screen);
+  expect(container.querySelector("input[data-attachment-media-input]")).toBeNull();
+  const triggerButton = container.querySelector<HTMLButtonElement>(
+    '[data-normal-composer] button[aria-label="Attach files"]',
+  )!;
+  const fileInput = container.querySelector<HTMLInputElement>(
+    '[data-normal-composer] input[type="file"]',
+  )!;
+  using fileClick = vi.spyOn(fileInput, "click").mockImplementation(() => {});
+  const pointerDowns: PointerEvent[] = [];
+  const recordPointerDown = (event: PointerEvent) => pointerDowns.push(event);
+  document.addEventListener("pointerdown", recordPointerDown);
+  await userEvent.click(triggerButton);
+  document.removeEventListener("pointerdown", recordPointerDown);
+  expect(fileClick).toHaveBeenCalledTimes(1);
+  expect(openMenuItems()).toHaveLength(0);
+  // The press must not take focus from the composer's editor.
+  expect(pointerDowns.map((event) => event.defaultPrevented)).toEqual([true]);
+});

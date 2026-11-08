@@ -10,26 +10,13 @@ import * as Layer from "effect/Layer";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { NvimBridge } from "../NvimBridge.ts";
+import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * The insert-mode bench, and the number the design decision rests on.
- *
- * The question it settles is whether keys in insert mode can go to Neovim like
- * every other key (naive), or whether Monaco has to edit locally and hand the
- * result over when insert mode ends (delegated). It is a question about time,
- * so it is answered with measurements rather than with an argument, and it can
- * only be answered against the developer's real configuration: `--clean` says
- * nothing useful, because it is the plugins that run on every inserted
- * character — autopairs, nvim-cmp, LuaSnip — that cost the time.
- *
- * Gated on `MESURA_NVIM_CONFIG_DIR`, and it cannot run in continuous
- * integration: the configuration is a separate repository whose first start
- * installs its plugins. Run it twice and take the second, so the first start's
- * work is not in the numbers.
- *
- * Deliberately not an assertion against a threshold. A bench that fails on a
- * loaded machine reports a defect that is not there; this records what it saw
- * and writes it where the decision can cite it.
+ * Can insert-mode keys go to Neovim (naive), or must Monaco edit locally (delegated)? Only the
+ * real config answers that: its per-character plugins (autopairs, nvim-cmp, LuaSnip) cost the time.
+ * Gated on `MESURA_NVIM_CONFIG_DIR`, not in CI. The first start installs plugins: use a second run.
+ * It records numbers and asserts no threshold, because a loaded machine would fail one falsely.
  */
 
 const configDirectory = (() => {
@@ -40,15 +27,6 @@ const configDirectory = (() => {
     return NodeFS.statSync(expanded).isDirectory() ? expanded : null;
   } catch {
     return null;
-  }
-})();
-
-const nvimAvailable = (() => {
-  try {
-    NodeChildProcess.execFileSync("nvim", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
   }
 })();
 
@@ -75,6 +53,10 @@ const SOURCE_FILE = "../web/src/components/files/monaco/MonacoFileSurface.tsx";
  * real event to wait for. Here the gap between keys is part of what is being
  * modelled: a person types, they do not hold the key down.
  */
+/** The idle window measured before typing; see the report. */
+const IDLE_WINDOW_MS = 500;
+
+// oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- Real gaps model human typing and expose idle plugin redraws in Neovim; no completion event represents an idle window.
 const pause = (milliseconds: number) => Effect.sleep(`${milliseconds} millis`);
 
 /** Did anything actually happen on screen between these two readings? */
@@ -84,19 +66,9 @@ const somethingHappened = (
 ) => after.gridCells !== before.gridCells || after.cursorMoves !== before.cursorMoves;
 
 /**
- * Counts the gaps in which something happened with no key in flight.
- *
- * This is the bench's error bar, and it is not decoration. Under the real
- * configuration Neovim flushes about every four milliseconds whether or not
- * anything is going on — measured at 114 frames in 500 idle milliseconds,
- * nearly all of them drawing nothing at all. A bench that timed "the next
- * frame" after a key would therefore be timing that stream rather than the
- * key: an earlier version of this file did exactly that and reported a p50 of
- * 1.73 ms, which is about half the gap between two empty frames.
- *
- * So `probe` waits for a frame in which something happened, and this counts
- * how often something happens when nothing should. A total near zero says the
- * timings have nothing to be confused with.
+ * The bench's error bar: gaps in which something happened with no key in flight. Some configs
+ * flush empty frames while idle (about every 4 ms), and an earlier bench that timed "the next
+ * frame" measured that stream, not the key. A total near zero means the timings are clean.
  */
 const idleSignals = (bridge: NvimBridge.Session, milliseconds: number) =>
   Effect.gen(function* () {
@@ -122,30 +94,16 @@ const median = (values: ReadonlyArray<number>) => quantile(values, 0.5);
 const round = (value: number) => Math.round(value * 100) / 100;
 
 /**
- * Sends one key and times the frame in which something happened.
- *
- * "Something" is a cell drawn **or** the cursor moving, and it has to be both
- * of those. Cells alone miss every closer: with autopairs on, typing the `)`
- * it already inserted only steps the cursor over it and draws nothing, and
- * about one key in twelve of ordinary code is such a closer — enough to put
- * every one of them in the tail, which is how an earlier version of this file
- * came to report a p50 of 1.8 ms beside a p95 of 515 ms. The cursor alone
- * misses the keys that redraw without moving it.
- *
- * Waiting for the next frame whatever it held is worse than either: this
- * configuration emits an empty frame about every four milliseconds, so that
- * version timed the background stream and not the key.
+ * Times the frame in which a cell is drawn **or** the cursor moves; it needs both. Cells alone miss
+ * autopairs closers (the cursor steps over a `)` and draws nothing), which once gave p50 1.8 ms
+ * beside p95 515 ms. The cursor alone misses in-place redraws, and "any frame" times idle frames.
  */
 const probe = (bridge: NvimBridge.Session, keys: string) =>
   waitingFor(bridge, keys, (before) => somethingHappened(before, bridge.metrics));
 
 /**
- * Sends keys and times the frame in which virtual text appears.
- *
- * For flash that is the frame carrying the labels, which is the number the
- * document talks about. Timing the first frame instead measured the cheap
- * redraw on entering the search and published it beside a sentence about the
- * expensive one.
+ * Times the frame in which virtual text appears: for flash, the frame with the labels. The first
+ * frame is the cheap redraw on entering the search, which an earlier version published by mistake.
  */
 const probeUntilOverlays = (bridge: NvimBridge.Session, keys: string) =>
   waitingFor(bridge, keys, () => bridge.overlays.length > 0);
@@ -169,15 +127,13 @@ function waitingFor(
     // The baseline is read after subscribing, so a frame landing during the
     // subscription cannot be folded into it and lost.
     const before = bridge.metrics;
+    // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- The bench measures real Neovim input-to-redraw latency; virtual time cannot measure the subprocess.
     const started = performance.now();
     yield* bridge.input(keys);
 
     let waited = 0;
     while (waited < 400) {
-      yield* frame.pipe(
-        Effect.timeout("1 second"),
-        Effect.catchCause(() => Effect.void),
-      );
+      yield* frame.pipe(Effect.timeout("1 second"), Effect.ignoreCause);
       waited += 1;
       if (done(before)) break;
       frame = yield* bridge.nextFrame;
@@ -185,6 +141,7 @@ function waitingFor(
 
     const after = bridge.metrics;
     return {
+      // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- The bench measures real Neovim input-to-redraw latency; virtual time cannot measure the subprocess.
       elapsedMs: performance.now() - started,
       cells: after.gridCells - before.gridCells,
       bufferEvents: after.bufferEvents - before.bufferEvents,
@@ -206,7 +163,9 @@ const summarise = (name: string, samples: ReadonlyArray<Sample>) => {
   };
 };
 
-if (!enabled) {
+if (configDirectory !== null && !nvimAvailable) reportMissingNvim("insert-mode bench");
+
+if (configDirectory === null) {
   it("skips the insert-mode bench", () => {
     // Said out loud rather than silently absent: a bench that vanishes looks
     // exactly like a bench that ran.
@@ -219,6 +178,7 @@ if (!enabled) {
 
 if (enabled)
   it.layer(layer, { excludeTestServices: true })("insert-mode latency", (it) => {
+    // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- The opt-in bench measures real Neovim plugins and paced typing; retain the existing measurement budget.
     it.effect(
       "measures the cost of a keystroke against the real configuration",
       () =>
@@ -242,6 +202,15 @@ if (enabled)
             initialFile: path,
           });
           yield* bridge.settle;
+
+          // How much this configuration draws with no key in flight, so the
+          // report states the idle flush rate it measured instead of assuming
+          // one: it depends entirely on the configuration.
+          const idleBefore = bridge.metrics;
+          yield* pause(IDLE_WINDOW_MS);
+          const idleAfter = bridge.metrics;
+          const idleFrames = idleAfter.frames - idleBefore.frames;
+          const idleCells = idleAfter.gridCells - idleBefore.gridCells;
 
           // Insert mode: a sentence with spaces, brackets and quotes, so
           // autopairs has something to react to on a real share of the keys.
@@ -267,23 +236,15 @@ if (enabled)
             normal.push(yield* probe(bridge, index % 2 === 0 ? "j" : "k"));
           }
 
-          // Flash: the plugin that draws the most, and the reason the grid is
-          // classified at all.
-          //
-          // Timed to its *labels*, not to its first frame. `s` redraws once on
-          // entering the search and again when the labels land, so a probe that
-          // took the first frame measured the cheap one and published it beside
-          // a sentence about the expensive one. Twenty runs rather than five,
-          // because a p95 over five samples is the maximum wearing a label.
+          // Flash draws the most and is why the grid is classified. Time its labels, not
+          // its first frame, which is the cheap redraw on entering the search. Twenty
+          // runs, because a p95 over five samples is only the maximum.
           const flash: Sample[] = [];
           for (let index = 0; index < 20; index += 1) {
             flash.push(yield* probeUntilOverlays(bridge, "se"));
             yield* bridge.input("<Esc>");
-            // `settle`, not the next frame. The next frame only came for free
-            // while the configuration's status line redrew on its own; with
-            // those plugins left out under Mesura an idle Neovim draws
-            // nothing, and an `<Esc>` that finds nothing to clear then waited
-            // for a frame that never came.
+            // `settle`, not the next frame: with the status-line plugins off under Mesura, an
+            // idle Neovim draws nothing, so an `<Esc>` with nothing to clear waits forever.
             yield* bridge.settle;
           }
 
@@ -311,9 +272,10 @@ if (enabled)
             `configuration ${configDirectory}`,
             ``,
             `Gaps of 25 ms in which something happened with no key in flight: ${strayFrames} of 200.`,
-            `That is the error bar. Neovim flushes about every 4 ms under this configuration`,
-            `whether or not anything is happening, so timing the next frame would time that`,
-            `stream; these are the gaps that could have been taken for a key.`,
+            `That is the error bar: these are the gaps that could have been taken for a key.`,
+            `Idle before typing, ${IDLE_WINDOW_MS} ms with no key in flight: ${idleFrames} frames, ${idleCells} cells drawn.`,
+            `A configuration that flushes while idle would put a frame in every gap, which is why`,
+            `the probe waits for a frame in which something happened rather than the next frame.`,
             ``,
             `| run | n | p50 ms | p95 ms | max ms | median cells | median buffer events |`,
             `| --- | --- | --- | --- | --- | --- | --- |`,

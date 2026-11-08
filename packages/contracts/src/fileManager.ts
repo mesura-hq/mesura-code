@@ -3,17 +3,10 @@ import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
- * The Symmetria file manager's bridge, carried over the WebSocket.
- *
- * The file manager's UI reaches its host through one object of channels
- * (`@symmetria/fm-core/bridge`), and both ends already decode every payload
- * with `@symmetria/fm-core/contract`. This contract types what that decoding
- * cannot: the envelope, the session, and the channel names — split by scope,
- * so a read token can never reach a write channel.
- *
- * The literals are a COPY of `@symmetria/fm-main/ipc/channels`, kept here so
- * mobile never depends on the vendored package. `apps/server` guards the copy
- * against the vendored table in a test.
+ * Types what `@symmetria/fm-core/contract` cannot: the envelope, the session and the channel names,
+ * split by scope so a read token never reaches a write channel. The literals COPY
+ * `@symmetria/fm-main/ipc/channels` so contracts never depend on the vendored package; `apps/server`
+ * guards the copy against the vendored table in a test.
  */
 
 export const FILE_MANAGER_READ_CHANNELS = [
@@ -150,18 +143,10 @@ export class FileManagerError extends Schema.TaggedError<FileManagerError>()("Fi
 }) {}
 
 /**
- * The file manager's values on the wire.
- *
- * In the standalone the replies cross Electron's IPC by structured clone,
- * which carries `undefined` and byte arrays; the WebSocket carries JSON,
- * which has neither, and a reply with either dies in the RPC encoder as a
- * defect the client cannot act on. `describe` answers with a file's first
- * bytes for the content sniff. So on the way out bytes become
- * `{ $symmetriaBytes: <base64> }` — a key no file manager payload can carry —
- * and `undefined` and the numbers JSON cannot write (non-finite, bigint)
- * become `null`; on the way in the bytes come back. A value with nothing to
- * change is returned as the same reference, so a large listing costs one
- * walk and no copy.
+ * The WebSocket carries JSON, unlike the standalone's structured clone, so bytes (`describe`'s content
+ * sniff) become `{ $symmetriaBytes: <base64> }` and `undefined`, non-finite numbers and bigints become
+ * `null`; otherwise the RPC encoder dies with a defect. A value with nothing to change keeps its
+ * reference, so a large listing costs one walk and no copy.
  */
 const FILE_MANAGER_BYTES_KEY = "$symmetriaBytes";
 

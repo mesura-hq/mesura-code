@@ -1,31 +1,8 @@
 /**
- * What Neovim draws, read against what the buffer actually contains.
- *
- * Neovim's UI protocol reports a grid of cells: characters and highlight ids at
- * screen positions. That is a drawing, not a meaning — nothing in it says which
- * characters are the file and which are decoration a plugin painted over it. The
- * classification `vscode-neovim` uses, and this uses, recovers the difference by
- * comparing each cell against the buffer line underneath it:
- *
- * - the cell's character differs from the buffer's → something drew over the
- *   text, so it is **virtual**: a flash label, inline diagnostics, a git blame;
- * - the characters match but the cell carries a highlight → the text is the
- *   file's own, marked: a search match, an incremental-substitution preview;
- * - a blank is neither.
- *
- * **Grid columns are screen cells, not buffer columns.** A tab is several
- * cells, a wide character is two (the second drawn as an empty string), and a
- * character outside ASCII is one cell but several bytes and possibly two
- * UTF-16 units. `classifyRow` walks the buffer line and the row together, so
- * what it reports is in UTF-16 columns — Monaco's unit — whatever the line
- * holds. Comparing index for index read every character after the first tab
- * or accent on a line as a phantom label.
- *
- * **This only holds while Neovim draws no gutter.** With line numbers on, grid
- * column N is not buffer column N, every character on the line differs from the
- * one it is compared against, and a single flash jump produced 132 phantom
- * labels when the prototype measured it. The host draws the gutter; the host
- * plugin forces Neovim's off. A test pins that reasoning in place.
+ * Classifies Neovim's grid against the buffer line under each row, as `vscode-neovim` does:
+ * a differing character is virtual text, a matching character with a highlight is a mark.
+ * Grid columns are screen cells (tabs, wide characters), so `classifyRow` reports UTF-16 columns.
+ * This holds only while Neovim draws no gutter; the host plugin forces it off.
  */
 
 export interface GridOverlay {
@@ -90,12 +67,11 @@ export class GridModel {
   #topLine = 0;
   #rowHashes: string[] = [];
   #tabstop = 8;
+  /** How far the window is scrolled sideways, in screen cells. See `setLeftColumn`. */
+  #leftColumn = 0;
   /**
    * Whether anything the classification reads moved since the last collect.
-   *
-   * A real configuration flushes about 230 times a second while idle, nearly
-   * always drawing nothing, so re-reading the whole grid on every one of them
-   * is work for no answer.
+   * Some configurations flush about 230 times a second while idle, drawing nothing.
    */
   #dirty = true;
   #overlays: GridOverlay[] = [];
@@ -110,19 +86,15 @@ export class GridModel {
     return this.#highlightDefinitions;
   }
 
-  /**
-   * The grid Neovim draws the developer's window on, once it has said so.
-   *
-   * `null` until the first `win_pos`. Resizing a grid needs this number and
-   * there is no API that answers it: with `ext_multigrid` the id is assigned
-   * by the redraw stream, so the only place that knows is whatever has been
-   * reading that stream.
-   */
   /** One past the last buffer line Neovim drew, zero-based as it reports it. */
   get botLine(): number {
     return this.#botLine;
   }
 
+  /**
+   * The grid of the developer's window, `null` until the first `win_pos`.
+   * With `ext_multigrid` only the redraw stream assigns this id; no API answers it.
+   */
   get bufferGridId(): number | null {
     return this.#bufferGridId;
   }
@@ -131,30 +103,28 @@ export class GridModel {
     return this.#topLine;
   }
 
+  /** How far the window is scrolled sideways, as the host plugin last reported it. */
+  get leftColumn(): number {
+    return this.#leftColumn;
+  }
+
+  /** The buffer's `tabstop`, as the host plugin last reported it. */
+  get tabstop(): number {
+    return this.#tabstop;
+  }
+
   /**
-   * How many cells Neovim has drawn since this model was made.
-   *
-   * Monotonic, and counted across every grid rather than only the buffer's,
-   * because what it measures is how much work a keystroke caused — a float
-   * that repaints costs the same as a line that does. Two samples either side
-   * of a key give that key's cost, and a sample that did not move says the
-   * frame drew nothing, which is how the bench tells a key's own frame from a
-   * status line redrawing on its own.
-   */
-  /**
-   * How often the cursor has moved, counted only when it actually moved.
-   *
-   * The companion to `cellsDrawn`, and needed because a great many keys draw
-   * no cells at all: with autopairs on, typing the `)` it already inserted
-   * only steps the cursor over it. Between them the two counters answer "did
-   * anything happen", which is what tells a key's own frame from the steady
-   * stream of empty ones a real configuration emits — measured at about one
-   * every four milliseconds, nearly all of them drawing nothing.
+   * How often the cursor actually moved. Many keys draw no cells (autopairs stepping over `)`),
+   * so with `cellsDrawn` this tells a key's own frame from an empty idle flush.
    */
   get cursorMoves(): number {
     return this.#cursorMoves;
   }
 
+  /**
+   * Cells drawn since this model was made: monotonic, counted across every grid, because it
+   * measures a keystroke's cost. Samples either side of a key give that key's cost.
+   */
   get cellsDrawn(): number {
     return this.#cellsDrawn;
   }
@@ -168,6 +138,17 @@ export class GridModel {
   setTabstop(tabstop: number): void {
     if (!Number.isInteger(tabstop) || tabstop < 1 || tabstop === this.#tabstop) return;
     this.#tabstop = tabstop;
+    this.#dirty = true;
+  }
+
+  /**
+   * Neovim's `leftcol`, in screen cells. `win_viewport` does not carry it, so the host plugin
+   * pushes it with the cursor before the frame that draws the key. The host sizes the grid so
+   * this stays 0 (`gridWidth.ts`); only a line wider than the grid's bound reaches it.
+   */
+  setLeftColumn(leftColumn: number): void {
+    if (!Number.isInteger(leftColumn) || leftColumn < 0 || leftColumn === this.#leftColumn) return;
+    this.#leftColumn = leftColumn;
     this.#dirty = true;
   }
 
@@ -221,11 +202,8 @@ export class GridModel {
         return;
       }
       case "grid_scroll": {
-        // Neovim scrolls by moving rows it already sent and drawing only the
-        // ones that came into view. Ignoring this left every moved row holding
-        // what it showed before the scroll, read against the line now under
-        // it: one `<C-d>` in a 442-line file produced 915 phantom overlays, and
-        // a closing tag from the top of the screen appeared mid-file.
+        // Neovim moves rows it already sent and draws only the new ones. Ignoring this read
+        // stale rows against new lines: one `<C-d>` produced 915 phantom overlays.
         const [gridId, top, bottom, left, right, rows] = batch as [
           number,
           number,
@@ -259,16 +237,9 @@ export class GridModel {
         return;
       }
       case "win_pos": {
-        // The grid that belongs to the window the developer is in.
-        //
-        // Taking the most recent `win_pos` instead looks equivalent and is
-        // not: a real configuration opens several ordinary windows — a file
-        // tree, a symbol list — and each reports its own `win_pos`, so the
-        // last one reported is usually a sidebar. Read against the file's
-        // lines, a sidebar's cells differ everywhere and the whole window
-        // becomes virtual text belonging to no line. Floats (which-key,
-        // snacks, noice) never arrive here at all; they report
-        // `win_float_pos`, which is ignored.
+        // Map the grid to the current window. Do not take the latest `win_pos`: sidebars
+        // (file tree, symbol list) report their own, and a sidebar read against the file
+        // becomes all virtual text. Floats report `win_float_pos`, which is ignored.
         const [gridId, window] = batch as [number, { id?: number } | undefined];
         this.#dirty = true;
         if (typeof window?.id === "number") {
@@ -386,10 +357,9 @@ export class GridModel {
     for (let row = 0; row < grid.height; row += 1) {
       const bufferLine = this.#bufferLines[this.#topLine + row];
       const line = this.#topLine + row + 1;
-      // The line and its text are part of the hash, not only the drawing: a
-      // row that shows a different line after a scroll owes the client that
-      // line's decorations even when the cells happen to be the same.
-      const hash = `${line}\u0000${bufferLine ?? ""}\u0000${grid.cells[row]!.join("")}\u0000${grid.highlights[row]!.join(",")}`;
+      // The line, its text and `leftcol` are in the hash: after a scroll or a sideways shift,
+      // the same cells read against other text still owe the client new decorations.
+      const hash = `${line}\u0000${this.#leftColumn}\u0000${bufferLine ?? ""}\u0000${grid.cells[row]!.join("")}\u0000${grid.highlights[row]!.join(",")}`;
       if (this.#rowHashes[row] !== hash) {
         this.#rowHashes[row] = hash;
         changedRows.push(row);
@@ -402,6 +372,7 @@ export class GridModel {
         text: bufferLine,
         line,
         tabstop: this.#tabstop,
+        leftColumn: this.#leftColumn,
         isHostDrawn,
       });
       overlays.push(...classified.overlays);
@@ -472,17 +443,38 @@ function cellWidth(cluster: string): number {
 }
 
 /**
- * The ways Neovim spells a character it cannot draw as itself: `^A` for a
- * control character, `<200b>` for an unprintable one. Candidates rather than
- * one answer, because the hex form's padding is Neovim's to choose; the cells
- * decide which one it drew.
+ * Code points Neovim will not draw as themselves (`utf_printable` in its
+ * `mbyte.c`): zero-width formatting characters, the BOM, surrogates and a few
+ * more. Each is drawn as its hex value in angle brackets.
  */
-function spelledForms(cluster: string): ReadonlyArray<string> {
+const UNPRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x070f, 0x070f],
+  [0x180b, 0x180e],
+  [0x200b, 0x200f],
+  [0x202a, 0x202e],
+  [0x2060, 0x206f],
+  [0x3164, 0x3164],
+  [0xd800, 0xdfff],
+  [0xfeff, 0xfeff],
+  [0xfff9, 0xfffb],
+  [0xfffe, 0xffff],
+];
+
+/**
+ * How Neovim spells a character it cannot draw as itself, or `null` when it
+ * draws the character. Measured against `nvim --embed`: `^A` for a control
+ * character, `^?` for DEL, `<85>` for a C1 control, `<200b>` and `<070f>`
+ * (four digits at least) for an unprintable one.
+ */
+function spellingOf(cluster: string): string | null {
   const code = cluster.codePointAt(0) ?? 0;
-  if (code < 0x20) return [`^${String.fromCharCode(code + 64)}`];
-  if (code === 0x7f) return ["^?"];
-  const hex = code.toString(16);
-  return [`<${hex}>`, `<${hex.padStart(4, "0")}>`];
+  if (code < 0x20) return `^${String.fromCharCode(code + 64)}`;
+  if (code === 0x7f) return "^?";
+  if (code >= 0x80 && code <= 0x9f) return `<${code.toString(16)}>`;
+  for (const [low, high] of UNPRINTABLE_RANGES) {
+    if (code >= low && code <= high) return `<${code.toString(16).padStart(4, "0")}>`;
+  }
+  return null;
 }
 
 /** Whether `cells` from `column` on hold exactly `spelled`, one character per cell. */
@@ -493,6 +485,46 @@ function cellsSpell(cells: ReadonlyArray<string>, column: number, spelled: strin
   return true;
 }
 
+/**
+ * How many screen cells `cluster` takes when drawn at screen column `column`,
+ * as Neovim draws it (`strdisplaywidth`): a tab reaches the next tab stop, an
+ * unprintable character takes its spelling, anything else one or two cells.
+ * The one width model for grid sizing and for reading a scrolled row.
+ */
+function cellsOf(cluster: string, column: number, tabstop: number): number {
+  if (cluster === "\t") return tabstop - (column % tabstop);
+  return spellingOf(cluster)?.length ?? cellWidth(cluster);
+}
+
+/** The characters of `text`, each with its UTF-16 offset, as Neovim counts them. */
+function* clustersOf(
+  text: string,
+): Generator<{ readonly index: number; readonly cluster: string }> {
+  // One pass for the whole line. Segmenting from each character on, as
+  // `clusterLength` does, made one accent cost 90 ms on a 1,100-character
+  // line measured seven rows at a time.
+  if (!/[\u0080-\uffff]/.test(text)) {
+    for (let index = 0; index < text.length; index += 1) yield { index, cluster: text[index]! };
+    return;
+  }
+  for (const { index, segment } of graphemes.segment(text)) yield { index, cluster: segment };
+}
+
+/**
+ * How many screen cells `text` takes, tabs expanded at `tabstop`, counted no
+ * further than `limit`.
+ */
+export function displayWidth(text: string, tabstop: number, limit = Infinity): number {
+  // Most lines are plain printable ASCII with no tab: a cell per UTF-16 unit.
+  if (!/[^ -~]/.test(text)) return text.length;
+  let column = 0;
+  for (const { cluster } of clustersOf(text)) {
+    column += cellsOf(cluster, column, tabstop);
+    if (column >= limit) return column;
+  }
+  return column;
+}
+
 export interface ClassifyRowInput {
   readonly cells: ReadonlyArray<string>;
   readonly highlights: ReadonlyArray<number>;
@@ -501,37 +533,56 @@ export interface ClassifyRowInput {
   /** One-based. */
   readonly line: number;
   readonly tabstop: number;
+  /** The screen column grid column 0 shows: Neovim's `leftcol`. */
+  readonly leftColumn?: number;
   readonly isHostDrawn: (highlight: number) => boolean;
 }
 
 /**
- * Reads one drawn row against the buffer line under it.
- *
- * Walks both at once: a cell that holds the buffer's next character is the
- * file's own text, and advances the buffer by that character's UTF-16 length;
- * a tab is however many blank cells reach the next tab stop; an empty cell is
- * the right half of a wide character and stands for nothing. What is left is
- * drawn over the text or past its end, and is reported as an overlay at the
- * UTF-16 column of the character it covers.
- *
- * Adjacent virtual cells on one highlight are one overlay, because each one
- * becomes a node on the client: git blame at the end of a line is one label,
- * not forty. Past the end of the line the overlay starts at the line's end and
- * carries the blank gap before it in its text, since Monaco has no column
- * there to put it at.
- *
- * Assumes the window is not scrolled sideways (`leftcol` 0), which holds while
- * the client sizes the grid wider than the widest visible line.
+ * Walks one drawn row and its buffer line together (tabs, wide characters) and reports overlays
+ * at UTF-16 columns. Adjacent virtual cells on one highlight merge into one overlay, one client
+ * node; past the line's end the overlay starts there and carries the blank gap in its text.
+ * The walk starts at `leftColumn`: read from column 0, a shifted row is all phantom overlays.
  */
 export function classifyRow(input: ClassifyRowInput): {
   readonly overlays: GridOverlay[];
   readonly highlightRuns: HighlightRun[];
 } {
   const { cells, highlights, text, line, tabstop, isHostDrawn } = input;
+  const leftColumn = input.leftColumn ?? 0;
   const overlays: GridOverlay[] = [];
   const highlightRuns: HighlightRun[] = [];
 
   let position = 0;
+  /** The screen column of the next buffer character, until it reaches `leftColumn`. */
+  let skipped = 0;
+  /** What Neovim draws in the first cells for a character the left edge cuts. */
+  let clipped: { readonly at: number; readonly drawing: string } | null = null;
+  if (leftColumn > 0) {
+    for (const { index, cluster } of clustersOf(text)) {
+      const width = cellsOf(cluster, skipped, tabstop);
+      if (skipped + width > leftColumn) {
+        // A tab the edge cuts is read by the loop below from the cells left of
+        // it, in screen columns. A wide character cut in half is drawn as `<`
+        // and a spelled one as the rest of its spelling (`<200b>` from
+        // `leftcol` 3 is `00b>`): both are that character, not virtual text.
+        if (cluster !== "\t" && skipped < leftColumn) {
+          const cut = leftColumn - skipped;
+          const spelling = spellingOf(cluster);
+          clipped = {
+            at: index,
+            drawing: spelling === null ? "<".repeat(width - cut) : spelling.slice(cut),
+          };
+          position = index + cluster.length;
+        } else {
+          position = index;
+        }
+        break;
+      }
+      skipped += width;
+      position = index + cluster.length;
+    }
+  }
   /** The grid column the buffer text ended at, once it has. */
   let endColumn: number | null = null;
   // Initialised through a cast so the closures below that reassign them do not
@@ -545,6 +596,16 @@ export function classifyRow(input: ClassifyRowInput): {
    * next character.
    */
   let covered = { at: 0, untilColumn: 0 };
+  /** The grid column the row's own reading starts at, past a clipped character. */
+  let firstColumn = 0;
+  if (clipped !== null) {
+    if (cellsSpell(cells, 0, clipped.drawing)) {
+      firstColumn = clipped.drawing.length;
+    } else {
+      // Something else is drawn there: read it as drawn over that character.
+      covered = { at: clipped.at, untilColumn: clipped.drawing.length };
+    }
+  }
   /** The last column that drew something over the text. */
   let lastOverlaidColumn = -2;
 
@@ -576,7 +637,7 @@ export function classifyRow(input: ClassifyRowInput): {
     overlay = { col: at + 1, text: gap + drawn, hl: highlight, lastColumn: column };
   };
 
-  for (let column = 0; column < cells.length; column += 1) {
+  for (let column = firstColumn; column < cells.length; column += 1) {
     const drawn = cells[column] ?? " ";
     const highlight = highlights[column] ?? 0;
 
@@ -632,8 +693,10 @@ export function classifyRow(input: ClassifyRowInput): {
 
     const at = position;
     if (text[position] === "\t") {
-      const tabEnd = (Math.floor(column / tabstop) + 1) * tabstop;
-      if (column + 1 >= tabEnd) position += 1;
+      // In screen columns, so the stops stay where they are when scrolled.
+      const screenColumn = column + leftColumn;
+      const tabEnd = (Math.floor(screenColumn / tabstop) + 1) * tabstop;
+      if (screenColumn + 1 >= tabEnd) position += 1;
       closeRun(at);
       if (drawn === " ") closeOverlay();
       else addOverlay(column, drawn, highlight, at);
@@ -655,8 +718,8 @@ export function classifyRow(input: ClassifyRowInput): {
 
     const length = clusterLength(text, position);
     const cluster = text.slice(position, position + length);
-    const spelled = spelledForms(cluster).find((form) => cellsSpell(cells, column, form));
-    if (spelled !== undefined) {
+    const spelled = spellingOf(cluster);
+    if (spelled !== null && cellsSpell(cells, column, spelled)) {
       // The file's own character, in the only form Neovim can draw it. Monaco
       // draws its own, so nothing is reported.
       position += length;
@@ -668,7 +731,7 @@ export function classifyRow(input: ClassifyRowInput): {
 
     // Something else was drawn where the buffer has this character.
     position += length;
-    covered = { at, untilColumn: column + cellWidth(cluster) };
+    covered = { at, untilColumn: column + cellsOf(cluster, column + leftColumn, tabstop) };
     closeRun(at);
     if (drawn === " ") {
       closeOverlay();

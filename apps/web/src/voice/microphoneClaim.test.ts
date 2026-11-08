@@ -1,30 +1,27 @@
-// Entry point: microphoneClaim.ts, the admission rule both composer starts use: the phone
-// (ThreadVoicePanel) and the dictation button (DictationMicrophoneButton).
-import { SymmetriaDictationSession } from "@symmetria/broker-contract";
-import * as Schema from "effect/Schema";
+// Entry point: microphoneClaim.ts, the admission rule both microphone starts use: the phone
+// (ThreadVoicePanel) and dictation (startDictation, behind every dictation entry point).
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { useDictationSessionStore } from "../symmetria/dictationSessionStore";
+import {
+  type DictationRecordingSession,
+  useDictationSessionStore,
+} from "../dictation/dictationSessionStore";
 import { claimMicrophone, microphoneBlocker, resetMicrophoneClaimForTest } from "./microphoneClaim";
 
-const recordingSession = Schema.decodeUnknownSync(SymmetriaDictationSession)({
-  protocolVersion: { major: 1, minor: 5 },
+const recordingSession: DictationRecordingSession = {
   sessionId: "stt_microphone_claim_test",
-  target: { kind: "thread", environmentId: "env_local", threadId: "thr_claim_test" },
-  source: "shell",
-  phase: "recording",
   mode: "inject",
-  projectName: null,
-  startedAt: "2026-11-08T12:00:00.000Z",
-  elapsedMs: 0,
-  audioLevel: null,
-  graceRemainingMs: null,
-  presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
-});
+  startedAt: 0,
+  bankedMs: 0,
+  runningSince: 0,
+  level: 0,
+  sampledAt: 0,
+  thread: null,
+};
 
 afterEach(() => {
   resetMicrophoneClaimForTest();
-  useDictationSessionStore.setState({ session: null, bridgeAvailable: false, error: null });
+  useDictationSessionStore.setState({ session: null });
 });
 
 describe("microphone claim", () => {
@@ -48,13 +45,20 @@ describe("microphone claim", () => {
     expect(microphoneBlocker("dictation")).toBeNull();
   });
 
-  it("microphone claim refuses a call while a shell dictation session records", () => {
+  it("microphone claim refuses a call while a dictation session records", () => {
     useDictationSessionStore.setState({ session: recordingSession });
     expect(microphoneBlocker("call")).toMatch(/dictation/i);
     expect(claimMicrophone("call")).toBeNull();
 
     useDictationSessionStore.setState({ session: null });
     expect(microphoneBlocker("call")).toBeNull();
+  });
+
+  it("microphone claim refuses a call while a dictation session is paused", () => {
+    // A paused recording keeps its microphone open for resume.
+    useDictationSessionStore.setState({ session: { ...recordingSession, runningSince: null } });
+    expect(microphoneBlocker("call")).toMatch(/dictation/i);
+    expect(claimMicrophone("call")).toBeNull();
   });
 
   it("microphone claim refuses a call while dictation is reserving the microphone", () => {

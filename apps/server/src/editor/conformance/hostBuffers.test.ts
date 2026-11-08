@@ -1,5 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off - locates the real nvim binary before spawning it.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -8,27 +6,12 @@ import * as Layer from "effect/Layer";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { NvimBridge } from "../NvimBridge.ts";
+import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
- * The host plugin's buffer module, run rather than read.
- *
- * `Manager.test.ts` drives the manager against a fake Neovim that matches on
- * the string `mesura.open` and answers with a made-up buffer number. That
- * proves the manager sends the right call; it proves nothing at all about what
- * the call does, because no Lua runs. This file is the other half, and it is
- * the half where the mistakes were: the first version looked buffers up with
- * `vim.fn.bufnr`, which treats its argument as a Vim pattern whenever nothing
- * matches exactly — which is always, the first time a path is opened.
+ * The host plugin's buffer module, run in a real Neovim. `Manager.test.ts` fakes `mesura.open`
+ * and runs no Lua, so only this file proves what the call does.
  */
-
-const nvimAvailable = (() => {
-  try {
-    NodeChildProcess.execFileSync("nvim", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -45,11 +28,7 @@ const withHost = <A>(body: (bridge: NvimBridge.Session, root: string) => Effect.
 const lua = (bridge: NvimBridge.Session, code: string, args: ReadonlyArray<unknown> = []) =>
   bridge.request("nvim_exec_lua", [code, [...args]]);
 
-if (!nvimAvailable) {
-  it("skips the host-buffer tests, because nvim is not on PATH", () => {
-    assert.isFalse(nvimAvailable);
-  });
-}
+if (!nvimAvailable) reportMissingNvim("host-buffer harness");
 
 if (nvimAvailable)
   it.layer(layer, { excludeTestServices: true })("the host's buffers", (it) => {
@@ -108,14 +87,10 @@ if (nvimAvailable)
     it.effect("looks a buffer up by its exact name, not by pattern", () =>
       withHost((bridge, root) =>
         Effect.gen(function* () {
-          // `vim.fn.bufnr(name)` falls back to Vim-pattern matching when no
-          // buffer matches exactly — which is always the case the first time a
-          // path is opened. Measured, with a real Neovim: with a buffer named
-          // `…/plain.ts` open, `bufnr("…/plain")` answers that buffer rather
-          // than -1. So a repository holding both `README` and `README.md` —
-          // or `index` and `index.ts` — is enough for a lookup to hand back
-          // the wrong file under the right name, and the developer edits one
-          // believing it is the other.
+          // `vim.fn.bufnr(name)` falls back to Vim-pattern matching when no buffer matches exactly,
+          // which is always the case on a path's first open. Measured: with `…/plain.ts` open,
+          // `bufnr("…/plain")` answers that buffer, not -1. So `README` beside `README.md` would
+          // open the wrong file under the right name.
           const extended = `${root}/README.md`;
           const bare = `${root}/README`;
 
@@ -204,8 +179,10 @@ if (nvimAvailable)
           yield* bridge.type("<Esc>");
           yield* lua(bridge, "vim.cmd('write')");
 
+          // The plugin also pushes the cursor on this channel; only writes count.
+          const seen = (yield* lua(bridge, "return _G.mesura_seen")) as ReadonlyArray<string>;
           assert.deepStrictEqual(
-            yield* lua(bridge, "return _G.mesura_seen"),
+            seen.filter((entry) => entry.startsWith("mesura:write:")),
             [`mesura:write:${path}`],
             "one request, naming the file",
           );

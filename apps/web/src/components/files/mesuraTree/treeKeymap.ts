@@ -7,14 +7,9 @@ import type { KeyInput } from "./keyInput";
 export type TreeKeyInput = KeyInput;
 
 /**
- * The file manager's tree bindings, driven through its command port.
- *
- * Mesura Code owns every chord, so the file manager's window-level dispatcher
- * is not mounted; this table is what its `TREE` rows say, minus the ones that
- * belong to the file manager alone (tabs, hidden files, help). `Ctrl+D` and
- * `Ctrl+U` are listed even though the chat timeline's capture-phase listener
- * takes them first today; the pane-focus work scopes that listener, and the
- * tree then gets them with no change here.
+ * The file manager's `TREE` bindings minus its own (tabs, hidden files, help); its
+ * window-level dispatcher is not mounted. The chat timeline's capture-phase listener
+ * still takes `Ctrl+D` and `Ctrl+U` first; once pane focus scopes it, they reach the tree.
  */
 const BINDINGS: ReadonlyArray<Binding<TreeCommand>> = [
   { keys: ["j", "arrowdown"], mods: [""], command: "down" },

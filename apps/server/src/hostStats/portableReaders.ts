@@ -49,12 +49,14 @@ export const readPortableCpu = Effect.gen(function* () {
 }).pipe(withNullsOnFailure<PortableCpuReading>({ cpuCount: null, cpuCounters: null }));
 
 /** Windows always reports a load of 0, which would read as idle, so it is null there. */
-export const readPortableLoad = (platform: NodeJS.Platform) =>
-  Effect.gen(function* () {
+export const readPortableLoad = Effect.fn(
+  function* (platform: NodeJS.Platform) {
     if (platform === "win32") return { load1: null };
     const load1 = (yield* HostOs).loadavg()[0];
     return { load1: load1 !== undefined && Number.isFinite(load1) ? load1 : null };
-  }).pipe(withNullsOnFailure<{ readonly load1: number | null }>({ load1: null }));
+  },
+  withNullsOnFailure<{ readonly load1: number | null }>({ load1: null }),
+);
 
 export const readPortableMemory = Effect.gen(function* () {
   const hostOs = yield* HostOs;

@@ -3,18 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { MonacoFileModelRegistry, RETAINED_PROJECT_LIMIT } from "./monacoFileModelRegistry.ts";
 
 /**
- * Where a file's undo stack lives while nobody is looking at it.
- *
- * It lives in the Monaco model, and the panel that owns the model unmounts for
- * three ordinary things: opening Settings, switching to a thread in another
- * project, and the spinner shown while a file is read. The cache was already
- * hoisted once, from the surface to the panel, to survive the third. This is
- * the same move again, out of React entirely, because the first two are routes
- * and no component survives a route.
- *
- * What the registry has to get right is the lifetime: a project nobody is
- * looking at is kept, and kept bounded, and a project somebody *is* looking at
- * is never thrown away underneath them.
+ * The undo stack lives in the Monaco model, and the panel owning it unmounts on route changes
+ * (Settings, a thread in another project) and on the read spinner. The registry must keep idle
+ * projects, keep them bounded, and never drop a project somebody is looking at.
  */
 
 interface FakeProject {
