@@ -124,20 +124,98 @@ describe("software keyboard detection", () => {
   });
 
   // regression: Chrome on Android sent on Enter, because `resizes-content` shrinks both heights
-  it("detects a keyboard that resizes the layout viewport", () => {
-    const { store, win, resize } = fixture({ native: true });
-    const resizeLayout = (height: number) => {
-      win.innerHeight = height;
-      resize(height);
-    };
-    const unsubscribe = store.subscribe(() => {});
-    resizeLayout(790);
-    expect(store.getSnapshot()).toBe(false);
-    resizeLayout(480);
-    expect(store.getSnapshot()).toBe(true);
-    resizeLayout(844);
-    expect(store.getSnapshot()).toBe(false);
-    unsubscribe();
+  describe("a keyboard that resizes the layout viewport", () => {
+    function layoutFixture(device: { touchOnly: boolean; editableFocused: boolean }) {
+      const parts = fixture({ native: true });
+      const { win, viewport } = parts;
+      const state = { ...device };
+      Object.assign(win, {
+        innerWidth: 390,
+        matchMedia: (query: string) => ({
+          matches: query === "(pointer: coarse)" ? state.touchOnly : !state.touchOnly,
+        }),
+        document: {
+          get activeElement() {
+            return state.editableFocused ? { isContentEditable: true, tagName: "DIV" } : null;
+          },
+        },
+      });
+      // Chrome on Android resizes the layout and visual viewports together.
+      let layoutWidth = 390;
+      const resizeLayout = (height: number, width = layoutWidth) => {
+        layoutWidth = width;
+        Object.assign(win, { innerHeight: height, innerWidth: width });
+        Object.assign(viewport, { height, width, scale: 1 });
+        viewport.dispatchEvent(new Event("resize"));
+      };
+      return { ...parts, state, resizeLayout };
+    }
+
+    it("opens and closes with the layout height on a touch device", () => {
+      const { store, resizeLayout } = layoutFixture({ touchOnly: true, editableFocused: true });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(790);
+      expect(store.getSnapshot()).toBe(false);
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      resizeLayout(844);
+      expect(store.getSnapshot()).toBe(false);
+      unsubscribe();
+    });
+
+    it("ignores a shorter desktop browser window", () => {
+      const { store, resizeLayout } = layoutFixture({ touchOnly: false, editableFocused: true });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(600);
+      expect(store.getSnapshot()).toBe(false);
+      unsubscribe();
+    });
+
+    it("takes a split-screen resize without focus as the new closed height", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: false,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(500);
+      expect(store.getSnapshot()).toBe(false);
+      state.editableFocused = true;
+      resizeLayout(500);
+      expect(store.getSnapshot()).toBe(false);
+      resizeLayout(250);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("stays open through a rotation until the height grows back", () => {
+      const { store, resizeLayout } = layoutFixture({ touchOnly: true, editableFocused: true });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      resizeLayout(200, 844);
+      expect(store.getSnapshot()).toBe(true);
+      resizeLayout(390, 844);
+      expect(store.getSnapshot()).toBe(false);
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("stays open through a pinch zoom", () => {
+      const { store, win, viewport, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      Object.assign(viewport, { width: 195, height: 240, scale: 2 });
+      viewport.dispatchEvent(new Event("resize"));
+      expect(win.innerHeight).toBe(480);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
   });
 
   it("bypasses both native geometry and viewport detection on desktop", () => {
