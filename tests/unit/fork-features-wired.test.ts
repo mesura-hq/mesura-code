@@ -265,17 +265,18 @@ it("orders the active sidebar list through the fork's sort setting", () => {
   );
 });
 
-// No build or behaviour test knows the order of the four footer controls: each renders anywhere.
+// No build or behaviour test knows the order of the five footer controls: each renders anywhere.
 // A sync once moved the attach button out of this group and separated the microphone from send.
 it("renders the composer footer controls in one group, in order", () => {
   const composer = read("apps/web/src/components/chat/ChatComposer.tsx");
-  // The right-hand footer now owns the order. The extracted primary component
-  // supplies send, while the parent supplies context, attach and dictation.
+  // The meter is shared with the collapsed composer. Check its rendered element
+  // here; looking for its inline JSX rejected the shared meter after the dev sync.
   const group = between(composer, 'data-chat-composer-actions="right"', "</div>");
 
   const row = [
-    ["context meter", "<ContextWindowMeter"],
+    ["context meter", "{contextWindowMeterElement}"],
     ["attach button", "{composerAttachButton}"],
+    ["voice call", "{voiceConversationControl}"],
     ["dictation microphone", "{dictationStartControl}"],
     ["send button", "<ComposerFooterPrimaryActions"],
   ] as const;
@@ -288,11 +289,16 @@ it("renders the composer footer controls in one group, in order", () => {
     assert.isAbove(
       index,
       previousIndex,
-      `the composer footer reads ${label} before ${previousLabel}; the row must read context, attach, microphone, send`,
+      `the composer footer reads ${label} before ${previousLabel}; the row must read context, attach, voice, microphone, send`,
     );
     previousIndex = index;
     previousLabel = label;
   }
+  assert.match(
+    composer,
+    /const contextWindowMeterElement =[\s\S]*?<ContextWindowMeter/,
+    "the shared context meter no longer renders the meter component",
+  );
   assert.include(
     composer,
     'import { ComposerFooterPrimaryActions } from "./ComposerFooterControls";',
