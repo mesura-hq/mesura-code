@@ -943,6 +943,63 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  for (const spokenText of ["What carries the audio?", "/compact", "/logout"]) {
+    effectIt.effect(
+      `persists the spoken request and projects voice context only for the provider: ${spokenText}`,
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* Effect.promise(() => createHarness());
+          const sent = yield* Deferred.make<void>();
+          harness.sendTurn.mockImplementation(() =>
+            Effect.succeed({
+              threadId: ThreadId.make("thread-1"),
+              turnId: asTurnId("turn-1"),
+            }).pipe(Effect.tap(() => Deferred.succeed(sent, undefined))),
+          );
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-voice-context"),
+            threadId: ThreadId.make("thread-1"),
+            message: {
+              messageId: asMessageId("spoken-message"),
+              role: "user",
+              text: spokenText,
+              attachments: [],
+              context: {
+                version: 1,
+                records: [],
+                voice: {
+                  mode: "research",
+                  handsFree: true,
+                  promptEffort: "ultrathink",
+                  transcript: [{ role: "assistant", text: "We are discussing voice." }],
+                },
+              },
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          });
+          yield* Deferred.await(sent);
+          yield* Effect.promise(() => harness.drain());
+          const input = (
+            harness.sendTurn.mock.calls[0]?.[0] as Parameters<ProviderServiceShape["sendTurn"]>[0]
+          ).input;
+          expect(input).toMatch(/^Ultrathink:/);
+          expect(input).toContain("Research mode:");
+          expect(input).toContain("We are discussing voice.");
+          expect(input).toContain(spokenText);
+          const snapshot = yield* Effect.promise(() => harness.readModel());
+          const message = snapshot.threads
+            .find((thread) => thread.id === "thread-1")
+            ?.messages.find((message) => message.id === "spoken-message");
+          expect(message?.text).toBe(spokenText);
+          expect(message?.context?.voice?.mode).toBe("research");
+          expect(message?.context?.voice?.handsFree).toBe(true);
+        }),
+    );
+  }
+
   effectIt.effect("projects inline context before sending the provider turn", () =>
     Effect.gen(function* () {
       const harness = yield* Effect.promise(() => createHarness());

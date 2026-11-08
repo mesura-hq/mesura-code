@@ -1062,9 +1062,36 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (Option.isNone(existingRow)) {
             return;
           }
+          // mesura: a checkpoint can finish after the next turn starts. Moving latestTurnId back
+          // to the older turn regressed every client's thread state, and made voice report the
+          // newer request as replaced. Turn order comes from the server: checkpoint counts are
+          // assigned in order, and a latest turn without a checkpoint started after every
+          // checkpointed turn, because only a session start makes such a turn latest.
+          // Rejected: comparing requestedAt. It is the sending client's clock, so a second
+          // client running behind made an older turn look newer and kept it latest even after
+          // the newer turn's own checkpoint.
+          // This upstream file moves often (35 upstream commits in three months); the change stays
+          // in this one branch so a merge conflict stays local. Regression tests: "keeps a newer
+          // latest turn when an older turn checkpoint lands late" and "orders a late checkpoint by
+          // server turn order when client clocks disagree".
+          const currentLatestTurnId = existingRow.value.latestTurnId;
+          let keepsNewerLatestTurn = false;
+          if (currentLatestTurnId !== null && currentLatestTurnId !== event.payload.turnId) {
+            const currentLatestTurn = yield* projectionTurnRepository.getByTurnId({
+              threadId: event.payload.threadId,
+              turnId: currentLatestTurnId,
+            });
+            // A latest turn with no projected row cannot be ordered; the checkpoint wins, as upstream.
+            keepsNewerLatestTurn = Option.match(currentLatestTurn, {
+              onNone: () => false,
+              onSome: (turn) =>
+                turn.checkpointTurnCount === null ||
+                turn.checkpointTurnCount > event.payload.checkpointTurnCount,
+            });
+          }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            latestTurnId: event.payload.turnId,
+            latestTurnId: keepsNewerLatestTurn ? currentLatestTurnId : event.payload.turnId,
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);
@@ -1429,9 +1456,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "thread.session-set": {
           const turnId = event.payload.session.activeTurnId;
           if (turnId === null || event.payload.session.status !== "running") {
+            // Provider initialization can emit ready before a queued turn starts.
+            // Clearing pending starts on ready lost message-to-turn correlation after access changes.
             if (
-              (event.payload.session.status === "ready" &&
-                event.commandId?.startsWith("server:provider-session-set:") === true) ||
               event.payload.session.status === "error" ||
               event.payload.session.status === "stopped" ||
               event.payload.session.status === "interrupted"

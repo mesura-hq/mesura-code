@@ -46,6 +46,55 @@ the oldest queued message now. Change `thread.steerQueuedMessage` in
 **Settings → Keybindings** to use another shortcut. It leaves the current draft
 in the composer and waits if the agent needs an approval or an answer.
 
+## Talk to an agent
+
+On web and desktop, open an existing thread and select **Talk to agent** above
+the conversation, or use the voice-call control between attachments and dictation.
+Both controls start and end the same call.
+A call opens in **Call** view. It shows your words and the voice's spoken captions.
+Use **Split** to see the captions and the working agent together, or **Work** to see
+the normal thread. The voice can rephrase the working agent's written answer.
+Captions remain available after the call ends. Starting another call, leaving the
+thread, or refreshing clears them. For a new thread, send its first message before starting a call.
+Choose the agent, effort, and access mode in the composer. Voice requests use
+those selections and leave any unsent text or attachments in the composer.
+Use **Voice settings** to choose a voice, language, or conversation mode:
+
+- **Discuss this repository** answers questions about your work.
+- **Research a topic or client** checks project material and current sources.
+- **Learn from this repository** uses recall questions and Learning App records when configured.
+
+Choose short spoken answers to get one main point and one question at a time.
+In learning mode, enter a Learning App space or ask the agent to help you choose.
+An environment admin can save an OpenAI API key there. Voice uses separate API
+billing; the thread's existing provider handles the agent work.
+
+Calls last up to 15 minutes. You can mute the microphone or end the call at any
+time. Speaking over the voice interrupts its speech. Use the thread's normal
+Stop action to stop the agent's task. Follow-up voice requests wait for the
+current task to finish. Resolve approvals and requested input in the thread.
+Use **Clear follow-ups** to remove waiting requests while the active task continues.
+The call keeps at most eight waiting requests. If the queue or its text exceeds
+its limit, the call removes waiting requests and asks you to start another call.
+The active task continues. The call does not send more requests until you restart it.
+The voice confirms when the thread accepts your request, before the agent's first
+progress update. The agent then announces its first action. During longer tasks,
+the call speaks brief public progress updates and can answer status questions.
+
+Changing threads or ending the call clears voice requests that did not reach the
+agent. Requests already sent appear as your spoken words, with their answers in the
+thread. Voice instructions stay separate from the displayed message. The voice
+paraphrases the agent's answer; use the written answer for exact code and details.
+
+For a phone listening test, use the HTTPS web address in the foreground. The
+native mobile client does not include this call control. Background and locked
+screen calls are not supported by this prototype.
+
+Learning mode uses repository material and can use the Learning App's `learn`
+command when the environment has its CLI and credentials. Without those
+credentials, the agent can discuss the repository but cannot read or save your
+learning records.
+
 ## Queue messages offline on mobile
 
 Mobile keeps local copies of draft attachments, so you can preview them and queue

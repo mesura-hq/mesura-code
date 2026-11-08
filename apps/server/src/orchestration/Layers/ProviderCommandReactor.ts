@@ -13,6 +13,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+import { voiceAgentPrompt } from "@t3tools/shared/voice-conversation-prompts";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
@@ -1271,6 +1272,8 @@ const make = Effect.gen(function* () {
       );
 
     const authCommandHandled = yield* Effect.gen(function* () {
+      // Spoken slash commands remain conversation data; only typed commands use native shortcuts.
+      if (message.context?.voice) return false;
       // Native account commands belong to the thread's existing provider session.
       const instanceId =
         thread.session?.providerInstanceId ??
@@ -1323,7 +1326,7 @@ const make = Effect.gen(function* () {
 
     yield* ensureThreadWorktree(thread);
 
-    const isCompactCommand = isCompactCommandMessage(message);
+    const isCompactCommand = !message.context?.voice && isCompactCommandMessage(message);
     if (!hasOtherUserMessages && !isCompactCommand) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
@@ -1469,12 +1472,15 @@ const make = Effect.gen(function* () {
       turnsAfterCompaction.set(event.payload.threadId, queued);
       return;
     }
+    const projectedText = projectComposerContextForProvider({
+      text: message.text,
+      records: message.context?.records ?? [],
+    });
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
-      messageText: projectComposerContextForProvider({
-        text: message.text,
-        records: message.context?.records ?? [],
-      }),
+      messageText: message.context?.voice
+        ? voiceAgentPrompt(projectedText, message.context.voice)
+        : projectedText,
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }

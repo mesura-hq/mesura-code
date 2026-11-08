@@ -164,6 +164,7 @@ export function mapRemoteEnvironmentError(
       });
     case "RemoteEnvironmentAuthInvalidJsonError":
     case "RemoteEnvironmentAuthUndeclaredStatusError":
+    case "VoiceConversationError":
       return new ConnectionTransientError({
         reason: "remote-unavailable",
         detail: error.message,

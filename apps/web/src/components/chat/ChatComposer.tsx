@@ -1159,13 +1159,11 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compactDisabled: boolean;
   compactDisabledReason: string | null;
   /**
-   * The four footer controls render here, in one place, so their order is read
-   * off one list instead of being split across this group and its caller.
-   * Both nodes below sit between the context meter and send deliberately: the
-   * row reads context, attach, microphone, send.
+   * Keep the order in one place: context, attach, voice call, dictation, send.
    */
   showAttachControl: boolean;
   onAttachFiles: () => void;
+  voiceConversationControl?: ReactNode;
   dictationStartControl?: ReactNode;
 }) {
   return (
@@ -1200,6 +1198,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           <TooltipPopup>Attach files</TooltipPopup>
         </Tooltip>
       ) : null}
+      {props.voiceConversationControl}
       {props.dictationStartControl}
       <ComposerPrimaryActions
         compact={props.compact}
@@ -1364,6 +1363,7 @@ export interface ChatComposerProps {
   keybindings: ResolvedKeybindingsConfig;
   terminalOpen: boolean;
   gitCwd: string | null;
+  voiceConversationControl?: ReactNode;
   dictationStartControl?: ReactNode;
   /**
    * Rendered as the last child of `ComposerBanner.Column`, so neighboring tabs
@@ -1471,6 +1471,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     keybindings,
     terminalOpen,
     gitCwd,
+    voiceConversationControl,
     dictationStartControl,
     dictationStrip,
     pullRequestProjectId,
@@ -6455,6 +6456,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   <ComposerFooterPrimaryActions
                     showAttachControl={showComposerAttachAction}
                     onAttachFiles={openAttachmentPicker}
+                    voiceConversationControl={voiceConversationControl}
                     dictationStartControl={dictationStartControl}
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
                     activeContextWindow={

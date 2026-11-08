@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { VoiceAgentContext } from "./voiceConversation.ts";
 
 import {
   ForwardCompatibleArray,
@@ -259,6 +260,7 @@ const COMPOSER_CONTEXT_MAX_SERIALIZED_CHARS = 16_000_000;
 
 /** Structured context riding on a user message. Undecodable records are dropped, not fatal. */
 export const OrchestrationMessageContext = Schema.Struct({
+  voice: Schema.optional(VoiceAgentContext),
   version: Schema.Literal(1),
   records: Schema.Array(Schema.Unknown)
     .check(

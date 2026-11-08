@@ -24,9 +24,10 @@ import {
   type AssistantCitation,
   type ApprovalRequestId,
   type ChatFileAttachment,
+  CommandId,
   DEFAULT_MODEL,
   type EnvironmentId,
-  type MessageId,
+  MessageId,
   type ModelSelection,
   type ProjectScript,
   type ProjectId,
@@ -374,6 +375,9 @@ import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import { resolveComposerTimelineInset, resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import type { VoiceCallLayout } from "../voice/VoiceCallTranscript";
+import { ThreadVoicePanel } from "../voice/ThreadVoicePanel";
+import type { VoiceAgentRequest } from "@t3tools/client-runtime/voice-conversation/controller";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
 import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
@@ -1664,6 +1668,21 @@ export default function ChatView(props: ChatViewProps) {
   const pasteAsTextShortcutUntilRef = useRef(0);
   const [restingComposerControlsHost, setRestingComposerControlsHost] =
     useState<HTMLDivElement | null>(null);
+  const [voiceComposerControlsHost, setVoiceComposerControlsHost] =
+    useState<HTMLSpanElement | null>(null);
+  const [voiceTranscriptHost, setVoiceTranscriptHost] = useState<HTMLDivElement | null>(null);
+  const [voiceLayoutState, setVoiceLayoutState] = useState<{
+    threadKey: string;
+    layout: VoiceCallLayout;
+  } | null>(null);
+  const voiceLayout =
+    voiceLayoutState?.threadKey === routeThreadKey ? voiceLayoutState.layout : "work";
+  const reportVoiceLayout = useCallback(
+    (layout: VoiceCallLayout) => {
+      setVoiceLayoutState({ threadKey: routeThreadKey, layout });
+    },
+    [routeThreadKey],
+  );
   const [restingComposerControlsVisible, setRestingComposerControlsVisible] = useState(false);
   const citeAssistantText = useCallback(
     (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => {
@@ -7143,6 +7162,87 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const dispatchVoiceRequest = async (request: VoiceAgentRequest, isCallActive: () => boolean) => {
+    if (
+      !isCallActive() ||
+      !activeThread ||
+      !isServerThread ||
+      !clientSettingsHydrated ||
+      threadDetailLoading ||
+      isSendBusy ||
+      isConnecting ||
+      isRevertingCheckpoint ||
+      sendInFlightRef.current
+    ) {
+      throw new Error("The thread is not ready for a voice request. Try again when it is ready.");
+    }
+    const context = composerRef.current?.getSendContext();
+    if (!context?.providerAvailable) {
+      throw new Error("Select an available agent in the composer.");
+    }
+    const threadId = activeThread.id;
+    const createdAt = new Date().toISOString();
+    // Keep the spoken text verbatim. Voice instructions travel as structured context.
+    sendInFlightRef.current = true;
+    beginLocalDispatch();
+    try {
+      // The composer keeps model, effort, and access changes local until a turn starts.
+      // Use its normal persistence path so voice and typed requests have the same settings.
+      const settingsResult = await persistThreadSettingsForNextTurn({
+        threadId,
+        createdAt,
+        modelSelection: context.selectedModelSelection,
+        ...(localCheckoutBranchMismatch
+          ? { branch: localCheckoutBranchMismatch.currentBranch }
+          : {}),
+        runtimeMode,
+        interactionMode: context.interactionMode,
+      });
+      if (settingsResult._tag === "Failure") throw squashAtomCommandFailure(settingsResult);
+      if (!isCallActive()) throw new Error("The call ended before the request was sent.");
+      const result = await startThreadTurn({
+        environmentId,
+        input: {
+          threadId,
+          commandId: CommandId.make(request.commandId),
+          message: {
+            messageId: MessageId.make(request.messageId),
+            role: "user",
+            text: request.text,
+            context: {
+              version: 1,
+              records: [],
+              voice: {
+                ...request.context,
+                promptEffort: resolvePromptInjectedEffort(
+                  getProviderModelCapabilities(
+                    context.selectedProviderModels,
+                    context.selectedModel,
+                    context.selectedProvider,
+                  ),
+                  context.selectedPromptEffort,
+                ),
+              },
+            },
+            attachments: [],
+          },
+          modelSelection: context.selectedModelSelection,
+          runtimeMode,
+          interactionMode: context.interactionMode,
+          createdAt,
+        },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      clearUsageLimitsFor(routeThreadKey);
+      acknowledgeActiveThreadWoke();
+    } catch (error) {
+      resetLocalDispatch();
+      throw error;
+    } finally {
+      sendInFlightRef.current = false;
+    }
+  };
+
   const onCompactContext = async () => {
     if (compactDisabled || !activeThread || !clientSettingsHydrated || sendInFlightRef.current) {
       return;
@@ -9538,11 +9638,28 @@ export default function ChatView(props: ChatViewProps) {
           />
         </WorkspacePageHeader>
 
+        {/* Keep voice below the header: the fixed window controls overlap a panel above ChatView. */}
+        {isServerThread && activeThreadRef ? (
+          <ThreadVoicePanel
+            key={`${activeThreadRef.environmentId}:${activeThreadRef.threadId}`}
+            threadRef={activeThreadRef}
+            dispatchRequest={dispatchVoiceRequest}
+            composerControlsHost={voiceComposerControlsHost}
+            transcriptHost={voiceTranscriptHost}
+            bottomInset={composerTimelineInset}
+            layout={voiceLayout}
+            onLayoutChange={reportVoiceLayout}
+          />
+        ) : null}
+
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
           <div
-            className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+            className={cn(
+              "relative flex min-h-0 min-w-0 flex-1 flex-col",
+              voiceLayout === "split" && "lg:flex-row",
+            )}
             data-chat-workspace-drop-target="true"
             onDragEnter={workspaceFileDropHandlers.onDragEnter}
             onDragOver={workspaceFileDropHandlers.onDragOver}
@@ -9579,8 +9696,30 @@ export default function ChatView(props: ChatViewProps) {
                 }}
               />
             </div>
-            {/* Messages Wrapper */}
-            <div className="relative flex min-h-0 flex-1 flex-col bg-background">
+            <div
+              ref={setVoiceTranscriptHost}
+              className={
+                voiceLayout === "work"
+                  ? "hidden"
+                  : "relative flex min-h-0 min-w-0 flex-1 flex-col bg-background"
+              }
+            />
+            {/* Keep the working timeline mounted so call views preserve its scroll and work state. */}
+            <div
+              data-voice-work-output
+              inert={voiceLayout === "call"}
+              aria-hidden={voiceLayout === "call"}
+              className={cn(
+                "relative flex min-h-0 min-w-0 flex-1 flex-col bg-background",
+                voiceLayout === "call" && "pointer-events-none invisible absolute inset-0",
+                voiceLayout === "split" && "border-t border-border lg:border-t-0 lg:border-l",
+              )}
+            >
+              {voiceLayout === "split" && (
+                <div className="shrink-0 border-b border-border px-5 py-3 text-xs font-medium text-muted-foreground">
+                  Working agent <span className="ml-2 font-normal">Written output</span>
+                </div>
+              )}
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
                 pendingUserInput={paintOnlyDisplayedTimeline ? null : inlinePendingUserInput}
@@ -9838,6 +9977,11 @@ export default function ChatView(props: ChatViewProps) {
                             keybindings={keybindings}
                             terminalOpen={Boolean(terminalUiState.terminalOpen)}
                             gitCwd={gitCwd}
+                            voiceConversationControl={
+                              isServerThread ? (
+                                <span ref={setVoiceComposerControlsHost} className="contents" />
+                              ) : undefined
+                            }
                             dictationStartControl={DICTATION_START_CONTROL}
                             dictationStrip={dictationStrip}
                             pullRequestProjectId={

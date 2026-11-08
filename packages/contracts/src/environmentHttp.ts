@@ -45,6 +45,15 @@ import {
   PullRequestUnavailableError,
 } from "./pullRequest.ts";
 import {
+  VoiceConversationAcknowledgement,
+  VoiceConversationConfigureInput,
+  VoiceConversationCreateInput,
+  VoiceConversationCreateResult,
+  VoiceConversationHttpErrors,
+  VoiceConversationSessionInput,
+  VoiceConversationSettings,
+} from "./voiceConversation.ts";
+import {
   RelayCloudEnvironmentHealthRequest,
   RelayCloudMintCredentialRequest,
   RelayEnvironmentConfigRequest,
@@ -614,9 +623,58 @@ class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
     }),
   ) {}
 
+const VoiceConversationErrors = [
+  ...VoiceConversationHttpErrors,
+  EnvironmentScopeRequiredError,
+  EnvironmentInternalError,
+  EnvironmentResourceNotFoundError,
+] as const;
+
+class EnvironmentVoiceHttpApi extends HttpApiGroup.make("voice")
+  .add(
+    HttpApiEndpoint.get("settings", "/api/voice/settings", {
+      headers: OptionalBearerHeaders,
+      success: VoiceConversationSettings,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("configure", "/api/voice/settings", {
+      headers: OptionalBearerHeaders,
+      payload: VoiceConversationConfigureInput,
+      success: VoiceConversationSettings,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("create", "/api/voice/sessions", {
+      headers: OptionalBearerHeaders,
+      payload: VoiceConversationCreateInput,
+      success: VoiceConversationCreateResult,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("heartbeat", "/api/voice/sessions/heartbeat", {
+      headers: OptionalBearerHeaders,
+      payload: VoiceConversationSessionInput,
+      success: VoiceConversationAcknowledgement,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("end", "/api/voice/sessions/end", {
+      headers: OptionalBearerHeaders,
+      payload: VoiceConversationSessionInput,
+      success: VoiceConversationAcknowledgement,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
-  .add(EnvironmentConnectHttpApi) {}
+  .add(EnvironmentConnectHttpApi)
+  .add(EnvironmentVoiceHttpApi) {}

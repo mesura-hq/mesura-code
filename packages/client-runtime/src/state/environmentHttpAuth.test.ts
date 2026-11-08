@@ -34,6 +34,7 @@ import {
 import { fetchEnvironmentSessionState } from "./session.ts";
 import { fetchEnvironmentShellSnapshot } from "./shellSnapshotHttp.ts";
 import { fetchEnvironmentThreadSnapshot } from "./threadSnapshotHttp.ts";
+import { endVoiceConversation, voiceConversationSettings } from "../voiceConversationHttp.ts";
 
 const TARGET = new RelayConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -180,6 +181,25 @@ const LOADERS: ReadonlyArray<{
   >;
 }> = [
   {
+    name: "voice settings",
+    method: "GET",
+    path: "/api/voice/settings",
+    response: {
+      configured: true,
+      canConfigure: false,
+      model: "gpt-live-1",
+      maxDurationSeconds: 900,
+    },
+    load: (input: HttpInput) =>
+      voiceConversationSettings(input.prepared).pipe(
+        Effect.provideService(ManagedRelayDpopSigner, Option.getOrThrow(input.signer)),
+        Effect.provideService(
+          RemoteEnvironmentAuthorization,
+          Option.getOrThrow(input.remoteAuthorization),
+        ),
+      ),
+  },
+  {
     name: "PR diff",
     method: "POST",
     path: "/api/pull-requests/diff",
@@ -215,6 +235,32 @@ const LOADERS: ReadonlyArray<{
 ];
 
 describe("authenticated environment HTTP requests", () => {
+  it.effect.each([400, 404, 409, 502, 503, 504] as const)(
+    "preserves a declared voice failure with status %s through the authenticated client",
+    (status) =>
+      Effect.gen(function* () {
+        const expected = {
+          _tag: "VoiceConversationError",
+          status,
+          message: "The voice operation was rejected.",
+        };
+        const harness = makeHarness(() => Response.json(expected, { status }));
+        const error = yield* endVoiceConversation(PREPARED, "voice-session-0001").pipe(
+          Effect.provideService(ManagedRelayDpopSigner, Option.getOrThrow(harness.input.signer)),
+          Effect.provideService(RemoteEnvironmentAuthorization, harness.remoteAuthorization),
+          Effect.provide(harness.httpLayer),
+          Effect.flip,
+        );
+        expect(error).toMatchObject(expected);
+        expect(harness.calls).toHaveLength(1);
+        expect(harness.calls[0]?.url).toBe(`${CURRENT_ORIGIN}/api/voice/sessions/end`);
+        const payload = yield* Effect.promise(() =>
+          new Response(harness.calls[0]?.init.body).json(),
+        );
+        expect(payload).toEqual({ sessionId: "voice-session-0001" });
+      }),
+  );
+
   it.effect.each(LOADERS)("rejects an invalid $name response", (loader) =>
     Effect.gen(function* () {
       const harness = makeHarness(() => Response.json({}));

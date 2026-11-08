@@ -2582,6 +2582,336 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("keeps a newer latest turn when an older turn checkpoint lands late", () =>
+    Effect.gen(function* () {
+      // A checkpoint can finish after the next turn starts. Moving latestTurnId back to the
+      // older turn made the voice controller report the newer request as replaced.
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-late-checkpoint");
+      const firstTurnId = TurnId.make("turn-late-checkpoint-first");
+      const olderTurnId = TurnId.make("turn-late-checkpoint-older");
+      const newerTurnId = TurnId.make("turn-late-checkpoint-newer");
+      let sequence = 0;
+      const metadata = (occurredAt: string) => {
+        sequence += 1;
+        return {
+          eventId: EventId.make(`evt-late-checkpoint-${sequence}`),
+          aggregateKind: "thread" as const,
+          aggregateId: threadId,
+          occurredAt,
+          commandId: CommandId.make(`cmd-late-checkpoint-${sequence}`),
+          causationEventId: null,
+          correlationId: CorrelationId.make(`cmd-late-checkpoint-${sequence}`),
+          metadata: {},
+        };
+      };
+      const appendSession = (
+        status: "running" | "ready",
+        activeTurnId: TurnId | null,
+        updatedAt: string,
+      ) =>
+        eventStore.append({
+          ...metadata(updatedAt),
+          type: "thread.session-set",
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status,
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId,
+              lastError: null,
+              updatedAt,
+            },
+          },
+        });
+      const appendCheckpoint = (turnId: TurnId, checkpointTurnCount: number, completedAt: string) =>
+        eventStore.append({
+          ...metadata(completedAt),
+          type: "thread.turn-diff-completed",
+          payload: {
+            threadId,
+            turnId,
+            checkpointTurnCount,
+            checkpointRef: CheckpointRef.make(
+              `refs/t3/checkpoints/thread-late-checkpoint/turn/${checkpointTurnCount}`,
+            ),
+            status: "ready",
+            files: [],
+            assistantMessageId: null,
+            completedAt,
+          },
+        });
+      const latestTurnId = Effect.gen(function* () {
+        yield* projectionPipeline.bootstrap;
+        const rows = yield* sql<{ readonly latestTurnId: string | null }>`
+          SELECT latest_turn_id AS "latestTurnId" FROM projection_threads WHERE thread_id = ${threadId}
+        `;
+        return rows[0]?.latestTurnId ?? null;
+      });
+
+      yield* eventStore.append({
+        ...metadata("2026-01-01T00:00:00.000Z"),
+        type: "thread.created",
+        payload: {
+          threadId,
+          projectId: ProjectId.make("project-late-checkpoint"),
+          title: "Late checkpoint",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      });
+      // A first checkpoint for a turn the thread never recorded still becomes the latest turn.
+      yield* appendCheckpoint(firstTurnId, 1, "2026-01-01T00:00:05.000Z");
+      assert.strictEqual(yield* latestTurnId, firstTurnId);
+
+      yield* appendSession("running", olderTurnId, "2026-01-01T00:00:10.000Z");
+      yield* appendSession("ready", null, "2026-01-01T00:00:20.000Z");
+      yield* appendSession("running", newerTurnId, "2026-01-01T00:00:21.000Z");
+      // The older turn's checkpoint lands while the newer turn runs.
+      yield* appendCheckpoint(olderTurnId, 2, "2026-01-01T00:00:20.000Z");
+      assert.strictEqual(yield* latestTurnId, newerTurnId);
+
+      // The newer turn's own checkpoint keeps it current, and a late repeat of the older
+      // checkpoint after the newer turn completed still cannot move the thread back.
+      yield* appendCheckpoint(newerTurnId, 3, "2026-01-01T00:00:40.000Z");
+      yield* appendSession("ready", null, "2026-01-01T00:00:40.000Z");
+      assert.strictEqual(yield* latestTurnId, newerTurnId);
+      yield* appendCheckpoint(olderTurnId, 2, "2026-01-01T00:00:20.000Z");
+      assert.strictEqual(yield* latestTurnId, newerTurnId);
+    }),
+  );
+
+  it.effect("orders a late checkpoint by server turn order when client clocks disagree", () =>
+    Effect.gen(function* () {
+      // requestedAt comes from each client's clock, so it cannot order turns. A second client
+      // whose clock runs 90 s behind starts the newer turn with the earlier timestamp.
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      let sequence = 0;
+      const appendFor = (threadId: ThreadId) => {
+        const metadata = (occurredAt: string) => {
+          sequence += 1;
+          return {
+            eventId: EventId.make(`evt-clock-skew-${sequence}`),
+            aggregateKind: "thread" as const,
+            aggregateId: threadId,
+            occurredAt,
+            commandId: CommandId.make(`cmd-clock-skew-${sequence}`),
+            causationEventId: null,
+            correlationId: CorrelationId.make(`cmd-clock-skew-${sequence}`),
+            metadata: {},
+          };
+        };
+        return {
+          created: (at: string) =>
+            eventStore.append({
+              ...metadata(at),
+              type: "thread.created",
+              payload: {
+                threadId,
+                projectId: ProjectId.make("project-clock-skew"),
+                title: "Clock skew",
+                modelSelection: {
+                  instanceId: ProviderInstanceId.make("codex"),
+                  model: "gpt-5-codex",
+                },
+                runtimeMode: "full-access",
+                branch: null,
+                worktreePath: null,
+                createdAt: at,
+                updatedAt: at,
+              },
+            }),
+          request: (messageId: string, clientCreatedAt: string) =>
+            Effect.gen(function* () {
+              yield* eventStore.append({
+                ...metadata(clientCreatedAt),
+                type: "thread.message-sent",
+                payload: {
+                  threadId,
+                  messageId: MessageId.make(messageId),
+                  role: "user",
+                  text: messageId,
+                  turnId: null,
+                  streaming: false,
+                  createdAt: clientCreatedAt,
+                  updatedAt: clientCreatedAt,
+                },
+              });
+              yield* eventStore.append({
+                ...metadata(clientCreatedAt),
+                type: "thread.turn-start-requested",
+                payload: {
+                  threadId,
+                  messageId: MessageId.make(messageId),
+                  runtimeMode: "full-access",
+                  createdAt: clientCreatedAt,
+                },
+              });
+            }),
+          session: (status: "running" | "ready", activeTurnId: TurnId | null, updatedAt: string) =>
+            eventStore.append({
+              ...metadata(updatedAt),
+              type: "thread.session-set",
+              payload: {
+                threadId,
+                session: {
+                  threadId,
+                  status,
+                  providerName: "codex",
+                  runtimeMode: "full-access",
+                  activeTurnId,
+                  lastError: null,
+                  updatedAt,
+                },
+              },
+            }),
+          checkpoint: (turnId: TurnId, checkpointTurnCount: number, completedAt: string) =>
+            eventStore.append({
+              ...metadata(completedAt),
+              type: "thread.turn-diff-completed",
+              payload: {
+                threadId,
+                turnId,
+                checkpointTurnCount,
+                checkpointRef: CheckpointRef.make(
+                  `refs/t3/checkpoints/${threadId}/turn/${checkpointTurnCount}`,
+                ),
+                status: "ready",
+                files: [],
+                assistantMessageId: null,
+                completedAt,
+              },
+            }),
+        };
+      };
+      const latestTurnId = (threadId: ThreadId) =>
+        Effect.gen(function* () {
+          yield* projectionPipeline.bootstrap;
+          const rows = yield* sql<{ readonly latestTurnId: string | null }>`
+            SELECT latest_turn_id AS "latestTurnId" FROM projection_threads WHERE thread_id = ${threadId}
+          `;
+          return rows[0]?.latestTurnId ?? null;
+        });
+      const first = TurnId.make("turn-clock-skew-first");
+      const second = TurnId.make("turn-clock-skew-second");
+      const unrecorded = TurnId.make("turn-clock-skew-unrecorded");
+      const history = (events: ReturnType<typeof appendFor>) => ({
+        startBoth: Effect.gen(function* () {
+          yield* events.created("2026-11-08T06:00:00.000Z");
+          yield* events.request("clock-skew-first-user", "2026-11-08T06:01:00.000Z");
+          yield* events.session("running", first, "2026-11-08T06:01:01.000Z");
+          yield* events.session("ready", null, "2026-11-08T06:01:30.000Z");
+          yield* events.request("clock-skew-second-user", "2026-11-08T06:00:31.000Z");
+          yield* events.session("running", second, "2026-11-08T06:01:32.000Z");
+        }),
+        // A function: each call appends a new event id.
+        lateFirstCheckpoint: () => events.checkpoint(first, 1, "2026-11-08T06:01:30.000Z"),
+        completeSecond: Effect.gen(function* () {
+          yield* events.session("ready", null, "2026-11-08T06:02:00.000Z");
+          yield* events.checkpoint(second, 2, "2026-11-08T06:02:00.000Z");
+        }),
+      });
+
+      // Projected live, one step at a time.
+      const liveThread = ThreadId.make("thread-clock-skew-live");
+      const live = history(appendFor(liveThread));
+      yield* live.startBoth;
+      assert.strictEqual(yield* latestTurnId(liveThread), second);
+      yield* live.lateFirstCheckpoint();
+      assert.strictEqual(yield* latestTurnId(liveThread), second);
+      yield* live.completeSecond;
+      assert.strictEqual(yield* latestTurnId(liveThread), second);
+      // A repeated older checkpoint after the newer turn completed cannot move it back.
+      yield* live.lateFirstCheckpoint();
+      assert.strictEqual(yield* latestTurnId(liveThread), second);
+      // A checkpoint for a turn with no projected row is ordered by its server checkpoint count.
+      const liveEvents = appendFor(liveThread);
+      yield* liveEvents.checkpoint(unrecorded, 3, "2026-11-08T05:00:00.000Z");
+      assert.strictEqual(yield* latestTurnId(liveThread), unrecorded);
+
+      // Replayed from the event store in one bootstrap, the same history ends the same way.
+      const replayThread = ThreadId.make("thread-clock-skew-replay");
+      const replay = history(appendFor(replayThread));
+      yield* replay.startBoth;
+      yield* replay.lateFirstCheckpoint();
+      yield* replay.completeSecond;
+      yield* replay.lateFirstCheckpoint();
+      assert.strictEqual(yield* latestTurnId(replayThread), second);
+    }),
+  );
+
+  it.effect("lets a checkpoint replace a latest turn whose projected row is missing", () =>
+    Effect.gen(function* () {
+      // Defined fallback of the late-checkpoint guard: a latest turn without a projected turn
+      // row cannot be ordered, so the checkpoint's turn becomes latest, as upstream did.
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-missing-latest-row");
+      const checkpointTurnId = TurnId.make("turn-missing-latest-row-checkpoint");
+      const base = (n: number, occurredAt: string) => ({
+        eventId: EventId.make(`evt-missing-latest-row-${n}`),
+        aggregateKind: "thread" as const,
+        aggregateId: threadId,
+        occurredAt,
+        commandId: CommandId.make(`cmd-missing-latest-row-${n}`),
+        causationEventId: null,
+        correlationId: CorrelationId.make(`cmd-missing-latest-row-${n}`),
+        metadata: {},
+      });
+      yield* eventStore.append({
+        ...base(1, "2026-11-08T07:00:00.000Z"),
+        type: "thread.created",
+        payload: {
+          threadId,
+          projectId: ProjectId.make("project-missing-latest-row"),
+          title: "Missing latest row",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-11-08T07:00:00.000Z",
+          updatedAt: "2026-11-08T07:00:00.000Z",
+        },
+      });
+      yield* projectionPipeline.bootstrap;
+      // Projected state from before turn rows existed for this latest turn.
+      yield* sql`
+        UPDATE projection_threads SET latest_turn_id = 'turn-missing-latest-row-unprojected'
+        WHERE thread_id = ${threadId}
+      `;
+      yield* eventStore.append({
+        ...base(2, "2026-11-08T07:01:00.000Z"),
+        type: "thread.turn-diff-completed",
+        payload: {
+          threadId,
+          turnId: checkpointTurnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make("refs/t3/checkpoints/thread-missing-latest-row/turn/1"),
+          status: "ready",
+          files: [],
+          assistantMessageId: null,
+          completedAt: "2026-11-08T07:01:00.000Z",
+        },
+      });
+      yield* projectionPipeline.bootstrap;
+      const rows = yield* sql<{ readonly latestTurnId: string | null }>`
+        SELECT latest_turn_id AS "latestTurnId" FROM projection_threads WHERE thread_id = ${threadId}
+      `;
+      assert.strictEqual(rows[0]?.latestTurnId, checkpointTurnId);
+    }),
+  );
+
   it.effect("keeps accumulated assistant text when completion payload text is empty", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
@@ -3972,6 +4302,151 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
 it.layer(makeProjectionPipelinePrefixedTestLayer("t3-pending-turn-terminal-test-"))(
   "OrchestrationProjectionPipeline pending turn cleanup",
   (it) => {
+    it.effect("preserves a queued turn start while the provider session becomes ready", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread-ready-pending-turn");
+        const messageId = MessageId.make("message-ready-pending-turn");
+        const turnId = TurnId.make("turn-ready-pending-turn");
+        const requestedAt = "2026-09-01T12:00:00.000Z";
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.make("evt-ready-pending-thread"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: requestedAt,
+          commandId: CommandId.make("cmd-ready-pending-thread"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-ready-pending-thread"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId: ProjectId.make("project-ready-pending-turn"),
+            title: "Queued voice turn",
+            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: requestedAt,
+            updatedAt: requestedAt,
+          },
+        });
+        yield* eventStore.append({
+          type: "thread.message-sent",
+          eventId: EventId.make("evt-ready-pending-message"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: requestedAt,
+          commandId: CommandId.make("cmd-ready-pending-message"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-ready-pending-message"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId,
+            role: "user",
+            text: "Explain this change",
+            turnId: null,
+            streaming: false,
+            createdAt: requestedAt,
+            updatedAt: requestedAt,
+          },
+        });
+        yield* eventStore.append({
+          type: "thread.turn-start-requested",
+          eventId: EventId.make("evt-ready-pending-request"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: requestedAt,
+          commandId: CommandId.make("cmd-ready-pending-request"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-ready-pending-request"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId,
+            runtimeMode: "full-access",
+            createdAt: requestedAt,
+          },
+        });
+        yield* eventStore.append({
+          type: "thread.session-set",
+          eventId: EventId.make("evt-ready-pending-session-ready"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-09-01T12:00:01.000Z",
+          commandId: CommandId.make("server:provider-session-set:ready-pending"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("server:provider-session-set:ready-pending"),
+          metadata: {},
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: "ready",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: "2026-09-01T12:00:01.000Z",
+            },
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const pendingRows = yield* sql<{ readonly messageId: string }>`
+          SELECT pending_message_id AS "messageId"
+          FROM projection_turns
+          WHERE thread_id = ${threadId}
+            AND turn_id IS NULL
+            AND state = 'pending'
+        `;
+        assert.deepEqual(pendingRows, [{ messageId }]);
+
+        yield* eventStore.append({
+          type: "thread.session-set",
+          eventId: EventId.make("evt-ready-pending-session-running"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-09-01T12:00:02.000Z",
+          commandId: CommandId.make("server:provider-session-set:running-pending"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("server:provider-session-set:running-pending"),
+          metadata: {},
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: turnId,
+              lastError: null,
+              updatedAt: "2026-09-01T12:00:02.000Z",
+            },
+          },
+        });
+        yield* projectionPipeline.bootstrap;
+
+        const runningRows = yield* sql<{
+          readonly turnId: string;
+          readonly pendingMessageId: string | null;
+        }>`
+          SELECT
+            turn_id AS "turnId",
+            pending_message_id AS "pendingMessageId"
+          FROM projection_turns
+          WHERE thread_id = ${threadId}
+            AND turn_id = ${turnId}
+        `;
+        assert.deepEqual(runningRows, [{ turnId, pendingMessageId: messageId }]);
+      }),
+    );
+
     it.effect("clears pending turn starts when startup reaches a terminal session state", () =>
       Effect.gen(function* () {
         const projectionPipeline = yield* OrchestrationProjectionPipeline;

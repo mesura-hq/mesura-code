@@ -49,3 +49,4 @@ export * from "./fileManager.ts";
 export * from "./rpc.ts";
 export * from "./worktreeSetup.ts";
 export * from "./factory.ts";
+export * from "./voiceConversation.ts";
