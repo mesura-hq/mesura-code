@@ -1,18 +1,35 @@
-import type { VoiceConversationCreateInput } from "@t3tools/contracts";
+import {
+  ThreadId,
+  type VoiceConversationCreateInput,
+  type VoiceTranscriptAppendInput,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Data from "effect/Data";
 import { RemoteEnvironmentAuthorization } from "./authorization/service.ts";
 import type { PreparedConnection } from "./connection/model.ts";
 import { environmentEndpointUrl } from "./environment/endpoint.ts";
 import { ManagedRelayDpopSigner } from "./relay/managedRelay.ts";
-import { makeEnvironmentHttpApiGroupClient } from "./rpc/http.ts";
+import {
+  executeEnvironmentHttpRequest,
+  makeEnvironmentHttpApiGroupClient,
+  RemoteEnvironmentAuthFetchError,
+  type RemoteEnvironmentRequestError,
+} from "./rpc/http.ts";
 import {
   executeAuthenticatedEnvironmentHttpRequest,
   type EnvironmentHttpAuthHeaders,
+  type EnvironmentHttpAuthorizedAttempt,
 } from "./state/environmentHttpAuth.ts";
 
 type VoiceHttpClient = Effect.Success<
   ReturnType<typeof makeEnvironmentHttpApiGroupClient<"voice">>
 >;
+
+const REQUEST_TIMEOUT_MS = 40_000;
+const OWNER_CHANGED_MESSAGE =
+  "Voice history was not sent because this connection now belongs to another identity. It stays saved in this browser.";
+const CONNECTION_GONE_MESSAGE =
+  "Voice history was not sent because this connection is no longer in use. It stays saved in this browser.";
 
 const request = <A, E>(
   prepared: PreparedConnection,
@@ -22,6 +39,7 @@ const request = <A, E>(
     client: VoiceHttpClient;
     headers: EnvironmentHttpAuthHeaders;
   }) => Effect.Effect<A, E>,
+  owner?: VoiceHistoryOwnerGuard,
 ) =>
   Effect.gen(function* () {
     const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
@@ -33,10 +51,58 @@ const request = <A, E>(
       group: "voice",
       method,
       url: (base) => environmentEndpointUrl(base, path),
-      timeoutMs: 40_000,
+      timeoutMs: REQUEST_TIMEOUT_MS,
       request: execute,
+      ...(owner ? { authorizeAttempt: owner } : {}),
     });
   });
+
+/** History text was not sent: the connection no longer proves the owner it was saved under. */
+export class VoiceHistoryOwnerChangedError extends Data.TaggedError(
+  "VoiceHistoryOwnerChangedError",
+)<{ readonly message: string }> {}
+
+/** A refused owner is a request that could not be authorized; its cause says why. */
+const ownerRefused = (message: string) =>
+  new RemoteEnvironmentAuthFetchError({
+    message,
+    cause: new VoiceHistoryOwnerChangedError({ message }),
+  });
+
+export type VoiceHistoryOwnerGuard = (
+  attempt: EnvironmentHttpAuthorizedAttempt<VoiceHttpClient>,
+) => Effect.Effect<void, RemoteEnvironmentRequestError>;
+
+/**
+ * Binds history requests to one verified owner. Before every attempt, including a credential
+ * retry, the environment must report `historyOwnerId` for that attempt's own authorization;
+ * otherwise nothing is sent. A header credential the server already confirmed for this owner is
+ * not asked again, because the server binds it to one identity. A browser cookie is invisible to
+ * the client, so cookie requests are confirmed every time, immediately before each request.
+ * `isCurrent` ends the guard's lifetime, for example when the view that started a resume closes.
+ */
+export const createVoiceHistoryOwnerGuard = (input: {
+  readonly historyOwnerId: string;
+  readonly isCurrent: () => boolean;
+}): VoiceHistoryOwnerGuard => {
+  let confirmedCredential: string | null = null;
+  return (attempt) =>
+    Effect.gen(function* () {
+      if (!input.isCurrent()) return yield* ownerRefused(CONNECTION_GONE_MESSAGE);
+      if (attempt.credentialKey !== null && attempt.credentialKey === confirmedCredential) return;
+      const url = environmentEndpointUrl(attempt.httpBaseUrl, "/api/voice/settings");
+      const headers = yield* attempt.headersFor("GET", url);
+      const settings = yield* executeEnvironmentHttpRequest(
+        url,
+        REQUEST_TIMEOUT_MS,
+        attempt.withCredentials(attempt.client.settings({ headers })),
+      );
+      if (settings.historyOwnerId !== input.historyOwnerId)
+        return yield* ownerRefused(OWNER_CHANGED_MESSAGE);
+      if (!input.isCurrent()) return yield* ownerRefused(CONNECTION_GONE_MESSAGE);
+      confirmedCredential = attempt.credentialKey;
+    });
+};
 
 export const voiceConversationSettings = (prepared: PreparedConnection) =>
   request(prepared, "/api/voice/settings", "GET", ({ client, headers }) =>
@@ -61,7 +127,60 @@ export const heartbeatVoiceConversation = (prepared: PreparedConnection, session
     client.heartbeat({ headers, payload: { sessionId } }),
   );
 
-export const endVoiceConversation = (prepared: PreparedConnection, sessionId: string) =>
-  request(prepared, "/api/voice/sessions/end", "POST", ({ client, headers }) =>
-    client.end({ headers, payload: { sessionId } }),
+/** Ends the call. `lastSequence` declares its final transcript boundary. */
+export const endVoiceConversation = (
+  prepared: PreparedConnection,
+  sessionId: string,
+  lastSequence?: number,
+  owner?: VoiceHistoryOwnerGuard,
+) =>
+  request(
+    prepared,
+    "/api/voice/sessions/end",
+    "POST",
+    ({ client, headers }) =>
+      client.end({
+        headers,
+        payload: lastSequence === undefined ? { sessionId } : { sessionId, lastSequence },
+      }),
+    owner,
+  );
+
+// Mesura: voice history. Only call these on environments whose voice settings report a
+// history owner; older environments do not have the routes.
+export const appendVoiceTranscript = (
+  prepared: PreparedConnection,
+  payload: VoiceTranscriptAppendInput,
+  owner: VoiceHistoryOwnerGuard,
+) =>
+  request(
+    prepared,
+    "/api/voice/sessions/transcript",
+    "POST",
+    ({ client, headers }) => client.appendTranscript({ headers, payload }),
+    owner,
+  );
+
+/** The call's summary for the requester, or null when the environment does not know the call. */
+export const readVoiceCall = (
+  prepared: PreparedConnection,
+  input: { readonly threadId: string; readonly callId: string },
+  owner: VoiceHistoryOwnerGuard,
+) =>
+  request(
+    prepared,
+    `/api/voice/threads/${encodeURIComponent(input.threadId)}/calls/${encodeURIComponent(input.callId)}/fragments`,
+    "GET",
+    ({ client, headers }) =>
+      client.listFragments({
+        headers,
+        params: { threadId: ThreadId.make(input.threadId), callId: input.callId },
+        payload: { limit: 1 },
+      }),
+    owner,
+  ).pipe(
+    Effect.map((page) => page.call),
+    Effect.catchTag("VoiceConversationError", (error) =>
+      error.status === 404 ? Effect.succeed(null) : Effect.fail(error),
+    ),
   );

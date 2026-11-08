@@ -13,7 +13,6 @@ import {
 import {
   configureVoiceConversation,
   createVoiceConversation,
-  endVoiceConversation,
   heartbeatVoiceConversation,
   voiceConversationSettings,
 } from "@t3tools/client-runtime/voice-conversation";
@@ -23,14 +22,15 @@ import { runtime } from "~/lib/runtime";
 import { randomUUID } from "~/lib/utils";
 import { useThread, useThreadShell } from "~/state/entities";
 import { readPreparedConnection, usePreparedConnection } from "~/state/session";
+import { connectLiveVoice } from "@t3tools/client-runtime/voice-conversation/browser";
 import {
-  connectLiveVoice,
-  type LiveVoiceTransport,
-} from "@t3tools/client-runtime/voice-conversation/browser";
-import {
-  createVoiceConversation as createVoiceController,
-  type VoiceAgentRequest,
-  type VoiceQueuedRequest,
+  createVoiceCall,
+  type VoiceCall,
+  type VoiceCallState,
+} from "@t3tools/client-runtime/voice-conversation/call";
+import type {
+  VoiceAgentRequest,
+  VoiceQueuedRequest,
 } from "@t3tools/client-runtime/voice-conversation/controller";
 
 import {
@@ -38,20 +38,33 @@ import {
   type VoiceCaption,
 } from "@t3tools/client-runtime/voice-conversation/captions";
 import { VoiceCallTranscript, type VoiceCallLayout } from "./VoiceCallTranscript";
+import {
+  claimVoiceHistoryCall,
+  prepareVoiceHistory,
+  resumePendingVoiceHistory,
+} from "./voiceHistoryOutbox";
 
 type CallPhase = "idle" | "connecting" | "connected" | "ending";
-interface ActiveCall {
-  readonly abort: AbortController;
-  readonly sessionId: string;
-  readonly conversation: ReturnType<typeof createVoiceController>;
-  readonly endServerSession: () => Promise<unknown>;
-  transport?: LiveVoiceTransport;
-  heartbeat?: ReturnType<typeof setInterval>;
-  deadline?: ReturnType<typeof setTimeout>;
-}
+
+const CALL_ENDED_STATUS = "Call ended. The agent’s work stays in this thread.";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The voice request failed. Try again.";
+}
+
+/** The panel's phase for a call state. The call reaches `ended` only after history settles. */
+function panelPhase(state: VoiceCallState): CallPhase {
+  switch (state.phase) {
+    case "idle":
+    case "ended":
+      return "idle";
+    case "connecting":
+      return "connecting";
+    case "active":
+      return "connected";
+    case "ending":
+      return "ending";
+  }
 }
 
 export function ThreadVoicePanel({
@@ -78,7 +91,10 @@ export function ThreadVoicePanel({
   const preparedConnection = Option.getOrNull(usePreparedConnection(threadRef.environmentId));
   const dispatchRequestRef = useRef(dispatchRequest);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const callRef = useRef<ActiveCall | null>(null);
+  const callRef = useRef<VoiceCall | null>(null);
+  // Set while history storage and ownership are checked, before the call exists.
+  const startingRef = useRef<{ cancelled: boolean } | null>(null);
+  const mountedRef = useRef(true);
   const threadRefValue = useRef(thread);
   const [phase, setPhase] = useState<CallPhase>("idle");
   const [status, setStatus] = useState("Talk with this thread’s agent");
@@ -107,7 +123,7 @@ export function ThreadVoicePanel({
   useEffect(() => {
     threadRefValue.current = thread;
     if (thread)
-      callRef.current?.conversation.update({
+      callRef.current?.update({
         ...thread,
         hasPendingApprovals: shell?.hasPendingApprovals ?? false,
         hasPendingUserInput: shell?.hasPendingUserInput ?? false,
@@ -132,51 +148,57 @@ export function ThreadVoicePanel({
   }, [preparedConnection]);
 
   useEffect(() => {
-    // ChatView keys this panel by environment and thread, so navigation unmounts the call owner.
+    // On mount and on every reconnect, send the history this browser kept for earlier calls.
+    // The environment's fresh owner decides; a call still recording is skipped.
+    if (!preparedConnection) return;
+    let alive = true;
+    const environmentId = threadRef.environmentId;
+    void resumePendingVoiceHistory({
+      environmentId,
+      readPrepared: () => readPreparedConnection(environmentId),
+      isCurrent: () => alive,
+    }).then(
+      (result) => {
+        if (alive && result?.errors[0] && !callRef.current) setError(result.errors[0]);
+      },
+      (cause: unknown) => {
+        if (alive && !callRef.current) setError(errorMessage(cause));
+      },
+    );
     return () => {
-      const call = callRef.current;
+      alive = false;
+    };
+  }, [preparedConnection, threadRef.environmentId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    // ChatView keys this panel by environment and thread, so navigation unmounts it. The call
+    // stops delegation and capture now and finishes its drain and history outside React.
+    return () => {
+      mountedRef.current = false;
+      if (startingRef.current) startingRef.current.cancelled = true;
+      void callRef.current?.hangup();
       callRef.current = null;
-      if (!call) return;
-      call.conversation.close();
-      clearInterval(call.heartbeat);
-      clearTimeout(call.deadline);
-      call.abort.abort();
-      void call.transport?.close();
-      void call.endServerSession().catch(() => {});
     };
   }, []);
 
-  async function stopCall(message = "Call ended. The agent’s work stays in this thread.") {
-    const call = callRef.current;
-    if (!call) return;
-    callRef.current = null;
-    setPhase("ending");
-    call.conversation.close();
-    setQueuedRequests([]);
-    setProgress(null);
-    clearInterval(call.heartbeat);
-    clearTimeout(call.deadline);
-    if (!call.transport) call.abort.abort();
-    try {
-      // Let session.closed drain before HTTP hangup. Racing them drops the final provider event.
-      await call.transport?.close();
-      await call.endServerSession();
-    } catch {
-      setError(
-        "Audio is closed, but the voice service did not confirm the end of the call. Check the connection before starting another call.",
-      );
-    } finally {
-      call.abort.abort();
+  function stopCall() {
+    if (startingRef.current) {
+      startingRef.current.cancelled = true;
+      startingRef.current = null;
       setPhase("idle");
-      setMuted(false);
-      setStatus(message);
+      setStatus(CALL_ENDED_STATUS);
+      return;
     }
+    void callRef.current?.hangup();
   }
 
   async function startCall() {
-    if (callRef.current || phase !== "idle" || !audioRef.current) return;
+    if (callRef.current || startingRef.current || phase !== "idle" || !audioRef.current) return;
+    const audio = audioRef.current;
     setError(null);
-    const prepared = readPreparedConnection(threadRef.environmentId);
+    const environmentId = threadRef.environmentId;
+    const prepared = readPreparedConnection(environmentId);
     const currentThread = threadRefValue.current;
     if (!prepared || !currentThread) {
       setError("Connect to this environment and wait for the thread to load.");
@@ -188,52 +210,140 @@ export function ThreadVoicePanel({
       );
       return;
     }
-    const abort = new AbortController();
+    const starting = { cancelled: false };
+    startingRef.current = starting;
+    setPhase("connecting");
+    setStatus("Checking voice history…");
+    let history: Awaited<ReturnType<typeof prepareVoiceHistory>>;
+    try {
+      // Storage and ownership are checked before the microphone is requested.
+      history = await prepareVoiceHistory({
+        environmentId,
+        readPrepared: () => readPreparedConnection(environmentId),
+        isCurrent: () => !starting.cancelled && mountedRef.current,
+      });
+    } catch (cause) {
+      if (startingRef.current === starting) {
+        startingRef.current = null;
+        setPhase("idle");
+        setStatus("Talk with this thread’s agent");
+        setError(errorMessage(cause));
+      }
+      return;
+    }
+    if (startingRef.current !== starting || starting.cancelled) return;
+    startingRef.current = null;
+
     const sessionId = randomUUID();
-    const outgoing: Array<Record<string, unknown>> = [];
+    const sessionPrepared = history.prepared;
+    let endStatus = CALL_ENDED_STATUS;
+    let connected = false;
     // The controller can report a blocked thread before the audio connects; connecting must not hide it.
     let controllerStatus: string | null = null;
-    let call: ActiveCall;
-    const conversation = createVoiceController({
-      mode,
-      handsFree,
-      learningSpace,
-      makeId: randomUUID,
-      onQueueChange: (requests) => {
-        if (callRef.current === call) setQueuedRequests(requests);
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const releaseHistory = claimVoiceHistoryCall(sessionId);
+    const isCurrentCall = () => mountedRef.current && callRef.current === call;
+    const call: VoiceCall = createVoiceCall({
+      callId: sessionId,
+      conversation: {
+        mode,
+        handsFree,
+        learningSpace,
+        makeId: randomUUID,
+        onQueueChange: (requests) => {
+          if (isCurrentCall()) setQueuedRequests(requests);
+        },
+        onProgress: (summary) => {
+          if (isCurrentCall()) setProgress(summary);
+        },
+        dispatch: async (request) => {
+          // The reference survives drain for captions. It cannot also authorize a request
+          // suspended in ChatView's settings persistence after hangup starts.
+          const canDispatch = () => callRef.current === call && call.acceptsRequests;
+          if (!canDispatch()) throw new Error("The call ended before the request was sent.");
+          const state = threadRefValue.current;
+          if (!state || state.id !== threadRef.threadId)
+            throw new Error("The selected thread is no longer available.");
+          await dispatchRequestRef.current(request, canDispatch);
+        },
+        onStatus: (next) => {
+          controllerStatus = next;
+          if (isCurrentCall()) setStatus(next);
+        },
+        onError: (message) => {
+          if (isCurrentCall()) setError(message);
+        },
       },
-      onProgress: (summary) => {
-        if (callRef.current === call) setProgress(summary);
+      history: {
+        owner: history.owner,
+        threadId: threadRef.threadId,
+        store: history.store,
+        client: history.client,
+        makeId: randomUUID,
       },
-      send: (event) => {
-        if (callRef.current !== call) return;
-        if (call.transport) call.transport.send(event);
-        else outgoing.push(event);
+      connect: (handlers) =>
+        connectLiveVoice({
+          audio,
+          signal: handlers.signal,
+          createSession: async (sdp) => {
+            if (handlers.signal.aborted) throw new DOMException("Cancelled", "AbortError");
+            const result = await runtime.runPromise(
+              createVoiceConversation(sessionPrepared, {
+                sessionId,
+                threadId: threadRef.threadId,
+                sdp,
+                voice,
+                language,
+                mode,
+                handsFree,
+                learningSpace,
+              }),
+            );
+            await handlers.onSessionCreated();
+            if (handlers.signal.aborted) throw new DOMException("Cancelled", "AbortError");
+            return result;
+          },
+          onSession: () => {},
+          onEvent: handlers.onEvent,
+          onDisconnect: handlers.onDisconnect,
+          onPlaybackBlocked: () => {
+            if (isCurrentCall()) setPlaybackBlocked(true);
+          },
+        }),
+      // The end declares the final transcript boundary, so it is a history request: it is sent
+      // only while the environment still confirms the owner the call recorded under.
+      endSession: (lastSequence) => history.client.end({ callId: sessionId, lastSequence }),
+      onEvent: (event) => {
+        // Final captions keep arriving while the call drains; the controller already stopped.
+        if (!mountedRef.current || callRef.current !== call) return;
+        setCaptions((current) => appendVoiceCaption(current, event, randomUUID));
+        if (event.type === "error") setError(event.error.message);
       },
-      dispatch: async (request) => {
-        if (callRef.current !== call)
-          throw new Error("The call ended before the request was sent.");
-        const state = threadRefValue.current;
-        if (!state || state.id !== threadRef.threadId)
-          throw new Error("The selected thread is no longer available.");
-        await dispatchRequestRef.current(request, () => callRef.current === call);
-      },
-      onStatus: (next) => {
-        controllerStatus = next;
-        if (callRef.current === call) setStatus(next);
-      },
-      onError: (message) => {
-        if (callRef.current === call) setError(message);
+      onState: (state) => {
+        if (state.phase === "ending" || state.phase === "ended") {
+          clearInterval(heartbeat);
+          clearTimeout(deadline);
+        }
+        if (state.phase === "ended") releaseHistory();
+        if (!mountedRef.current || callRef.current !== call) return;
+        setPhase(panelPhase(state));
+        if (state.error) setError(state.error);
+        if (state.phase === "ending") {
+          setQueuedRequests([]);
+          setProgress(null);
+          setStatus("Ending the call…");
+        }
+        if (state.phase === "active") connected = true;
+        if (state.phase === "ended") {
+          callRef.current = null;
+          setMuted(false);
+          setStatus(!connected && state.error ? "Could not connect" : endStatus);
+        }
       },
     });
-    call = {
-      abort,
-      sessionId,
-      conversation,
-      endServerSession: () => runtime.runPromise(endVoiceConversation(prepared, sessionId)),
-    };
     callRef.current = call;
-    conversation.update({
+    call.update({
       ...currentThread,
       hasPendingApprovals: shell?.hasPendingApprovals ?? false,
       hasPendingUserInput: shell?.hasPendingUserInput ?? false,
@@ -245,85 +355,31 @@ export function ThreadVoicePanel({
     setProgress(null);
     setMuted(false);
     setPlaybackBlocked(false);
-    setPhase("connecting");
     setStatus("Connecting microphone…");
-    try {
-      const transport = await connectLiveVoice({
-        audio: audioRef.current,
-        signal: abort.signal,
-        createSession: async (sdp) => {
-          if (abort.signal.aborted) throw new DOMException("Cancelled", "AbortError");
-          const result = await runtime.runPromise(
-            createVoiceConversation(prepared, {
-              sessionId,
-              threadId: threadRef.threadId,
-              sdp,
-              voice,
-              language,
-              mode,
-              handsFree,
-              learningSpace,
-            }),
-          );
-          if (abort.signal.aborted) {
-            await call.endServerSession();
-            throw new DOMException("Cancelled", "AbortError");
-          }
-          return result;
-        },
-        onSession: () => {},
-        onEvent: (event) => {
-          if (abort.signal.aborted) return;
-          // Keep final captions while session.closed drains. The controller stops immediately.
-          setCaptions((current) => appendVoiceCaption(current, event, randomUUID));
-          if (callRef.current !== call) return;
-          conversation.event(event);
-          if (event.type === "error") setError(event.error.message);
-        },
-        onDisconnect: (message) => {
-          if (callRef.current === call) void stopCall(message);
-        },
-        onPlaybackBlocked: () => {
-          if (callRef.current === call) setPlaybackBlocked(true);
-        },
-      });
-      if (callRef.current !== call) {
-        await transport.close();
-        return;
-      }
-      call.transport = transport;
-      for (const event of outgoing) transport.send(event);
-      transport.send({
-        type: "session.commentary.append",
-        event_id: "voice-greeting",
-        delegation_id: null,
-        content: language === "en" ? "Hi. I’m listening." : "Hola. Te escucho.",
-      });
-      call.heartbeat = setInterval(() => {
-        void runtime
-          .runPromise(heartbeatVoiceConversation(prepared, sessionId))
-          .catch((cause: unknown) => {
-            if (callRef.current === call) {
-              setError(errorMessage(cause));
-              void stopCall("The voice connection ended.");
-            }
-          });
-      }, 15_000);
-      call.deadline = setTimeout(
-        () => {
-          if (callRef.current === call)
-            void stopCall("The 15-minute call ended. You can start another call in this thread.");
-        },
-        (settings?.maxDurationSeconds ?? 900) * 1000,
-      );
-      setPhase("connected");
-      setStatus(controllerStatus ?? "Listening");
-    } catch (cause) {
-      if (callRef.current === call) {
-        setError(errorMessage(cause));
-        await stopCall("Could not connect");
-      }
-    }
+    await call.start();
+    if (call.state.phase !== "active") return;
+    call.send({
+      type: "session.commentary.append",
+      event_id: "voice-greeting",
+      delegation_id: null,
+      content: language === "en" ? "Hi. I’m listening." : "Hola. Te escucho.",
+    });
+    heartbeat = setInterval(() => {
+      void runtime
+        .runPromise(heartbeatVoiceConversation(sessionPrepared, sessionId))
+        .catch((cause: unknown) => {
+          endStatus = "The voice connection ended.";
+          void call.hangup(errorMessage(cause));
+        });
+    }, 15_000);
+    deadline = setTimeout(
+      () => {
+        endStatus = "The 15-minute call ended. You can start another call in this thread.";
+        void call.hangup();
+      },
+      (settings?.maxDurationSeconds ?? 900) * 1000,
+    );
+    if (isCurrentCall()) setStatus(controllerStatus ?? "Listening");
   }
 
   async function saveKey() {
@@ -342,7 +398,7 @@ export function ThreadVoicePanel({
   }
 
   function toggleCall() {
-    if (phase !== "idle") void stopCall();
+    if (phase !== "idle") stopCall();
     else if (settings?.configured === false) setShowSettings(true);
     else void startCall();
   }
@@ -416,7 +472,7 @@ export function ThreadVoicePanel({
                   aria-label={muted ? "Unmute microphone" : "Mute microphone"}
                   aria-pressed={muted}
                   onClick={() => {
-                    callRef.current?.transport?.setMuted(!muted);
+                    callRef.current?.setMuted(!muted);
                     setMuted(!muted);
                   }}
                 >
@@ -426,7 +482,7 @@ export function ThreadVoicePanel({
               <Button
                 size="sm"
                 variant="destructive-outline"
-                onClick={() => void stopCall()}
+                onClick={stopCall}
                 disabled={phase === "ending"}
               >
                 <PhoneOff className="size-3.5" /> {phase === "connecting" ? "Cancel" : "End call"}
@@ -501,7 +557,7 @@ export function ThreadVoicePanel({
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => callRef.current?.conversation.discardQueuedRequests()}
+                onClick={() => callRef.current?.discardQueuedRequests()}
               >
                 Clear follow-ups
               </Button>

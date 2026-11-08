@@ -114,6 +114,7 @@ const readLiveVoiceEvent = (value: unknown): LiveVoiceEvent | null => {
       return {
         type: "error",
         error: {
+          ...("code" in error && typeof error.code === "string" ? { code: error.code } : {}),
           message:
             typeof error.message === "string"
               ? error.message
@@ -337,9 +338,9 @@ export function connectLiveVoiceWithPlatform(
         close: () => {
           if (closePromise) return closePromise;
           closing = true;
-          media?.getAudioTracks().forEach((track) => {
-            track.enabled = false;
-          });
+          // Hanging up releases the microphone now. The data channel stays open so the
+          // provider can still deliver its final transcript events before session.closed.
+          media?.getTracks().forEach((track) => track.stop());
           audio.pause();
           closePromise = new Promise<void>((resolve) => {
             if (closed || channel.readyState !== "open") {

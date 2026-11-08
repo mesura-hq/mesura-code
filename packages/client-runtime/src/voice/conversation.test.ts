@@ -306,6 +306,46 @@ describe("thread voice conversation", () => {
     expect(harness.dispatchSpy).toHaveBeenCalledOnce();
   });
 
+  it("voice acknowledgement precedes the first agent response under a controlled clock", async () => {
+    const accepted = deferred<void>();
+    const harness = makeHarness(() => accepted.promise);
+    harness.conversation.update(makeSnapshot());
+    harness.conversation.event(transcript("Revisa el transporte.", 0, 100));
+    harness.conversation.event(delegation("ordered-ack", 100));
+    await settleTranscriptAndDispatch();
+    expect(harness.dispatchSpy).toHaveBeenCalledOnce();
+
+    // A suspended dispatch holds the acknowledgement however long the clock runs.
+    await vi.advanceTimersByTimeAsync(60_000);
+    const spoken = () =>
+      harness.sent
+        .filter((event) => event.type === "session.commentary.append")
+        .map((event) => event.content);
+    expect(spoken()).toEqual([]);
+
+    accepted.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(spoken()).toEqual(["Okay, I’ll get started."]);
+
+    harness.conversation.update(
+      makeSnapshot({
+        turnId: "ordered-turn",
+        userMessageId: harness.requests[0]!.messageId,
+        messages: [
+          {
+            id: "ordered-progress",
+            role: "assistant",
+            text: "I am reading the transport.",
+            turnId: "ordered-turn",
+            streaming: false,
+          },
+        ],
+      }),
+    );
+    expect(spoken()).toEqual(["Okay, I’ll get started.", "I am reading the transport."]);
+  });
+
   it("keeps a delayed acknowledgement quiet when the agent already sent public progress", async () => {
     const accepted = deferred<void>();
     const harness = makeHarness(() => accepted.promise);

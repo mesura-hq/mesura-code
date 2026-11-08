@@ -136,4 +136,17 @@ describe("voice history contracts phase 2 fence", () => {
     expect(VoiceConversation.VOICE_HISTORY_MAX_PAGE_SIZE).toBeGreaterThan(0);
     expect(VoiceConversation.VOICE_HISTORY_MAX_PAGE_SIZE).toBeLessThan(1_000);
   });
+
+  it("VH-C6 decodes voice settings with and without the optional history owner", () => {
+    const decodeSettings = Schema.decodeUnknownSync(VoiceConversation.VoiceConversationSettings);
+    const older = {
+      configured: true,
+      canConfigure: false,
+      model: "gpt-live-1",
+      maxDurationSeconds: 900,
+    };
+    expect(decodeSettings(older).historyOwnerId).toBeUndefined();
+    expect(decodeSettings({ ...older, historyOwnerId: "a1b2" }).historyOwnerId).toBe("a1b2");
+    expect(() => decodeSettings({ ...older, historyOwnerId: "" })).toThrow();
+  });
 });

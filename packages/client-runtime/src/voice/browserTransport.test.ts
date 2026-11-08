@@ -286,6 +286,24 @@ describe("live voice transport", () => {
     expect(harness.onPlaybackBlocked).not.toHaveBeenCalled();
   });
 
+  it("live voice transport preserves the provider error code for closing classification", async () => {
+    const harness = makeHarness();
+    const connection = await connectLiveVoiceWithPlatform(harness.input, harness.platform);
+    harness.peer.channel.receive({
+      type: "error",
+      error: { code: "context_injection_incomplete", message: "Context injection was cancelled." },
+    });
+    expect(harness.onEvent).toHaveBeenCalledWith({
+      type: "error",
+      error: { code: "context_injection_incomplete", message: "Context injection was cancelled." },
+    });
+    harness.peer.channel.onSend = (data) => {
+      if (JSON.parse(data).type === "session.close")
+        harness.peer.channel.receive({ type: "session.closed" });
+    };
+    await connection.close();
+  });
+
   it("cleans up and rejects when the provider reports an error before readiness", async () => {
     const harness = makeHarness();
     harness.peer.setRemoteDescription = async (description) => {
@@ -357,11 +375,38 @@ describe("live voice transport", () => {
     const connection = await connectionPromise;
 
     const closePromise = connection.close();
-    expect(harness.stream.audioTrack.stopped).toBe(false);
+    // The drain keeps the data channel open; capture release is pinned by the next test.
+    expect(harness.peer.closed).toBe(false);
     await vi.advanceTimersByTimeAsync(15_000);
     await closePromise;
     expect(harness.stream.audioTrack.stopped).toBe(true);
     expect(harness.peer.closed).toBe(true);
+  });
+
+  it("live voice transport releases the microphone at close and forwards final transcript until session.closed", async () => {
+    const harness = makeHarness();
+    const connectionPromise = connectLiveVoiceWithPlatform(harness.input, harness.platform);
+    await vi.advanceTimersByTimeAsync(0);
+    const connection = await connectionPromise;
+    let closed = false;
+
+    const closePromise = connection.close().then(() => {
+      closed = true;
+    });
+
+    expect(harness.stream.audioTrack.stopped).toBe(true);
+    harness.peer.channel.receive({ type: "session.output_transcript.delta", delta: "Adiós." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closed).toBe(false);
+    expect(harness.onEvent).toHaveBeenLastCalledWith({
+      type: "session.output_transcript.delta",
+      delta: "Adiós.",
+    });
+
+    harness.peer.channel.receive({ type: "session.closed" });
+    await closePromise;
+    expect(harness.peer.closed).toBe(true);
+    expect(harness.onDisconnect).not.toHaveBeenCalled();
   });
 
   it("fails when the provider never starts the session", async () => {

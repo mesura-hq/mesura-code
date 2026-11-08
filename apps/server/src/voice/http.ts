@@ -15,7 +15,7 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { failEnvironmentNotFound, requireEnvironmentScope } from "../auth/http.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { VoiceHistory } from "./VoiceHistory.ts";
+import { VoiceHistory, voiceOwnerKeyOf } from "./VoiceHistory.ts";
 import {
   createVoiceSessionManager,
   VoiceSessionError,
@@ -103,6 +103,11 @@ export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
         canConfigure: principal.scopes.has(AuthAccessWriteScope),
         model: "gpt-live-1" as const,
         maxDurationSeconds: 900,
+        // Only a caller that may append history gets its owner. The digest is the one stored in
+        // history events, so the client can key pending text by the identity the server checks.
+        ...(principal.scopes.has(AuthOrchestrationOperateScope)
+          ? { historyOwnerId: voiceOwnerKeyOf(voiceOwnerId(principal)) }
+          : {}),
       };
     });
 

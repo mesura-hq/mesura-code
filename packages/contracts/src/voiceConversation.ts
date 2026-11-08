@@ -68,6 +68,15 @@ export const VoiceConversationSettings = Schema.Struct({
   canConfigure: Schema.Boolean,
   model: Schema.Literal("gpt-live-1"),
   maxDurationSeconds: Schema.Number,
+  /**
+   * An opaque, one-way identifier of the caller's verified voice owner, present only when the
+   * caller may record history. A client keys pending transcript text by it and never sends that
+   * text under another one. Absent on servers that predate it: such a client cannot prove
+   * ownership and must not record recoverable history.
+   */
+  historyOwnerId: Schema.optionalKey(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  ),
 });
 export type VoiceConversationSettings = typeof VoiceConversationSettings.Type;
 

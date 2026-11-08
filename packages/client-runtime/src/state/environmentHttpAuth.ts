@@ -80,6 +80,22 @@ const buildEnvironmentAuthHeaders = (
   });
 
 /**
+ * One authorization attempt, before its protected request. `credentialKey` is the exact
+ * header credential of this attempt (null for a browser cookie, which the client cannot see).
+ * Requests built with `headersFor` and `withCredentials` use this attempt's authorization.
+ */
+export interface EnvironmentHttpAuthorizedAttempt<Client> {
+  readonly client: Client;
+  readonly httpBaseUrl: string;
+  readonly credentialKey: string | null;
+  readonly headersFor: (
+    method: HttpMethod.HttpMethod,
+    url: string,
+  ) => Effect.Effect<EnvironmentHttpAuthHeaders, RemoteEnvironmentAuthFetchError>;
+  readonly withCredentials: <A, E, R>(request: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+}
+
+/**
  * Resolve relay credentials at request time without replacing the live socket.
  * A rejected credential gets one refresh and retry, with a new request-bound
  * proof. Cookie and bearer requests keep their existing authentication behavior.
@@ -105,6 +121,15 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   }) => Effect.Effect<A, E, R>;
   /** Some endpoints report rejected credentials in a successful response. */
   readonly isUnauthorizedResponse?: (response: NoInfer<A>) => boolean;
+  /**
+   * Mesura: runs before every attempt's request, including a credential retry, with that
+   * attempt's authorization. Failing it stops the request; a rejected credential still retries.
+   */
+  readonly authorizeAttempt?: (
+    attempt: EnvironmentHttpAuthorizedAttempt<
+      Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>
+    >,
+  ) => Effect.Effect<void, RemoteEnvironmentRequestError, R>;
 }): Effect.fn.Return<
   A,
   RemoteEnvironmentRequestError,
@@ -149,10 +174,31 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
         requestUrl,
         input.signer,
       );
-      const result = yield* executeEnvironmentHttpRequest(
+      const attemptAuthorization = authorization;
+      const protectedRequest = executeEnvironmentHttpRequest(
         requestUrl,
         input.timeoutMs,
         withEnvironmentCredentials(authorization, input.request({ client, headers })),
+      );
+      const result = yield* (
+        input.authorizeAttempt
+          ? input
+              .authorizeAttempt({
+                client,
+                httpBaseUrl,
+                credentialKey:
+                  attemptAuthorization === null
+                    ? null
+                    : attemptAuthorization._tag === "Bearer"
+                      ? attemptAuthorization.token
+                      : attemptAuthorization.accessToken,
+                headersFor: (method, url) =>
+                  buildEnvironmentAuthHeaders(attemptAuthorization, method, url, input.signer),
+                withCredentials: (request) =>
+                  withEnvironmentCredentials(attemptAuthorization, request),
+              })
+              .pipe(Effect.andThen(protectedRequest))
+          : protectedRequest
       ).pipe(Effect.result);
 
       if (Result.isFailure(result)) {

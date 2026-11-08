@@ -113,8 +113,11 @@ const storageFailure = () =>
     message: "The voice history could not be saved or read. Try again.",
   });
 
-/** The owner identity is stored only as a digest, so events never carry a session credential. */
-const ownerKeyOf = (ownerId: string) =>
+/**
+ * The owner identity is stored only as a digest, so events never carry a session credential.
+ * The voice settings route returns the same digest to its owner as an opaque history owner.
+ */
+export const voiceOwnerKeyOf = (ownerId: string) =>
   NodeCrypto.createHash("sha256").update(ownerId).digest("hex");
 
 // The call page cursor is the keyset position of the last call shown: [startedAt, callId].
@@ -148,7 +151,7 @@ const toSummary = (call: ProjectionVoiceCall, requesterOwnerId: string): VoiceCa
   endReason: call.endReason,
   finalSequence: call.finalSequence,
   lastSequence: call.lastSequence,
-  ownedByRequester: call.ownerKey === ownerKeyOf(requesterOwnerId),
+  ownedByRequester: call.ownerKey === voiceOwnerKeyOf(requesterOwnerId),
 });
 
 const makeVoiceHistory = Effect.gen(function* () {
@@ -178,7 +181,7 @@ const makeVoiceHistory = Effect.gen(function* () {
     ownerId: string,
   ) {
     const call = yield* readCall(callId);
-    if (Option.isNone(call) || call.value.ownerKey !== ownerKeyOf(ownerId)) {
+    if (Option.isNone(call) || call.value.ownerKey !== voiceOwnerKeyOf(ownerId)) {
       return yield* unavailable();
     }
     return call.value;
@@ -205,7 +208,7 @@ const makeVoiceHistory = Effect.gen(function* () {
     const call = yield* readCall(callId);
     if (
       Option.isSome(call) &&
-      call.value.ownerKey === ownerKeyOf(pending.ownerId) &&
+      call.value.ownerKey === voiceOwnerKeyOf(pending.ownerId) &&
       call.value.endedAt === null
     ) {
       yield* endWithoutBoundary(call.value, pending.reason, pending.endedAt);
@@ -228,7 +231,7 @@ const makeVoiceHistory = Effect.gen(function* () {
     const existing = yield* readCall(callId);
     if (Option.isNone(existing)) return;
     const call = existing.value;
-    if (call.ownerKey !== ownerKeyOf(ownerId) || call.threadId !== threadId) {
+    if (call.ownerKey !== voiceOwnerKeyOf(ownerId) || call.threadId !== threadId) {
       return yield* unavailable();
     }
     if (call.endedAt !== null) return yield* conflict("That voice call has ended.");
@@ -244,7 +247,7 @@ const makeVoiceHistory = Effect.gen(function* () {
           commandId: CommandId.make(`voice:${input.callId}:start`),
           threadId: input.threadId,
           callId: input.callId,
-          ownerKey: ownerKeyOf(input.ownerId),
+          ownerKey: voiceOwnerKeyOf(input.ownerId),
           startedAt: yield* nowIso,
         });
       }),

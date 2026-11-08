@@ -3,6 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./voice-conversation/call": {
+      "types": "./src/voice/call.ts",
+      "default": "./src/voice/call.ts"
+    },
+    "./voice-conversation/history": {
+      "types": "./src/voice/history.ts",
+      "default": "./src/voice/history.ts"
+    },
     "./voice-conversation/captions": {
       "types": "./src/voice/captions.ts",
       "default": "./src/voice/captions.ts"

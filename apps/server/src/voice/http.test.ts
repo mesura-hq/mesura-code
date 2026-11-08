@@ -83,9 +83,25 @@ const principalsByToken: Readonly<Record<string, EnvironmentSessionPrincipalShap
   },
 };
 
+// A real voice client holds read and operate. Settings need read; history needs operate.
+const readOperate = [AuthOrchestrationReadScope, AuthOrchestrationOperateScope];
+const settingsPrincipalsByToken: Readonly<Record<string, EnvironmentSessionPrincipalShape>> =
+  Object.fromEntries(
+    Object.entries(principalsByToken).map(([token, principal]) => [
+      `settings-${token}`,
+      {
+        ...principal,
+        scopes: principal.scopes.has(AuthOrchestrationOperateScope)
+          ? new Set(readOperate)
+          : new Set([AuthOrchestrationReadScope]),
+      },
+    ]),
+  );
+
 const authLayer = makeVoiceTestAuthLayer(
   (token) =>
-    principalsByToken[token] ?? {
+    principalsByToken[token] ??
+    settingsPrincipalsByToken[token] ?? {
       sessionId: `session-${token}` as EnvironmentSessionPrincipalShape["sessionId"],
       subject: "voice-http-test",
       method: "bearer-access-token",
@@ -238,6 +254,39 @@ describe("voice conversation HTTP routes", () => {
       });
       expect(body).not.toContain(API_KEY);
     }),
+  );
+
+  it.effect(
+    "voice settings return one opaque history owner per verified voice owner and no credential",
+    () =>
+      withHandler({ initialApiKey: API_KEY }, async (environment) => {
+        const ownerOf = async (token: string) => {
+          const response = await call(environment, get("/api/voice/settings", `settings-${token}`));
+          expect(response.status).toBe(200);
+          const body = await response.text();
+          // Neither the credential, the session, the subject nor the proof key is returned.
+          for (const secret of [token, `session-${token}`, "thumbprint-a", "voice-client"])
+            expect(body).not.toContain(secret);
+          return (JSON.parse(body) as { historyOwnerId?: string }).historyOwnerId;
+        };
+
+        const original = await ownerOf("dpop-key-a");
+        expect(original).toEqual(expect.any(String));
+        // A renewed DPoP token is the same verified subject and proof key.
+        expect(await ownerOf("dpop-key-a-renewed")).toBe(original);
+        // Another proof key, another subject with the same key, or a non-DPoP session differ.
+        const others = [
+          await ownerOf("dpop-key-b"),
+          await ownerOf("dpop-other-subject"),
+          await ownerOf("bearer-same-subject"),
+          await ownerOf("cookie-same-subject"),
+        ];
+        expect(new Set([original, ...others]).size).toBe(5);
+        // A replaced cookie session in the same environment is another owner.
+        expect(await ownerOf("cookie-same-subject-other-session")).not.toBe(others[3]);
+        // A caller that cannot append history gets no owner to record under.
+        expect(await ownerOf("dpop-key-a-read-only")).toBeUndefined();
+      }),
   );
 
   it.effect("allows only access:write to configure the key and never returns it", () =>

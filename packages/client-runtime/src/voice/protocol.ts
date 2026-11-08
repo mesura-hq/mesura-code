@@ -18,4 +18,7 @@ export type LiveVoiceEvent =
       readonly offset_ms: number;
       readonly delegation: { readonly id: string; readonly target: string };
     }
-  | { readonly type: "error"; readonly error: { readonly message: string } };
+  | {
+      readonly type: "error";
+      readonly error: { readonly message: string; readonly code?: string };
+    };
