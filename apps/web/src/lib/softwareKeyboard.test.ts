@@ -214,6 +214,41 @@ describe("software keyboard detection", () => {
       unsubscribe();
     });
 
+    it("ends the closing state when the keyboard closes a little below the old height", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      state.editableFocused = false;
+      resizeLayout(560);
+      resizeLayout(790);
+      resizeLayout(500);
+      state.editableFocused = true;
+      resizeLayout(490);
+      expect(store.getSnapshot()).toBe(false);
+      unsubscribe();
+    });
+
+    it("keeps a rotated open keyboard through a blur", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      state.editableFocused = false;
+      resizeLayout(200, 844);
+      expect(store.getSnapshot()).toBe(false);
+      state.editableFocused = true;
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
     it("ignores a shorter desktop browser window", () => {
       const { store, resizeLayout } = layoutFixture({ touchOnly: false, editableFocused: true });
       const unsubscribe = store.subscribe(() => {});

@@ -36,31 +36,43 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
     win?.matchMedia?.("(pointer: coarse)").matches === true &&
     isEditable(win.document?.activeElement);
 
+  // The height counts as closed again: near the closed height, or well above the open one.
+  const closureReached = (width: number, height: number) => {
+    const closedHeight = closedHeightByWidth.get(width);
+    if (closedHeight !== undefined) return closedHeight - height <= KEYBOARD_THRESHOLD;
+    if (openAtUnknownWidth?.width !== width) return true;
+    return height - openAtUnknownWidth.height > KEYBOARD_THRESHOLD;
+  };
+
+  const recordClosed = (width: number, height: number) => {
+    closedHeightByWidth.set(width, height);
+    openAtUnknownWidth = null;
+  };
+
   const evaluate = () => {
     if (!win) return false;
     const { innerWidth: width, innerHeight: height } = win;
     if (!keyboardCanShow()) {
       if (open) closingAfterBlur = true;
-      const closedHeight = closedHeightByWidth.get(width);
-      if (closedHeight === undefined || height >= closedHeight) closingAfterBlur = false;
-      if (!closingAfterBlur) closedHeightByWidth.set(width, height);
-      openAtUnknownWidth = null;
+      if (closingAfterBlur && closureReached(width, height)) closingAfterBlur = false;
+      if (!closingAfterBlur) recordClosed(width, height);
+      else if (openAtUnknownWidth?.width === width) {
+        openAtUnknownWidth.height = Math.min(openAtUnknownWidth.height, height);
+      }
       open = false;
       return open;
     }
     closingAfterBlur = false;
     const closedHeight = closedHeightByWidth.get(width);
     if (closedHeight === undefined) {
-      if (!open) {
-        closedHeightByWidth.set(width, height);
-      } else if (openAtUnknownWidth?.width !== width) {
+      if (openAtUnknownWidth?.width === width) {
+        open = !closureReached(width, height);
+        if (open) openAtUnknownWidth.height = Math.min(openAtUnknownWidth.height, height);
+        else recordClosed(width, height);
+      } else if (open) {
         openAtUnknownWidth = { width, height };
-      } else if (height - openAtUnknownWidth.height > KEYBOARD_THRESHOLD) {
-        closedHeightByWidth.set(width, height);
-        openAtUnknownWidth = null;
-        open = false;
       } else {
-        openAtUnknownWidth.height = Math.min(openAtUnknownWidth.height, height);
+        recordClosed(width, height);
       }
       return open;
     }
