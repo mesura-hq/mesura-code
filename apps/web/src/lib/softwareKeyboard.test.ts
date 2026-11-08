@@ -190,9 +190,27 @@ describe("software keyboard detection", () => {
       state.editableFocused = false;
       resizeLayout(560);
       expect(store.getSnapshot()).toBe(false);
+      resizeLayout(600);
+      expect(store.getSnapshot()).toBe(false);
       state.editableFocused = true;
       resizeLayout(480);
       expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("records a new closed height once the closing keyboard is gone", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      state.editableFocused = false;
+      resizeLayout(844);
+      resizeLayout(500);
+      state.editableFocused = true;
+      resizeLayout(500);
+      expect(store.getSnapshot()).toBe(false);
       unsubscribe();
     });
 

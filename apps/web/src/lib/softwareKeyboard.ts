@@ -27,6 +27,8 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
   const closedHeightByWidth = new Map<number, number>();
   if (win) closedHeightByWidth.set(win.innerWidth, win.innerHeight);
   let open = false;
+  // A keyboard still closing after blur reports heights that must not lower the closed one.
+  let closingAfterBlur = false;
   // Rotating while the keyboard is open reaches a width with no closed height yet.
   let openAtUnknownWidth: { width: number; height: number } | null = null;
 
@@ -38,15 +40,15 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
     if (!win) return false;
     const { innerWidth: width, innerHeight: height } = win;
     if (!keyboardCanShow()) {
+      if (open) closingAfterBlur = true;
       const closedHeight = closedHeightByWidth.get(width);
-      // A keyboard still closing after blur reports heights that must not lower the closed one.
-      if (!open || closedHeight === undefined || height > closedHeight) {
-        closedHeightByWidth.set(width, height);
-      }
+      if (closedHeight === undefined || height >= closedHeight) closingAfterBlur = false;
+      if (!closingAfterBlur) closedHeightByWidth.set(width, height);
       openAtUnknownWidth = null;
       open = false;
       return open;
     }
+    closingAfterBlur = false;
     const closedHeight = closedHeightByWidth.get(width);
     if (closedHeight === undefined) {
       if (!open) {
