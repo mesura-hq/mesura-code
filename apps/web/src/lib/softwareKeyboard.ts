@@ -28,9 +28,9 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
   if (win) closedHeightByWidth.set(win.innerWidth, win.innerHeight);
   let open = false;
   // While a keyboard closes after blur its heights only grow and never lower the closed height.
-  // An unfocused shrink is a window change instead (split screen) and records the new height.
-  let lastClosingHeight: number | null = null;
-  // Rotating while the keyboard is open reaches a width with no closed height yet.
+  // An unfocused shrink at the same width is a window change instead (split screen).
+  let lastClosing: { width: number; height: number } | null = null;
+  // Rotating while the keyboard is open or closing reaches a width with no closed height yet.
   let openAtUnknownWidth: { width: number; height: number } | null = null;
 
   const keyboardCanShow = () =>
@@ -54,16 +54,22 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
     if (!win) return false;
     const { innerWidth: width, innerHeight: height } = win;
     if (!keyboardCanShow()) {
-      if (open) lastClosingHeight = Number.NEGATIVE_INFINITY;
+      if (open) lastClosing = { width, height: Number.NEGATIVE_INFINITY };
       if (
-        lastClosingHeight === null ||
-        height < lastClosingHeight ||
-        closureReached(width, height)
+        lastClosing !== null &&
+        lastClosing.width !== width &&
+        !closedHeightByWidth.has(width) &&
+        openAtUnknownWidth?.width !== width
       ) {
-        lastClosingHeight = null;
+        openAtUnknownWidth = { width, height };
+      }
+      const shrankAtSameWidth =
+        lastClosing !== null && lastClosing.width === width && height < lastClosing.height;
+      if (lastClosing === null || shrankAtSameWidth || closureReached(width, height)) {
+        lastClosing = null;
         recordClosed(width, height);
       } else {
-        lastClosingHeight = height;
+        lastClosing = { width, height };
         if (openAtUnknownWidth?.width === width) {
           openAtUnknownWidth.height = Math.min(openAtUnknownWidth.height, height);
         }
@@ -71,7 +77,7 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
       open = false;
       return open;
     }
-    lastClosingHeight = null;
+    lastClosing = null;
     const closedHeight = closedHeightByWidth.get(width);
     if (closedHeight === undefined) {
       if (openAtUnknownWidth?.width === width) {

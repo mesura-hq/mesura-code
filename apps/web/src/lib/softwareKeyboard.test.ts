@@ -265,6 +265,44 @@ describe("software keyboard detection", () => {
       unsubscribe();
     });
 
+    it("keeps the other orientation's closed height when rotating during a dismissal", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: false,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(390, 844);
+      resizeLayout(844, 390);
+      state.editableFocused = true;
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      state.editableFocused = false;
+      resizeLayout(560);
+      resizeLayout(200, 844);
+      state.editableFocused = true;
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("keeps a keyboard open after rotating during a dismissal to a new width", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      state.editableFocused = false;
+      resizeLayout(560);
+      resizeLayout(200, 844);
+      state.editableFocused = true;
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      resizeLayout(390, 844);
+      expect(store.getSnapshot()).toBe(false);
+      unsubscribe();
+    });
+
     it("keeps a rotated open keyboard through a blur", () => {
       const { store, state, resizeLayout } = layoutFixture({
         touchOnly: true,
