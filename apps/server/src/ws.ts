@@ -95,6 +95,7 @@ import {
   projectThreadDetailSnapshot,
 } from "./orchestration/ActivityPayloadProjection.ts";
 import { makeThreadLiveEventCoalescer } from "./orchestration/ThreadLiveEventCoalescer.ts";
+import { makeVoiceHistoryNoticeStream } from "./voice/voiceHistoryNotices.ts";
 import { makeLiveStreamBudget, type RetainedLiveItem } from "./orchestration/LiveStreamBudget.ts";
 import {
   cleanupFailedUploadedAttachments,
@@ -2191,6 +2192,14 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        // Mesura: change notices for an open voice history viewer; the thread detail stream above
+        // and below stays free of voice history.
+        [ORCHESTRATION_WS_METHODS.subscribeVoiceHistory]: (input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeVoiceHistory,
+            makeVoiceHistoryNoticeStream(orchestrationEngine.streamDomainEvents, input.threadId),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeThread]: (input) =>

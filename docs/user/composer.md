@@ -48,32 +48,43 @@ in the composer and waits if the agent needs an approval or an answer.
 
 ## Talk to an agent
 
-On web and desktop, open an existing thread and select **Talk to agent** above
-the conversation, or use the voice-call control between attachments and dictation.
-Both controls start and end the same call.
-A call opens in **Call** view. It shows your words and the voice's spoken captions.
-Use **Split** to see the captions and the working agent together, or **Work** to see
-the normal thread. The voice can rephrase the working agent's written answer.
-Captions remain available after the call ends. Starting another call, leaving the
-thread, or refreshing clears them. For a new thread, send its first message before starting a call.
+On web and desktop, open an existing thread and select the phone between the
+attachment and dictation controls. On a phone browser, the phone also appears in the
+collapsed composer. While a call runs, one bar above the thread switches between
+**Call**, **Split**, and **Work**, mutes the microphone, and hangs up. Without a call
+the thread shows no voice bar.
+**Call** shows your words and the voice's spoken captions. **Split** shows the
+captions and the working agent together, and **Work** shows the normal thread.
+Hanging up returns to **Work**. The voice can rephrase the working agent's written
+answer. For a new thread, send its first message before starting a call.
 Choose the agent, effort, and access mode in the composer. Voice requests use
 those selections and leave any unsent text or attachments in the composer.
-Use **Voice settings** to choose a voice, language, or conversation mode:
+Dictation and a call cannot use the microphone at the same time; the control that
+cannot start explains why.
+
+To read an earlier call, open the thread menu and select **Voice conversations**.
+Opening a saved call only reads it: it starts no audio and sends nothing to the agent.
+
+Choose the voice, language, and conversation mode in **Settings > Integrations >
+Voice calls**. A change applies to your next call.
 
 - **Discuss this repository** answers questions about your work.
 - **Research a topic or client** checks project material and current sources.
 - **Learn from this repository** uses recall questions and Learning App records when configured.
 
-Choose short spoken answers to get one main point and one question at a time.
-In learning mode, enter a Learning App space or ask the agent to help you choose.
-An environment admin can save an OpenAI API key there. Voice uses separate API
-billing; the thread's existing provider handles the agent work.
+Choose hands-free calls to get one main point and one question at a time.
+For learning mode, select a project in Settings to set its Learning App space, or
+ask the agent to help you choose. Each project keeps its own space.
+The OpenAI API key belongs to the environment selected in Settings, and only an
+environment admin can save it. If the key is missing when you select the phone,
+Mesura Code opens that setting; **Back to thread** returns without starting a call.
+Voice uses separate API billing; the thread's existing provider handles the agent work.
 
 Calls last up to 15 minutes. You can mute the microphone or end the call at any
 time. Speaking over the voice interrupts its speech. Use the thread's normal
 Stop action to stop the agent's task. Follow-up voice requests wait for the
 current task to finish. Resolve approvals and requested input in the thread.
-Use **Clear follow-ups** to remove waiting requests while the active task continues.
+Select the waiting count in the call bar to remove waiting requests while the active task continues.
 The call keeps at most eight waiting requests. If the queue or its text exceeds
 its limit, the call removes waiting requests and asks you to start another call.
 The active task continues. The call does not send more requests until you restart it.

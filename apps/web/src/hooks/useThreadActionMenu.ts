@@ -40,6 +40,10 @@ import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
+import {
+  openVoiceHistory,
+  readEnvironmentSupportsVoiceHistory,
+} from "../voice/voiceHistoryNavigation";
 
 function failureToast(title: string, error: unknown) {
   toastManager.add(
@@ -135,6 +139,7 @@ export function useThreadActionMenu(input: {
           snooze: readEnvironmentSupportsSnooze(threadRef.environmentId),
           pinning: readEnvironmentSupportsPinning(threadRef.environmentId),
           titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
+          voiceHistory: readEnvironmentSupportsVoiceHistory(threadRef.environmentId),
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
@@ -253,6 +258,9 @@ export function useThreadActionMenu(input: {
                 input: { threadId: threadRef.threadId, regenerateTitle: true },
               }),
             );
+            return;
+          case "voice-history":
+            openVoiceHistory(router, threadRef);
             return;
           case "mark-unread":
             markThreadUnread(scopedThreadKey(threadRef), thread.latestTurn?.completedAt);

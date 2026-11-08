@@ -37,6 +37,7 @@ import {
 } from "./dictationPresentation";
 import { useDictationSessionStore } from "./dictationSessionStore";
 import { dictationCoordinator, type DictationReservationRequest } from "./dictationCoordinator";
+import { claimMicrophone, useMicrophoneBlocker } from "../voice/microphoneClaim";
 
 const LEASE_DURATION_MS = 3_500;
 const LEASE_RENEWAL_MS = 1_500;
@@ -99,8 +100,16 @@ export const DictationMicrophoneButton = memo(function DictationMicrophoneButton
     setReservationPending(false);
   }, [active, bridgeAvailable]);
 
+  // Mesura: a voice call holding the microphone blocks dictation, with its own explanation.
+  const microphoneBlocked = useMicrophoneBlocker("dictation");
+
   const start = useCallback(async () => {
-    if (!claimDictationReservation(microphoneReservationPending)) return;
+    const releaseMicrophone = claimMicrophone("dictation");
+    if (!releaseMicrophone) return;
+    if (!claimDictationReservation(microphoneReservationPending)) {
+      releaseMicrophone();
+      return;
+    }
     setReservationPending(true);
     setError(null);
     const request: DictationReservationRequest & { readonly type: "dictation.reserve.request" } = {
@@ -136,6 +145,9 @@ export const DictationMicrophoneButton = memo(function DictationMicrophoneButton
         setError(cause instanceof Error ? cause.message : String(cause));
       }
     } finally {
+      // From here a recording session in the store blocks a call; the claim only covered the
+      // reservation, while no session existed yet.
+      releaseMicrophone();
       releaseDictationReservation(microphoneReservationPending);
       setReservationPending(false);
     }
@@ -147,14 +159,16 @@ export const DictationMicrophoneButton = memo(function DictationMicrophoneButton
     active,
     reservationPending,
   });
-  const disabled = presentation.disabled || props.disabled;
+  const disabled = presentation.disabled || props.disabled || microphoneBlocked !== null;
   const explanation = props.disabled
     ? "Voice input is unavailable while this answer is sending"
-    : presentation.disabled || error
-      ? presentation.explanation
-      : props.targetLabel
-        ? `Dictate into ${props.targetLabel}`
-        : presentation.explanation;
+    : microphoneBlocked !== null && !active && bridgeAvailable
+      ? microphoneBlocked
+      : presentation.disabled || error
+        ? presentation.explanation
+        : props.targetLabel
+          ? `Dictate into ${props.targetLabel}`
+          : presentation.explanation;
 
   return (
     <Tooltip>

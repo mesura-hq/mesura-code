@@ -184,3 +184,50 @@ export const readVoiceCall = (
       error.status === 404 ? Effect.succeed(null) : Effect.fail(error),
     ),
   );
+
+// Mesura: the saved-history viewer. These only read, so any client with orchestration:read may
+// open a finished call, including one another client recorded: they never use the owner guard,
+// which authorizes writing pending history, not reading it.
+const voiceCallsPath = (threadId: string) =>
+  `/api/voice/threads/${encodeURIComponent(threadId)}/calls`;
+
+/** One page of a thread's saved calls, newest first; pass `nextCursor` back for the next page. */
+export const listVoiceCalls = (
+  prepared: PreparedConnection,
+  input: { readonly threadId: string; readonly cursor?: string; readonly limit?: number },
+) =>
+  request(prepared, voiceCallsPath(input.threadId), "GET", ({ client, headers }) =>
+    client.listCalls({
+      headers,
+      params: { threadId: ThreadId.make(input.threadId) },
+      payload: {
+        ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+      },
+    }),
+  );
+
+/** One page of a saved call's transcript after `afterSequence`, with the call's summary. */
+export const listVoiceTranscript = (
+  prepared: PreparedConnection,
+  input: {
+    readonly threadId: string;
+    readonly callId: string;
+    readonly afterSequence?: number;
+    readonly limit?: number;
+  },
+) =>
+  request(
+    prepared,
+    `${voiceCallsPath(input.threadId)}/${encodeURIComponent(input.callId)}/fragments`,
+    "GET",
+    ({ client, headers }) =>
+      client.listFragments({
+        headers,
+        params: { threadId: ThreadId.make(input.threadId), callId: input.callId },
+        payload: {
+          ...(input.afterSequence === undefined ? {} : { afterSequence: input.afterSequence }),
+          ...(input.limit === undefined ? {} : { limit: input.limit }),
+        },
+      }),
+  );

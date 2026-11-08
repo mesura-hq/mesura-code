@@ -71,6 +71,13 @@ const clientSettings: ClientSettings = {
   timestampFormat: "24-hour",
   modalEditing: true,
   wordWrap: true,
+  voiceConversation: {
+    voice: "marin",
+    language: "es",
+    mode: "discuss",
+    handsFree: true,
+    learningSpaces: { "environment-1:project-a": "software" },
+  },
 };
 
 const decodeClientSettingsJson = Schema.decodeEffect(Schema.fromJsonString(ClientSettingsSchema));
@@ -144,6 +151,30 @@ describe("DesktopClientSettings", () => {
             "settings",
           ),
         );
+      }),
+    ),
+  );
+
+  it.effect("desktop client settings keep voice call preferences after a restart", () =>
+    withClientSettings(
+      Effect.gen(function* () {
+        const voiceConversation = {
+          voice: "cedar",
+          language: "en",
+          mode: "learn",
+          handsFree: false,
+        } as const;
+        const settings = yield* DesktopClientSettings.DesktopClientSettings;
+        yield* settings.set({
+          ...clientSettings,
+          voiceConversation: { ...clientSettings.voiceConversation, ...voiceConversation },
+        });
+
+        // A fresh service instance reads the file the way the next app start does.
+        const restarted = yield* DesktopClientSettings.make;
+        const reloaded = yield* restarted.get;
+        assert.isTrue(Option.isSome(reloaded));
+        assert.include(Option.getOrThrow(reloaded).voiceConversation, voiceConversation);
       }),
     ),
   );

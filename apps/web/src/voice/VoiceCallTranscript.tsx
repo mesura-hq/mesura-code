@@ -66,45 +66,28 @@ export function VoiceCallTranscript({
               : "pb-[calc(var(--voice-composer-inset)+1.5rem)]",
           )}
         >
-          {captions.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-12 text-center">
-              <p className="text-lg">{active ? "Your conversation" : "Call ended"}</p>
-              <p className="max-w-64 text-sm leading-relaxed text-muted-foreground">
-                Your words and the spoken replies appear here.
-              </p>
-            </div>
-          ) : (
-            captions.map((caption) => (
-              <article
-                key={caption.id}
-                data-voice-caption-role={caption.role}
-                aria-label={caption.role === "user" ? "You" : "Voice"}
-                className={cn(
-                  "min-w-0",
-                  caption.role === "user"
-                    ? "ml-8 self-end rounded-2xl bg-muted/70 px-4 py-3"
-                    : "w-full",
-                )}
+          {/* Only provider captions: the view stays blank until the first one arrives. */}
+          {captions.map((caption) => (
+            <article
+              key={caption.id}
+              data-voice-caption-role={caption.role}
+              aria-label={caption.role === "user" ? "You" : "Voice"}
+              className={cn(
+                "min-w-0",
+                caption.role === "user"
+                  ? "ml-8 self-end rounded-2xl bg-muted/70 px-4 py-3"
+                  : "w-full",
+              )}
+            >
+              <p
+                data-voice-caption-text
+                // Neutral provider captions, larger than Work's text: 18px narrow, 20px wide.
+                className="text-[18px] leading-8 whitespace-pre-wrap break-words text-foreground [overflow-wrap:anywhere] sm:text-[20px] sm:leading-9"
               >
-                <p
-                  data-voice-caption-text
-                  className={cn(
-                    "whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
-                    caption.role === "user"
-                      ? "text-base leading-7 sm:text-lg sm:leading-8"
-                      : "text-lg leading-8 sm:text-xl sm:leading-9",
-                  )}
-                >
-                  {caption.text.trimStart()}
-                </p>
-              </article>
-            ))
-          )}
-          {captions.length > 0 && !active && (
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
-              Captions clear when you start another call, leave, or refresh.
-            </p>
-          )}
+                {caption.text.trimStart()}
+              </p>
+            </article>
+          ))}
         </div>
       </div>
       {!following && (

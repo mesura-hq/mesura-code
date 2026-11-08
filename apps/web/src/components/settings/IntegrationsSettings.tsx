@@ -112,6 +112,7 @@ import {
 import { searchableSetting } from "./settingsSearch";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { VoiceSettings } from "~/voice/VoiceSettings";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import type { ImportOutcome } from "./browserImportWizard.logic";
 
@@ -1346,6 +1347,8 @@ export function IntegrationsSettingsPanel() {
         )}
       </SettingsSection>
       <DeviceIntegrationSettings />
+      {/* Mesura: voice call preferences and the environment's voice key. */}
+      <VoiceSettings />
     </SettingsPageContainer>
   );
 }

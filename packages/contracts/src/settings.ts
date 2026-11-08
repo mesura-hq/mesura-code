@@ -39,6 +39,7 @@ import {
   type ProviderDriverKind,
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
+import { VoiceConversationClientPreferences } from "./voiceConversation.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -487,6 +488,10 @@ export const ClientSettingsSchema = Schema.Struct({
    * when Neovim cannot start.
    */
   modalEditing: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // Mesura: preferences for the next voice call on this device.
+  voiceConversation: VoiceConversationClientPreferences.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -1562,5 +1567,6 @@ export const ClientSettingsPatch = Schema.Struct({
   snapShotAnimations: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
   modalEditing: Schema.optionalKey(Schema.Boolean),
+  voiceConversation: Schema.optionalKey(VoiceConversationClientPreferences),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

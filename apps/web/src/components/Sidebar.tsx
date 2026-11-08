@@ -74,6 +74,10 @@ import {
   type ReactNode,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
+import {
+  openVoiceHistory,
+  readEnvironmentSupportsVoiceHistory,
+} from "../voice/voiceHistoryNavigation";
 
 import { useRightPanelStore } from "../rightPanelStore";
 import {
@@ -4077,6 +4081,7 @@ export default function Sidebar() {
                 snooze: supportsSnooze,
                 pinning: supportsPinning,
                 titleRegeneration: supportsTitleRegeneration,
+                voiceHistory: readEnvironmentSupportsVoiceHistory(thread.environmentId),
               },
               snoozePresets,
             }),
@@ -4163,6 +4168,9 @@ export default function Sidebar() {
             }
             return;
           }
+          case "voice-history":
+            openVoiceHistory(router, threadRef);
+            return;
           case "mark-unread":
             markThreadUnread(threadKey, thread.latestTurn?.completedAt);
             return;
@@ -4265,6 +4273,7 @@ export default function Sidebar() {
       markThreadUnread,
       openProjectSettings,
       projectByKey,
+      router,
       serverConfigs,
       startThreadRename,
       updateThreadMetadata,

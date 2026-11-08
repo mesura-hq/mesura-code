@@ -141,4 +141,23 @@ describe("clientPersistenceStorage", () => {
     writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, diffLayout: "split" });
     expect(readBrowserClientSettings()?.diffLayout).toBe("split");
   });
+  it("browser storage keeps voice call preferences through a reload", async () => {
+    getTestWindow();
+    const voiceConversation = {
+      voice: "cedar",
+      language: "en",
+      mode: "research",
+      handsFree: false,
+    } as const;
+    const { writeBrowserClientSettings } = await import("./clientPersistenceStorage");
+    writeBrowserClientSettings({
+      ...DEFAULT_CLIENT_SETTINGS,
+      voiceConversation: { ...DEFAULT_CLIENT_SETTINGS.voiceConversation, ...voiceConversation },
+    });
+
+    // A reload reads the stored document with fresh modules.
+    vi.resetModules();
+    const reloaded = await import("./clientPersistenceStorage");
+    expect(reloaded.readBrowserClientSettings()).toMatchObject({ voiceConversation });
+  });
 });

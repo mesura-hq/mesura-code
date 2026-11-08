@@ -16,6 +16,8 @@ import {
   appendVoiceTranscript,
   createVoiceHistoryOwnerGuard,
   endVoiceConversation,
+  listVoiceCalls,
+  listVoiceTranscript,
   readVoiceCall,
 } from "./voiceConversationHttp.ts";
 import {
@@ -144,6 +146,24 @@ const makeEnvironment = (options: {
           ...(authenticated ? { historyOwnerId: authenticated } : {}),
         }),
       );
+    if (url.pathname.endsWith("/calls"))
+      return respond(
+        Response.json({
+          calls: [
+            {
+              callId: CALL_ID,
+              threadId: "thread-1",
+              startedAt: "2026-11-08T10:00:00.000Z",
+              endedAt: "2026-11-08T10:05:00.000Z",
+              endReason: "hangup",
+              finalSequence: 1,
+              lastSequence: 1,
+              ownedByRequester: authenticated === "owner-a",
+            },
+          ],
+          nextCursor: "page-2",
+        }),
+      );
     if (url.pathname.endsWith("/fragments"))
       return respond(
         Response.json({
@@ -195,6 +215,7 @@ const makeEnvironment = (options: {
   return {
     outbound,
     authorizations,
+    layer,
     client,
     transcriptRequests,
     call,
@@ -451,6 +472,49 @@ describe("voice history requests bound to the verified owner", () => {
         ]);
         expect(textCarriers(environment.outbound)).toEqual([]);
         expect(backing.size).toBe(1);
+      }),
+  );
+});
+
+// Phase 4 fence: the saved-history viewer only reads. Any client with orchestration:read can open
+// another owner's finished call, so it must not use the outbox owner guard as read permission.
+describe("voice history viewer reads", () => {
+  it.effect(
+    "voice history viewer lists another owner's calls and transcript without an owner check or a write",
+    () =>
+      scenario(async (run) => {
+        const environment = makeEnvironment({
+          prepared: relayConnection,
+          currentToken: "token-b",
+          ownerByCredential: { "token-b": "owner-b" },
+          call: { endedAt: "2026-11-08T10:05:00.000Z", finalSequence: 1 },
+        });
+
+        const page = await run(
+          listVoiceCalls(relayConnection, {
+            threadId: "thread-1",
+            cursor: "page-1",
+            limit: 20,
+          }).pipe(Effect.provide(environment.layer)),
+        );
+        const transcript = await run(
+          listVoiceTranscript(relayConnection, {
+            threadId: "thread-1",
+            callId: CALL_ID,
+            afterSequence: 0,
+            limit: 50,
+          }).pipe(Effect.provide(environment.layer)),
+        );
+
+        expect(page.calls.map((call) => call.callId)).toEqual([CALL_ID]);
+        expect(transcript.call.callId).toBe(CALL_ID);
+        // Reads go only to the typed history routes, under the reader's own credential.
+        expect(environment.outbound.map((request) => request.path)).toEqual([
+          "/api/voice/threads/thread-1/calls",
+          `/api/voice/threads/thread-1/calls/${CALL_ID}/fragments`,
+        ]);
+        expect(environment.outbound.every((request) => request.owner === "owner-b")).toBe(true);
+        expect(environment.outbound.every((request) => request.body === null)).toBe(true);
       }),
   );
 });

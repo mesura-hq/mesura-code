@@ -19,6 +19,7 @@ export type ThreadActionMenuId =
   | "rename"
   | "regenerate-title"
   | "mark-unread"
+  | "voice-history"
   | "copy"
   | "copy-path"
   | "copy-branch"
@@ -40,6 +41,8 @@ export interface ThreadActionMenuState {
     readonly snooze: boolean;
     readonly pinning: boolean;
     readonly titleRegeneration: boolean;
+    /** Mesura: the environment keeps saved voice conversations. Absent means unsupported. */
+    readonly voiceHistory?: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
 }
@@ -110,6 +113,9 @@ export function buildThreadActionMenuItems(
         ]
       : []),
     { id: "mark-unread", label: "Mark unread", icon: "mail-open" },
+    ...(state.supports.voiceHistory
+      ? [{ id: "voice-history" as const, label: "Voice conversations" }]
+      : []),
     {
       id: "copy",
       label: "Copy",

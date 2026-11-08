@@ -5888,6 +5888,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     (showProviderUnavailable ? "Enable a provider in Settings" : "Ask anything...")}
                 </button>
                 {collapsedComposerImagePreviews}
+                {/* Mesura: a phone call starts from the collapsed phone composer too. */}
+                {voiceConversationControl}
                 <button
                   type="button"
                   data-chat-composer-transition-actions="true"

@@ -107,3 +107,30 @@ describe("buildThreadActionMenuItems", () => {
     expect(archiveItem?.disabled).toBe(true);
   });
 });
+
+// Phase 4 fence: the header menu and the sidebar row both render this list, so the saved voice
+// conversations entry and its capability gate exist once.
+describe("buildThreadActionMenuItems voice conversations", () => {
+  const withVoiceHistory = (voiceHistory: boolean): ThreadActionMenuState => ({
+    ...baseState,
+    supports: { ...baseState.supports, voiceHistory },
+  });
+  const voiceEntries = (state: ThreadActionMenuState) =>
+    buildThreadActionMenuItems(state).filter((item) => /voice conversations/i.test(item.label));
+
+  it("thread menu offers saved voice conversations when the environment records voice history", () => {
+    const entries = voiceEntries(withVoiceHistory(true));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.disabled).not.toBe(true);
+    expect(entries[0]?.destructive).not.toBe(true);
+  });
+
+  it("thread menu hides voice conversations on environments without voice history", () => {
+    expect(voiceEntries(withVoiceHistory(false))).toEqual([]);
+    expect(voiceEntries(baseState)).toEqual([]);
+  });
+
+  it("thread menu keeps delete last with voice conversations present", () => {
+    expect(buildThreadActionMenuItems(withVoiceHistory(true)).at(-1)?.id).toBe("delete");
+  });
+});

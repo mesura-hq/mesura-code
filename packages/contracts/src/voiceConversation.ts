@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { IsoDateTime, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchemas.ts";
 
@@ -43,11 +44,32 @@ export type VoiceConversationMode = typeof VoiceConversationMode.Type;
 export type VoiceConversationLanguage = typeof VoiceConversationLanguage.Type;
 export type VoiceConversationVoice = typeof VoiceConversationVoice.Type;
 
+const VoiceLearningSpace = Schema.String.check(Schema.isMaxLength(120));
+
 export const VoiceConversationPreferences = Schema.Struct({
   handsFree: Schema.optionalKey(Schema.Boolean),
-  learningSpace: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(120))),
+  learningSpace: Schema.optionalKey(VoiceLearningSpace),
 });
 export type VoiceConversationPreferences = typeof VoiceConversationPreferences.Type;
+
+/**
+ * Device preferences for the next voice call, kept in ClientSettings. A call copies them when it
+ * starts. Learning spaces are keyed by `<environmentId>:<projectId>`, so a study destination
+ * chosen for one repository never applies to another. The OpenAI key is never stored here: it
+ * belongs to the environment and is written through /api/voice/settings.
+ */
+export const VoiceConversationClientPreferences = Schema.Struct({
+  voice: VoiceConversationVoice.pipe(Schema.withDecodingDefault(Effect.succeed("marin" as const))),
+  language: VoiceConversationLanguage.pipe(
+    Schema.withDecodingDefault(Effect.succeed("es" as const)),
+  ),
+  mode: VoiceConversationMode.pipe(Schema.withDecodingDefault(Effect.succeed("discuss" as const))),
+  handsFree: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  learningSpaces: Schema.Record(Schema.String, VoiceLearningSpace).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+});
+export type VoiceConversationClientPreferences = typeof VoiceConversationClientPreferences.Type;
 
 /** Provider-only context stays separate from the user's durable spoken message. */
 export const VoiceAgentContext = Schema.Struct({
@@ -277,3 +299,37 @@ export const VoiceConversationHttpErrors = [
   voiceErrorAtStatus(503),
   voiceErrorAtStatus(504),
 ] as const;
+
+// Mesura: an open history viewer subscribes to change notices for one thread. A notice names the
+// call that changed and never carries transcript text or the owner's identity; the viewer reads
+// what changed through the authenticated history routes.
+export const VoiceHistorySubscribeInput = Schema.Struct({ threadId: ThreadId });
+export type VoiceHistorySubscribeInput = typeof VoiceHistorySubscribeInput.Type;
+
+export const VoiceHistoryCallChange = Schema.Literals(["started", "appended", "ended"]);
+export type VoiceHistoryCallChange = typeof VoiceHistoryCallChange.Type;
+
+export const VoiceHistoryStreamItem = Schema.Union([
+  /** Live delivery is attached: a viewer re-reads now, so nothing between its read and here is lost. */
+  Schema.Struct({ kind: Schema.Literal("subscribed") }),
+  /**
+   * The server dropped notices because the viewer fell behind. The viewer re-reads everything it
+   * shows, exactly as after `subscribed`, instead of silently missing a call's only notice.
+   */
+  Schema.Struct({ kind: Schema.Literal("resync") }),
+  Schema.Struct({
+    kind: Schema.Literal("call-changed"),
+    callId: VoiceCallId,
+    change: VoiceHistoryCallChange,
+    sequence: NonNegativeInt,
+  }),
+]);
+export type VoiceHistoryStreamItem = typeof VoiceHistoryStreamItem.Type;
+
+export const VOICE_HISTORY_CALL_CHANGES: Readonly<
+  Record<VoiceHistoryEventType, VoiceHistoryCallChange>
+> = {
+  "thread.voice-call-started": "started",
+  "thread.voice-transcript-appended": "appended",
+  "thread.voice-call-ended": "ended",
+};

@@ -102,6 +102,7 @@ import {
   ReviewDiffPreviewResult,
 } from "./review.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
+import { VoiceHistoryStreamItem, VoiceHistorySubscribeInput } from "./voiceConversation.ts";
 import {
   ClientOrchestrationCommand,
   ORCHESTRATION_WS_METHODS,
@@ -1462,6 +1463,16 @@ const WsOrchestrationSubscribeThreadRpc = Rpc.make(ORCHESTRATION_WS_METHODS.subs
   stream: true,
 });
 
+const WsOrchestrationSubscribeVoiceHistoryRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.subscribeVoiceHistory,
+  {
+    payload: VoiceHistorySubscribeInput,
+    success: VoiceHistoryStreamItem,
+    error: EnvironmentAuthorizationError,
+    stream: true,
+  },
+);
+
 const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
@@ -1695,4 +1706,5 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
+  WsOrchestrationSubscribeVoiceHistoryRpc,
 );

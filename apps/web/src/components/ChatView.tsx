@@ -377,6 +377,8 @@ import { resolveComposerTimelineInset, resolveScrollToEndClearance } from "./com
 import { ChatHeader } from "./chat/ChatHeader";
 import type { VoiceCallLayout } from "../voice/VoiceCallTranscript";
 import { ThreadVoicePanel } from "../voice/ThreadVoicePanel";
+import { VoiceHistoryPanel } from "../voice/VoiceHistoryPanel";
+import { closeVoiceHistory, useVoiceHistoryOpen } from "../voice/voiceHistoryNavigation";
 import type { VoiceAgentRequest } from "@t3tools/client-runtime/voice-conversation/controller";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
 import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -2042,6 +2044,7 @@ export default function ChatView(props: ChatViewProps) {
         : null,
     [activeThreadEnvironmentId, activeThreadId],
   );
+  const voiceHistoryOpen = useVoiceHistoryOpen(isServerThread ? activeThreadRef : null);
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null);
   const [timelineAnchor, setTimelineAnchor] = useState<{
@@ -9696,6 +9699,10 @@ export default function ChatView(props: ChatViewProps) {
                 }}
               />
             </div>
+            {/* Saved voice conversations cover the chat column; the timeline stays mounted below. */}
+            {voiceHistoryOpen && activeThreadRef ? (
+              <VoiceHistoryPanel threadRef={activeThreadRef} onClose={closeVoiceHistory} />
+            ) : null}
             <div
               ref={setVoiceTranscriptHost}
               className={

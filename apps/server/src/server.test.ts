@@ -11133,6 +11133,162 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
+  // Phase 4 fence: an open history viewer refreshes only the call that changed, from typed
+  // voice events, without polling. The thread detail and shell streams stay voice-free.
+  const voiceHistoryChangeEvent = (
+    sequence: number,
+    threadId: ThreadId,
+    callId: string,
+    type:
+      | "thread.voice-call-started"
+      | "thread.voice-transcript-appended"
+      | "thread.voice-call-ended",
+  ): OrchestrationEvent =>
+    ({
+      sequence,
+      eventId: EventId.make(`event-voice-history-change-${sequence}`),
+      aggregateKind: "thread",
+      aggregateId: threadId,
+      occurredAt: "2026-11-08T10:00:00.000Z",
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      type,
+      payload:
+        type === "thread.voice-call-started"
+          ? { threadId, callId, ownerKey: "owner-digest", startedAt: "2026-11-08T10:00:00.000Z" }
+          : type === "thread.voice-transcript-appended"
+            ? {
+                threadId,
+                callId,
+                batchId: `batch-${sequence}`,
+                fragments: [
+                  {
+                    fragmentId: `fragment-${sequence}`,
+                    sequence: 1,
+                    speaker: "user",
+                    text: "VH-I1 private spoken transcript text",
+                  },
+                ],
+                appendedAt: "2026-11-08T10:00:01.000Z",
+              }
+            : {
+                threadId,
+                callId,
+                reason: "hangup",
+                lastSequence: 1,
+                endedAt: "2026-11-08T10:00:02.000Z",
+              },
+    }) as OrchestrationEvent;
+
+  it("VH-I2 thread detail events never include voice history", () => {
+    for (const type of [
+      "thread.voice-call-started",
+      "thread.voice-transcript-appended",
+      "thread.voice-call-ended",
+    ] as const) {
+      assert.isFalse(
+        isThreadDetailEvent(voiceHistoryChangeEvent(1, ThreadId.make("thread-vh-i2"), "c", type)),
+      );
+    }
+  });
+
+  it.effect(
+    "VH-I1 an opt-in voice history subscription notifies only the watched thread's changed calls",
+    () =>
+      Effect.gen(function* () {
+        const watchedThreadId = ThreadId.make("thread-voice-history-watched");
+        const otherThreadId = ThreadId.make("thread-voice-history-other");
+        const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+        const subscribed = yield* Deferred.make<void>();
+        yield* buildAppUnderTest({
+          layers: { orchestrationEngine: { streamDomainEvents: Stream.fromPubSub(liveEvents) } },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const items = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const itemsFiber = yield* withWsRpcClient(wsUrl, (client) =>
+              client[ORCHESTRATION_WS_METHODS.subscribeVoiceHistory]({
+                threadId: watchedThreadId,
+              }).pipe(
+                // The server's first item is its receipt that live delivery is attached.
+                Stream.tap((item) =>
+                  item.kind === "subscribed"
+                    ? Deferred.succeed(subscribed, undefined).pipe(Effect.ignore)
+                    : Effect.void,
+                ),
+                Stream.filter((item) => item.kind !== "subscribed"),
+                Stream.take(3),
+                Stream.runCollect,
+              ),
+            ).pipe(Effect.forkScoped);
+
+            // A subscription that fails before its receipt fails the test instead of waiting.
+            yield* Effect.raceFirst(
+              Deferred.await(subscribed),
+              Fiber.join(itemsFiber).pipe(Effect.asVoid),
+            );
+            for (const event of [
+              voiceHistoryChangeEvent(
+                1,
+                otherThreadId,
+                "voice-history-call-other-01",
+                "thread.voice-call-started",
+              ),
+              voiceHistoryChangeEvent(
+                2,
+                watchedThreadId,
+                "voice-history-call-a-00001",
+                "thread.voice-call-started",
+              ),
+              voiceShellTestEvent(3, watchedThreadId, "thread.message-sent"),
+              voiceHistoryChangeEvent(
+                4,
+                watchedThreadId,
+                "voice-history-call-a-00001",
+                "thread.voice-transcript-appended",
+              ),
+              voiceHistoryChangeEvent(
+                5,
+                watchedThreadId,
+                "voice-history-call-a-00001",
+                "thread.voice-call-ended",
+              ),
+            ]) {
+              yield* PubSub.publish(liveEvents, event);
+            }
+            return yield* Fiber.join(itemsFiber);
+          }),
+        ).pipe(Effect.timeout("5 seconds"));
+
+        // One notice per change of the watched call, in order, each naming its event sequence.
+        // The whole notice is compared, so it carries no transcript text, owner digest or other
+        // thread: only the call, the kind of change and the sequence.
+        assert.deepEqual(Array.from(items), [
+          {
+            kind: "call-changed",
+            callId: "voice-history-call-a-00001",
+            change: "started",
+            sequence: 2,
+          },
+          {
+            kind: "call-changed",
+            callId: "voice-history-call-a-00001",
+            change: "appended",
+            sequence: 4,
+          },
+          {
+            kind: "call-changed",
+            callId: "voice-history-call-a-00001",
+            change: "ended",
+            sequence: 5,
+          },
+        ]);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
   it.effect("subscribeShell retries a transient shell projection refetch failure", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("thread-transient-refetch");
