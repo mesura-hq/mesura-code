@@ -226,6 +226,11 @@ The server keeps it for a day, and a server restart clears it.
 On a phone, open Mesura Code in the browser and dictate the same way: the browser asks once for the
 microphone, and the marker, modes and send-when-ready work as on the desktop.
 
+Keep Mesura Code on screen while you dictate. Android stops a browser's microphone about a minute
+after the screen locks or you switch to another app, and the recording goes on silent. A recording
+keeps the screen from turning off by itself. If the screen was off or the app was in the background
+longer than that, a warning tells you that part of the recording may be silent.
+
 ### Dictate from another app on Hyprland
 
 With Mesura Code running, `mesura-code --dictation toggle` starts a recording, and running it again

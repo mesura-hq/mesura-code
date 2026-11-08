@@ -57,6 +57,11 @@ import {
 } from "./recorder";
 import { appendDictationSlot } from "./dictationSlotEdits";
 import {
+  formatHiddenDuration,
+  guardRecordingScreen,
+  type RecordingScreenGuard,
+} from "./recordingScreen";
+import {
   armQuestionSendWhenReady,
   armSendWhenReady,
   disarmQuestionSendWhenReady,
@@ -111,6 +116,7 @@ export interface DictationComposer {
 let activeRecording: DictationRecording | null = null;
 let opening = false;
 let levelTimer: ReturnType<typeof setInterval> | null = null;
+let screenGuard: RecordingScreenGuard | null = null;
 /**
  * Bumped by every start, stop, cancel and restart. A microphone that opens after the session it
  * was opened for has moved on (cancelled during a restart, say) is discarded, not installed.
@@ -424,6 +430,24 @@ function startLevelPolling() {
   }, LEVEL_POLL_INTERVAL_MS);
 }
 
+function warnMicrophoneMayHaveStopped(hiddenMs: number) {
+  if (!useDictationSessionStore.getState().session) return;
+  toastManager.add({
+    type: "warning",
+    title: "Part of this recording may be silent",
+    description: `The screen was off or Mesura Code was in the background for ${formatHiddenDuration(hiddenMs)}. Android cuts the microphone about a minute after that, so what you said later was probably not recorded.`,
+    timeout: 0,
+  });
+}
+
+function guardScreenForRecording() {
+  screenGuard?.release();
+  screenGuard = guardRecordingScreen({
+    isCapturing: () => useDictationSessionStore.getState().session?.runningSince != null,
+    onMicrophoneMayHaveStopped: warnMicrophoneMayHaveStopped,
+  });
+}
+
 async function openRecording(): Promise<DictationRecording | null> {
   opening = true;
   try {
@@ -466,10 +490,13 @@ export async function startDictation(): Promise<void> {
     },
   });
   startLevelPolling();
+  guardScreenForRecording();
 }
 
 function endRecording() {
   stopLevelPolling();
+  screenGuard?.release();
+  screenGuard = null;
   activeRecording = null;
   recordingThread = null;
   useDictationSessionStore.setState({ session: null });

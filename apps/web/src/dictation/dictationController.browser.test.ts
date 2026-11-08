@@ -60,6 +60,7 @@ import {
   selectDictationMode,
   startDictation,
   stopDictation,
+  toggleDictationPause,
 } from "./dictationController";
 import { createFakeMedia } from "./dictationMedia.testFixtures";
 import {
@@ -72,6 +73,8 @@ import {
   useOwnDictationJobsStore,
 } from "./dictationSessionStore";
 import { setDictationMediaBackend } from "./recorder";
+import { setRecordingScreenEnvironment } from "./recordingScreen";
+import { createFakeScreen } from "./recordingScreen.testFixtures";
 import { sendWhenReadyKey, useSendWhenReadyStore, withDictatedPrefix } from "./sendWhenReady";
 import { readThreadDictationActivity } from "./threadDictationActivity";
 import { useDictationWidgetActivityStore } from "./dictationWidgetState";
@@ -919,5 +922,45 @@ describe("the thread a recording belongs to", () => {
 
     await recordAndStop("clipboard");
     expect(readThreadDictationActivity(draftTarget)).toBeNull();
+  });
+});
+
+describe("dictation on a phone whose screen goes off", () => {
+  const silenceWarnings = () =>
+    vi
+      .mocked(toastManager.add)
+      .mock.calls.filter(([toast]) => String(toast.title).includes("may be silent"));
+
+  it("keeps the screen on while recording and lets it go when the recording stops", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _screenOverride = { [Symbol.dispose]: () => setRecordingScreenEnvironment(null) };
+    const screen = createFakeScreen();
+    await startDictation();
+    expect(screen.wakeLock.request).toHaveBeenCalledExactlyOnceWith("screen");
+    await screen.grantNext();
+    await stopDictation();
+    expect(screen.sentinels[0]?.releaseCalls).toBe(1);
+    expect(screen.listenerCount()).toBe(0);
+  });
+
+  it("warns, and keeps recording, when the page returns after Android may have cut the microphone", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _screenOverride = { [Symbol.dispose]: () => setRecordingScreenEnvironment(null) };
+    const screen = createFakeScreen();
+    await startDictation();
+    screen.hideFor(3 * 60_000);
+    expect(silenceWarnings()).toHaveLength(1);
+    expect(silenceWarnings()[0]![0].description).toContain("3 min");
+    expect(useDictationSessionStore.getState().session).not.toBeNull();
+  });
+
+  it("does not warn for a long hide while the recording was paused", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _screenOverride = { [Symbol.dispose]: () => setRecordingScreenEnvironment(null) };
+    const screen = createFakeScreen();
+    await startDictation();
+    toggleDictationPause();
+    screen.hideFor(3 * 60_000);
+    expect(silenceWarnings()).toHaveLength(0);
   });
 });
