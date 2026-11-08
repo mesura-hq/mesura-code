@@ -123,6 +123,259 @@ describe("software keyboard detection", () => {
     unsubscribe();
   });
 
+  // regression: Chrome on Android sent on Enter, because `resizes-content` shrinks both heights
+  describe("a keyboard that resizes the layout viewport", () => {
+    function layoutFixture(device: { touchOnly: boolean; editableFocused: boolean }) {
+      const parts = fixture({ native: true });
+      const { win, viewport } = parts;
+      const state = { ...device };
+      Object.assign(win, {
+        innerWidth: 390,
+        matchMedia: (query: string) => ({
+          matches: query === "(pointer: coarse)" ? state.touchOnly : !state.touchOnly,
+        }),
+        document: {
+          get activeElement() {
+            return state.editableFocused ? { isContentEditable: true, tagName: "DIV" } : null;
+          },
+        },
+      });
+      // Chrome on Android resizes the layout and visual viewports together.
+      let layoutWidth = 390;
+      const resizeLayout = (height: number, width = layoutWidth) => {
+        layoutWidth = width;
+        Object.assign(win, { innerHeight: height, innerWidth: width });
+        Object.assign(viewport, { height, width, scale: 1 });
+        viewport.dispatchEvent(new Event("resize"));
+      };
+      return { ...parts, state, resizeLayout };
+    }
+
+    it("opens and closes with the layout height on a touch device", () => {
+      const { store, resizeLayout } = layoutFixture({ touchOnly: true, editableFocused: true });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(790);
+      expect(store.getSnapshot()).toBe(false);
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      resizeLayout(844);
+      expect(store.getSnapshot()).toBe(false);
+      unsubscribe();
+    });
+
+    it("still detects the keyboard on a touch device that also has a stylus", () => {
+      const { store, win, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      Object.assign(win, {
+        matchMedia: (query: string) => ({
+          matches: query === "(pointer: coarse)" || query === "(any-pointer: fine)",
+        }),
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("keeps the closed height while the keyboard closes after a blur", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      state.editableFocused = false;
+      resizeLayout(560);
+      expect(store.getSnapshot()).toBe(false);
+      resizeLayout(600);
+      expect(store.getSnapshot()).toBe(false);
+      state.editableFocused = true;
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("records a new closed height once the closing keyboard is gone", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      state.editableFocused = false;
+      resizeLayout(844);
+      resizeLayout(500);
+      state.editableFocused = true;
+      resizeLayout(500);
+      expect(store.getSnapshot()).toBe(false);
+      unsubscribe();
+    });
+
+    it("records an unfocused shrink after a dismissal as the new closed height", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      state.editableFocused = false;
+      resizeLayout(560);
+      resizeLayout(790);
+      resizeLayout(500);
+      state.editableFocused = true;
+      resizeLayout(490);
+      expect(store.getSnapshot()).toBe(false);
+      unsubscribe();
+    });
+
+    it("keeps the closed height when a refocus interrupts a dismissal", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(390, 844);
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      state.editableFocused = false;
+      resizeLayout(260, 844);
+      expect(store.getSnapshot()).toBe(false);
+      state.editableFocused = true;
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("keeps the closed height through dismissal frames near it", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(560);
+      state.editableFocused = false;
+      resizeLayout(700);
+      resizeLayout(730);
+      state.editableFocused = true;
+      resizeLayout(590);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("keeps the other orientation's closed height when rotating during a dismissal", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: false,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(390, 844);
+      resizeLayout(844, 390);
+      state.editableFocused = true;
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      state.editableFocused = false;
+      resizeLayout(560);
+      resizeLayout(200, 844);
+      state.editableFocused = true;
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("keeps a keyboard open after rotating during a dismissal to a new width", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      state.editableFocused = false;
+      resizeLayout(560);
+      resizeLayout(200, 844);
+      state.editableFocused = true;
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      resizeLayout(390, 844);
+      expect(store.getSnapshot()).toBe(false);
+      unsubscribe();
+    });
+
+    it("keeps a rotated open keyboard through a blur", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      state.editableFocused = false;
+      resizeLayout(200, 844);
+      expect(store.getSnapshot()).toBe(false);
+      state.editableFocused = true;
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("ignores a shorter desktop browser window", () => {
+      const { store, resizeLayout } = layoutFixture({ touchOnly: false, editableFocused: true });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(600);
+      expect(store.getSnapshot()).toBe(false);
+      unsubscribe();
+    });
+
+    it("takes a split-screen resize without focus as the new closed height", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: false,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(500);
+      expect(store.getSnapshot()).toBe(false);
+      state.editableFocused = true;
+      resizeLayout(500);
+      expect(store.getSnapshot()).toBe(false);
+      resizeLayout(250);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("stays open through a rotation until the height grows back", () => {
+      const { store, resizeLayout } = layoutFixture({ touchOnly: true, editableFocused: true });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      resizeLayout(200, 844);
+      expect(store.getSnapshot()).toBe(true);
+      resizeLayout(390, 844);
+      expect(store.getSnapshot()).toBe(false);
+      resizeLayout(160, 844);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("stays open through a pinch zoom", () => {
+      const { store, win, viewport, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      Object.assign(viewport, { width: 195, height: 240, scale: 2 });
+      viewport.dispatchEvent(new Event("resize"));
+      expect(win.innerHeight).toBe(480);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+  });
+
   it("bypasses both native geometry and viewport detection on desktop", () => {
     const { store, geometry, resize } = fixture({ native: true, overlay: true, desktop: true });
     const listener = vi.fn();

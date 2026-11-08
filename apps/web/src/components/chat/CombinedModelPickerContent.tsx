@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type KeyboardEvent,
   type SyntheticEvent,
 } from "react";
 
@@ -327,7 +328,17 @@ function CombinedPicker(
     return row ? resolveCombinedPickerRow(pickerState, row, context).effort : null;
   };
 
+  // Left/Right edit the highlighted row, else the row More options would edit.
+  const stepTargetEffort = (highlightedModelKey: string | null, direction: 1 | -1) => {
+    const targetKey = [highlightedModelKey, lastHighlightedModelKeyRef.current, savedRowKey].find(
+      (modelKey): modelKey is string => modelKey !== null && isModelVisible(modelKey),
+    );
+    const target = targetKey ? parseModelPickerModelKey(targetKey) : null;
+    if (target) stepEffort(target.instanceId, target.slug, direction);
+  };
+
   const extension: ModelPickerExtension = {
+    hideModelJumpLabels: true,
     hidden: extrasExpanded,
     rootClassName: MODEL_SCREEN_HEIGHT_CLASS_NAME,
     rowRenderKey: pickerState,
@@ -365,18 +376,13 @@ function CombinedPicker(
         selectAdjacentProvider(event.shiftKey ? -1 : 1);
         return true;
       }
-      // Plain Left/Right change the highlighted row's effort instead of
-      // moving the caret.
-      const highlighted =
-        (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
-        !event.shiftKey &&
-        highlightedModelKey
-          ? parseModelPickerModelKey(highlightedModelKey)
-          : null;
-      if (!highlighted) return false;
+      // Plain Left/Right change effort instead of moving the caret. Without a
+      // highlighted row they still never fall through to the provider sidebar.
+      const direction = plainEffortArrowDirection(event);
+      if (direction === null) return false;
       event.preventDefault();
       event.stopPropagation();
-      stepEffort(highlighted.instanceId, highlighted.slug, event.key === "ArrowRight" ? 1 : -1);
+      stepTargetEffort(highlightedModelKey, direction);
       return true;
     },
   };
@@ -420,6 +426,21 @@ function CombinedPicker(
       className={`flex w-screen max-w-90 flex-col overflow-hidden ${PICKER_HEIGHT_CLASS_NAME}`}
       data-model-picker-content="true"
       data-combined-model-picker="true"
+      onKeyDownCapture={(event) => {
+        // Focus can rest on a provider button after a click; Left/Right still change effort.
+        const direction = plainEffortArrowDirection(event);
+        if (
+          direction === null ||
+          !(event.target instanceof Element) ||
+          !event.target.closest("[data-model-picker-sidebar]")
+        ) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        focusSearch();
+        stepTargetEffort(null, direction);
+      }}
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         event.preventDefault();
@@ -479,6 +500,15 @@ function CombinedPicker(
       </span>
     </div>
   );
+}
+
+/** The effort step of a Left/Right press without modifiers, else null. */
+function plainEffortArrowDirection(event: KeyboardEvent): 1 | -1 | null {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+  if (event.nativeEvent.isComposing) return null;
+  if (event.key === "ArrowRight") return 1;
+  if (event.key === "ArrowLeft") return -1;
+  return null;
 }
 
 /** Keeps a stepper press from selecting the row or moving focus out of search. */

@@ -14,6 +14,8 @@ export interface ModelPickerExtension {
    * survive, because the content stays mounted.
    */
   hidden?: boolean;
+  /** Hides the Ctrl+1..9 labels on model rows. The jump shortcuts keep working. */
+  hideModelJumpLabels?: boolean;
   /** Merged into the content root, for example to cap its height. */
   rootClassName?: string;
   /** Changes whenever row accessories must re-render in the virtual list. */
