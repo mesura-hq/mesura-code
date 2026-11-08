@@ -163,6 +163,39 @@ describe("software keyboard detection", () => {
       unsubscribe();
     });
 
+    it("still detects the keyboard on a touch device that also has a stylus", () => {
+      const { store, win, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      Object.assign(win, {
+        matchMedia: (query: string) => ({
+          matches: query === "(pointer: coarse)" || query === "(any-pointer: fine)",
+        }),
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
+    it("keeps the closed height while the keyboard closes after a blur", () => {
+      const { store, state, resizeLayout } = layoutFixture({
+        touchOnly: true,
+        editableFocused: true,
+      });
+      const unsubscribe = store.subscribe(() => {});
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      state.editableFocused = false;
+      resizeLayout(560);
+      expect(store.getSnapshot()).toBe(false);
+      state.editableFocused = true;
+      resizeLayout(480);
+      expect(store.getSnapshot()).toBe(true);
+      unsubscribe();
+    });
+
     it("ignores a shorter desktop browser window", () => {
       const { store, resizeLayout } = layoutFixture({ touchOnly: false, editableFocused: true });
       const unsubscribe = store.subscribe(() => {});

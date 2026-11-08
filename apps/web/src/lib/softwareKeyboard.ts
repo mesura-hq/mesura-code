@@ -21,7 +21,7 @@ function isEditable(element: Element | null | undefined) {
  * Mesura: Chrome on Android honors `interactive-widget=resizes-content` (index.html), so its
  * keyboard shrinks the layout viewport too and the visual-vs-layout check never fires. That
  * keyboard shows as a layout height below the one recorded at the same layout width while no
- * keyboard could show: a touch-only device with an editable element focused.
+ * keyboard could show: a touch device with an editable element focused.
  */
 function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
   const closedHeightByWidth = new Map<number, number>();
@@ -32,14 +32,17 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
 
   const keyboardCanShow = () =>
     win?.matchMedia?.("(pointer: coarse)").matches === true &&
-    !win.matchMedia("(any-pointer: fine)").matches &&
     isEditable(win.document?.activeElement);
 
   const evaluate = () => {
     if (!win) return false;
     const { innerWidth: width, innerHeight: height } = win;
     if (!keyboardCanShow()) {
-      closedHeightByWidth.set(width, height);
+      const closedHeight = closedHeightByWidth.get(width);
+      // A keyboard still closing after blur reports heights that must not lower the closed one.
+      if (!open || closedHeight === undefined || height > closedHeight) {
+        closedHeightByWidth.set(width, height);
+      }
       openAtUnknownWidth = null;
       open = false;
       return open;
@@ -61,6 +64,8 @@ function createLayoutKeyboardTracker(win: KeyboardWindow | undefined) {
     }
     if (height > closedHeight) closedHeightByWidth.set(width, height);
     openAtUnknownWidth = null;
+    // A focused split-screen resize with a hardware keyboard also reads as open: geometry alone
+    // cannot tell it from this keyboard, and a stray newline costs less than an early send.
     open = Math.max(closedHeight, height) - height > KEYBOARD_THRESHOLD;
     return open;
   };
