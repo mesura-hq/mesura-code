@@ -123,6 +123,23 @@ describe("software keyboard detection", () => {
     unsubscribe();
   });
 
+  // regression: Chrome on Android sent on Enter, because `resizes-content` shrinks both heights
+  it("detects a keyboard that resizes the layout viewport", () => {
+    const { store, win, resize } = fixture({ native: true });
+    const resizeLayout = (height: number) => {
+      win.innerHeight = height;
+      resize(height);
+    };
+    const unsubscribe = store.subscribe(() => {});
+    resizeLayout(790);
+    expect(store.getSnapshot()).toBe(false);
+    resizeLayout(480);
+    expect(store.getSnapshot()).toBe(true);
+    resizeLayout(844);
+    expect(store.getSnapshot()).toBe(false);
+    unsubscribe();
+  });
+
   it("bypasses both native geometry and viewport detection on desktop", () => {
     const { store, geometry, resize } = fixture({ native: true, overlay: true, desktop: true });
     const listener = vi.fn();

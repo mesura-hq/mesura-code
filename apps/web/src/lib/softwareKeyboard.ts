@@ -23,6 +23,20 @@ export function createSoftwareKeyboardStore(win: KeyboardWindow | undefined, isD
   const viewport = isDesktop ? undefined : win?.visualViewport;
   const keyboard = isDesktop ? undefined : win?.navigator.virtualKeyboard;
   let previous = viewport ? viewportSnapshot(viewport) : undefined;
+  // Mesura: Chrome on Android honors `interactive-widget=resizes-content` (index.html), so its
+  // keyboard shrinks the layout viewport too and the visual-vs-layout check never fires. Compare
+  // the layout height with the tallest one seen at the current width instead.
+  let tallestLayout = previous
+    ? { width: previous.width, height: win?.innerHeight ?? 0 }
+    : undefined;
+  const layoutShrunkByKeyboard = (current: { width: number }) => {
+    if (!win) return false;
+    if (!tallestLayout || tallestLayout.width !== current.width) {
+      tallestLayout = { width: current.width, height: win.innerHeight };
+    }
+    tallestLayout.height = Math.max(tallestLayout.height, win.innerHeight);
+    return tallestLayout.height - win.innerHeight > KEYBOARD_THRESHOLD;
+  };
 
   const getSnapshot = () => {
     // Chromium can expose the API while withholding geometry outside overlay mode.
@@ -46,7 +60,7 @@ export function createSoftwareKeyboardStore(win: KeyboardWindow | undefined, isD
       ? (previous.height - current.height) * current.scale
       : 0;
     if (Math.abs(current.height - win.innerHeight / current.scale) <= 1) {
-      viewportOpen = false;
+      viewportOpen = layoutShrunkByKeyboard(current);
     } else if (
       !viewportOpen &&
       previous?.width === current.width &&
@@ -64,7 +78,9 @@ export function createSoftwareKeyboardStore(win: KeyboardWindow | undefined, isD
       if (viewport) {
         previous = viewportSnapshot(viewport);
         // A composer can mount after the keyboard has already opened.
-        viewportOpen = win.innerHeight - previous.height * previous.scale > KEYBOARD_THRESHOLD;
+        viewportOpen =
+          win.innerHeight - previous.height * previous.scale > KEYBOARD_THRESHOLD ||
+          layoutShrunkByKeyboard(previous);
         viewport.addEventListener("resize", onViewportResize);
       }
       keyboard?.addEventListener("geometrychange", notify);
