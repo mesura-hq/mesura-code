@@ -1,4 +1,4 @@
-import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
+import { projectUserMessageForProvider } from "../voice/voiceProviderText.ts";
 import {
   MessageId,
   type NodeId,
@@ -357,10 +357,8 @@ export const layer: Layer.Layer<
               providerTurnId: loaded.providerTurn.id,
               message: {
                 messageId: message.id,
-                text: projectComposerContextForProvider({
-                  text: message.text,
-                  records: message.context?.records ?? [],
-                }),
+                // Mesura: a spoken steer carries the voice agent instructions.
+                text: projectUserMessageForProvider(message),
                 attachments: message.attachments,
                 createdBy: message.createdBy,
                 creationSource: message.creationSource,

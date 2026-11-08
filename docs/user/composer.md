@@ -80,6 +80,65 @@ start of the composer to edit the most recently queued message. Change
 On a phone, use the same **Settings → General → Follow-up behavior** setting.
 Sending and uploading attachments require a connection to the environment.
 
+## Talk to an agent
+
+On web and desktop, open an existing thread and select the phone between the
+attachment and dictation controls. On a phone browser, the phone also appears in the
+collapsed composer. While a call runs, one bar above the thread switches between
+**Call**, **Split**, and **Work**, mutes the microphone, and hangs up. Without a call
+the thread shows no voice bar.
+**Call** shows your words and the voice's spoken captions. **Split** shows the
+captions and the working agent together, and **Work** shows the normal thread.
+Hanging up returns to **Work**. The voice can rephrase the working agent's written
+answer. For a new thread, send its first message before starting a call.
+Choose the agent, effort, and access mode in the composer. Voice requests use
+those selections and leave any unsent text or attachments in the composer.
+Dictation and a call cannot use the microphone at the same time; the control that
+cannot start explains why.
+
+To read an earlier call, open the thread menu and select **Voice conversations**.
+Opening a saved call only reads it: it starts no audio and sends nothing to the agent.
+
+Choose the voice, language, and conversation mode in **Settings > Integrations >
+Voice calls**. A change applies to your next call.
+
+- **Discuss this repository** answers questions about your work.
+- **Research a topic or client** checks project material and current sources.
+- **Learn from this repository** uses recall questions and Learning App records when configured.
+
+Choose hands-free calls to get one main point and one question at a time.
+For learning mode, select a project in Settings to set its Learning App space, or
+ask the agent to help you choose. Each project keeps its own space.
+The OpenAI API key belongs to the environment selected in Settings, and only an
+environment admin can save it. If the key is missing when you select the phone,
+Mesura Code opens that setting; **Back to thread** returns without starting a call.
+Voice uses separate API billing; the thread's existing provider handles the agent work.
+
+Calls last up to 15 minutes. You can mute the microphone or end the call at any
+time. Speaking over the voice interrupts its speech. Use the thread's normal
+Stop action to stop the agent's task. Follow-up voice requests wait for the
+current task to finish. Resolve approvals and requested input in the thread.
+Select the waiting count in the call bar to remove waiting requests while the active task continues.
+The call keeps at most eight waiting requests. If the queue or its text exceeds
+its limit, the call removes waiting requests and asks you to start another call.
+The active task continues. The call does not send more requests until you restart it.
+The voice confirms when the thread accepts your request, before the agent's first
+progress update. The agent then announces its first action. During longer tasks,
+the call speaks brief public progress updates and can answer status questions.
+
+Changing threads or ending the call clears voice requests that did not reach the
+agent. Requests already sent appear as your spoken words, with their answers in the
+thread. Voice instructions stay separate from the displayed message. The voice
+paraphrases the agent's answer; use the written answer for exact code and details.
+
+For a phone listening test, use the HTTPS web address in the foreground.
+Background and locked screen calls are not supported by this prototype.
+
+Learning mode uses repository material and can use the Learning App's `learn`
+command when the environment has its CLI and credentials. Without those
+credentials, the agent can discuss the repository but cannot read or save your
+learning records.
+
 ## Custom models
 
 On web and desktop, use Settings → Providers → **Models** to add an unlisted model with a custom

@@ -196,6 +196,11 @@ import { GitWorkingTreeChangesInput, GitWorkingTreeChangesResult } from "./gitCh
 import { KeybindingsConfigError } from "./keybindings.ts";
 import { OrchestrationSearchThreadsError } from "./threadSearch.ts";
 import {
+  VOICE_WS_METHODS,
+  VoiceHistoryStreamItem,
+  VoiceHistorySubscribeInput,
+} from "./voiceConversation.ts";
+import {
   ProviderUploadFeedbackError,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
@@ -2171,6 +2176,14 @@ const WsOrchestrationV2SubscribeThreadRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS
   stream: true,
 });
 
+// Mesura: change notices for an open voice history viewer.
+const WsVoiceSubscribeHistoryRpc = Rpc.make(VOICE_WS_METHODS.subscribeVoiceHistory, {
+  payload: VoiceHistorySubscribeInput,
+  success: VoiceHistoryStreamItem,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsOrchestrationV2SubscribeCommandOutputRpc = Rpc.make(
   ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput,
   {
@@ -2648,6 +2661,7 @@ const MesuraWsRpcGroup = RpcGroup.make(
   WsThreadSearchToolConnectRpc,
   WsThreadSearchToolRespondRpc,
   WsProviderRetryNowRpc,
+  WsVoiceSubscribeHistoryRpc,
 );
 
 /** Every RPC, as clients and the server's router see them. */

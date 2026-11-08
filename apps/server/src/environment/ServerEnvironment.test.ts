@@ -317,4 +317,18 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       }).pipe(Effect.provide(layerTest));
     }),
   );
+
+  it.effect("VH-E1 advertises persisted voice history to clients", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-environment-voice-history-",
+      });
+      const descriptor = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+        return yield* serverEnvironment.getDescriptor;
+      }).pipe(Effect.provide(layerServerEnvironment(baseDir)));
+      expect(descriptor.capabilities.voiceHistory).toBe(true);
+    }),
+  );
 });

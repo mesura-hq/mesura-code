@@ -168,6 +168,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       (`linkOrigin`). Another environment links to this one only when it is
       set, since without it that work could change the user's own threads. */
   linkFence: Schema.optionalKey(Schema.Boolean),
+  /** Mesura: server persists spoken voice call transcripts and serves them over the voice
+      history routes. Absent on older servers, which keep no history -- treat absence as false. */
+  voiceHistory: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

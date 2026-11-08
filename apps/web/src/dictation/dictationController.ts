@@ -77,6 +77,7 @@ import {
   useDictationSessionStore,
   useOwnDictationJobsStore,
 } from "./dictationSessionStore";
+import { claimMicrophone, microphoneBlocker } from "../voice/microphoneClaim";
 import { dictationTargetLabel } from "./dictationTargetLabel";
 import {
   recordDictationDelivery,
@@ -438,6 +439,27 @@ async function openRecording(): Promise<DictationRecording | null> {
 
 export async function startDictation(): Promise<void> {
   if (useDictationSessionStore.getState().session !== null || opening) return;
+  await withDictationMicrophone(openDictationSession);
+}
+
+// Cancellation clears the session before a pending microphone settles. Keep its claim through
+// acquisition and stale-recorder cleanup for both starts and restarts.
+async function withDictationMicrophone(open: () => Promise<void>): Promise<void> {
+  const releaseMicrophone = claimMicrophone("dictation");
+  if (!releaseMicrophone) {
+    // Another dictation start already holds the claim; only a call needs explaining.
+    const blocker = microphoneBlocker("dictation");
+    if (blocker !== null) reportError(blocker);
+    return;
+  }
+  try {
+    await open();
+  } finally {
+    releaseMicrophone();
+  }
+}
+
+async function openDictationSession(): Promise<void> {
   const generation = ++sessionGeneration;
   // Bound before the microphone opens: the user pressed record in this thread, and may leave it
   // while the browser asks for the microphone.
@@ -507,6 +529,11 @@ export function toggleDictationPause(): void {
 
 export async function restartDictation(): Promise<void> {
   if (!useDictationSessionStore.getState().session || !activeRecording || opening) return;
+  await withDictationMicrophone(restartDictationRecording);
+}
+
+async function restartDictationRecording(): Promise<void> {
+  if (!activeRecording) return;
   const generation = ++sessionGeneration;
   activeRecording.discard();
   stopLevelPolling();

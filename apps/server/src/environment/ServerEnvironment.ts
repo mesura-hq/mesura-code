@@ -277,6 +277,8 @@ export const make = Effect.gen(function* () {
       peerLinks: true,
       mcpModeLimitHeader: true,
       linkFence: true,
+      // Mesura: persisted voice call history.
+      voiceHistory: true,
     },
   };
 

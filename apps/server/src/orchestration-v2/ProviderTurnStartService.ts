@@ -1,5 +1,6 @@
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
+import { isSpokenMessage, projectUserMessageForProvider } from "../voice/voiceProviderText.ts";
 import {
   CommandId,
   latestProviderTurnForAttempt,
@@ -399,7 +400,12 @@ export const layer: Layer.Layer<
           });
         },
       );
-      if (message.attachments.length === 0 && message.text.trimStart().startsWith("/")) {
+      if (
+        message.attachments.length === 0 &&
+        message.text.trimStart().startsWith("/") &&
+        // Mesura: spoken slash commands stay conversation data.
+        !isSpokenMessage(message)
+      ) {
         const isEmptyCompaction =
           message.text.trim().toLowerCase() === "/compact" && !projection.hasConversation;
         // Preparation may select a new provider; account commands still target the last native session.
@@ -1035,10 +1041,8 @@ export const layer: Layer.Layer<
       const routableSubagents = projection.subagents.filter((subagent) =>
         RunExecutionService.canRouteRelatedSubagent(subagent.status),
       );
-      const userText = projectComposerContextForProvider({
-        text: message.text,
-        records: message.context?.records ?? [],
-      });
+      // Mesura: a spoken request carries the voice agent instructions.
+      const userText = projectUserMessageForProvider(message);
       // Codex and Claude parse /goal from the prompt, so it goes verbatim and history waits a turn.
       const goalDriver = session.driver === "codex" || session.driver === "claudeAgent";
       const goalCommand = goalDriver && parseGoalCommand(message) !== null;

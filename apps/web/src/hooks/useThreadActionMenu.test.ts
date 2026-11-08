@@ -35,6 +35,11 @@ function recordEffect(action: string) {
 }
 
 vi.mock("../components/CustomSnoozeDialog", () => ({ requestCustomSnooze: vi.fn() }));
+// Keep this permission test at the menu boundary; voice navigation loads React state services.
+vi.mock("../voice/voiceHistoryNavigation", () => ({
+  readEnvironmentSupportsVoiceHistory: () => true,
+  openVoiceHistory: () => recordEffect("voice-history"),
+}));
 vi.mock("react", () => ({
   useCallback: (callback: unknown) => callback,
   useMemo: (factory: () => unknown) => factory(),
@@ -167,6 +172,13 @@ beforeEach(() => {
 });
 
 describe("thread menu permissions", () => {
+  it("opens saved voice history without permission to change the thread", async () => {
+    state.show.mockResolvedValue("voice-history");
+    createMenu().openMenu(position);
+    await state.completed.promise;
+    expect(state.effects).toEqual(["voice-history"]);
+  });
+
   it.each(["rename", "regenerate-title", "delete", "pin", "settle", "archive"] as const)(
     "%s rechecks after the native menu closes",
     async (action) => {

@@ -103,7 +103,7 @@ vi.mock(import("./useScopedSettings"), async (original) => ({
 vi.mock(import("./SettingsScopeContext"), async (original) => ({
   ...(await original()),
   useSettingsScope: (() => ({
-    scope: { kind: state.scopeKind, environmentIds: [] },
+    scope: { kind: state.scopeKind, environmentIds: [], members: [] },
     search: {},
     environment: null,
     environments: [],

@@ -223,6 +223,8 @@ import { makePersistedServerRuntimeState } from "./serverRuntimeState.ts";
 import { acceptsPrivateNetworkConnection, loopbackUrlHostForAddress } from "./startupAccess.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
+import { voiceConversationHttpApiLayer } from "./voice/http.ts";
+import { VoiceHistoryLive } from "./voice/VoiceHistory.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
@@ -813,6 +815,8 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(McpOAuthHttp.layer.pipe(Layer.provide(McpOAuth.layer))),
       Layer.provide(CloudHttp.layer),
       Layer.provide(OrchestrationHttp.layer),
+      // Mesura: realtime voice calls and their saved history.
+      Layer.provide(voiceConversationHttpApiLayer),
       Layer.provide(PullRequestHttp.layer),
       Layer.provide(ProjectHttp.layer),
       Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),
@@ -850,6 +854,9 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(layerPullRequestService),
   // Mesura: takeover cards, asked from /mcp and answered over WebSocket.
   Layer.provide(BrowserTakeoverRequests.layer),
+  // Mesura: one voice history for the HTTP routes and the WebSocket notice stream. Building it
+  // replays the voice projection and recovers calls the previous process left open.
+  Layer.provide(VoiceHistoryLive),
   // The same activity instance RunExecutionService reports to, by layer memoization.
   Layer.provide(
     ServerBrowser.layer.pipe(

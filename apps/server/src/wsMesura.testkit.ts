@@ -33,6 +33,7 @@ import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { AccountLimitsService } from "./usage/AccountLimitsService.ts";
 import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
+import { VoiceHistoryNoticesLive } from "./voice/voiceHistoryNotices.ts";
 import { layerMesuraServerScope } from "./wsMesura.ts";
 
 /** The server-scope services, built once; `projectCreates` counts search-project creations. */
@@ -54,6 +55,7 @@ export const makeMesuraServerScope = Effect.fn("WsMesuraTestFixtures.makeServerS
     Layer.mock(AccountLimitsService)({}),
     Layer.mock(ReviewService.ReviewService)({}),
     Layer.mock(ProjectStore.ProjectStoreV2)({}),
+    VoiceHistoryNoticesLive,
     Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),
     FetchHttpClient.layer,
   );

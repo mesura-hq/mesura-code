@@ -501,6 +501,8 @@ export interface ChatComposerProps {
   composerFilesRef: React.RefObject<ComposerFileAttachment[]>;
   composerTerminalContextsRef: React.RefObject<TerminalContextDraft[]>;
   requireExplicitModelSelection?: boolean;
+  /** Mesura: the voice call control, between attach and dictation and in the collapsed row. */
+  voiceConversationControl?: ReactNode;
   dictationStartControl?: ReactNode;
   dictationStrip?: ReactNode;
   composerRef: React.RefObject<ChatComposerHandle | null>;
@@ -636,6 +638,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onRestingChange,
     promptRef,
     requireExplicitModelSelection = false,
+    voiceConversationControl,
     dictationStartControl,
     dictationStrip,
     composerRef,
@@ -3806,6 +3809,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     (showProviderUnavailable ? "Enable a provider in Settings" : "Ask anything...")}
                 </button>
                 {collapsedComposerImagePreviews}
+                {voiceConversationControl ? (
+                  // Mesura: a call starts from the collapsed phone composer too, without expanding it.
+                  <span data-chat-composer-collapsed-controls="true" className="contents">
+                    {voiceConversationControl}
+                  </span>
+                ) : null}
                 {contextWindowMeterElement ? (
                   // Focus here must not expand the composer, or the meter remounts and its popover closes.
                   <span data-chat-composer-collapsed-controls="true" className="contents">
@@ -4074,6 +4083,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 >
                   {contextWindowMeterElement}
                   {composerAttachButton}
+                  {voiceConversationControl}
                   {dictationStartControl}
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}

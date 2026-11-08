@@ -84,3 +84,4 @@ export * from "./providerRetryNow.ts";
 export * from "./clientRpcPermissions.ts";
 export * from "./threadSearchEvidence.ts";
 export * from "./threadSearchTools.ts";
+export * from "./voiceConversation.ts";

@@ -49,12 +49,15 @@ import * as Stream from "effect/Stream";
 import { projectFaviconCache } from "../assets/projectFaviconCache";
 
 const DATABASE_NAME = "t3code:connection-runtime";
-const DATABASE_VERSION = 4;
+// v5 adds the voice history outbox. The upgrade only creates missing stores, so the catalog and
+// caches survive it.
+const DATABASE_VERSION = 5;
 const CATALOG_STORE_NAME = "catalog";
 const SHELL_STORE_NAME = "shell";
 const THREAD_STORE_NAME = "thread";
 const SERVER_CONFIG_STORE_NAME = "server-config";
 const VCS_REFS_STORE_NAME = "vcs-refs";
+const VOICE_HISTORY_OUTBOX_STORE_NAME = "voice-history-outbox";
 const CATALOG_KEY = "document";
 const StoredShellSnapshot = StoredOrchestrationShellSnapshot;
 const StoredShellSnapshotJson = Schema.fromJsonString(StoredShellSnapshot);
@@ -144,6 +147,9 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
         }
         if (!request.result.objectStoreNames.contains(VCS_REFS_STORE_NAME)) {
           request.result.createObjectStore(VCS_REFS_STORE_NAME);
+        }
+        if (!request.result.objectStoreNames.contains(VOICE_HISTORY_OUTBOX_STORE_NAME)) {
+          request.result.createObjectStore(VOICE_HISTORY_OUTBOX_STORE_NAME);
         }
       });
       request.addEventListener("error", () => {
@@ -267,6 +273,22 @@ function writeDatabaseValueOnConnection(
   }).pipe(Effect.withSpan("web.connectionStorage.writeDatabaseValue"));
 }
 
+function readAllDatabaseValuesOnConnection(database: IDBDatabase, storeName: string) {
+  return Effect.callback<ReadonlyArray<unknown>, ConnectionTransientError>((resume) => {
+    try {
+      const request = database.transaction(storeName, "readonly").objectStore(storeName).getAll();
+      request.addEventListener("error", () => {
+        resume(Effect.fail(catalogError("read", request.error ?? "Unknown IndexedDB read error")));
+      });
+      request.addEventListener("success", () => {
+        resume(Effect.succeed(request.result));
+      });
+    } catch (cause) {
+      resume(Effect.fail(catalogError("read", cause)));
+    }
+  }).pipe(Effect.withSpan("web.connectionStorage.readAllDatabaseValues"));
+}
+
 function removeDatabaseValueOnConnection(
   database: IDBDatabase,
   storeName: string,
@@ -385,6 +407,33 @@ const encodeCatalog = Effect.fn("web.connectionStorage.encodeCatalog")(function*
   return yield* encodeConnectionCatalogDocument(catalog).pipe(
     Effect.mapError((cause) => catalogError("encode", cause)),
   );
+});
+
+/**
+ * The voice history outbox: unconfirmed transcript batches, kept beside the connection caches in
+ * the same database and never in the catalog document. Values are opaque here; the voice outbox
+ * decodes them.
+ */
+export interface VoiceHistoryOutboxBackend {
+  readonly readAll: Effect.Effect<ReadonlyArray<unknown>, ConnectionTransientError>;
+  readonly write: (key: string, value: unknown) => Effect.Effect<void, ConnectionTransientError>;
+  readonly remove: (key: string) => Effect.Effect<void, ConnectionTransientError>;
+}
+
+export const openVoiceHistoryOutboxBackend = Effect.fn(
+  "web.connectionStorage.openVoiceHistoryOutboxBackend",
+)(function* () {
+  // The outbox lives for the page, so its connection handle is never closed here. The handle
+  // reopens after another tab's upgrade closes it.
+  const { handle } = yield* makeDatabaseHandle();
+  yield* handle.get;
+  return {
+    readAll: withDatabase(handle, (opened) =>
+      readAllDatabaseValuesOnConnection(opened, VOICE_HISTORY_OUTBOX_STORE_NAME),
+    ),
+    write: (key, value) => writeDatabaseValue(handle, VOICE_HISTORY_OUTBOX_STORE_NAME, key, value),
+    remove: (key) => removeDatabaseValue(handle, VOICE_HISTORY_OUTBOX_STORE_NAME, key),
+  } satisfies VoiceHistoryOutboxBackend;
 });
 
 export interface CatalogBackend {

@@ -443,6 +443,80 @@ describe("ServerSettings.neovimConfigDirectory", () => {
   });
 });
 
+// Phase 4 fence: call preferences are device preferences in ClientSettings. The OpenAI key is
+// environment-owned and must never become a client setting.
+describe("ClientSettings.voiceConversation", () => {
+  const prototypeDefaults = { voice: "marin", language: "es", mode: "discuss", handsFree: true };
+
+  it("voice preferences default to the prototype's voice, language, mode and hands-free", () => {
+    expect(decodeClientSettings({}).voiceConversation).toMatchObject(prototypeDefaults);
+  });
+
+  it("voice preferences round-trip through saved client settings and patches", () => {
+    const voiceConversation = {
+      voice: "cedar",
+      language: "mixed",
+      mode: "research",
+      handsFree: false,
+    };
+    const settings = decodeClientSettings({ voiceConversation });
+    expect(encodeClientSettings(settings).voiceConversation).toMatchObject(voiceConversation);
+    expect(decodeClientSettingsPatch({ voiceConversation }).voiceConversation).toMatchObject(
+      voiceConversation,
+    );
+  });
+
+  it.each([{ voice: "unknown-voice" }, { language: "fr" }, { mode: "chat" }, { handsFree: "yes" }])(
+    "voice preferences reject an unsupported value %o",
+    (invalid) => {
+      expect(() =>
+        decodeClientSettings({ voiceConversation: { ...prototypeDefaults, ...invalid } }),
+      ).toThrow();
+    },
+  );
+
+  it("voice preferences never keep an OpenAI key in client settings", () => {
+    const encoded = JSON.stringify(
+      encodeClientSettings(
+        decodeClientSettings({
+          voiceConversation: { ...prototypeDefaults, apiKey: "sk-voice-fence-secret" },
+        }),
+      ),
+    );
+    expect(encoded).not.toContain("sk-voice-fence-secret");
+  });
+});
+
+describe("ClientSettings.voiceConversation learning spaces", () => {
+  it("voice learning spaces round-trip per environment and project and default to none", () => {
+    expect(decodeClientSettings({}).voiceConversation.learningSpaces).toEqual({});
+    const learningSpaces = {
+      "environment-a:project-one": "software",
+      "environment-b:project-two": "clients",
+    };
+    const settings = decodeClientSettings({
+      voiceConversation: {
+        voice: "marin",
+        language: "es",
+        mode: "learn",
+        handsFree: true,
+        learningSpaces,
+      },
+    });
+    expect(encodeClientSettings(settings).voiceConversation?.learningSpaces).toEqual(
+      learningSpaces,
+    );
+  });
+
+  it("voice learning spaces reject a destination longer than the call accepts", () => {
+    expect(() =>
+      decodeClientSettings({
+        voiceConversation: { learningSpaces: { "environment-a:project-one": "x".repeat(121) } },
+      }),
+    ).toThrow();
+  });
+});
+
 describe("branch naming settings", () => {
   it("defaults existing settings to the mesura static prefix", () => {
     expect(decodeServerSettings({})).toMatchObject({

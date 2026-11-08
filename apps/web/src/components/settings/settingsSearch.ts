@@ -817,6 +817,45 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "devices",
     searchTerms: ["xcode android studio sdk avd runtime"],
   },
+  // Mesura: voice calls. Call preferences are saved on this device; the key is the environment's.
+  {
+    id: "voice-call-voice",
+    title: "Call voice",
+    to: "/settings/integrations",
+    searchTerms: ["voice call speaker sound marin cedar alloy"],
+  },
+  {
+    id: "voice-call-language",
+    title: "Call language",
+    to: "/settings/integrations",
+    searchTerms: ["voice call spanish english rioplatense mixed"],
+  },
+  {
+    id: "voice-call-mode",
+    title: "Conversation mode",
+    to: "/settings/integrations",
+    searchTerms: ["voice call discuss repository research topic client learn"],
+  },
+  {
+    id: "voice-call-hands-free",
+    title: "Hands-free voice calls",
+    to: "/settings/integrations",
+    searchTerms: ["voice call short spoken answers one question at a time"],
+  },
+  {
+    id: "voice-call-learning-space",
+    title: "Learning App space",
+    to: "/settings/integrations",
+    searchTerms: ["voice call learn study cards destination project"],
+  },
+  {
+    id: "voice-openai-key",
+    title: "OpenAI API key for voice calls",
+    to: "/settings/integrations",
+    scope: "environment",
+    environmentOnly: true,
+    searchTerms: ["openai api key voice call gpt live billing administrator credential"],
+  },
   {
     id: "browser-profiles",
     title: "Browser profiles",

@@ -18,6 +18,7 @@ export type ThreadActionMenuId =
   | "rename"
   | "regenerate-title"
   | "mark-unread"
+  | "voice-history"
   | "share-guest"
   | "copy"
   | "copy-path"
@@ -85,6 +86,8 @@ export interface ThreadActionMenuState {
     readonly snooze: boolean;
     readonly pinning: boolean;
     readonly titleRegeneration: boolean;
+    /** Mesura: the environment keeps saved voice conversations. Absent means unsupported. */
+    readonly voiceHistory?: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
   /** Guest links need their own grant, so the caller checks it instead of `canOperate`. */
@@ -97,6 +100,8 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
     "new-thread-on-branch",
     "project-settings",
     "mark-unread",
+    // Mesura: saved voice conversations are read-only.
+    "voice-history",
     "share-guest",
     "copy",
     "copy-path",
@@ -163,6 +168,9 @@ export function buildThreadActionMenuItems(
         ]
       : []),
     { id: "mark-unread", label: "Mark unread", icon: "mail-open" },
+    ...(state.supports.voiceHistory
+      ? [{ id: "voice-history" as const, label: "Voice conversations" }]
+      : []),
     ...(state.canShareWithGuest
       ? [{ id: "share-guest" as const, label: "Share with guest", icon: "user-plus" }]
       : []),

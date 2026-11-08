@@ -414,3 +414,49 @@ describe("source control host search items", () => {
     );
   });
 });
+
+// Phase 4 fence: voice call options live in Settings > Integrations. Device preferences render at
+// every selection; the OpenAI key belongs to the environment selected in Settings.
+describe("voice call settings search", () => {
+  const integrationsResults = (query: string) =>
+    searchSettings(query).filter((item) => item.to === "/settings/integrations");
+  const noEnvironment = {
+    hasCloudPublicConfig: false,
+    hasEnvironment: false,
+    hasProviderSettingsEnvironment: false,
+    hasMacProviderSettingsEnvironment: false,
+    canManageLocalBackend: false,
+    isWslSettingsRowVisible: false,
+    hasThreadAutoSettlement: false,
+  };
+
+  it.each(["voice call", "call voice", "voice language", "conversation mode", "hands-free"])(
+    "settings search finds the voice call preference for %s under Integrations",
+    (query) => {
+      const results = integrationsResults(query);
+      expect(results.length).toBeGreaterThan(0);
+      // Device preferences are not tied to an environment selection.
+      expect(results.some((item) => item.scope === undefined)).toBe(true);
+    },
+  );
+
+  it("settings search finds the voice OpenAI key as an environment setting", () => {
+    const keyResults = integrationsResults("openai api key");
+    expect(keyResults.length).toBeGreaterThan(0);
+    expect(keyResults.every((item) => item.scope === "environment")).toBe(true);
+  });
+
+  it("settings search hides the voice OpenAI key without an environment", () => {
+    const available = filterAvailableSettingsSearchItems(noEnvironment);
+    expect(
+      searchSettings("openai api key", available).filter(
+        (item) => item.to === "/settings/integrations",
+      ),
+    ).toEqual([]);
+    // Device preferences stay searchable without an environment.
+    expect(
+      searchSettings("hands-free", available).filter((item) => item.to === "/settings/integrations")
+        .length,
+    ).toBeGreaterThan(0);
+  });
+});

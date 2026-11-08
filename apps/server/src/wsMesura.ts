@@ -8,6 +8,7 @@ import {
   OrchestrationSearchThreadsError,
   ProjectReadFileError,
   THREAD_SEARCH_WS_METHODS,
+  VOICE_WS_METHODS,
   WS_METHODS,
   WsRpcGroupMesura,
 } from "@t3tools/contracts";
@@ -35,6 +36,7 @@ import * as ReviewService from "./review/ReviewService.ts";
 import * as StartThreadSearchChat from "./textGeneration/StartThreadSearchChat.ts";
 import { makeReasonThreadSearch } from "./textGeneration/ThreadSearchReasoning.ts";
 import { AccountLimitsService } from "./usage/AccountLimitsService.ts";
+import { VoiceHistoryNotices } from "./voice/voiceHistoryNotices.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import { projectFileFailureContext } from "./ws.ts";
 
@@ -54,10 +56,13 @@ export const captureMesuraServerScope = Effect.gen(function* () {
   const broker = yield* ThreadSearchBroker.ThreadSearchBroker;
   const starter = yield* StartThreadSearchChat.StartThreadSearchChat;
   const providerRetryNow = yield* ProviderRetryNow.ProviderRetryNow;
+  // Built with the voice history in server.ts, so notices reach every connection.
+  const voiceHistoryNotices = yield* VoiceHistoryNotices;
   return Layer.mergeAll(
     Layer.succeed(ThreadSearchBroker.ThreadSearchBroker, broker),
     Layer.succeed(StartThreadSearchChat.StartThreadSearchChat, starter),
     Layer.succeed(ProviderRetryNow.ProviderRetryNow, providerRetryNow),
+    Layer.succeed(VoiceHistoryNotices, voiceHistoryNotices),
   );
 });
 
@@ -86,6 +91,7 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
     const accountLimits = yield* AccountLimitsService;
     const review = yield* ReviewService.ReviewService;
     const providerRetryNow = yield* ProviderRetryNow.ProviderRetryNow;
+    const voiceHistoryNotices = yield* VoiceHistoryNotices;
 
     return ServerWsRpcGroupMesura.of({
       // Agent thread search reads (threadSearchEvidence.ts contracts) and one
@@ -127,6 +133,11 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
           Effect.andThen(providerRetryNow.retry(input)),
         ),
+
+      // Change notices for an open voice history viewer. A notice names the changed call; the
+      // viewer reads it through the authenticated history routes.
+      [VOICE_WS_METHODS.subscribeVoiceHistory]: (input) =>
+        Stream.unwrap(voiceHistoryNotices.subscribe(input.threadId)),
 
       [WS_METHODS.issuesList]: (input) =>
         listIssues(input).pipe(Effect.provide(GitHubIssueCli.layer)),

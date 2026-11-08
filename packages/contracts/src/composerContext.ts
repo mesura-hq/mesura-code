@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { VoiceAgentContext } from "./voiceConversation.ts";
 
 import {
   EnvironmentId,
@@ -290,6 +291,7 @@ export type GuestMessageAttribution = typeof GuestMessageAttribution.Type;
 
 /** Structured context riding on a user message. Undecodable records are dropped, not fatal. */
 export const OrchestrationMessageContext = Schema.Struct({
+  voice: Schema.optional(VoiceAgentContext),
   version: Schema.Literal(1),
   guest: Schema.optional(GuestMessageAttribution),
   records: Schema.Array(Schema.Unknown)

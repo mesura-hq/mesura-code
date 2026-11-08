@@ -86,6 +86,10 @@ import {
   type ReactNode,
 } from "react";
 import { type AnyRouter, useRouter } from "@tanstack/react-router";
+import {
+  openVoiceHistory,
+  readEnvironmentSupportsVoiceHistory,
+} from "../voice/voiceHistoryNavigation";
 
 import {
   isAtomCommandInterrupted,
@@ -2552,6 +2556,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 snooze: supportsSnooze,
                 pinning: supportsPinning,
                 titleRegeneration: supportsTitleRegeneration,
+                voiceHistory: readEnvironmentSupportsVoiceHistory(thread.environmentId),
               },
               snoozePresets,
             }),
@@ -2663,6 +2668,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             }
             return;
           }
+          case "voice-history":
+            openVoiceHistory(router, threadRef);
+            return;
           case "mark-unread":
             markThreadUnread(threadRef);
             return;

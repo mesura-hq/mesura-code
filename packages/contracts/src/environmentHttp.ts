@@ -65,6 +65,24 @@ import {
   PullRequestUnavailableError,
 } from "./pullRequest.ts";
 import {
+  VoiceConversationAcknowledgement,
+  VoiceConversationConfigureInput,
+  VoiceConversationCreateInput,
+  VoiceConversationCreateResult,
+  VoiceConversationHttpErrors,
+  VoiceConversationEndInput,
+  VoiceConversationSessionInput,
+  VoiceConversationSettings,
+  VoiceCallListParams,
+  VoiceCallListQuery,
+  VoiceCallPage,
+  VoiceTranscriptAppendInput,
+  VoiceTranscriptAppendResult,
+  VoiceTranscriptListParams,
+  VoiceTranscriptListQuery,
+  VoiceTranscriptPage,
+} from "./voiceConversation.ts";
+import {
   RelayCloudEnvironmentHealthRequest,
   RelayCloudMintCredentialRequest,
   RelayEnvironmentConfigRequest,
@@ -836,6 +854,81 @@ class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
     }),
   ) {}
 
+const VoiceConversationErrors = [
+  ...VoiceConversationHttpErrors,
+  EnvironmentScopeRequiredError,
+  EnvironmentInternalError,
+  EnvironmentResourceNotFoundError,
+] as const;
+
+class EnvironmentVoiceHttpApi extends HttpApiGroup.make("voice")
+  .add(
+    HttpApiEndpoint.get("settings", "/api/voice/settings", {
+      headers: OptionalBearerHeaders,
+      success: VoiceConversationSettings,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("configure", "/api/voice/settings", {
+      headers: OptionalBearerHeaders,
+      payload: VoiceConversationConfigureInput,
+      success: VoiceConversationSettings,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("create", "/api/voice/sessions", {
+      headers: OptionalBearerHeaders,
+      payload: VoiceConversationCreateInput,
+      success: VoiceConversationCreateResult,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("heartbeat", "/api/voice/sessions/heartbeat", {
+      headers: OptionalBearerHeaders,
+      payload: VoiceConversationSessionInput,
+      success: VoiceConversationAcknowledgement,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("end", "/api/voice/sessions/end", {
+      headers: OptionalBearerHeaders,
+      payload: VoiceConversationEndInput,
+      success: VoiceConversationAcknowledgement,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  // Mesura: persisted voice history. Appends need orchestration:operate and the call's owner;
+  // reads need orchestration:read and never touch the live audio session.
+  .add(
+    HttpApiEndpoint.post("appendTranscript", "/api/voice/sessions/transcript", {
+      headers: OptionalBearerHeaders,
+      payload: VoiceTranscriptAppendInput,
+      success: VoiceTranscriptAppendResult,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("listCalls", "/api/voice/threads/:threadId/calls", {
+      headers: OptionalBearerHeaders,
+      params: VoiceCallListParams,
+      query: VoiceCallListQuery,
+      success: VoiceCallPage,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("listFragments", "/api/voice/threads/:threadId/calls/:callId/fragments", {
+      headers: OptionalBearerHeaders,
+      params: VoiceTranscriptListParams,
+      query: VoiceTranscriptListQuery,
+      success: VoiceTranscriptPage,
+      error: VoiceConversationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
 // Path tokens and optional body signatures authenticate webhooks; read raw bytes to verify signatures.
 const WebhookParams = Schema.Struct({
   hookId: TrimmedNonEmptyString,
@@ -864,4 +957,6 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
   .add(EnvironmentConnectHttpApi)
-  .add(EnvironmentWebhooksHttpApi) {}
+  .add(EnvironmentWebhooksHttpApi)
+  // Mesura: realtime voice calls and their saved history.
+  .add(EnvironmentVoiceHttpApi) {}

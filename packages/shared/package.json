@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./voice-conversation-prompts": {
+      "types": "./src/voiceConversationPrompts.ts",
+      "import": "./src/voiceConversationPrompts.ts"
+    },
     "./changedFileKind": {
       "types": "./src/changedFileKind.ts",
       "import": "./src/changedFileKind.ts"

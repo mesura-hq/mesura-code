@@ -1,0 +1,135 @@
+// Phase 2 fence: persisted voice history contracts. Entry points are the public schemas a
+// server and every client decode: `VoiceHistoryEvent` (the stored voice event family),
+// `OrchestrationV2Command` and the v2 event type set, `ExecutionEnvironmentCapabilities`, and
+// the `voice` group of `EnvironmentHttpApi`.
+import * as Schema from "effect/Schema";
+import * as Exit from "effect/Exit";
+import { describe, expect, it } from "vite-plus/test";
+
+import { isKnownOrchestrationV2EventType, OrchestrationV2Command } from "./orchestrationV2.ts";
+import { ExecutionEnvironmentCapabilities } from "./environment.ts";
+import { EnvironmentHttpApi } from "./environmentHttp.ts";
+import * as VoiceConversation from "./voiceConversation.ts";
+
+const THREAD_ID = "thread-voice-contract";
+const CALL_ID = "voice-call-contract-0001";
+const AT = "2026-11-08T10:00:00.000Z";
+
+const fragment = {
+  fragmentId: "fragment-0001",
+  sequence: 1,
+  speaker: "user",
+  // Realtime transcript deltas keep leading spaces and punctuation; storage keeps them exactly.
+  text: "  Revisá el test, ¿sí?  ",
+  startOffsetMs: 0,
+  endOffsetMs: 1_250,
+} as const;
+
+const decodeEvent = Schema.decodeUnknownExit(VoiceConversation.VoiceHistoryEvent);
+const decodeClientCommand = Schema.decodeUnknownExit(OrchestrationV2Command);
+const decodeCapabilities = Schema.decodeUnknownSync(ExecutionEnvironmentCapabilities);
+
+describe("voice history contracts phase 2 fence", () => {
+  it("VH-C1 decodes the three persisted voice events as the stored voice event family", () => {
+    const events = [
+      {
+        type: "thread.voice-call-started",
+        payload: { threadId: THREAD_ID, callId: CALL_ID, ownerKey: "owner-key-a", startedAt: AT },
+      },
+      {
+        type: "thread.voice-transcript-appended",
+        payload: {
+          threadId: THREAD_ID,
+          callId: CALL_ID,
+          batchId: "batch-0001",
+          fragments: [fragment],
+          appendedAt: AT,
+        },
+      },
+      {
+        type: "thread.voice-call-ended",
+        payload: {
+          threadId: THREAD_ID,
+          callId: CALL_ID,
+          reason: "hangup",
+          lastSequence: 1,
+          endedAt: AT,
+        },
+      },
+    ];
+    for (const event of events) {
+      const decoded = decodeEvent(event);
+      expect(Exit.isSuccess(decoded), event.type).toBe(true);
+    }
+    const appended = decodeEvent(events[1]);
+    if (!Exit.isSuccess(appended) || appended.value.type !== "thread.voice-transcript-appended") {
+      throw new Error("The appended voice event did not decode.");
+    }
+    expect(appended.value.payload.fragments[0]?.text).toBe(fragment.text);
+    // Agent and shell replay never treats a voice event as one of its own.
+    for (const type of VoiceConversation.VOICE_HISTORY_EVENT_TYPES) {
+      expect(isKnownOrchestrationV2EventType(type), type).toBe(false);
+    }
+  });
+
+  it("VH-C2 keeps transcript fragments to user and assistant speech with original text", () => {
+    const decodeFragment = Schema.decodeUnknownExit(VoiceConversation.VoiceTranscriptFragment);
+    const decoded = decodeFragment(fragment);
+    expect(Exit.isSuccess(decoded)).toBe(true);
+    if (Exit.isSuccess(decoded)) expect(decoded.value.text).toBe(fragment.text);
+    expect(Exit.isSuccess(decodeFragment({ ...fragment, speaker: "assistant" }))).toBe(true);
+    for (const speaker of ["tool", "system", "thinking", "agent"]) {
+      expect(Exit.isSuccess(decodeFragment({ ...fragment, speaker })), speaker).toBe(false);
+    }
+    const withoutOffsets = {
+      fragmentId: "fragment-0002",
+      sequence: 2,
+      speaker: "user",
+      text: "Hola",
+    };
+    expect(Exit.isSuccess(decodeFragment(withoutOffsets))).toBe(true);
+  });
+
+  it("VH-C3 gives clients no orchestration command that writes voice history", () => {
+    const appendCommand = {
+      type: "thread.voice-transcript.append",
+      commandId: "command-voice-append",
+      threadId: THREAD_ID,
+      callId: CALL_ID,
+      batchId: "batch-0001",
+      fragments: [fragment],
+      appendedAt: AT,
+    };
+    // Clients reach voice history only through the owner-checked voice HTTP routes.
+    expect(Exit.isSuccess(decodeClientCommand(appendCommand))).toBe(false);
+  });
+
+  it("VH-C4 advertises voice history as an optional capability that older servers omit", () => {
+    expect(decodeCapabilities({ repositoryIdentity: true }).voiceHistory ?? false).toBe(false);
+    expect(decodeCapabilities({ repositoryIdentity: true, voiceHistory: true }).voiceHistory).toBe(
+      true,
+    );
+  });
+
+  it("VH-C5 exposes transcript append and paginated history reads in the voice group", () => {
+    const endpoints = Object.keys(EnvironmentHttpApi.groups.voice.endpoints);
+    expect(endpoints).toEqual(
+      expect.arrayContaining(["appendTranscript", "listCalls", "listFragments"]),
+    );
+    expect(VoiceConversation.VOICE_HISTORY_MAX_PAGE_SIZE).toBeGreaterThan(0);
+    expect(VoiceConversation.VOICE_HISTORY_MAX_PAGE_SIZE).toBeLessThan(1_000);
+  });
+
+  it("VH-C6 decodes voice settings with and without the optional history owner", () => {
+    const decodeSettings = Schema.decodeUnknownSync(VoiceConversation.VoiceConversationSettings);
+    const older = {
+      configured: true,
+      canConfigure: false,
+      model: "gpt-live-1",
+      maxDurationSeconds: 900,
+    };
+    expect(decodeSettings(older).historyOwnerId).toBeUndefined();
+    expect(decodeSettings({ ...older, historyOwnerId: "a1b2" }).historyOwnerId).toBe("a1b2");
+    expect(() => decodeSettings({ ...older, historyOwnerId: "" })).toThrow();
+  });
+});

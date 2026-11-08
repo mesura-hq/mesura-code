@@ -3,6 +3,38 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./voice-conversation/call": {
+      "types": "./src/voice/call.ts",
+      "default": "./src/voice/call.ts"
+    },
+    "./voice-conversation/history": {
+      "types": "./src/voice/history.ts",
+      "default": "./src/voice/history.ts"
+    },
+    "./voice-conversation/captions": {
+      "types": "./src/voice/captions.ts",
+      "default": "./src/voice/captions.ts"
+    },
+    "./voice-conversation/browser": {
+      "types": "./src/voice/browserTransport.ts",
+      "default": "./src/voice/browserTransport.ts"
+    },
+    "./voice-conversation/thread-snapshot": {
+      "types": "./src/voice/threadSnapshot.ts",
+      "default": "./src/voice/threadSnapshot.ts"
+    },
+    "./voice-conversation/controller": {
+      "types": "./src/voice/conversation.ts",
+      "default": "./src/voice/conversation.ts"
+    },
+    "./voice-conversation/protocol": {
+      "types": "./src/voice/protocol.ts",
+      "default": "./src/voice/protocol.ts"
+    },
+    "./voice-conversation": {
+      "types": "./src/voiceConversationHttp.ts",
+      "default": "./src/voiceConversationHttp.ts"
+    },
     "./user-input-answers": {
       "types": "./src/userInputAnswers.ts",
       "default": "./src/userInputAnswers.ts"

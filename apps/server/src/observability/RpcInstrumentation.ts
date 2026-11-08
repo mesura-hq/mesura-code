@@ -1,6 +1,7 @@
 import {
   ORCHESTRATION_V2_WS_METHODS,
   THREAD_SEARCH_WS_METHODS,
+  VOICE_WS_METHODS,
   WS_METHODS,
   type WsRpcGroup,
 } from "@t3tools/contracts";
@@ -268,6 +269,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverGetAccountLimits]: "server",
   [WS_METHODS.subscribeHostStats]: "server",
   [WS_METHODS.providerRetryNow]: "orchestration",
+  [VOICE_WS_METHODS.subscribeVoiceHistory]: "voice",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

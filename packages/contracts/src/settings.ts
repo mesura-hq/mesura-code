@@ -48,6 +48,7 @@ import {
   ProviderDriverKind,
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
+import { VoiceConversationClientPreferences } from "./voiceConversation.ts";
 
 export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"]);
 export type TimestampFormat = typeof TimestampFormat.Type;
@@ -500,6 +501,10 @@ export const ClientSettingsSchema = Schema.Struct({
   mathRenderingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // The quieter sidebar, composer and panel design. Off keeps the classic look.
   redesignEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // Mesura: preferences for the next voice call on this device.
+  voiceConversation: VoiceConversationClientPreferences.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -1791,5 +1796,6 @@ export const ClientSettingsPatch = Schema.Struct({
   updateEverythingButton: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
   redesignEnabled: Schema.optionalKey(Schema.Boolean),
+  voiceConversation: Schema.optionalKey(VoiceConversationClientPreferences),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

@@ -17,6 +17,7 @@ import {
   ProjectId,
   type OrchestrationV2ThreadProjection,
   OrchestrationV2DomainEvent,
+  type VoiceAgentContext,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -255,6 +256,8 @@ it.each([
 
 function makeLocalCommandHarness(input: {
   readonly text: string;
+  /** Mesura: a spoken request; the turn opens a provider session and starts. */
+  readonly voice?: VoiceAgentContext;
   readonly worktreePath?: string;
   readonly worktreesDir?: string;
   readonly fileSystem?: FileSystem.FileSystem;
@@ -330,6 +333,9 @@ function makeLocalCommandHarness(input: {
     nodeId: rootNodeId,
     role: "user",
     text: input.text,
+    ...(input.voice === undefined
+      ? {}
+      : { context: { version: 1, records: [], voice: input.voice } }),
     attachments: [],
     streaming: false,
     createdBy: "user",
@@ -588,7 +594,9 @@ function makeLocalCommandHarness(input: {
                   ),
                 ),
               )
-            : input.failReadsAfterRunning === true || input.previousTurn !== undefined
+            : input.failReadsAfterRunning === true ||
+                input.previousTurn !== undefined ||
+                input.voice !== undefined
               ? Effect.succeed({
                   driver: providerThread.driver,
                   providerSession: {
@@ -611,7 +619,9 @@ function makeLocalCommandHarness(input: {
   const startRootRun = vi.fn<
     (input: RunExecutionService.RunExecutionServiceV2StartRootRunInput) => Effect.Effect<void>
   >(() =>
-    input.failReadsAfterRunning === true || input.previousTurn !== undefined
+    input.failReadsAfterRunning === true ||
+    input.previousTurn !== undefined ||
+    input.voice !== undefined
       ? Effect.suspend(() =>
           providerBusy ? Effect.die("The previous provider turn is still running.") : Effect.void,
         )
@@ -1213,6 +1223,38 @@ effectIt.effect(
       expect(projection.checkpoints).toEqual([]);
     }),
 );
+
+// Mesura: a spoken request keeps its raw text in the thread; only the provider input carries the
+// voice instructions, and a spoken slash command is conversation text, not a native command.
+for (const spokenText of ["What carries the audio?", "/compact", "/logout"]) {
+  effectIt.effect(`projects voice context only for the provider: ${spokenText}`, () =>
+    Effect.gen(function* () {
+      const harness = makeLocalCommandHarness({
+        text: spokenText,
+        previousNativeSession: true,
+        voice: {
+          mode: "research",
+          handsFree: true,
+          promptEffort: "ultrathink",
+          transcript: [{ role: "assistant", text: "We are discussing voice." }],
+        },
+      });
+
+      yield* harness.start;
+
+      expect(harness.tryHandlePromptCommand).not.toHaveBeenCalled();
+      expect(harness.startRootRun).toHaveBeenCalledTimes(1);
+      const input = harness.startRootRun.mock.calls[0]![0].message.text;
+      expect(input).toMatch(/^Ultrathink:/);
+      expect(input).toContain("Research mode:");
+      expect(input).toContain("We are discussing voice.");
+      expect(input).toContain(spokenText);
+      const stored = harness.projection().messages.at(-1);
+      expect(stored?.text).toBe(spokenText);
+      expect(stored?.context?.voice?.mode).toBe("research");
+    }),
+  );
+}
 
 for (const previousMessages of [[], ["/compact", " /COMPACT "]]) {
   effectIt.effect(

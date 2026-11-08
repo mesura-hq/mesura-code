@@ -22,6 +22,7 @@ import {
   useDictationKeybindings,
   useDictationEnvironments,
 } from "./useDictationSession";
+import { useMicrophoneBlocker } from "../voice/microphoneClaim";
 
 /**
  * A microphone that starts a recording in this window: the composer's, or a question card's when
@@ -34,14 +35,18 @@ export const DictationStartButton = memo(function DictationStartButton(props: {
   readonly onBeforeStart?: () => void;
 }) {
   const recording = useDictationSessionStore((state) => state.session !== null);
-  const unavailable = recording || props.disabled === true;
+  // Mesura: a voice call holding the microphone blocks dictation, with its own explanation.
+  const microphoneBlocked = useMicrophoneBlocker("dictation");
+  const unavailable = recording || props.disabled === true || microphoneBlocked !== null;
   const label = recording
     ? "A dictation session is already active"
-    : props.disabled
-      ? "Voice input is unavailable while this answer is sending"
-      : props.targetLabel
-        ? `Dictate into ${props.targetLabel}`
-        : "Start voice dictation";
+    : microphoneBlocked !== null
+      ? microphoneBlocked
+      : props.disabled
+        ? "Voice input is unavailable while this answer is sending"
+        : props.targetLabel
+          ? `Dictate into ${props.targetLabel}`
+          : "Start voice dictation";
   return (
     <Tooltip>
       <TooltipTrigger

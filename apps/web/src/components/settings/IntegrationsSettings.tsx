@@ -128,6 +128,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { VoiceSettings } from "~/voice/VoiceSettings";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import {
   formatPaymentDomainsText,
@@ -1725,6 +1726,8 @@ export function IntegrationsSettingsPanel() {
         <PullRequestLinksOpenInAppSetting />
       </SettingsSection>
       <DeviceIntegrationSettings />
+      {/* Mesura: voice call preferences and the environment's voice key. */}
+      <VoiceSettings />
     </SettingsPageContainer>
   );
 }

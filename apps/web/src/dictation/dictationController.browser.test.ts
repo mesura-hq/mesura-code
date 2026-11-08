@@ -75,6 +75,7 @@ import { setDictationMediaBackend } from "./recorder";
 import { sendWhenReadyKey, useSendWhenReadyStore, withDictatedPrefix } from "./sendWhenReady";
 import { readThreadDictationActivity } from "./threadDictationActivity";
 import { useDictationWidgetActivityStore } from "./dictationWidgetState";
+import { claimMicrophone } from "../voice/microphoneClaim";
 
 const JOB_CREATED_AT = Date.UTC(2026, 9, 3, 12);
 
@@ -354,6 +355,30 @@ describe("dictation delivery is acknowledged once it is durable", () => {
 });
 
 describe("restarting a recording", () => {
+  it("keeps a cancelled restart's microphone claim until its late recorder is discarded", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await startDictation();
+    media.holdMicrophone();
+    const restarting = restartDictation();
+    cancelDictation();
+    const prematureCall = claimMicrophone("call");
+    try {
+      expect(prematureCall).toBeNull();
+    } finally {
+      prematureCall?.();
+      media.releaseMicrophone();
+      await restarting;
+    }
+    expect(media.stoppedTracks).toContain(2);
+    expect(useDictationSessionStore.getState().session).toBeNull();
+    const call = claimMicrophone("call");
+    try {
+      expect(call).not.toBeNull();
+    } finally {
+      call?.();
+    }
+  });
+
   it("dictation phase 4 regression: cancel while a restart waits for the microphone keeps the recording cancelled", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
