@@ -42,7 +42,8 @@ the request's Host header is not checked, because a LAN client can forge it.
 ### MCP clients are a separate audience
 
 Agents T3 Code did not launch sign in to `/mcp` through a narrow OAuth
-authorization-code server ([McpOAuth](../../apps/server/src/auth/McpOAuth.ts)).
+server ([McpOAuth](../../apps/server/src/auth/McpOAuth.ts)) with the
+authorization-code grant and, in this fork, the refresh grant.
 It accepts loopback redirect URIs for agents on the user's machine and any
 HTTPS redirect for hosted agents (ChatGPT, bots). An HTTPS redirect means a
 link someone else sends the owner can deliver access to that someone, so the
@@ -64,6 +65,45 @@ path rejects that subject, because the RPC surface would let the agent act
 above its ceiling. Inside MCP the credential sets the limits and tool
 parameters only pick targets; see
 [threadAccess](../../apps/server/src/mcp/threadAccess.ts).
+
+The access token lasts 30 days and its expiry is a signed claim. A client that
+must outlive that renews with the refresh grant
+([McpRefreshTokens](../../apps/server/src/auth/McpRefreshTokens.ts)), a fork
+addition that upstream does not have:
+
+- The code exchange returns an opaque `mrt_` refresh token. The fork table
+  `mesura_mcp_refresh_tokens` stores only its SHA-256 hash, bound to the
+  session, the hash of the `client_id`, and the access grant and peer-link mark.
+  The `auth_sessions` row does not keep those two, and the signed claims need
+  them again.
+- `grant_type=refresh_token` re-signs a token for the SAME session id
+  (`SessionStore.reissue`) and moves `auth_sessions.expires_at` to its new
+  expiry. A new session per renewal would orphan the work tied to the session
+  id (peer-link work, the `client:<sid>` request namespace), and the client
+  would drop out of Connections after 30 days.
+- Every use rotates the token. Each refresh token lives 90 days from its own
+  issue, so the window slides with use. A spent token presented again by the
+  same client within 60 seconds of its first use is a retry after a lost
+  response: the successor it produced, and every token rotated from that
+  successor since, is deleted and another one issued, so only one chain stays
+  usable. Past that window it is a replay, and the whole session is revoked
+  (RFC 9700).
+- If the refresh token cannot be stored at the code exchange, the new session
+  is revoked and the exchange fails. An answer without a refresh token would
+  look configured and stop working after 30 days, with the code already spent.
+- There is no revocation endpoint. Every renewal reads the session row, so
+  revoking the session in Connections cuts the refresh token too.
+- Registration stays stateless, so the `client_id` is a signature over the
+  client's name and redirect URIs. Two clients registered with identical
+  metadata share one `client_id`, and the `client_id` binding does not tell
+  them apart.
+- Clients that ignore `refresh_token`, such as peer links and older releases,
+  behave as before; the result schema tolerates the extra field.
+- The registration response lists `refresh_token` in `grant_types` only when
+  the request's `grant_types` asks for it. Releases before the refresh grant
+  decode that field as `["authorization_code"]` and register without
+  `grant_types`, so a peer link from one of them still signs in here. The token
+  endpoint issues a refresh token to every client regardless.
 
 Issuer and resource URLs come from the request's Host and
 `X-Forwarded-Proto`, so one server answers over loopback, Tailscale Serve and a
@@ -127,6 +167,9 @@ after 30 days.
 Sessions issued without an explicit TTL last a year in this fork (upstream: 30
 days): paired browser sessions, and bearer sessions from `t3 auth session issue`
 without `--ttl`. The expiry is a signed claim, so it never extends with use.
+The one exception is an MCP client that renews with its refresh token (see
+[MCP clients are a separate audience](#mcp-clients-are-a-separate-audience)):
+each renewal signs a new token and moves the session row's expiry.
 
 ## The environment is the filesystem boundary
 

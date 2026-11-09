@@ -92,6 +92,12 @@ Any agent that supports remote MCP servers over HTTP with OAuth can connect. Giv
 it the MCP URL and choose OAuth, and the agent finds the sign-in settings itself.
 Agents without OAuth support cannot connect.
 
+A bot that runs without anyone at hand should use the refresh token it receives
+at sign-in. With it, the bot renews its access before the 30 days run out, and
+you approve it only once. Each refresh token works once and the bot must keep
+the new one it gets back. A refresh token stays valid for 90 days after it is
+issued, so a bot that stops renewing for longer needs a new approval.
+
 ## Scripts on the host
 
 On the machine that runs the environment, `t3 thread` uses the same tools
@@ -117,5 +123,7 @@ result that always includes the thread id.
 ## Remove an agent
 
 Approved agents appear under **Settings → Connections** like other clients.
-Revoke one there to cut off its access immediately. A sign-in lasts 30 days;
-after that the agent asks you to approve it again.
+Revoke one there to cut off its access immediately; a revoked agent can no
+longer renew. A sign-in lasts 30 days. An agent that renews with its refresh
+token keeps the same entry and stays signed in. Any other agent asks you to
+approve it again after 30 days.
