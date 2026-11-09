@@ -1,5 +1,5 @@
 import { flushBrowserTasks } from "../test/browserTasks";
-import { fakeTimers } from "../../test/render";
+import { fakeTimers, render } from "../../test/render";
 /**
  * Regression tests for the dictation controller, from the phase 4 review. The boundaries are the
  * RPC commands (`runAtomCommand`), the upload cycle and the microphone; the draft store and the
@@ -14,7 +14,9 @@ import {
   type DictationMode,
 } from "@t3tools/contracts";
 import { findDictationSlots } from "@t3tools/shared/dictationSlots";
+import { createElement } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { page } from "vite-plus/test/browser";
 
 const fixture = vi.hoisted(() => ({
   names: new Map<unknown, string>(),
@@ -41,7 +43,7 @@ vi.mock("@t3tools/client-runtime/state/attachments", async (importOriginal) => (
   runAttachmentUploadCycle: async () => ({ status: "uploaded", attachmentId: "dictation-audio" }),
 }));
 
-import { toastManager } from "~/components/ui/toast";
+import { ToastProvider, toastManager } from "~/components/ui/toast";
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
   DraftId,
@@ -60,6 +62,7 @@ import {
   selectDictationMode,
   startDictation,
   stopDictation,
+  toggleDictationPause,
 } from "./dictationController";
 import { createFakeMedia } from "./dictationMedia.testFixtures";
 import {
@@ -72,6 +75,8 @@ import {
   useOwnDictationJobsStore,
 } from "./dictationSessionStore";
 import { setDictationMediaBackend } from "./recorder";
+import { setRecordingScreenEnvironment } from "./recordingScreen";
+import { createFakeScreen } from "./recordingScreen.testFixtures";
 import { sendWhenReadyKey, useSendWhenReadyStore, withDictatedPrefix } from "./sendWhenReady";
 import { readThreadDictationActivity } from "./threadDictationActivity";
 import { useDictationWidgetActivityStore } from "./dictationWidgetState";
@@ -944,5 +949,80 @@ describe("the thread a recording belongs to", () => {
 
     await recordAndStop("clipboard");
     expect(readThreadDictationActivity(draftTarget)).toBeNull();
+  });
+});
+
+describe("dictation on a phone whose screen goes off", () => {
+  const silenceWarnings = () =>
+    vi
+      .mocked(toastManager.add)
+      .mock.calls.filter(([toast]) => String(toast.title).includes("may be silent"));
+
+  it("keeps the screen on while recording and lets it go when the recording stops", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _screenOverride = { [Symbol.dispose]: () => setRecordingScreenEnvironment(null) };
+    const screen = createFakeScreen();
+    await startDictation();
+    expect(screen.wakeLock.request).toHaveBeenCalledExactlyOnceWith("screen");
+    await screen.grantNext();
+    await stopDictation();
+    expect(screen.sentinels[0]?.releaseCalls).toBe(1);
+    expect(screen.listenerCount()).toBe(0);
+  });
+
+  it("warns, and keeps recording, when the page returns after Android may have cut the microphone", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _screenOverride = { [Symbol.dispose]: () => setRecordingScreenEnvironment(null) };
+    const screen = createFakeScreen();
+    await startDictation();
+    screen.hideFor(3 * 60_000);
+    expect(silenceWarnings()).toHaveLength(1);
+    expect(silenceWarnings()[0]![0].description).toContain("3 min");
+    expect(useDictationSessionStore.getState().session).not.toBeNull();
+  });
+
+  it("keeps one warning per recording, updated by another long hide, and a new one for the next recording", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _screenOverride = { [Symbol.dispose]: () => setRecordingScreenEnvironment(null) };
+    const screen = createFakeScreen();
+    await startDictation();
+    screen.hideFor(2 * 60_000);
+    screen.hideFor(5 * 60_000);
+    const [first, second] = silenceWarnings().map(([toast]) => toast);
+    expect(first?.id).toBeDefined();
+    expect(second?.id).toBe(first?.id);
+    expect(second?.description).toContain("5 min");
+
+    await stopDictation();
+    await startDictation();
+    screen.hideFor(2 * 60_000);
+    expect(silenceWarnings().at(-1)![0].id).not.toBe(first?.id);
+  });
+
+  it("shows the warning again after the toast provider remounts mid-recording", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _screenOverride = { [Symbol.dispose]: () => setRecordingScreenEnvironment(null) };
+    const screen = createFakeScreen();
+    await startDictation();
+    {
+      await using _toasts = await render(createElement(ToastProvider, null, null));
+      // Earlier tests' toasts replay into the first provider; the durations here are unique.
+      screen.hideFor(7 * 60_000);
+      await expect.element(page.getByText(/background for 7 min/)).toBeVisible();
+    }
+    // A root error view replaces the providers, and "Try again" mounts a fresh one.
+    await using _remounted = await render(createElement(ToastProvider, null, null));
+    screen.hideFor(11 * 60_000);
+    await expect.element(page.getByText(/background for 11 min/)).toBeVisible();
+  });
+
+  it("does not warn for a long hide while the recording was paused", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _screenOverride = { [Symbol.dispose]: () => setRecordingScreenEnvironment(null) };
+    const screen = createFakeScreen();
+    await startDictation();
+    toggleDictationPause();
+    screen.hideFor(3 * 60_000);
+    expect(silenceWarnings()).toHaveLength(0);
   });
 });
