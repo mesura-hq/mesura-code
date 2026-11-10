@@ -61,6 +61,8 @@ export function ComposerControlsBar(props: {
   showInlineRestingControls: boolean;
   showLeadingSeparator: boolean;
   showProviderUnavailable: boolean;
+  /** Mesura: the phone footer's model row shows the model without its provider word. */
+  shortModelLabel: boolean;
   providerSetupInstanceId: ProviderInstanceId | undefined;
   onOpenProviderSetup: ChatComposerProps["onOpenProviderSetup"];
   providerCatalogPending: boolean;
@@ -111,6 +113,7 @@ export function ComposerControlsBar(props: {
     showInlineRestingControls,
     showLeadingSeparator,
     showProviderUnavailable,
+    shortModelLabel,
     providerSetupInstanceId,
     onOpenProviderSetup,
     providerCatalogPending,
@@ -202,6 +205,7 @@ export function ComposerControlsBar(props: {
       environmentId={environmentId}
       compact={false}
       isComposerOwned
+      shortModelLabel={shortModelLabel}
       disabled={providerCatalogPending || isSendBusy}
       multipleModelsEnabled={multipleModelsEnabled}
       multipleModelSelections={multipleModelSelections}

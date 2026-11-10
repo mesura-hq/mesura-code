@@ -2706,6 +2706,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         restingControlsHaveLeadingContext
       }
       showProviderUnavailable={showProviderUnavailable}
+      shortModelLabel={stackPhoneFooterRows}
       providerSetupInstanceId={providerSetupInstanceId}
       onOpenProviderSetup={onOpenProviderSetup}
       providerCatalogPending={providerCatalogPending}
@@ -4069,11 +4070,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-footer-controls="true"
                   className={cn(
                     "relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-0 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-                    stackPhoneFooterRows && "w-full flex-none justify-center-safe",
+                    // A narrow phone wraps this row rather than clipping it or truncating the model.
+                    stackPhoneFooterRows &&
+                      "w-full flex-none flex-wrap justify-center gap-y-1 overflow-visible [&_[data-chat-provider-model-picker]]:shrink-0",
                     isComposerResting && "hidden",
                   )}
                 >
-                  {stackPhoneFooterRows ? contextWindowMeterElement : null}
+                  {stackPhoneFooterRows && contextWindowMeterElement ? (
+                    // The controls measurement reserves this width before it fits the model picker.
+                    <span data-resting-controls-fixed="true" className="flex shrink-0">
+                      {contextWindowMeterElement}
+                    </span>
+                  ) : null}
                   {composerControlsCollapsed ? null : composerControls}
                 </div>
 

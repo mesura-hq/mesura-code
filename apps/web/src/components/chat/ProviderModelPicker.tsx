@@ -97,6 +97,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   open?: boolean;
   triggerClassName?: string;
   triggerLabel?: string;
+  /** Mesura: drop the provider word the icon already shows; the phone composer opts in. */
+  shortModelLabel?: boolean;
   triggerAriaLabel?: string;
   onOpenChange?: (open: boolean) => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
@@ -140,8 +142,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const showInstanceBadge =
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
   const visibleTriggerTitle =
-    selectedModel && activeEntry
-      ? getTriggerDisplayModelNameBesideIcon(selectedModel, activeEntry.displayName)
+    props.shortModelLabel && selectedModel && activeEntry
+      ? getTriggerDisplayModelNameBesideIcon(selectedModel, activeEntry.driverKind)
       : triggerTitle;
 
   const setIsMenuOpen = (open: boolean) => {

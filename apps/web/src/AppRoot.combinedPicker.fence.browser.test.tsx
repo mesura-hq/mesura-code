@@ -5,6 +5,7 @@
 import { type ReactNode } from "react";
 import { act } from "../test/render";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { page } from "vite-plus/test/browser";
 import {
   ProjectId,
   ProviderDriverKind,
@@ -297,6 +298,14 @@ async function mountApp(
   };
 }
 
+function modelTriggerLabel() {
+  return (
+    [
+      ...document.querySelectorAll<HTMLElement>('[data-chat-provider-model-picker-label="true"]'),
+    ].find((element) => !element.closest("[inert]"))?.textContent ?? null
+  );
+}
+
 function selectedProviderTab() {
   return (
     pickerContent()
@@ -452,6 +461,11 @@ describe("combined picker in the composer: apply", () => {
   });
 
   it("combined picker row click applies another provider's model with its effort", async () => {
+    const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+    await using _viewport = {
+      [Symbol.asyncDispose]: () => page.viewport(previousViewport.width, previousViewport.height),
+    };
+    await page.viewport(1440, 900);
     await using app = await mountApp();
     await app.openPicker();
     await press(searchInput(), "Tab");
@@ -466,12 +480,29 @@ describe("combined picker in the composer: apply", () => {
       model: "claude-opus-5",
       options: [{ id: "effort", value: "high" }],
     });
-    // Beside the Claude icon the trigger drops the provider prefix.
-    await vi.waitFor(() =>
-      expect(
-        document.querySelector('[data-chat-provider-model-picker-label="true"]')?.textContent,
-      ).toBe("Opus 5"),
-    );
+    // The desktop footer keeps the full model name.
+    await vi.waitFor(() => expect(modelTriggerLabel()).toBe("Claude Opus 5"));
+  });
+
+  it("phone composer footer stacks the model row above the actions and drops the provider word", async () => {
+    const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+    await using _viewport = {
+      [Symbol.asyncDispose]: () => page.viewport(previousViewport.width, previousViewport.height),
+    };
+    await using app = await mountApp();
+    await app.openPicker();
+    await press(searchInput(), "Tab");
+    await click(row("Claude Opus 5"));
+    await vi.waitFor(() => expect(pickerContent()).toBeNull());
+
+    await page.viewport(412, 915);
+    const editor = app.container.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+    await act(async () => editor?.focus());
+    await vi.waitFor(() => {
+      const footer = app.container.querySelector<HTMLElement>('[data-chat-composer-footer="true"]');
+      expect(footer && getComputedStyle(footer).flexDirection).toBe("column");
+      expect(modelTriggerLabel()).toBe("Opus 5");
+    });
   });
 
   it("combined picker stages Ultrathink and prefixes the prompt current at apply time", async () => {
