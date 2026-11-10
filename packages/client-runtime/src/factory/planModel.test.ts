@@ -8,11 +8,7 @@ import { splitFactoryDocument } from "@t3tools/shared/factoryDocument";
 import { describe, expect, it } from "vite-plus/test";
 
 import planMarkdown from "../../../shared/src/fixtures/factory-in-chat.plan.md?raw";
-import {
-  deriveFactoryPlanDocumentModel,
-  readFactoryPlanContext,
-  summarizeFactoryPlanCard,
-} from "./planModel.ts";
+import { deriveFactoryPlanDocumentModel, summarizeFactoryPlanCard } from "./planModel.ts";
 import { makeFactoryPlanPayload } from "./testing.ts";
 
 describe("factory plan card content (phase 2 fence)", () => {
@@ -32,16 +28,6 @@ describe("factory plan card content (phase 2 fence)", () => {
         makeFactoryPlanPayload({ phases: [{ title: "Only phase", acceptanceCount: 1 }] }),
       ),
     ).toMatchObject({ phaseCountLabel: "1 phase", phaseLines: ["Only phase · 1 criterion"] });
-  });
-
-  it("reads the Context section the plan card shows inline", () => {
-    const context = readFactoryPlanContext(planMarkdown);
-
-    expect(context).toContain("Mesura Code is the app the developer uses every day");
-    expect(context).toContain("All of it works on the desktop and on the phone.");
-    // Nothing heavier than the Context section renders inline.
-    expect(context).not.toContain("## Current state");
-    expect(readFactoryPlanContext("# A plan\n\n## The phases\n\n```json\n[]\n```\n")).toBeNull();
   });
 });
 

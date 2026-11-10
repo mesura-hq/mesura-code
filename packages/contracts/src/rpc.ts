@@ -157,6 +157,8 @@ import {
   FactoryReadSnapshotResult,
   FactoryRunStreamItem,
   FactorySubscribeRunInput,
+  FactoryReadRunUsageInput,
+  FactoryRunUsage,
 } from "./factory.ts";
 import {
   GitActionProgressEvent,
@@ -498,6 +500,7 @@ export const WS_METHODS = {
   projectsReadFile: "projects.readFile",
   factoryReadSnapshot: "factory.readSnapshot",
   subscribeFactoryRun: "factory.subscribeRun",
+  factoryReadRunUsage: "factory.readRunUsage",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
@@ -1691,6 +1694,12 @@ const WsSubscribeFactoryRunRpc = Rpc.make(WS_METHODS.subscribeFactoryRun, {
   stream: true,
 });
 
+const WsFactoryReadRunUsageRpc = Rpc.make(WS_METHODS.factoryReadRunUsage, {
+  payload: FactoryReadRunUsageInput,
+  success: FactoryRunUsage,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsSubscribeProjectFileRpc = Rpc.make(WS_METHODS.subscribeProjectFile, {
   payload: ProjectReadFileInput,
   success: ProjectFileWatchEvent,
@@ -2643,6 +2652,7 @@ const MesuraWsRpcGroup = RpcGroup.make(
   WsFileManagerSubscribeEventsRpc,
   WsSubscribeProjectFileRpc,
   WsFactoryReadSnapshotRpc,
+  WsFactoryReadRunUsageRpc,
   WsSubscribeFactoryRunRpc,
   WsReviewGetWorkingTreeChangesRpc,
   WsReviewSubscribeWorkingTreeChangesRpc,

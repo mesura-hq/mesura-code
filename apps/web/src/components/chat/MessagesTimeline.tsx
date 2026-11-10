@@ -1711,7 +1711,11 @@ function FactoryRunTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "fac
   const ctx = { ...use(TimelineRowCtx), ...use(FactoryTimelineCtx) };
   return (
     <div className="min-w-0 px-1 py-0.5">
-      <FactoryRunCard factoryRun={row.factoryRun} onOpen={ctx.onOpenFactoryRun} />
+      <FactoryRunCard
+        factoryRun={row.factoryRun}
+        onOpen={ctx.onOpenFactoryRun}
+        threadRef={ctx.threadRef}
+      />
     </div>
   );
 }

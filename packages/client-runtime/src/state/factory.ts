@@ -2,6 +2,7 @@ import {
   WS_METHODS,
   type FactoryReadSnapshotResult,
   type FactoryRunStreamItem,
+  type FactoryRunUsage,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -20,6 +21,9 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
  */
 export const FACTORY_RUN_IDLE_TTL_MS = 3_000;
 
+/** Five minutes: a finished run's usage does not change, a live one is read again later. */
+const FACTORY_RUN_USAGE_STALE_MS = 300_000;
+
 /** A day: a digest names fixed bytes, so its answer never goes stale. */
 const FACTORY_SNAPSHOT_CACHE_MS = 86_400_000;
 
@@ -32,6 +36,16 @@ export function createFactoryEnvironmentAtoms<R, E>(
       label: "environment-data:factory:snapshot",
       tag: WS_METHODS.factoryReadSnapshot,
       staleTimeMs: FACTORY_SNAPSHOT_CACHE_MS,
+      idleTtlMs: 300_000,
+    }),
+    /**
+     * What a run used of the developer's plans. It reads files and the machine's
+     * usage, so it is asked for only by an open report and kept for a few minutes.
+     */
+    factoryRunUsage: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:factory:run-usage",
+      tag: WS_METHODS.factoryReadRunUsage,
+      staleTimeMs: FACTORY_RUN_USAGE_STALE_MS,
       idleTtlMs: 300_000,
     }),
     /** A run's full state and live role progress, for a visible Run tab only. */
@@ -97,4 +111,21 @@ export function readFactoryRunStreamState<E>(
   const item = Option.getOrNull(AsyncResult.value(result));
   if (item !== null) return { status: "ready", item };
   return AsyncResult.isFailure(result) ? FAILED_FACTORY_RUN : LOADING_FACTORY_RUN;
+}
+
+export type FactoryRunUsageState =
+  | { readonly status: "loading" }
+  | { readonly status: "failed" }
+  | { readonly status: "ready"; readonly usage: FactoryRunUsage };
+
+const LOADING_FACTORY_RUN_USAGE: FactoryRunUsageState = { status: "loading" };
+const FAILED_FACTORY_RUN_USAGE: FactoryRunUsageState = { status: "failed" };
+
+/** What a report renders from a `factoryRunUsage` query; a later failure keeps the last answer. */
+export function readFactoryRunUsageState<E>(
+  result: AsyncResult.AsyncResult<FactoryRunUsage, E>,
+): FactoryRunUsageState {
+  const usage = Option.getOrNull(AsyncResult.value(result));
+  if (usage !== null) return { status: "ready", usage };
+  return AsyncResult.isFailure(result) ? FAILED_FACTORY_RUN_USAGE : LOADING_FACTORY_RUN_USAGE;
 }

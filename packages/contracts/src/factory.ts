@@ -144,7 +144,24 @@ const FactoryRunCriterionResult = Schema.Struct({
   name: Schema.String,
   result: Schema.Literals(["PASS", "FAIL", "NOT_EXERCISED"]),
   authoredTestsOnly: Schema.optional(Schema.Boolean),
+  /** The criterion's outcome is something on screen, so a capture is expected for it. */
+  visual: Schema.optional(Schema.Boolean),
 });
+
+export const FactoryRunEvidenceKind = Schema.Literals(["image", "video"]);
+export type FactoryRunEvidenceKind = typeof FactoryRunEvidenceKind.Type;
+
+/** One capture that proves an acceptance criterion: a screenshot or a recording. */
+const FactoryRunEvidenceFields = {
+  criterion: PhaseNumber,
+  kind: FactoryRunEvidenceKind,
+  /** Relative to the run directory, or absolute. */
+  path: Schema.String,
+  caption: Schema.String,
+  /** Live: a real server and browser. Test: an authored test rendered it. */
+  source: Schema.Literals(["live", "test"]),
+  viewport: Schema.optional(Schema.Literals(["desktop", "phone"])),
+};
 
 const eventOf = <Type extends string, Fields extends Schema.Struct.Fields>(
   type: Type,
@@ -211,7 +228,18 @@ export const FactoryRunEventSchemas = {
   "checks.recorded": eventOf("checks.recorded", {
     phase: PhaseNumber,
     stage: Schema.Literals(["build", "harden"]),
-    results: Schema.Array(Schema.Struct({ command: Schema.String, exit: Schema.Int })),
+    results: Schema.Array(
+      Schema.Struct({
+        command: Schema.String,
+        exit: Schema.Int,
+        /** The directory the command ran in, so a reader can run it again. */
+        cwd: Schema.optional(Schema.String),
+      }),
+    ),
+  }),
+  "evidence.recorded": eventOf("evidence.recorded", {
+    phase: PhaseNumber,
+    ...FactoryRunEvidenceFields,
   }),
   "verdict.recorded": eventOf("verdict.recorded", {
     phase: PhaseNumber,
@@ -319,8 +347,16 @@ export const FactoryRunDispatch = Schema.Struct({
   startedAt: IsoDateTime,
   finishedAt: Schema.NullOr(IsoDateTime),
   stopReason: Schema.NullOr(Schema.String),
+  /**
+   * The turn's own spend. A resumed session reports its running total
+   * (`claude -p --resume` and `codex exec resume` both do), so the fold
+   * subtracts the session's previous turn; these are never the raw figures.
+   */
   costUsd: Schema.NullOr(Schema.Number),
   tokens: Schema.NullOr(TokenCounts),
+  /** The figures as the harness reported them, a running total for a resumed session. */
+  reportedCostUsd: Schema.NullOr(Schema.Number),
+  reportedTokens: Schema.NullOr(TokenCounts),
   reportFile: Schema.NullOr(Schema.String),
 });
 export type FactoryRunDispatch = typeof FactoryRunDispatch.Type;
@@ -343,9 +379,16 @@ export const FactoryRunPhase = Schema.Struct({
     Schema.Struct({
       stage: Schema.Literals(["build", "harden"]),
       at: IsoDateTime,
-      results: Schema.Array(Schema.Struct({ command: Schema.String, exit: Schema.Int })),
+      results: Schema.Array(
+        Schema.Struct({
+          command: Schema.String,
+          exit: Schema.Int,
+          cwd: Schema.optional(Schema.String),
+        }),
+      ),
     }),
   ),
+  evidence: Schema.Array(Schema.Struct({ ...FactoryRunEvidenceFields, at: IsoDateTime })),
   verdicts: Schema.Array(
     Schema.Struct({
       pass: Schema.Literals([1, 2]),
@@ -507,6 +550,16 @@ export const FactoryRunSummary = Schema.Struct({
   coverage: Schema.optional(Schema.Struct({ passed: NonNegativeInt, total: NonNegativeInt })),
   /** Phases closed degraded: kept when the phase marks are trimmed from a long run. */
   degradedPhases: Schema.optional(NonNegativeInt),
+  /** The run card's trace strip and time split, so the card needs no run stream. */
+  trace: Schema.optional(
+    Schema.Struct({
+      /** One character per equal slice of the wall clock; see `FACTORY_TRACE_STRIP_CODES`. */
+      strip: Schema.String,
+      wallMs: NonNegativeInt,
+      agentMs: NonNegativeInt,
+      waitingMs: NonNegativeInt,
+    }),
+  ),
 });
 export type FactoryRunSummary = typeof FactoryRunSummary.Type;
 
@@ -555,6 +608,63 @@ export const FactorySubscribeRunInput = Schema.Struct({
   runId: TrimmedNonEmptyString,
 });
 export type FactorySubscribeRunInput = typeof FactorySubscribeRunInput.Type;
+
+export const FactoryRunQuotaProvider = Schema.Literals(["claude", "codex"]);
+export type FactoryRunQuotaProvider = typeof FactoryRunQuotaProvider.Type;
+
+/** How far one account window moved while the run ran, from the provider's own readings. */
+export const FactoryRunUsageWindow = Schema.Struct({
+  /** `five_hour`, `seven_day`, or `<minutes>m`. */
+  window: Schema.String,
+  firstPercent: Schema.Number,
+  lastPercent: Schema.Number,
+  /** The climb in percentage points, resets excluded. Includes every session on the account. */
+  movedPercent: Schema.Number,
+  samples: NonNegativeInt,
+  resets: NonNegativeInt,
+  firstAt: IsoDateTime,
+  lastAt: IsoDateTime,
+});
+export type FactoryRunUsageWindow = typeof FactoryRunUsageWindow.Type;
+
+export const FactoryRunUsageProvider = Schema.Struct({
+  provider: FactoryRunQuotaProvider,
+  windows: Schema.Array(FactoryRunUsageWindow),
+  /** The run's role turns at list price; null when they reported nothing priceable. */
+  runSpendUsd: Schema.NullOr(Schema.Number),
+  /** Everything this machine spent on the provider over the run, at list price. */
+  machineSpendUsd: Schema.NullOr(Schema.Number),
+  /**
+   * The run's share of one window: the window's movement between its first and
+   * last reading, split by the run's part of this machine's spend between the
+   * same two instants. An estimate that leans high: spend on other machines is
+   * not seen here.
+   */
+  estimate: Schema.NullOr(
+    Schema.Struct({
+      window: Schema.String,
+      percent: Schema.Number,
+      runShareOfSpend: Schema.Number,
+      /** The run's spend between the window's first and last reading. */
+      runSpendUsd: Schema.Number,
+      /** This machine's spend on the provider between the same two readings. */
+      machineSpendUsd: Schema.Number,
+    }),
+  ),
+});
+export type FactoryRunUsageProvider = typeof FactoryRunUsageProvider.Type;
+
+export const FactoryReadRunUsageInput = FactorySubscribeRunInput;
+export type FactoryReadRunUsageInput = typeof FactoryReadRunUsageInput.Type;
+
+export const FactoryRunUsage = Schema.Struct({
+  runId: Schema.String,
+  providers: Schema.Array(FactoryRunUsageProvider),
+  /** Why the spend split is missing when it is: the machine's usage could not be read. */
+  machineSpend: Schema.Literals(["read", "unavailable"]),
+  readAt: IsoDateTime,
+});
+export type FactoryRunUsage = typeof FactoryRunUsage.Type;
 
 /** A whole snapshot: a subscriber that skips intermediate items loses nothing. */
 export const FactoryRunStreamItem = Schema.Struct({

@@ -51,6 +51,14 @@
       "types": "./src/factoryRun.ts",
       "import": "./src/factoryRun.ts"
     },
+    "./factoryRunTrace": {
+      "types": "./src/factoryRunTrace.ts",
+      "import": "./src/factoryRunTrace.ts"
+    },
+    "./factoryRunUsage": {
+      "types": "./src/factoryRunUsage.ts",
+      "import": "./src/factoryRunUsage.ts"
+    },
     "./model": {
       "types": "./src/model.ts",
       "import": "./src/model.ts"

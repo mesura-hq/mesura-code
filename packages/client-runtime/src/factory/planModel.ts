@@ -14,7 +14,6 @@ import {
   type FactoryLegendEntry,
 } from "@t3tools/shared/factoryDocument";
 
-const FACTORY_CONTEXT_HEADING = "Context";
 const FACTORY_DECISIONS_HEADING = "Decisions";
 const FACTORY_ARCHITECTURE_HEADING = "Architecture";
 /** Long and settled: shown folded, never dropped. */
@@ -39,14 +38,6 @@ export function summarizeFactoryPlanCard(plan: FactoryPlanActivityPayload): Fact
       (phase) => `${phase.title} · ${plural(phase.acceptanceCount, "criterion", "criteria")}`,
     ),
   };
-}
-
-/** The Context section's body, the only section the card renders inline. */
-export function readFactoryPlanContext(markdown: string): string | null {
-  const section = splitFactoryDocument(markdown).sections.find(
-    (entry) => entry.heading === FACTORY_CONTEXT_HEADING,
-  );
-  return section === undefined ? null : section.body.trim();
 }
 
 export interface FactoryPlanPhaseCard {

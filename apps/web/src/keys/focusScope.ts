@@ -72,11 +72,12 @@ export function deepActiveElement(): Element | null {
 }
 
 /**
- * A tree (the file tree, a diff's file list) owns its keys too, except the
- * leader: `Space` and the sequence it starts stay the keymap's, so the panel
- * launcher and the other leader commands work from inside a tree.
+ * A tree (the file tree, a diff's file list, a factory card's folds marked
+ * `data-key-scope="tree"`) owns its keys too, except the leader: `Space` and
+ * the sequence it starts stay the keymap's, so the panel launcher and the
+ * other leader commands work from inside a tree.
  */
-const TREE_SELECTOR = '[role="tree"]';
+const TREE_SELECTOR = '[role="tree"], [data-key-scope="tree"]';
 
 /** Set on a frame while its page's Vim reader holds the keys (`keys/frame/frameReader.ts`). */
 export const FRAME_READER_ATTRIBUTE = "data-mesura-reader";

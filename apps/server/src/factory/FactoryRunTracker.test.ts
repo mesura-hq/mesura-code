@@ -1442,14 +1442,15 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
               { phase: 3, pass: 1, verdict: "COULD_NOT_EXERCISE" },
               { phase: 3, pass: 2, verdict: "WORKS" },
             ],
+            // Each turn's own spend: the role sessions report running totals.
             cost: {
-              usd: 95.971663,
+              usd: expect.closeTo(32.077657, 6),
               tokens: {
-                input_tokens: 89939687,
-                cached_input_tokens: 87741824,
+                input_tokens: 43034161,
+                cached_input_tokens: 41801472,
                 cache_write_input_tokens: 0,
-                output_tokens: 596279,
-                reasoning_output_tokens: 392079,
+                output_tokens: 286773,
+                reasoning_output_tokens: 182700,
               },
             },
             request: "Sanitized sf-team run request",
@@ -1457,6 +1458,13 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
             question: null,
             coverage: { passed: 23, total: 39 },
             degradedPhases: 1,
+            // Drawn to the last event: the stop after phase 3 waited 6h 27m.
+            trace: {
+              strip: `iiivriicviiiiivriiiiiciiivvvvrriv${"w".repeat(63)}`,
+              wallMs: 35373932,
+              agentMs: 9847538,
+              waitingMs: 23247571,
+            },
           });
           const panel = yield* harness.tracker
             .stream(THREAD_ID, "thread-attention")

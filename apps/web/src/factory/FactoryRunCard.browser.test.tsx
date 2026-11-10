@@ -47,6 +47,8 @@ const fixture = vi.hoisted(() => ({
   threadListeners: new Set<() => void>(),
   factorySnapshots: {} as Record<string, string>,
   factorySnapshotAtoms: new Map<string, unknown>(),
+  factoryRunUsage: null as unknown,
+  factoryRunUsageAtoms: new Map<string, unknown>(),
   factoryRunItem: null as unknown,
   factoryRunAtoms: new Map<string, unknown>(),
   factoryRunInputs: [] as unknown[],
@@ -139,6 +141,20 @@ vi.mock("../state/factory", async () => {
   const { AsyncResult, Atom } = await import("effect/reactivity");
   return {
     factoryEnvironment: {
+      // What a run used of the plans: one answer per run, or loading while none is set.
+      factoryRunUsage: ({ input }: { input: { threadId: string; runId: string } }) => {
+        const key = `${input.threadId}:${input.runId}:${fixture.factoryRunUsage === null ? "loading" : "ready"}`;
+        let atom = fixture.factoryRunUsageAtoms.get(key);
+        if (atom === undefined) {
+          atom = Atom.make(
+            fixture.factoryRunUsage === null
+              ? AsyncResult.initial(true)
+              : AsyncResult.success(fixture.factoryRunUsage),
+          );
+          fixture.factoryRunUsageAtoms.set(key, atom);
+        }
+        return atom;
+      },
       factorySnapshot: ({ input }: { input: { digest: string } }) => {
         const markdown = fixture.factorySnapshots[input.digest];
         const key = `${input.digest}:${markdown === undefined ? "loading" : "ready"}`;
@@ -172,6 +188,20 @@ vi.mock("../state/factory", async () => {
         }
         return atom;
       },
+    },
+  };
+});
+// A video capture's signed URL; every other asset resolves as it does in the app.
+vi.mock("../assets/assetUrls", async (original) => {
+  const actual = await original<typeof import("../assets/assetUrls")>();
+  return {
+    ...actual,
+    useAssetUrlState: (...args: Parameters<typeof actual.useAssetUrlState>) => {
+      const [, resource] = args;
+      const state = actual.useAssetUrlState(...args);
+      return resource?._tag === "media-file" && resource.path.endsWith(".webm")
+        ? { _tag: "Success", url: `https://assets.test/${resource.path}` }
+        : state;
     },
   };
 });
@@ -278,6 +308,8 @@ async function setupBrowserFixture0() {
   appRootFence.sessions.set(environmentId, makeFenceSession());
   fixture.factorySnapshots = {};
   fixture.factorySnapshotAtoms.clear();
+  fixture.factoryRunUsage = null;
+  fixture.factoryRunUsageAtoms.clear();
   fixture.factoryRunItem = null;
   fixture.factoryRunAtoms.clear();
   fixture.factoryRunInputs = [];
@@ -524,7 +556,7 @@ const liveRunSubscriptions = () => fixture.factoryRunOpened - fixture.factoryRun
 const panelState = () =>
   selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
 
-it("phase9 web AC1 opens the run card's run on the Run tab of the Factory pane, maximized, with one rail entry per phase", async () => {
+it("phase9 web AC1 opens the run card's run on the Run tab of the Factory pane, maximized, with one trace lane per phase", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.turnItems = [runCard("verify")];
@@ -548,6 +580,7 @@ it("phase9 web AC1 opens the run card's run on the Run tab of the Factory pane, 
     (entry) => entry.getAttribute("aria-label"),
   );
   // Amended for review finding P2-2: the title is part of each entry's accessible name.
+  // The trace's phase lanes replaced the rail and keep its accessible names.
   expect(railLabels).toEqual([
     `Phase 1: running, ${PHASE_1_TITLE}`,
     `Phase 2: pending, ${PHASE_2_TITLE}`,
@@ -744,6 +777,7 @@ it("phase9 web P2-1 opens a turn file whose path holds spaces, parentheses, brac
 
 import {
   FACTORY_REPORT_DIGEST,
+  foldFactoryRunTestLines,
   makeFactoryReportPayload,
 } from "@t3tools/client-runtime/factory/testing";
 import { factoryReportActivityId } from "@t3tools/contracts";
@@ -809,6 +843,23 @@ function visiblePaneText(): string {
 }
 
 /** The first element in the pane whose whole text is `text`. */
+/**
+ * The verification table's phase folds, each opened so its criteria render: a
+ * phase's summary reads `<n>. <title>` over `<passed>/<total> passed`.
+ */
+async function openVerificationPhases(): Promise<HTMLElement[]> {
+  const folds = () =>
+    [...factoryPane().querySelectorAll<HTMLButtonElement>("button")].filter((button) =>
+      /^\d+\. .*\d+\/\d+ passed/.test(button.textContent?.replace(/\s+/g, " ").trim() ?? ""),
+    );
+  expect(folds().length, "Expected the verification table's phase folds").toBeGreaterThan(0);
+  for (const fold of folds()) {
+    if (fold.getAttribute("aria-expanded") !== "true") await click(fold);
+  }
+  await settle();
+  return folds();
+}
+
 function paneElementWithText(text: string): HTMLElement {
   const element = [...factoryPane().querySelectorAll<HTMLElement>("*")].find(
     (node) => node.textContent?.replace(/\s+/g, " ").trim() === text,
@@ -828,7 +879,12 @@ it("phase11 web AC1 renders a factory.report turn item as a report card with its
 
   showReport();
   await mountApp();
-  const text = (await reportRow()).textContent ?? "";
+  const row = await reportRow();
+  // Every section starts folded, with its heading in view.
+  expect(row.textContent).toContain("How it was built");
+  expect(row.textContent).not.toContain("Accountants close each month from the invoice list");
+  await openSections(row, ["Context", "What was built"]);
+  const text = row.textContent ?? "";
 
   expect(text).toContain("Accountants close each month from the invoice list");
   expect(text).toContain("Export the invoices the current filter shows as a CSV file.");
@@ -838,12 +894,14 @@ it("phase11 web AC1 renders a factory.report turn item as a report card with its
   );
   expect(text).toContain("4/5 criteria passed");
   expect(text).toContain("1 degraded phase");
-  // The card carries the Context and What was built only.
+  // A section left folded shows its heading and not its prose.
+  expect(text).toContain("How it was built");
+  expect(text).toContain("Check it yourself");
   expect(text).not.toContain(HOW_IT_WAS_BUILT_PROSE);
   // The run card stays; the report card is a second row, never a work-log row.
   expect(runRow()).not.toBe(await reportRow());
-  // Its numbers come from the run's factory.run activity: no run stream opens.
-  expect(fixture.factoryRunOpened).toBe(0);
+  // Its frame comes from the run's record, which the card reads while it is mounted.
+  expect(fixture.factoryRunOpened).toBe(1);
 });
 
 it("phase11 web AC6 report card reads coverage and degraded count from the run state, not from report.md", async () => {
@@ -861,7 +919,6 @@ it("phase11 web AC6 report card reads coverage and degraded count from the run s
 
   expect(text).toContain("4/5 criteria passed");
   expect(text).toContain("0 degraded phases");
-  expect(fixture.factoryRunOpened).toBe(0);
 });
 
 it("phase11 web AC1 report card Open opens the Report tab of the Factory pane, maximized", async () => {
@@ -924,25 +981,30 @@ it("phase11 web AC2 AC3 Report tab draws the verification table inside How it wa
   await mountApp();
   await openReportFromCard();
 
-  const table = factoryPane().querySelector("table");
-  expect(table, "Expected the verification table").not.toBeNull();
-  expect(precedes(paneElementWithText("How it was verified"), table!)).toBe(true);
-  expect(precedes(table!, paneElementWithText("Architecture"))).toBe(true);
+  const phases = await openVerificationPhases();
+  const table = phases[0]!;
+  expect(precedes(paneElementWithText("How it was verified"), table)).toBe(true);
+  expect(precedes(phases.at(-1)!, paneElementWithText("Architecture"))).toBe(true);
   const comment = [...factoryPane().querySelectorAll<HTMLElement>("p, li")].find((node) =>
     node.textContent?.includes(VERIFIED_COMMENT),
   );
   expect(comment, "Expected the authored comment").toBeDefined();
-  expect(precedes(table!, comment!), "the derived table before the authored comment").toBe(true);
+  expect(precedes(table, comment!), "the derived table before the authored comment").toBe(true);
 
   const row = (criterion: string) => {
-    const match = [...table!.querySelectorAll("tr")].find((candidate) =>
-      candidate.textContent?.includes(criterion),
+    const match = [...factoryPane().querySelectorAll("li")].find(
+      (candidate) =>
+        candidate.textContent?.includes(criterion) && candidate.querySelector("li") === null,
     );
-    expect(match, `Expected a table row for "${criterion}"`).toBeDefined();
+    expect(match, `Expected a row for "${criterion}"`).toBeDefined();
     return match!.textContent?.replace(/\s+/g, " ") ?? "";
   };
-  expect(table!.textContent).toContain("Serialize the filtered invoice list as CSV");
-  expect(table!.textContent).toContain("Add the Export button to the invoices page");
+  expect(phases.map((phase) => phase.textContent).join(" ")).toContain(
+    "Serialize the filtered invoice list as CSV",
+  );
+  expect(phases.map((phase) => phase.textContent).join(" ")).toContain(
+    "Add the Export button to the invoices page",
+  );
   const quoting = row("A field that contains a comma or a quote is quoted per RFC 4180");
   expect(quoting).toMatch(/pass/i);
   expect(quoting).toMatch(/authored tests only/i);
@@ -1027,12 +1089,244 @@ it("phase11 web review P2-1 Report tab keeps the verification table at its contr
   await mountApp();
   await openReportFromCard();
 
-  const table = factoryPane().querySelector("table");
-  expect(table, "Expected the verification table").not.toBeNull();
+  const table = (await openVerificationPhases())[0]!;
   const heading = paneElementWithText("How it was verified");
   expect(precedes(paneElementWithText("Where this differs from the plan"), heading)).toBe(true);
-  expect(precedes(heading, table!)).toBe(true);
-  expect(precedes(table!, paneElementWithText("Architecture"))).toBe(true);
+  expect(precedes(heading, table)).toBe(true);
+  expect(precedes(table, paneElementWithText("Architecture"))).toBe(true);
   expect(visiblePaneText()).toContain("Missing from report.md: How it was verified");
   expect(visiblePaneText()).not.toContain(VERIFIED_COMMENT);
+});
+
+/** Buttons of `root` whose text matches, e.g. a phase fold or a trace lane. */
+const buttonsMatching = (root: HTMLElement, pattern: RegExp) =>
+  [...root.querySelectorAll<HTMLButtonElement>("button")].filter((button) =>
+    pattern.test(button.textContent?.replace(/\s+/g, " ").trim() ?? ""),
+  );
+
+/** Opens the report card's folded sections by heading: every section starts closed. */
+async function openSections(root: HTMLElement, headings: ReadonlyArray<string>) {
+  for (const heading of headings) {
+    const [fold] = buttonsMatching(root, new RegExp(`^${heading}$`));
+    expect(fold, `Expected a ${heading} fold`).toBeDefined();
+    await click(fold!);
+  }
+}
+
+it("trace draws the run card's strip from its summary, and opens the full trace only on demand", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  fixture.turnItems = [runCard("degraded")];
+  streamRunAt("degraded");
+  await mountApp();
+
+  // 09:00 to 13:49, twelve role turns, and the 25-minute stop that waited for the developer.
+  expect(runRow().textContent).toMatch(/4h 49m\s*agents 3h 06m\s*waiting for you 25m/);
+  expect(fixture.factoryRunOpened).toBe(0);
+
+  const trigger = runRow().querySelector<HTMLElement>('[aria-label="Run trace"]');
+  expect(trigger, "Expected the trace strip's fold").not.toBeNull();
+  await click(trigger!);
+  await settle();
+  expect(fixture.factoryRunOpened).toBe(1);
+  expect(runRow().textContent).toContain("coordinator, checks");
+  const lane = buttonsMatching(runRow(), /^1\. /)[0];
+  expect(lane, "Expected phase 1's lane").toBeDefined();
+  await click(lane!);
+  await settle();
+  const turns = runRow().querySelector<HTMLElement>('[aria-label="Turns of phase 1"]');
+  expect(turns, "Expected phase 1's turns").not.toBeNull();
+  // Each turn names the step it ran in: the implementer wrote the fence before implementing.
+  const steps = [...turns!.querySelectorAll("li")].map((item) => item.textContent ?? "");
+  expect(steps[0]).toMatch(/Fence\s*implementer 1/);
+  expect(steps[1]).toMatch(/Implement\s*implementer 2/);
+});
+
+it("report card shows each criterion's captures, marks an on-screen criterion without one, and lists the suites to run again", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  showReport();
+  const lines = eventsJsonl.split("\n").filter((line) => line.trim().length > 0);
+  // Phase 2's first verdict marks its criterion 2 as something on screen; no capture follows.
+  lines[59] = JSON.stringify(
+    ((verdict) => ({
+      ...verdict,
+      criteria: verdict.criteria.map((criterion: { n: number }) =>
+        criterion.n === 2 ? { ...criterion, visual: true } : criterion,
+      ),
+    }))(JSON.parse(lines[59]!)),
+  );
+  // Phase 2's harden checks name the directory the suite ran in.
+  lines[67] = lines[67]!.replace(
+    '{"command":"pnpm test","exit":0}',
+    '{"command":"pnpm test","exit":0,"cwd":"apps/web"}',
+  );
+  lines.push(
+    JSON.stringify({
+      v: 1,
+      at: "2026-09-28T13:50:00.000Z",
+      type: "evidence.recorded",
+      phase: 1,
+      criterion: 1,
+      kind: "image",
+      path: "evidence/01-export.png",
+      caption: "The exported CSV opened in a spreadsheet.",
+      source: "live",
+      viewport: "desktop",
+    }),
+  );
+  fixture.factoryRunItem = { state: foldFactoryRunTestLines(lines), roles: [] };
+  fixture.factoryRunUsage = {
+    runId: "invoice-csv-export",
+    providers: [
+      {
+        provider: "claude",
+        windows: [
+          {
+            window: "seven_day",
+            firstPercent: 16,
+            lastPercent: 24,
+            movedPercent: 8,
+            samples: 3,
+            resets: 0,
+            firstAt: "2026-09-28T09:09:00.000Z",
+            lastAt: "2026-09-28T13:32:00.000Z",
+          },
+        ],
+        runSpendUsd: 57.6,
+        machineSpendUsd: 128,
+        estimate: {
+          window: "seven_day",
+          percent: 3.6,
+          runShareOfSpend: 0.45,
+          runSpendUsd: 54,
+          machineSpendUsd: 120,
+        },
+      },
+    ],
+    machineSpend: "read",
+    readAt: "2026-09-28T14:00:00.000Z",
+  };
+  await mountApp();
+  const row = await reportRow();
+
+  expect(row.textContent).toContain("Share of your plans");
+  expect(row.textContent).toContain("3.6% of week");
+  expect(row.textContent).toContain("account +8% · run $54 of $120");
+
+  await openSections(row, ["How it was verified", "Check it yourself"]);
+  for (const fold of buttonsMatching(row, /^[12]\. .*passed/)) await click(fold);
+  await settle();
+  expect(row.textContent).toContain("Live · desktop: The exported CSV opened in a spreadsheet.");
+  expect(row.textContent).toContain("1 capture");
+  expect(row.textContent).toContain("shows something on screen, no capture");
+  expect(row.textContent).toContain("1 without capture");
+
+  expect(row.textContent).toContain("Check it yourself");
+  expect(row.textContent).toContain("(cd apps/web && pnpm test)");
+});
+
+it("report card opens a video capture in the app's media viewer", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  showReport();
+  const lines = eventsJsonl.split("\n").filter((line) => line.trim().length > 0);
+  lines.push(
+    JSON.stringify({
+      v: 1,
+      at: "2026-09-28T13:50:00.000Z",
+      type: "evidence.recorded",
+      phase: 1,
+      criterion: 1,
+      kind: "video",
+      path: "evidence/01-export.webm",
+      caption: "The export downloading.",
+      source: "live",
+      viewport: "phone",
+    }),
+  );
+  fixture.factoryRunItem = { state: foldFactoryRunTestLines(lines), roles: [] };
+  await mountApp();
+  const row = await reportRow();
+  await openSections(row, ["How it was verified"]);
+  for (const fold of buttonsMatching(row, /^1\. .*passed/)) await click(fold);
+  await settle();
+
+  const play = row.querySelector('button[aria-label="Play The export downloading."]');
+  expect(play).not.toBeNull();
+  await click(play!);
+  expect(document.querySelector('[aria-label="Close video preview"]')).not.toBeNull();
+});
+
+it("opens the run card's trace from the keyboard and walks into its phase lanes", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  fixture.turnItems = [runCard("degraded")];
+  streamRunAt("degraded");
+  await mountApp();
+  const trigger = runRow().querySelector<HTMLElement>('[aria-label="Run trace"]');
+  expect(trigger, "Expected the run card's trace fold").not.toBeNull();
+  // The composer takes focus once the thread settles; the reader then clicks into the card.
+  await settle();
+  trigger!.focus();
+  expect(document.activeElement).toBe(trigger);
+  const press = async (key: string) =>
+    act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+      await settle();
+    });
+
+  await press("l");
+  await vi.waitFor(() => expect(buttonsMatching(runRow(), /^1\. /)).toHaveLength(1));
+  expect(trigger!.hasAttribute("data-panel-open")).toBe(true);
+  // Opening mounts the trace's stream, and the harness's composer takes focus back on that render.
+  trigger!.focus();
+  await press("j");
+  const lane = buttonsMatching(runRow(), /^1\. /)[0]!;
+  expect(document.activeElement).toBe(lane);
+  await press("l");
+  expect(lane.getAttribute("aria-expanded")).toBe("true");
+  await press("h");
+  expect(lane.getAttribute("aria-expanded")).toBe("false");
+  await press("h");
+  expect(document.activeElement).toBe(trigger);
+});
+
+it("walks the Factory pane's phase lanes from the keyboard", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  fixture.turnItems = [runCard("degraded")];
+  streamRunAt("degraded");
+  await mountApp();
+  await openRunFromCard();
+  await settle();
+  const pane = factoryPane();
+  const [first, second] = [/^1\. /, /^2\. /].map((pattern) => buttonsMatching(pane, pattern)[0]!);
+  expect(first, "Expected phase 1's lane").toBeDefined();
+  expect(second, "Expected phase 2's lane").toBeDefined();
+  first!.focus();
+  const press = async (key: string) =>
+    act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+      await settle();
+    });
+
+  // In the pane a lane is a choice, not a fold: Right selects it and stays on it, even
+  // when pressed again; a fold would step into the next lane instead.
+  await press("l");
+  expect(first!.getAttribute("aria-expanded")).toBe("true");
+  await press("l");
+  expect(document.activeElement).toBe(first);
+  // Left leaves the selected lane selected and focused.
+  await press("h");
+  expect(first!.getAttribute("aria-expanded")).toBe("true");
+  expect(document.activeElement).toBe(first);
+
+  await press("j");
+  expect(document.activeElement).toBe(second);
+  await press("l");
+  expect(second!.getAttribute("aria-expanded")).toBe("true");
+  expect(first!.getAttribute("aria-expanded")).toBe("false");
+  await press("k");
+  expect(document.activeElement).toBe(first);
 });

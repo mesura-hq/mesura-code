@@ -66,6 +66,8 @@ const fixture = vi.hoisted(() => ({
   hiddenRows: new Set<string>(),
   factorySnapshots: {} as Record<string, string>,
   factorySnapshotAtoms: new Map<string, unknown>(),
+  factoryRunUsage: null as unknown,
+  factoryRunUsageAtoms: new Map<string, unknown>(),
   environments: [
     {
       environmentId: "pinned-dock-environment",
@@ -151,6 +153,20 @@ vi.mock("../../state/factory", async () => {
   const { AsyncResult, Atom } = await import("effect/reactivity");
   return {
     factoryEnvironment: {
+      // What a run used of the plans: one answer per run, or loading while none is set.
+      factoryRunUsage: ({ input }: { input: { threadId: string; runId: string } }) => {
+        const key = `${input.threadId}:${input.runId}:${fixture.factoryRunUsage === null ? "loading" : "ready"}`;
+        let atom = fixture.factoryRunUsageAtoms.get(key);
+        if (atom === undefined) {
+          atom = Atom.make(
+            fixture.factoryRunUsage === null
+              ? AsyncResult.initial(true)
+              : AsyncResult.success(fixture.factoryRunUsage),
+          );
+          fixture.factoryRunUsageAtoms.set(key, atom);
+        }
+        return atom;
+      },
       factorySnapshot: ({ input }: { input: { digest: string } }) => {
         const markdown = fixture.factorySnapshots[input.digest];
         const key = `${input.digest}:${markdown === undefined ? "loading" : "ready"}`;
