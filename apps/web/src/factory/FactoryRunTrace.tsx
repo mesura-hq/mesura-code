@@ -232,6 +232,7 @@ function PhaseLane({
   trace,
   length,
   open,
+  foldable,
   onToggle,
   detail,
 }: {
@@ -239,6 +240,8 @@ function PhaseLane({
   trace: FactoryTrace;
   length: number;
   open: boolean;
+  /** False where the caller selects one phase at a time: the lane is then a choice, not a fold. */
+  foldable: boolean;
   onToggle: () => void;
   detail: ReactNode;
 }) {
@@ -250,7 +253,7 @@ function PhaseLane({
         type="button"
         aria-expanded={open}
         {...{ [FOLD_TRIGGER_ATTRIBUTE]: "" }}
-        data-panel-open={open ? "" : undefined}
+        data-panel-open={foldable && open ? "" : undefined}
         aria-label={`Phase ${phase.index}: ${phase.status}, ${phase.title}`}
         disabled={!started}
         onClick={onToggle}
@@ -370,6 +373,7 @@ export const FactoryRunTrace = memo(function FactoryRunTrace({
                 trace={trace}
                 length={length}
                 open={open}
+                foldable={!controlled}
                 onToggle={() => {
                   if (controlled) {
                     onSelectPhase(phase.index);

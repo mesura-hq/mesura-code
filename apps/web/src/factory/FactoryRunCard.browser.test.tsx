@@ -1313,6 +1313,12 @@ it("walks the Factory pane's phase lanes from the keyboard", async () => {
 
   await press("j");
   expect(document.activeElement).toBe(second);
+  // In the pane a lane is a choice, not a fold: Right selects it, Left leaves it selected.
+  await press("l");
+  expect(second!.getAttribute("aria-expanded")).toBe("true");
+  await press("h");
+  expect(second!.getAttribute("aria-expanded")).toBe("true");
+  expect(document.activeElement).toBe(second);
   await press("k");
   expect(document.activeElement).toBe(first);
 });
