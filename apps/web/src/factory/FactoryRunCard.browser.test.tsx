@@ -1291,3 +1291,28 @@ it("opens the run card's trace from the keyboard and walks into its phase lanes"
   await press("h");
   expect(document.activeElement).toBe(trigger);
 });
+
+it("walks the Factory pane's phase lanes from the keyboard", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  fixture.turnItems = [runCard("degraded")];
+  streamRunAt("degraded");
+  await mountApp();
+  await openRunFromCard();
+  await settle();
+  const pane = factoryPane();
+  const [first, second] = [/^1\. /, /^2\. /].map((pattern) => buttonsMatching(pane, pattern)[0]!);
+  expect(first, "Expected phase 1's lane").toBeDefined();
+  expect(second, "Expected phase 2's lane").toBeDefined();
+  first!.focus();
+  const press = async (key: string) =>
+    act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+      await settle();
+    });
+
+  await press("j");
+  expect(document.activeElement).toBe(second);
+  await press("k");
+  expect(document.activeElement).toBe(first);
+});

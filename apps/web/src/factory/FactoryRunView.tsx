@@ -8,6 +8,7 @@ import { FactoryCostFloor } from "./FactoryCostFloor";
 import { FactoryNodeSpine } from "./FactoryNodeSpine";
 import { FactoryRoleSessions } from "./FactoryRoleSessions";
 import { FactoryRunTrace, useFactoryTraceClock } from "./FactoryRunTrace";
+import { onFoldTreeKeyDown } from "./foldKeyboard";
 import {
   deriveFactoryRunTotals,
   deriveFactoryRunView,
@@ -209,12 +210,14 @@ function FactoryRunContent({
       {trace === null ? (
         <p className="text-xs text-muted-foreground">The run has not started yet.</p>
       ) : (
-        <FactoryRunTrace
-          trace={trace}
-          selectedPhase={view.selectedPhase}
-          onSelectPhase={setSelectedPhase}
-          phaseDetail={phaseDetail}
-        />
+        <div data-key-scope="tree" onKeyDown={onFoldTreeKeyDown}>
+          <FactoryRunTrace
+            trace={trace}
+            selectedPhase={view.selectedPhase}
+            onSelectPhase={setSelectedPhase}
+            phaseDetail={phaseDetail}
+          />
+        </div>
       )}
     </div>
   );
