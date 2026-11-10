@@ -879,7 +879,12 @@ it("phase11 web AC1 renders a factory.report turn item as a report card with its
 
   showReport();
   await mountApp();
-  const text = (await reportRow()).textContent ?? "";
+  const row = await reportRow();
+  // Every section starts folded, with its heading in view.
+  expect(row.textContent).toContain("How it was built");
+  expect(row.textContent).not.toContain("Accountants close each month from the invoice list");
+  await openSections(row, ["Context", "What was built"]);
+  const text = row.textContent ?? "";
 
   expect(text).toContain("Accountants close each month from the invoice list");
   expect(text).toContain("Export the invoices the current filter shows as a CSV file.");
@@ -889,8 +894,7 @@ it("phase11 web AC1 renders a factory.report turn item as a report card with its
   );
   expect(text).toContain("4/5 criteria passed");
   expect(text).toContain("1 degraded phase");
-  // The whole report reads in the card: every section is there, the reading ones open
-  // and the rest folded, so How it was built shows its heading and not its prose.
+  // A section left folded shows its heading and not its prose.
   expect(text).toContain("How it was built");
   expect(text).toContain("Check it yourself");
   expect(text).not.toContain(HOW_IT_WAS_BUILT_PROSE);
@@ -1100,6 +1104,15 @@ const buttonsMatching = (root: HTMLElement, pattern: RegExp) =>
     pattern.test(button.textContent?.replace(/\s+/g, " ").trim() ?? ""),
   );
 
+/** Opens the report card's folded sections by heading: every section starts closed. */
+async function openSections(root: HTMLElement, headings: ReadonlyArray<string>) {
+  for (const heading of headings) {
+    const [fold] = buttonsMatching(root, new RegExp(`^${heading}$`));
+    expect(fold, `Expected a ${heading} fold`).toBeDefined();
+    await click(fold!);
+  }
+}
+
 it("trace draws the run card's strip from its summary, and opens the full trace only on demand", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
 
@@ -1198,13 +1211,13 @@ it("report card shows each criterion's captures, marks an on-screen criterion wi
   const row = await reportRow();
 
   expect(row.textContent).toContain("Share of your plans");
-  expect(row.textContent).toMatch(/this run ≈ 3\.6%/);
-  expect(row.textContent).toMatch(/account moved \+8% between the run's first and last reading/);
-  expect(row.textContent).toContain("in that span the run spent $54 of the $120");
+  expect(row.textContent).toContain("3.6% of week");
+  expect(row.textContent).toContain("account +8% · run $54 of $120");
 
+  await openSections(row, ["How it was verified", "Check it yourself"]);
   for (const fold of buttonsMatching(row, /^[12]\. .*passed/)) await click(fold);
   await settle();
-  expect(row.textContent).toContain("Live · desktop — The exported CSV opened in a spreadsheet.");
+  expect(row.textContent).toContain("Live · desktop: The exported CSV opened in a spreadsheet.");
   expect(row.textContent).toContain("1 capture");
   expect(row.textContent).toContain("shows something on screen, no capture");
   expect(row.textContent).toContain("1 without capture");
@@ -1235,6 +1248,7 @@ it("report card opens a video capture in the app's media viewer", async () => {
   fixture.factoryRunItem = { state: foldFactoryRunTestLines(lines), roles: [] };
   await mountApp();
   const row = await reportRow();
+  await openSections(row, ["How it was verified"]);
   for (const fold of buttonsMatching(row, /^1\. .*passed/)) await click(fold);
   await settle();
 

@@ -1,14 +1,7 @@
 /**
- * FactoryRunUsage - what a Software Factory run used of the developer's plans.
- *
- * The run's role turns already left the provider's own readings on disk:
- * every `claude -p` output carries `rate_limit_event` lines, and every Codex
- * session rollout carries `rate_limits`. This reads them for the run's turns,
- * reads this machine's spend over the run and over the readings' span from the
- * usage service, and lets `@t3tools/shared/factoryRunUsage` turn both into the
- * run's share. Nothing
- * is recorded by the skill for it, so runs recorded before it existed work too.
- *
+ * FactoryRunUsage - what a factory run used of the developer's plans, read from the
+ * providers' own readings already on disk (`claude -p` rate_limit_event lines, Codex
+ * rollout rate_limits) plus this machine's spend. Runs recorded before it work too.
  * @module FactoryRunUsage
  */
 import * as NodeOS from "node:os";
@@ -32,13 +25,16 @@ import {
   type FactoryQuotaSample,
   type FactoryTurnSpend,
 } from "@t3tools/shared/factoryRunUsage";
+import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
+import * as ServerConfig from "../config.ts";
 import * as UsageService from "../usage/UsageService.ts";
 import { FactoryRunTracker, subscribeFactoryRun } from "./FactoryRunTracker.ts";
 
@@ -150,11 +146,9 @@ const dayDirectoriesUntil = (
 };
 
 /**
- * A Codex session's rollout. Codex files it under the local day the session
- * started and appends every resumed turn to that file, so a session resumed
- * days later, or begun before the run, is still in its first day's directory.
- * The days around its first turn in the run are looked at first, then every
- * earlier day, newest first.
+ * A Codex session's rollout. Codex files it under the day the session started and
+ * appends every resumed turn there, so search the days around the run's first turn
+ * first, then every earlier day, newest first.
  */
 function findCodexRollouts(
   fs: FileSystem.FileSystem,
@@ -188,8 +182,9 @@ const firstRollouts = (
   const [directory, ...rest] = directories;
   if (directory === undefined) return Effect.succeed([]);
   return rolloutsIn(fs, path, directory, sessionId).pipe(
-    Effect.flatMap((found) =>
-      found.length > 0 ? Effect.succeed(found) : firstRollouts(fs, path, rest, sessionId),
+    Effect.filterOrElse(
+      (found) => found.length > 0,
+      () => firstRollouts(fs, path, rest, sessionId),
     ),
   );
 };
@@ -333,11 +328,40 @@ const spendOf = (buckets: ReadonlyArray<UsageBucket>, provider: FactoryRunQuotaP
     .reduce((sum, bucket) => sum + bucket.costUsd, 0);
 
 /**
+ * Every input the share was computed from, beside its result, so a later
+ * reader can redo the arithmetic. Written next to the server's state, never
+ * sent to clients: the samples alone can run to thousands of lines.
+ */
+export interface FactoryRunUsageAudit {
+  readonly runId: string;
+  readonly runDir: string;
+  readonly readAt: string;
+  readonly runStartedAt: string | null;
+  readonly runEndedAt: string | null;
+  readonly providers: ReadonlyArray<{
+    readonly provider: FactoryRunQuotaProvider;
+    readonly samples: ReadonlyArray<FactoryQuotaSample>;
+    readonly turns: ReadonlyArray<FactoryTurnSpend>;
+    readonly span: { readonly firstAt: string; readonly lastAt: string } | null;
+    readonly machineSpendUsd: number | null;
+    readonly machineSpendInSpanUsd: number | null;
+    readonly result: FactoryRunUsage["providers"][number];
+  }>;
+}
+
+/**
  * The run's usage of each plan, from its folded state. A provider the run
  * dispatched no turn to is left out; a provider whose readings are missing
  * still shows the run's spend.
  */
-export const readFactoryRunUsageOf = Effect.fn("FactoryRunUsage.read")(function* (
+export const readFactoryRunUsageOf = (
+  state: FactoryRunState,
+  usage: Option.Option<UsageService.UsageService["Service"]>,
+  codexHome: string = defaultCodexHome(),
+) =>
+  readFactoryRunUsageWithAudit(state, usage, codexHome).pipe(Effect.map((result) => result.usage));
+
+const readFactoryRunUsageWithAudit = Effect.fn("FactoryRunUsage.read")(function* (
   state: FactoryRunState,
   usage: Option.Option<UsageService.UsageService["Service"]>,
   codexHome: string = defaultCodexHome(),
@@ -345,13 +369,24 @@ export const readFactoryRunUsageOf = Effect.fn("FactoryRunUsage.read")(function*
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const readAt = DateTime.formatIso(yield* DateTime.now);
+  const audit = (providers: FactoryRunUsageAudit["providers"]): FactoryRunUsageAudit => ({
+    runId: state.runId,
+    runDir: state.runDir,
+    readAt,
+    runStartedAt: state.startedAt,
+    runEndedAt: state.finishedAt ?? state.lastEventAt,
+    providers,
+  });
   if (state.startedAt === null) {
     return {
-      runId: state.runId,
-      providers: [],
-      machineSpend: "unavailable",
-      readAt,
-    } satisfies FactoryRunUsage;
+      usage: {
+        runId: state.runId,
+        providers: [],
+        machineSpend: "unavailable",
+        readAt,
+      } satisfies FactoryRunUsage,
+      audit: audit([]),
+    };
   }
   const startMs = Date.parse(state.startedAt);
   const endMs = Date.parse(state.finishedAt ?? state.lastEventAt ?? state.startedAt);
@@ -373,22 +408,56 @@ export const readFactoryRunUsageOf = Effect.fn("FactoryRunUsage.read")(function*
         buckets === null || target === undefined
           ? null
           : yield* machineBuckets(usage, Date.parse(target.firstAt), Date.parse(target.lastAt));
-      return factoryRunUsageProvider({
+      const input = {
         provider,
         windows,
         turns: turnSpends(state, provider, buckets),
         machineSpendUsd: buckets === null ? null : spendOf(buckets, provider),
         machineSpendInSpanUsd: spanBuckets === null ? null : spendOf(spanBuckets, provider),
-      });
+      };
+      const result = factoryRunUsageProvider(input);
+      return {
+        result,
+        audit: {
+          provider,
+          samples,
+          turns: input.turns,
+          span: target === undefined ? null : { firstAt: target.firstAt, lastAt: target.lastAt },
+          machineSpendUsd: input.machineSpendUsd,
+          machineSpendInSpanUsd: input.machineSpendInSpanUsd,
+          result,
+        },
+      };
     }),
   );
   return {
-    runId: state.runId,
-    providers,
-    machineSpend: buckets === null ? "unavailable" : "read",
-    readAt,
-  } satisfies FactoryRunUsage;
+    usage: {
+      runId: state.runId,
+      providers: providers.map((provider) => provider.result),
+      machineSpend: buckets === null ? "unavailable" : "read",
+      readAt,
+    } satisfies FactoryRunUsage,
+    audit: audit(providers.map((provider) => provider.audit)),
+  };
 });
+
+/**
+ * Keeps the newest audit of each run under the server's state, one file per
+ * run, so the estimate can be checked against its inputs later. A failed
+ * write never fails the read.
+ */
+const encodeAudit = Schema.encodeUnknownEffect(fromJsonStringPretty(Schema.Unknown));
+
+const writeFactoryRunUsageAudit = Effect.fn("FactoryRunUsage.writeAudit")(
+  function* (directory: string, audit: FactoryRunUsageAudit) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fs.makeDirectory(directory, { recursive: true });
+    const file = path.join(directory, `${audit.runId.replace(/[^\w.-]/g, "_")}.json`);
+    yield* fs.writeFileString(file, `${yield* encodeAudit(audit)}\n`);
+  },
+  (effect) => Effect.ignore(effect),
+);
 
 /** The `factory.readRunUsage` handler: the run's state from the tracker, then its usage. */
 export const makeReadFactoryRunUsage = Effect.gen(function* () {
@@ -396,6 +465,10 @@ export const makeReadFactoryRunUsage = Effect.gen(function* () {
   // Optional, so a server built without usage reading still answers with the movement.
   const usage = yield* Effect.serviceOption(UsageService.UsageService);
   const context = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+  const auditDirectory = (yield* Path.Path).join(
+    (yield* ServerConfig.ServerConfig).stateDir,
+    "factory-usage",
+  );
   return (input: FactoryReadRunUsageInput): Effect.Effect<FactoryRunUsage> =>
     subscribeFactoryRun(tracker, input).pipe(
       Stream.runHead,
@@ -410,7 +483,10 @@ export const makeReadFactoryRunUsage = Effect.gen(function* () {
                 readAt,
               } satisfies FactoryRunUsage;
             })
-          : readFactoryRunUsageOf(item.value.state, usage),
+          : readFactoryRunUsageWithAudit(item.value.state, usage).pipe(
+              Effect.tap((result) => writeFactoryRunUsageAudit(auditDirectory, result.audit)),
+              Effect.map((result) => result.usage),
+            ),
       ),
       Effect.provide(context),
     );

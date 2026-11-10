@@ -13,7 +13,8 @@ import {
   type FactoryPlanPhaseCard,
   type FactoryPlanSectionModel,
 } from "@t3tools/client-runtime/factory/plan-model";
-import { FACTORY_PHASES_HEADING, type FactoryArchitecture } from "@t3tools/shared/factoryDocument";
+import type { FactoryArchitecture } from "@t3tools/shared/factoryDocument";
+import { FOLD_TRIGGER_ATTRIBUTE, onFoldTreeKeyDown } from "./foldKeyboard";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys";
 
@@ -50,10 +51,11 @@ export function Fold({
   label?: string;
 }) {
   return (
-    <Collapsible defaultOpen={defaultOpen}>
+    <Collapsible defaultOpen={defaultOpen} data-fold="">
       <CollapsibleTrigger
         aria-label={label}
-        className="group flex w-full items-center gap-1.5 text-left text-sm text-foreground/90"
+        {...{ [FOLD_TRIGGER_ATTRIBUTE]: "" }}
+        className="group -mx-1.5 flex w-[calc(100%+0.75rem)] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left text-sm text-foreground/90 focus-visible:bg-accent"
       >
         <ChevronRightIcon
           aria-hidden="true"
@@ -250,12 +252,8 @@ export const FactoryPlanDocument = memo(function FactoryPlanDocument({
   );
 });
 
-/** What a reader needs before approving opens with the card; every other section waits folded. */
-const PLAN_CARD_OPEN_SECTIONS: ReadonlySet<string> = new Set([
-  "Context",
-  "What we will build",
-  FACTORY_PHASES_HEADING,
-]);
+/** Only the context opens with the card, so it stays short in the chat; every other section waits folded. */
+const PLAN_CARD_OPEN_SECTIONS: ReadonlySet<string> = new Set(["Context"]);
 
 /**
  * A whole plan inside its chat card: every level-two section in document order
@@ -285,7 +283,7 @@ export const FactoryPlanFolds = memo(function FactoryPlanFolds({
     [document],
   );
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3" data-key-scope="tree" onKeyDown={onFoldTreeKeyDown}>
       {document.sections.map((section, index) => {
         const summary = <span className="font-medium">{section.heading}</span>;
         const open = PLAN_CARD_OPEN_SECTIONS.has(section.heading);

@@ -24,15 +24,9 @@ import { FactoryCostFloor } from "./FactoryCostFloor";
 import { ArchitectureBody, Fold, Markdown, type MarkdownScope } from "./FactoryPlanDocument";
 import { FactoryRunTrace, useFactoryTraceClock } from "./FactoryRunTrace";
 import { FactoryRunUsageBlock } from "./FactoryRunUsageBlock";
+import { onFoldTreeKeyDown } from "./foldKeyboard";
 
 const ERROR_TEXT = "text-destructive-foreground";
-
-/** Sections that open with the card; the rest wait behind their heading. */
-const CARD_OPEN_SECTIONS: ReadonlySet<string> = new Set([
-  "Context",
-  "What was built",
-  "How it was verified",
-]);
 
 /** Elapsed, machine and waiting time, and the cost: all from the run, never from report.md. */
 function ClockBand({ view }: { view: FactoryReportView }) {
@@ -76,7 +70,7 @@ function EvidenceThumb({
       />
       <figcaption className="line-clamp-2 text-search-label leading-snug text-muted-foreground">
         {evidence.source === "live" ? "Live" : "Test"}
-        {evidence.viewport === null ? null : ` · ${evidence.viewport}`} — {evidence.caption}
+        {evidence.viewport === null ? null : ` · ${evidence.viewport}`}: {evidence.caption}
       </figcaption>
     </figure>
   );
@@ -304,12 +298,9 @@ function RunTrace({ state }: { state: FactoryRunState }) {
 }
 
 /**
- * A whole report. On a page (the Factory pane) every section is a heading; in
- * a card (the chat) every section is a fold, the reading ones open. Both draw
- * the same frame from the run: the clock, the plan share, the verification
- * table with each criterion's captures, the commands to try it, and the trace.
- * Only a degraded phase, a failed result, a red check and an unrepaired
- * finding take the error tone.
+ * A whole report: headings on a page (the Factory pane), folds in a card (the chat),
+ * one frame from the run in both. Only a degraded phase, a failed result, a red check
+ * and an unrepaired finding take the error tone.
  */
 export const FactoryReportDocument = memo(function FactoryReportDocument({
   view,
@@ -336,9 +327,10 @@ export const FactoryReportDocument = memo(function FactoryReportDocument({
   const openEvidence: OpenEvidence = setPreview;
 
   const card = variant === "card";
-  const section = (heading: string, body: ReactNode, open: boolean, key: string = heading) =>
+  // In the card every section opens folded, so a finished run takes a few lines of the chat.
+  const section = (heading: string, body: ReactNode, key: string = heading) =>
     card ? (
-      <Fold key={key} summary={<span className="font-medium">{heading}</span>} defaultOpen={open}>
+      <Fold key={key} summary={<span className="font-medium">{heading}</span>}>
         {body}
       </Fold>
     ) : (
@@ -352,6 +344,8 @@ export const FactoryReportDocument = memo(function FactoryReportDocument({
   return (
     <div
       className={cn("flex w-full flex-col", card ? "gap-3" : "mx-auto max-w-3xl gap-6 px-4 py-5")}
+      data-key-scope="tree"
+      onKeyDown={onFoldTreeKeyDown}
     >
       {card ? null : (
         <header className="flex flex-col gap-1.5">
@@ -378,13 +372,12 @@ export const FactoryReportDocument = memo(function FactoryReportDocument({
             threadRef={threadRef}
             onOpenEvidence={openEvidence}
           />,
-          CARD_OPEN_SECTIONS.has(entry.heading),
           sectionKeys[index],
         ),
       )}
-      {section("Check it yourself", <TryIt tryIt={view.tryIt} />, true)}
-      {section("The run", <RunTrace state={state} />, false)}
-      {card ? null : section("The run, step by step", <StepRecord view={view} />, false)}
+      {section("Check it yourself", <TryIt tryIt={view.tryIt} />)}
+      {section("The run", <RunTrace state={state} />)}
+      {card ? null : section("The run, step by step", <StepRecord view={view} />)}
       {preview === null ? null : (
         <ExpandedImageDialog preview={preview} onClose={() => setPreview(null)} />
       )}

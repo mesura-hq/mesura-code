@@ -13,28 +13,34 @@ import {
   type FactoryTraceStripKind,
   type FactoryTraceTurn,
 } from "@t3tools/shared/factoryRunTrace";
+import { minuteTick } from "@t3tools/client-runtime/clock";
 import { ChevronRightIcon } from "lucide-react";
-import { Fragment, memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  Fragment,
+  memo,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 
 import { Spinner } from "../components/ui/spinner";
 import { cn } from "~/lib/utils";
 import { useFactoryRun } from "./useFactoryRun";
 
+/**
+ * Shades of the text colour, from full for the implementer to faint for the
+ * coordinator: white through near-black in dark mode, the reverse in light. The
+ * developer chose this over a palette of the primary accent. Waiting is a soft
+ * band in the sidebar's "Needs input" colour, not a hatch.
+ */
 const ROLE_FILL: Record<FactoryRunRole, string> = {
-  implementer: "bg-orange-500/85",
-  verifier: "bg-sky-500/85",
-  reviewer: "bg-violet-500/85",
+  implementer: "bg-foreground",
+  verifier: "bg-foreground/60",
+  reviewer: "bg-foreground/35",
 };
-
-// Hatched, so waiting reads apart from work in any theme; a gradient has no utility token.
-const WAITING_FILL = "opacity-70";
-const WAITING_HATCH: CSSProperties = {
-  backgroundImage: "repeating-linear-gradient(45deg, var(--warning) 0 4px, transparent 4px 8px)",
-};
-
-/** A fill's style: only waiting carries one, its hatch. */
-const fillStyle = (fill: string): CSSProperties | undefined =>
-  fill === WAITING_FILL ? WAITING_HATCH : undefined;
+const WAITING_FILL = "bg-needs-input/30";
+const WAITING_TEXT = "text-needs-input";
 const COORDINATOR_FILL = "bg-foreground/12";
 
 const STRIP_FILL: Record<Exclude<FactoryTraceStripKind, "idle">, string> = {
@@ -54,7 +60,7 @@ function spanOf(from: number, to: number, origin: number, length: number): CSSPr
 
 function Track({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("relative h-3 overflow-hidden rounded-sm bg-muted/60", className)}>
+    <div className={cn("relative h-2 overflow-hidden rounded-full bg-muted/60", className)}>
       {children}
     </div>
   );
@@ -63,14 +69,14 @@ function Track({ children, className }: { children: ReactNode; className?: strin
 function turnSpend(turn: FactoryTraceTurn): string {
   if (turn.costUsd !== null) return factoryTraceUsdText(turn.costUsd);
   if (turn.tokens !== null) return `${factoryTraceTokenText(turn.tokens)} tok`;
-  return "—";
+  return "–";
 }
 
 function spendText(costUsd: number, tokens: number): string {
   const parts: string[] = [];
   if (costUsd > 0) parts.push(factoryTraceUsdText(costUsd));
   if (tokens > 0) parts.push(`${factoryTraceTokenText(tokens)} tok`);
-  return parts.join(" + ") || "—";
+  return parts.join(" + ") || "–";
 }
 
 /**
@@ -86,14 +92,14 @@ export const FactoryTraceStrip = memo(function FactoryTraceStrip({
   const segments = decodeFactoryTraceStrip(trace.strip);
   return (
     <div className="flex flex-col gap-1">
-      <Track className="h-2.5">
+      <Track className="h-1.5">
         {segments.map((segment) => {
           const fill = STRIP_FILL[segment.kind as Exclude<FactoryTraceStripKind, "idle">];
           return (
             <div
               key={segment.start}
               className={cn("absolute inset-y-0", fill)}
-              style={{ ...placed(segment.start, segment.width), ...fillStyle(fill) }}
+              style={placed(segment.start, segment.width)}
             />
           );
         })}
@@ -102,7 +108,7 @@ export const FactoryTraceStrip = memo(function FactoryTraceStrip({
         <span>{factoryTraceDurationText(trace.wallMs)}</span>
         <span>agents {factoryTraceDurationText(trace.agentMs)}</span>
         {trace.waitingMs > 0 ? (
-          <span className="text-warning-foreground">
+          <span className={WAITING_TEXT}>
             waiting for you {factoryTraceDurationText(trace.waitingMs)}
           </span>
         ) : null}
@@ -124,7 +130,7 @@ function Legend() {
     <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
       {swatches.map((swatch) => (
         <span key={swatch.label} className="flex items-center gap-1.5">
-          <i className={cn("size-2.5 rounded-xs", swatch.fill)} style={fillStyle(swatch.fill)} />
+          <i className={cn("size-2 rounded-full", swatch.fill)} />
           {swatch.label}
         </span>
       ))}
@@ -168,7 +174,7 @@ function StopLane({
   return (
     <li className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between gap-3 text-xs">
-        <span className="min-w-0 truncate text-warning-foreground">Stopped: {stop.question}</span>
+        <span className={cn("min-w-0 truncate", WAITING_TEXT)}>Stopped: {stop.question}</span>
         <span className="shrink-0 text-muted-foreground tabular-nums">
           {factoryTraceDurationText(end - stop.startMs)}
         </span>
@@ -176,7 +182,7 @@ function StopLane({
       <Track>
         <div
           className={cn("absolute inset-y-0", WAITING_FILL)}
-          style={{ ...spanOf(stop.startMs, end, trace.startMs, length), ...WAITING_HATCH }}
+          style={spanOf(stop.startMs, end, trace.startMs, length)}
         />
       </Track>
     </li>
@@ -195,7 +201,7 @@ function PhaseTurns({ phase, endMs }: { phase: FactoryTracePhase; endMs: number 
       {phase.turns.map((turn) => (
         <li key={turn.key} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-0.5">
           <span className="flex min-w-0 items-center gap-1.5 text-xs">
-            <i className={cn("size-2 shrink-0 rounded-xs", ROLE_FILL[turn.role])} />
+            <i className={cn("size-2 shrink-0 rounded-full", ROLE_FILL[turn.role])} />
             <span className="shrink-0 text-foreground">
               {turn.node === null ? turn.role : factoryNodeDisplayName(turn.node)}
             </span>
@@ -210,7 +216,7 @@ function PhaseTurns({ phase, endMs }: { phase: FactoryTracePhase; endMs: number 
           </span>
           <Track className="col-span-2 h-1.5">
             <div
-              className={cn("absolute inset-y-0 rounded-xs", ROLE_FILL[turn.role])}
+              className={cn("absolute inset-y-0 rounded-full", ROLE_FILL[turn.role])}
               style={spanOf(turn.startMs, turn.endMs ?? endMs, origin, length)}
             />
           </Track>
@@ -242,7 +248,7 @@ function PhaseLane({
       <button
         type="button"
         aria-expanded={open}
-        aria-label={`Phase ${phase.index}: ${phase.status} — ${phase.title}`}
+        aria-label={`Phase ${phase.index}: ${phase.status}, ${phase.title}`}
         disabled={!started}
         onClick={onToggle}
         className="flex flex-col gap-1 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default"
@@ -280,7 +286,7 @@ function PhaseLane({
           {phase.turns.map((turn) => (
             <div
               key={turn.key}
-              className={cn("absolute inset-y-0 rounded-xs", ROLE_FILL[turn.role])}
+              className={cn("absolute inset-y-0 rounded-full", ROLE_FILL[turn.role])}
               style={spanOf(turn.startMs, turn.endMs ?? trace.endMs, trace.startMs, length)}
             />
           ))}
@@ -304,7 +310,7 @@ function RoleTotals({ trace }: { trace: FactoryTrace }) {
         .map((row) => (
           <div key={row.role} className="flex items-center justify-between gap-3 text-xs">
             <span className="flex items-center gap-1.5">
-              <i className={cn("size-2 rounded-xs", ROLE_FILL[row.role])} />
+              <i className={cn("size-2 rounded-full", ROLE_FILL[row.role])} />
               {row.role}
               <span className="text-muted-foreground">· {row.turns} turns</span>
             </span>
@@ -401,15 +407,17 @@ export const FactoryRunTrace = memo(function FactoryRunTrace({
   );
 });
 
+const subscribeNever = () => () => {};
+
 /** A live run's trace is redrawn once a minute between events; a finished one never. */
 export function useFactoryTraceClock(live: boolean): number {
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    if (!live) return;
-    const timer = window.setInterval(() => setNowMs(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, [live]);
-  return nowMs;
+  const minute = useSyncExternalStore(
+    live ? minuteTick.subscribe : subscribeNever,
+    minuteTick.getSnapshot,
+    minuteTick.getSnapshot,
+  );
+  // `minute` is `YYYY-MM-DDTHH:mm` in UTC; the trace only needs it to move each minute.
+  return Date.parse(`${minute}Z`);
 }
 
 /**

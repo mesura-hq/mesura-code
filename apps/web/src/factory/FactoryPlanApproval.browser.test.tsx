@@ -460,9 +460,9 @@ it("phase4 web AC1 ends the plan card with implementer, reviewer and verifier ro
 
   await mountApp();
   const row = planRow();
-  // The last phase's fold, inside the open phases section.
-  const lastPhaseLine = [...row.querySelectorAll("button")].find((entry) =>
-    entry.textContent?.includes("Render the plan card and the Factory pane on the web"),
+  // The folded phases section, the plan's last part before the routes.
+  const lastPhaseLine = [...row.querySelectorAll("button")].find(
+    (entry) => entry.textContent?.trim() === "The phases",
   );
   expect(lastPhaseLine).toBeDefined();
   const rows = ["Implementer", "Reviewer", "Verifier"].map((role) => ({
@@ -646,17 +646,17 @@ it("phase4 web AC7 ignores an approval of another plan file", async () => {
   expect(approveButton()?.disabled).toBe(false);
 });
 
-it("phase4 web guard keeps the plan card's title, context, phases and Open, with the whole plan folded", async () => {
+it("phase4 web guard keeps the plan card's title, context, phase count and Open, with every other section folded", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
   const row = planRow();
   expect(row.textContent).toContain(PLAN_TITLE);
   expect(row.textContent).toContain("The developer builds with the factory from a thread.");
-  // The whole plan reads in the card: the phases open, each a fold with its criterion count.
-  expect(row.textContent).toContain("Snapshot a plan and present it to the thread");
-  expect(row.textContent).toContain("7 criteria");
-  // A section a reader does not need before approving starts folded.
+  // Only the context opens, so the card stays short in the chat: the phases wait folded.
+  expect(row.textContent).toContain("The phases");
+  expect(row.textContent).not.toContain("Snapshot a plan and present it to the thread");
+  // Every other section starts folded too.
   expect(row.textContent).toContain("What we will NOT build");
   expect(row.textContent).not.toContain("A second plan surface.");
   expect(
@@ -788,4 +788,39 @@ it("Factory v2 approval disables when the destination operate grant is revoked",
   expect(approveButton()?.disabled).toBe(true);
   await act(async () => approveButton()?.click());
   expect(fixture.startTurn).not.toHaveBeenCalled();
+});
+
+it("walks the plan card's fold headings from the keyboard, opening and closing them", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  await mountApp();
+  const row = planRow();
+  const heading = (text: string) => {
+    const match = [...row.querySelectorAll<HTMLElement>("[data-fold-trigger]")].find(
+      (entry) => entry.textContent?.trim() === text,
+    );
+    expect(match, `Expected a ${text} heading`).toBeDefined();
+    return match!;
+  };
+  const press = async (key: string) =>
+    act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+      await flushBrowserTasks();
+    });
+
+  const context = heading("Context");
+  context.focus();
+  await press("ArrowDown");
+  const second = document.activeElement as HTMLElement;
+  expect(second).not.toBe(context);
+  expect(second.hasAttribute("data-fold-trigger")).toBe(true);
+  expect(second.hasAttribute("data-panel-open")).toBe(false);
+
+  await press("l");
+  expect(second.hasAttribute("data-panel-open")).toBe(true);
+  await press("h");
+  expect(second.hasAttribute("data-panel-open")).toBe(false);
+
+  await press("k");
+  expect(document.activeElement).toBe(context);
 });

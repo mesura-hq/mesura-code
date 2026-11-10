@@ -14,29 +14,33 @@ const PROVIDER_NAMES: Record<FactoryRunUsageProvider["provider"], string> = {
 };
 
 const WINDOW_NAMES: Record<string, string> = {
-  five_hour: "5-hour limit",
-  seven_day: "weekly limit",
+  five_hour: "5 h",
+  seven_day: "week",
 };
 
-const windowName = (window: string) => WINDOW_NAMES[window] ?? `${window} limit`;
+const windowName = (window: string) => WINDOW_NAMES[window] ?? window;
 
 const percentText = (percent: number) =>
   `${percent < 10 ? percent.toFixed(1).replace(/\.0$/, "") : Math.round(percent)}%`;
 
-/**
- * The spends the share compares: over the readings' span when there is an
- * estimate, otherwise over the whole run.
- */
-function spendText(usage: FactoryRunUsageProvider) {
+/** The account's movement and the two spends the share divides, in one short line. */
+function basisText(usage: FactoryRunUsageProvider, movedPercent: number | null): string | null {
+  const parts: string[] = [];
+  if (movedPercent !== null) parts.push(`account +${percentText(movedPercent)}`);
   if (usage.estimate !== null) {
-    return ` · in that span the run spent ${factoryTraceUsdText(usage.estimate.runSpendUsd)} of the ${factoryTraceUsdText(usage.estimate.machineSpendUsd)} this machine spent, at list price`;
+    parts.push(
+      `run ${factoryTraceUsdText(usage.estimate.runSpendUsd)} of ${factoryTraceUsdText(usage.estimate.machineSpendUsd)}`,
+    );
+  } else if (usage.runSpendUsd !== null) {
+    parts.push(`run ${factoryTraceUsdText(usage.runSpendUsd)}`);
   }
-  if (usage.runSpendUsd === null) return null;
-  return ` · run ${factoryTraceUsdText(usage.runSpendUsd)}${usage.machineSpendUsd === null ? "" : ` of ${factoryTraceUsdText(usage.machineSpendUsd)} this machine spent`} at list price`;
+  return parts.length === 0 ? null : parts.join(" · ");
 }
 
 /** Bars span 0 to this many points, so one run reads at a glance. */
 const BAR_SCALE_PERCENT = 10;
+
+const barWidth = (percent: number) => `${Math.min(100, (percent / BAR_SCALE_PERCENT) * 100)}%`;
 
 function ProviderRow({ usage }: { usage: FactoryRunUsageProvider }) {
   const target =
@@ -44,59 +48,52 @@ function ProviderRow({ usage }: { usage: FactoryRunUsageProvider }) {
     usage.windows.find((window) => window.window === "seven_day") ??
     usage.windows[0];
   const name = PROVIDER_NAMES[usage.provider];
+  const basis = basisText(usage, target?.movedPercent ?? null);
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
-        <span className="text-foreground">
-          {name}
-          {target === undefined ? null : (
-            <span className="text-muted-foreground"> · {windowName(target.window)}</span>
-          )}
-        </span>
-        <span className="text-foreground tabular-nums">
-          {usage.estimate === null
-            ? target === undefined
-              ? "no readings"
-              : "share not estimable"
-            : `this run ≈ ${percentText(usage.estimate.percent)}`}
-        </span>
-      </div>
-      {target === undefined ? null : (
-        <div
-          className="relative h-1.5 overflow-hidden rounded-full bg-muted"
-          role="img"
-          aria-label={`${name}: the account moved ${percentText(target.movedPercent)} of its ${windowName(target.window)} during the run`}
-        >
+    <div className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-x-3 gap-y-0.5 text-xs">
+      <span className="text-foreground">{name}</span>
+      <div
+        className="relative h-1.5 overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label={
+          target === undefined
+            ? `${name}: no readings`
+            : `${name}: the account moved ${percentText(target.movedPercent)} of its ${windowName(target.window)} limit during the run`
+        }
+      >
+        {target === undefined ? null : (
           <div
-            className="absolute inset-y-0 left-0 rounded-full bg-foreground/20"
-            style={{ width: `${Math.min(100, (target.movedPercent / BAR_SCALE_PERCENT) * 100)}%` }}
+            className="absolute inset-y-0 left-0 rounded-full bg-foreground/15"
+            style={{ width: barWidth(target.movedPercent) }}
           />
-          {usage.estimate === null ? null : (
-            <div
-              className="absolute inset-y-0 left-0 rounded-full bg-foreground/70"
-              style={{
-                width: `${Math.min(100, (usage.estimate.percent / BAR_SCALE_PERCENT) * 100)}%`,
-              }}
-            />
-          )}
-        </div>
+        )}
+        {usage.estimate === null ? null : (
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-foreground/70"
+            style={{ width: barWidth(usage.estimate.percent) }}
+          />
+        )}
+      </div>
+      <span className="text-right text-foreground tabular-nums">
+        {usage.estimate === null
+          ? target === undefined
+            ? "no readings"
+            : "–"
+          : `${percentText(usage.estimate.percent)} of ${windowName(usage.estimate.window)}`}
+      </span>
+      {basis === null ? null : (
+        <span className="col-start-2 col-end-4 text-search-label text-muted-foreground tabular-nums">
+          {basis}
+        </span>
       )}
-      <p className="text-search-label text-muted-foreground tabular-nums">
-        {target === undefined
-          ? "The run's outputs carry no reading of this plan."
-          : `account moved +${percentText(target.movedPercent)} between the run's first and last reading, every session included${target.resets > 0 ? ` (${target.resets} reset)` : ""}`}
-        {spendText(usage)}
-      </p>
     </div>
   );
 }
 
 /**
- * What the run used of each plan, as the providers measured it. The account's
- * movement is measured; the run's share is that movement split by the run's
- * part of this machine's spend between the same two readings, so it is an
- * estimate that leans high: what other machines spent on the same account in
- * that time is not seen here.
+ * What the run used of each plan. The account's movement is measured; the run's
+ * share splits it by the run's part of this machine's spend, so it leans high:
+ * other machines' spend on the same account is not seen here.
  */
 export const FactoryRunUsageBlock = memo(function FactoryRunUsageBlock({
   threadRef,
@@ -141,9 +138,8 @@ export const FactoryRunUsageBlock = memo(function FactoryRunUsageBlock({
       ))}
       <p className="text-search-label text-muted-foreground">
         {usage.machineSpend === "unavailable"
-          ? "This machine's usage could not be read, so the run's share is not estimated."
-          : "The run's share counts its role turns, not the coordinator thread, and takes each turn's spend as even over the turn. It leans high: spend on other machines in the same time is not seen here."}{" "}
-        Bars span 0–{BAR_SCALE_PERCENT}% of the window; the light part is the whole account.
+          ? "This machine's usage could not be read, so there is no estimate."
+          : "Leans high: other machines on the same account are not counted."}
       </p>
     </section>
   );

@@ -1,14 +1,8 @@
 /**
- * What a Software Factory run used of the developer's subscriptions.
- *
- * The provider is the only source of a plan's size: Claude and Codex report
- * the account's used percent per window, and that percent already counts
- * against whatever the plan is today. Nothing here knows a plan budget, a
- * dollar allowance or a conversion rate. The run's share is the account's
- * movement between its first and last reading, split by the run's part of the
- * spend this machine saw between the same two instants. It is an estimate:
- * a turn's spend is taken as spread evenly over the turn, the readings are
- * rounded, and spend on other machines is invisible here, which makes it lean high.
+ * What a factory run used of the developer's subscriptions. Only the provider's
+ * used percent sizes a plan: no budget, allowance or rate is known here. The share
+ * splits the account's movement by the run's part of this machine's spend, so it
+ * leans high: other machines' spend on the same account is invisible.
  */
 import type {
   FactoryRunQuotaProvider,
@@ -228,11 +222,9 @@ export function factoryRunSpendBetween(
 }
 
 /**
- * One provider's line of the run's usage: the account windows' movement, the
- * run's and the machine's spend over the run, and the run's estimated share of
- * the estimate window. The share compares the two spends between that
- * window's first and last reading, the span its movement covers, so
- * `machineSpendInSpanUsd` must be read over exactly that span.
+ * One provider's usage line: the windows' movement, the run's and the machine's
+ * spend, and the run's estimated share. `machineSpendInSpanUsd` must cover exactly
+ * the estimate window's first-to-last reading span, the span its movement covers.
  */
 export function factoryRunUsageProvider(input: {
   readonly provider: FactoryRunQuotaProvider;

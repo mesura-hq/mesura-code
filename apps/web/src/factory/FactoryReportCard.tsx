@@ -18,12 +18,9 @@ import { useFactoryRun } from "./useFactoryRun";
 import { useFactorySnapshot } from "./useFactorySnapshot";
 
 /**
- * The whole report a run wrote, inside its chat card: the prose of
- * `report.md` read by digest and the frame (verification with captures, the
- * plan share, the commands to try it, the trace) from the run. The card holds
- * the run's stream while it is mounted; until it arrives, and on a thread
- * without a reference to read it through, the card shows the prose's lead with
- * the numbers of the run's summary.
+ * The whole report in its chat card: `report.md` by digest plus the frame from the
+ * run (captures, plan share, commands, trace). Until the run's stream arrives, or
+ * with no thread to read it through, the card shows the prose's lead and summary.
  */
 export const FactoryReportCard = memo(function FactoryReportCard({
   factoryReport,
