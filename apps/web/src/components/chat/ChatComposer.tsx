@@ -2472,6 +2472,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ? standaloneComposerImages.filter((image) => pendingSnapShotIdSet.has(image.id))
     : standaloneComposerImages;
   const composerControlsCollapsed = isComposerResting || isComposerCollapsedMobile;
+  // Mesura: on a phone the expanded footer stacks two centered rows, the model above the actions.
+  const stackPhoneFooterRows = isMobileViewport && !composerControlsCollapsed;
   const showInlineRestingControls = composerControlsCollapsed && restingControlsHost === null;
   const composerControlsVisibleInStrip =
     composerControlsCollapsed && restingControlsHost !== null && restingControlsVisible;
@@ -2704,6 +2706,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         restingControlsHaveLeadingContext
       }
       showProviderUnavailable={showProviderUnavailable}
+      shortModelLabel={stackPhoneFooterRows}
       providerSetupInstanceId={providerSetupInstanceId}
       onOpenProviderSetup={onOpenProviderSetup}
       providerCatalogPending={providerCatalogPending}
@@ -4051,6 +4054,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                 className={cn(
                   "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3 pb-3 sm:px-4 sm:pb-4",
+                  stackPhoneFooterRows && "flex-col gap-1",
                   pendingUserInputs.length > 0 && "pt-2",
                   isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
                   showMobilePendingAnswerActions && "hidden sm:flex",
@@ -4066,9 +4070,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-footer-controls="true"
                   className={cn(
                     "relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-0 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+                    // A narrow phone wraps this row rather than clipping it or truncating the model.
+                    stackPhoneFooterRows &&
+                      "w-full flex-none flex-wrap justify-center gap-y-1 overflow-visible [&_[data-chat-provider-model-picker]]:max-w-full [&_[data-chat-provider-model-picker]]:shrink-0",
                     isComposerResting && "hidden",
                   )}
                 >
+                  {stackPhoneFooterRows && contextWindowMeterElement ? (
+                    // The controls measurement reserves this width before it fits the model picker.
+                    <span data-resting-controls-fixed="true" className="flex shrink-0">
+                      {contextWindowMeterElement}
+                    </span>
+                  ) : null}
                   {composerControlsCollapsed ? null : composerControls}
                 </div>
 
@@ -4079,9 +4092,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+                  className={cn(
+                    "flex shrink-0 flex-nowrap items-center justify-end gap-2",
+                    stackPhoneFooterRows && "justify-center",
+                  )}
                 >
-                  {contextWindowMeterElement}
+                  {stackPhoneFooterRows ? null : contextWindowMeterElement}
                   {composerAttachButton}
                   {voiceConversationControl}
                   {dictationStartControl}

@@ -67,6 +67,21 @@ export function getTriggerDisplayModelName(model: ModelEsque): string {
   return getDisplayModelName(model, { preferShortName: true });
 }
 
+// Mesura: model families named after the provider an icon already shows. Keyed by driver, never by
+// the editable instance name, so a Claude model under Cursor keeps its "Claude".
+const MODEL_FAMILY_PREFIX_BY_DRIVER: Readonly<Record<string, string>> = { claudeAgent: "Claude" };
+
+/** Mesura: beside its provider's icon a model needs no provider prefix ("Claude Opus 5.5" -> "Opus 5.5"). */
+export function getTriggerDisplayModelNameBesideIcon(
+  model: ModelEsque,
+  driverKind: string,
+): string {
+  return stripLeadingQualifier(
+    getTriggerDisplayModelName(model),
+    MODEL_FAMILY_PREFIX_BY_DRIVER[driverKind],
+  );
+}
+
 export function getTriggerDisplayModelLabel(model: ModelEsque): string {
   return getTriggerDisplayModelName(model);
 }
