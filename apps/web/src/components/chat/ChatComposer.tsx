@@ -4072,7 +4072,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     "relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-0 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                     // A narrow phone wraps this row rather than clipping it or truncating the model.
                     stackPhoneFooterRows &&
-                      "w-full flex-none flex-wrap justify-center gap-y-1 overflow-visible [&_[data-chat-provider-model-picker]]:shrink-0",
+                      "w-full flex-none flex-wrap justify-center gap-y-1 overflow-visible [&_[data-chat-provider-model-picker]]:max-w-full [&_[data-chat-provider-model-picker]]:shrink-0",
                     isComposerResting && "hidden",
                   )}
                 >
