@@ -86,7 +86,7 @@ function FactoryPlanApprovalSection({
     threadRef,
     plan,
   );
-  const { slots, routes, violations, setEdited } = useFactoryPlanRoutes(
+  const { slots, routes, setEdited } = useFactoryPlanRoutes(
     factoryPlanRoutesKey(threadRef, plan.digest),
     providers,
   );
@@ -113,11 +113,6 @@ function FactoryPlanApprovalSection({
         {state.kind === "changed" ? <Badge variant="outline">Changed since approval</Badge> : null}
       </div>
       <FactoryRoutePicker slots={slots} providers={providers} onChange={setEdited} />
-      {violations.map((violation) => (
-        <p key={violation} className="text-xs text-destructive">
-          {violation}
-        </p>
-      ))}
       <div className="flex justify-end">
         <Button
           size="xs"

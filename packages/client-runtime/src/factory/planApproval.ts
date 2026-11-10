@@ -17,10 +17,12 @@ const FENCE_CLOSE = "```";
 
 const isFactoryRoutes = Schema.is(FactoryRoutes);
 
-/** Exactly the `--routes` keys, whatever else an object carries. */
+/**
+ * Exactly the `--routes` keys the card sets, whatever else an object carries. A `budgetUsd` from a
+ * card edited before the budget field was removed is dropped: sf-team in Mesura Code cannot enforce it.
+ */
 function routeFileEntry(route: FactoryRoute): FactoryRoute {
-  const entry = { harness: route.harness, model: route.model, effort: route.effort };
-  return route.budgetUsd === undefined ? entry : { ...entry, budgetUsd: route.budgetUsd };
+  return { harness: route.harness, model: route.model, effort: route.effort };
 }
 
 function routesFile(routes: FactoryRoutes): FactoryRoutes {

@@ -3,7 +3,6 @@ import {
   defaultFactoryRoutes,
   readyFactoryRoutes,
   reconcileFactoryRouteSlots,
-  validateFactoryRoutes,
   type FactoryRouteSlots,
 } from "@t3tools/client-runtime/factory/routes";
 
@@ -25,15 +24,6 @@ export function useFactoryPlanRoutes(planKey: string, providers: ReadonlyArray<S
     edited === null
       ? defaultFactoryRoutes(providers)
       : reconcileFactoryRouteSlots(edited, providers);
-  const { implementer, reviewer, verifier } = slots;
-  const violations =
-    implementer.status === "ready" && reviewer.status === "ready" && verifier.status === "ready"
-      ? validateFactoryRoutes({
-          implementer: implementer.route,
-          reviewer: reviewer.route,
-          verifier: verifier.route,
-        })
-      : [];
   const setEdited = (next: FactoryRouteSlots) => setFactoryPlanEditedRoutes(planKey, next);
-  return { slots, routes: readyFactoryRoutes(slots), violations, setEdited };
+  return { slots, routes: readyFactoryRoutes(slots), setEdited };
 }
