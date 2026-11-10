@@ -67,6 +67,14 @@ export function getTriggerDisplayModelName(model: ModelEsque): string {
   return getDisplayModelName(model, { preferShortName: true });
 }
 
+/** Mesura: beside its provider's icon a model needs no provider prefix ("Claude Opus 5.5" -> "Opus 5.5"). */
+export function getTriggerDisplayModelNameBesideIcon(
+  model: ModelEsque,
+  providerDisplayName: string,
+): string {
+  return stripLeadingQualifier(getTriggerDisplayModelName(model), providerDisplayName);
+}
+
 export function getTriggerDisplayModelLabel(model: ModelEsque): string {
   return getTriggerDisplayModelName(model);
 }

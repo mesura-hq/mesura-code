@@ -466,6 +466,12 @@ describe("combined picker in the composer: apply", () => {
       model: "claude-opus-5",
       options: [{ id: "effort", value: "high" }],
     });
+    // Beside the Claude icon the trigger drops the provider prefix.
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector('[data-chat-provider-model-picker-label="true"]')?.textContent,
+      ).toBe("Opus 5"),
+    );
   });
 
   it("combined picker stages Ultrathink and prefixes the prompt current at apply time", async () => {
