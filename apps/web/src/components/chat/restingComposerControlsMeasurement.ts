@@ -19,6 +19,23 @@ function elementInlineMarginWidth(element: HTMLElement): number {
   );
 }
 
+// Mesura: a percentage max-width (the phone footer caps the picker at its row) resolves against the
+// row's content box; Number.parseFloat("100%") would read it as 100 pixels.
+function resolvedMaxWidth(element: HTMLElement, maxWidth: string): number {
+  if (maxWidth.endsWith("%")) {
+    const parent = element.parentElement;
+    if (!parent) return Number.POSITIVE_INFINITY;
+    const parentStyle = getComputedStyle(parent);
+    const contentWidth =
+      parent.clientWidth -
+      (Number.parseFloat(parentStyle.paddingInlineStart) || 0) -
+      (Number.parseFloat(parentStyle.paddingInlineEnd) || 0);
+    return (contentWidth * Number.parseFloat(maxWidth)) / 100;
+  }
+  const pixels = Number.parseFloat(maxWidth);
+  return Number.isFinite(pixels) ? pixels : Number.POSITIVE_INFINITY;
+}
+
 function providerModelPickerNaturalWidth(picker: HTMLElement): number {
   const renderedWidth = picker.getBoundingClientRect().width;
   if (renderedWidth === 0) return 0;
@@ -27,10 +44,9 @@ function providerModelPickerNaturalWidth(picker: HTMLElement): number {
   const labelIsCollapsed = label?.clientWidth === 0 && getComputedStyle(label).flexGrow === "0";
   const hiddenLabelWidth =
     label && !labelIsCollapsed ? Math.max(0, label.scrollWidth - label.clientWidth) : 0;
-  const maxWidth = Number.parseFloat(style.maxWidth);
   const naturalWidth = Math.min(
     renderedWidth + hiddenLabelWidth,
-    Number.isFinite(maxWidth) ? maxWidth : Number.POSITIVE_INFINITY,
+    resolvedMaxWidth(picker, style.maxWidth),
   );
   return naturalWidth + elementInlineMarginWidth(picker);
 }
