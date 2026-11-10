@@ -305,3 +305,238 @@ describe("phase11 factory run summary coverage", () => {
     });
   });
 });
+
+describe("factory run turn spend", () => {
+  const line = (event: Record<string, unknown>) => JSON.stringify({ v: 1, ...event });
+  const started = line({
+    at: "2026-10-24T06:43:21.000Z",
+    type: "run.started",
+    runId: "spend",
+    request: "Spend",
+    phases: [{ index: 1, title: "One", acceptance: ["It works."] }],
+  });
+  const dispatch = (turn: number, minute: number, finish: Record<string, unknown>, phase = 1) => [
+    line({
+      at: `2026-10-24T07:${String(minute).padStart(2, "0")}:00.000Z`,
+      type: "dispatch.started",
+      phase,
+      role: turn > 10 ? "verifier" : "implementer",
+      turn: turn > 10 ? turn - 10 : turn,
+      harness: turn > 10 ? "codex" : "claude",
+      model: "model",
+      promptFile: `p-${turn}.md`,
+      outputFile: `o-${turn}.jsonl`,
+    }),
+    line({
+      at: `2026-10-24T07:${String(minute + 5).padStart(2, "0")}:00.000Z`,
+      type: "dispatch.finished",
+      phase,
+      role: turn > 10 ? "verifier" : "implementer",
+      turn: turn > 10 ? turn - 10 : turn,
+      stopReason: "end_turn",
+      reportFile: `r-${turn}.md`,
+      ...finish,
+    }),
+  ];
+
+  it("takes each turn's own spend from a resumed session's running total, in dollars and tokens", () => {
+    const state = foldLines([
+      started,
+      ...dispatch(1, 0, { sessionId: "claude-a", costUsd: 3.67 }),
+      ...dispatch(2, 10, { sessionId: "claude-a", costUsd: 6.76 }),
+      ...dispatch(11, 20, {
+        sessionId: "codex-a",
+        tokens: { input_tokens: 13_000_000, output_tokens: 60_000 },
+      }),
+      ...dispatch(12, 30, {
+        sessionId: "codex-a",
+        tokens: { input_tokens: 27_000_000, output_tokens: 130_000 },
+      }),
+    ]);
+    const dispatches = state.phases[0]!.dispatches;
+
+    expect(dispatches.map((entry) => entry.costUsd)).toEqual([
+      3.67,
+      expect.closeTo(3.09, 6),
+      null,
+      null,
+    ]);
+    expect(dispatches[3]!.tokens).toEqual({ input_tokens: 14_000_000, output_tokens: 70_000 });
+    expect(dispatches[1]!.reportedCostUsd).toBe(6.76);
+    expect(state.cost.usd).toBeCloseTo(6.76, 6);
+    expect(state.cost.tokens).toEqual({ input_tokens: 27_000_000, output_tokens: 130_000 });
+  });
+
+  it("takes a total lower than the session's previous one as a fresh total", () => {
+    const state = foldLines([
+      started,
+      ...dispatch(1, 0, { sessionId: "claude-a", costUsd: 5 }),
+      ...dispatch(2, 10, { sessionId: "claude-a", costUsd: 2 }),
+    ]);
+
+    expect(state.phases[0]!.dispatches.map((entry) => entry.costUsd)).toEqual([5, 2]);
+    expect(state.cost.usd).toBe(7);
+  });
+
+  it("keeps a session's last reported total across a turn that reported none, in any phase", () => {
+    const state = foldLines([
+      line({
+        at: "2026-10-24T06:43:21.000Z",
+        type: "run.started",
+        runId: "spend",
+        request: "Spend",
+        phases: [
+          { index: 1, title: "One", acceptance: ["It works."] },
+          { index: 2, title: "Two", acceptance: ["It still works."] },
+        ],
+      }),
+      ...dispatch(1, 0, { sessionId: "claude-a", costUsd: 5 }),
+      ...dispatch(2, 10, { sessionId: "claude-a" }),
+      ...dispatch(3, 20, { sessionId: "claude-a", costUsd: 8 }, 2),
+      ...dispatch(11, 30, { sessionId: "codex-a", tokens: { input_tokens: 100 } }),
+      ...dispatch(12, 40, { sessionId: "codex-a" }, 2),
+      ...dispatch(13, 50, { sessionId: "codex-a", tokens: { input_tokens: 250 } }, 2),
+    ]);
+
+    expect(state.phases[1]!.dispatches.map((entry) => entry.costUsd)).toEqual([3, null, null]);
+    expect(state.phases[1]!.dispatches[2]!.tokens).toEqual({ input_tokens: 150 });
+    expect(state.cost.usd).toBe(8);
+    expect(state.cost.tokens).toEqual({ input_tokens: 250 });
+  });
+
+  it("adds no spend for a finish that matched no running dispatch", () => {
+    const state = foldLines([
+      started,
+      line({
+        at: "2026-10-24T07:00:00.000Z",
+        type: "dispatch.finished",
+        phase: 1,
+        role: "implementer",
+        turn: 1,
+        sessionId: "claude-a",
+        stopReason: "end_turn",
+        costUsd: 9,
+        reportFile: "r.md",
+      }),
+    ]);
+
+    expect(state.cost.usd).toBe(0);
+  });
+
+  it("folds captures, visual criteria and check directories, and still decodes events without them", () => {
+    const state = foldLines([
+      started,
+      line({
+        at: "2026-10-24T07:00:00.000Z",
+        type: "evidence.recorded",
+        phase: 1,
+        criterion: 1,
+        kind: "image",
+        path: "evidence/01-sidebar.png",
+        caption: "The sidebar at phone width.",
+        source: "live",
+        viewport: "phone",
+      }),
+      line({
+        at: "2026-10-24T07:01:00.000Z",
+        type: "verdict.recorded",
+        phase: 1,
+        pass: 1,
+        verdict: "WORKS",
+        deciding: "It works.",
+        criteria: [{ n: 1, name: "It works", result: "PASS", visual: true }],
+      }),
+      line({
+        at: "2026-10-24T07:02:00.000Z",
+        type: "checks.recorded",
+        phase: 1,
+        stage: "harden",
+        results: [{ command: "vp test run src/a.test.ts", exit: 0, cwd: "apps/web" }],
+      }),
+    ]);
+    const phase = state.phases[0]!;
+
+    expect(state.warningCount).toBe(0);
+    expect(phase.evidence).toEqual([
+      {
+        criterion: 1,
+        kind: "image",
+        path: "evidence/01-sidebar.png",
+        caption: "The sidebar at phone width.",
+        source: "live",
+        viewport: "phone",
+        at: "2026-10-24T07:00:00.000Z",
+      },
+    ]);
+    expect(phase.verdicts[0]!.criteria[0]!.visual).toBe(true);
+    expect(phase.checks[0]!.results[0]!.cwd).toBe("apps/web");
+  });
+
+  it("shows a two-phase seal's captures on their own phase's criterion and opens its report", () => {
+    const verdict = (phase: number, name: string) =>
+      line({
+        at: "2026-10-24T08:00:00.000Z",
+        type: "verdict.recorded",
+        phase,
+        pass: 1,
+        verdict: "WORKS",
+        deciding: "seen",
+        criteria: [{ n: 1, name, result: "PASS", visual: true }],
+      });
+    const capture = (phase: number, path: string) =>
+      line({
+        at: "2026-10-24T08:01:00.000Z",
+        type: "evidence.recorded",
+        phase,
+        criterion: 1,
+        kind: "image",
+        path,
+        caption: path,
+        source: "live",
+      });
+    const state = foldLines([
+      line({
+        at: "2026-10-24T07:00:00.000Z",
+        type: "run.started",
+        runId: "seal-dock",
+        request: "Seal the dock",
+        phases: [
+          { index: 1, title: "Open the dock", acceptance: ["Open dock"] },
+          { index: 2, title: "Close the dock", acceptance: ["The dock closes"] },
+        ],
+      }),
+      verdict(1, "Open dock"),
+      verdict(2, "The dock closes"),
+      capture(1, "evidence/1.1-open.png"),
+      capture(2, "evidence/2.1-close.png"),
+      line({
+        at: "2026-10-24T08:05:00.000Z",
+        type: "report.written",
+        path: "/srv/factory-runs/seal-dock/report.md",
+      }),
+      line({ at: "2026-10-24T08:05:00.000Z", type: "run.finished", status: "done" }),
+    ]);
+
+    const criteria = deriveFactoryRunVerification(state).map((phase) =>
+      phase.criteria.map((criterion) => [
+        criterion.name,
+        criterion.evidence.map((evidence) => evidence.path.split("/").at(-1)),
+      ]),
+    );
+    expect(criteria).toEqual([
+      [["Open dock", ["1.1-open.png"]]],
+      [["The dock closes", ["2.1-close.png"]]],
+    ]);
+    expect(state.report?.path).toBe("/srv/factory-runs/seal-dock/report.md");
+  });
+
+  it("carries the trace strip and the time split in the run summary", () => {
+    const summary = summarizeFactoryRun(foldLines(FIXTURE_LINES));
+
+    expect(summary.trace?.strip).toHaveLength(96);
+    expect(summary.trace?.wallMs).toBe(17_340_000);
+    expect(summary.trace!.agentMs + summary.trace!.waitingMs).toBeLessThanOrEqual(
+      summary.trace!.wallMs,
+    );
+  });
+});

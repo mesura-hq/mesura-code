@@ -103,10 +103,11 @@ function FactoryReportTab({
   if (stream.status === "failed" && state === null) {
     return <PaneMessage>The run's record could not be loaded.</PaneMessage>;
   }
-  if (view === null) return <PaneSpinner />;
+  if (view === null || state === null) return <PaneSpinner />;
   return (
     <FactoryReportDocument
       view={view}
+      state={state}
       environmentId={threadRef.environmentId}
       cwd={cwd}
       threadRef={threadRef}

@@ -283,6 +283,7 @@ export function ChatMarkdownVideo(props: {
   readonly mediaIdentity?: string | undefined;
   readonly actionsSource?: MediaActionSource | undefined;
   readonly onRetry?: (() => Promise<unknown>) | undefined;
+  readonly onOpen?: (() => void) | undefined;
 }) {
   return (
     <MediaVideoPlayer
@@ -303,6 +304,7 @@ export function ChatMarkdownVideo(props: {
         CHAT_MARKDOWN_MEDIA_FRAME_CLASS_NAME,
       )}
       onRetry={props.onRetry}
+      onOpen={props.onOpen}
       actionsSource={props.actionsSource}
     />
   );
@@ -338,6 +340,8 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
   readonly workspaceRoot?: string | undefined;
   readonly workspaceMutationId?: string | null | undefined;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
+  /** Opens a video in the media viewer instead of playing it in place. */
+  readonly onVideoExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }) {
   const resource = props.resource;
   const assetUrl = useAssetUrlState(
@@ -410,6 +414,15 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
         style={props.style}
         mediaIdentity={JSON.stringify([props.environmentId, props.resource, props.srcFragment])}
         onRetry={refreshAssetUrl}
+        onOpen={
+          props.onVideoExpand === undefined || src === null
+            ? undefined
+            : () =>
+                props.onVideoExpand?.({
+                  images: [{ src, name: props.alt, type: "video", autoPlay: true, actionsSource }],
+                  index: 0,
+                })
+        }
         actionsSource={actionsSource}
       />
     );

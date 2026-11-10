@@ -20,6 +20,7 @@ import * as Stream from "effect/Stream";
 import { DictationJobs } from "./dictation/DictationJobs.ts";
 import * as EditorSessionManager from "./editor/Manager.ts";
 import * as FactoryRunTracker from "./factory/FactoryRunTracker.ts";
+import { makeReadFactoryRunUsage } from "./factory/FactoryRunUsage.ts";
 import * as FactorySnapshotStore from "./factory/FactorySnapshotStore.ts";
 import * as FileManagerHost from "./fileManager/FileManagerHost.ts";
 import { HostStatsService } from "./hostStats/HostStatsService.ts";
@@ -84,6 +85,7 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
     const fileManagerHost = yield* FileManagerHost.FileManagerHost;
     const factorySnapshots = yield* FactorySnapshotStore.FactorySnapshotStore;
     const factoryRunTracker = yield* FactoryRunTracker.FactoryRunTracker;
+    const readFactoryRunUsage = yield* makeReadFactoryRunUsage;
     const dictationJobs = yield* DictationJobs;
     const pushSubscriptions = yield* PushSubscriptions;
     const clientPresence = yield* ClientPresence;
@@ -201,6 +203,7 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
         ),
       [WS_METHODS.subscribeFactoryRun]: (input) =>
         FactoryRunTracker.subscribeFactoryRun(factoryRunTracker, input),
+      [WS_METHODS.factoryReadRunUsage]: (input) => readFactoryRunUsage(input),
 
       [WS_METHODS.reviewGetWorkingTreeChanges]: (input) => review.getWorkingTreeChanges(input),
       [WS_METHODS.reviewSubscribeWorkingTreeChanges]: (input) =>

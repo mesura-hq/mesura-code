@@ -83,8 +83,8 @@ Sending and uploading attachments require a connection to the environment.
 ## Talk to an agent
 
 On web and desktop, open an existing thread and select the phone between the
-attachment and dictation controls. On a phone browser, the phone also appears in the
-collapsed composer. While a call runs, one bar above the thread switches between
+attachment and dictation controls. On a phone browser, tap the composer first: the
+collapsed composer shows the microphone for dictation instead. While a call runs, one bar above the thread switches between
 **Call**, **Split**, and **Work**, mutes the microphone, and hangs up. Without a call
 the thread shows no voice bar.
 **Call** shows your words and the voice's spoken captions. **Split** shows the

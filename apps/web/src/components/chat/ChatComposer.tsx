@@ -501,7 +501,7 @@ export interface ChatComposerProps {
   composerFilesRef: React.RefObject<ComposerFileAttachment[]>;
   composerTerminalContextsRef: React.RefObject<TerminalContextDraft[]>;
   requireExplicitModelSelection?: boolean;
-  /** Mesura: the voice call control, between attach and dictation and in the collapsed row. */
+  /** Mesura: the voice call control, between attach and dictation; the collapsed row shows dictation instead. */
   voiceConversationControl?: ReactNode;
   dictationStartControl?: ReactNode;
   dictationStrip?: ReactNode;
@@ -3809,10 +3809,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     (showProviderUnavailable ? "Enable a provider in Settings" : "Ask anything...")}
                 </button>
                 {collapsedComposerImagePreviews}
-                {voiceConversationControl ? (
-                  // Mesura: a call starts from the collapsed phone composer too, without expanding it.
+                {dictationStartControl ? (
+                  // Mesura: dictation starts from the collapsed phone row; a call needs the expanded composer.
                   <span data-chat-composer-collapsed-controls="true" className="contents">
-                    {voiceConversationControl}
+                    {dictationStartControl}
                   </span>
                 ) : null}
                 {contextWindowMeterElement ? (
