@@ -394,16 +394,6 @@ async function choose(label: string, optionText: string) {
   });
 }
 
-async function typeBudget(value: string) {
-  const input = budgetInput();
-  expect(input, "Expected the Implementer budget input").not.toBeNull();
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
-    input!.dispatchEvent(new Event("input", { bubbles: true }));
-    input!.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-}
-
 async function approve() {
   const button = approveButton();
   expect(button, `Expected Approve; card: ${planRow().textContent}`).toBeDefined();
@@ -462,60 +452,48 @@ it("phase4 web AC1 ends the plan card with implementer, reviewer and verifier ro
   expect(approveButton()?.disabled).toBe(false);
 });
 
-it("phase4 web AC3 gives a Claude implementer an editable 25 dollar budget and sends the edited amount", async () => {
+it("shows no budget field and sends no budget for a Claude implementer", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
-  expect(budgetInput()?.value).toBe("25");
-  await typeBudget("40");
-  const sent = await approve();
-  expect(readFactoryApprovalMessage(sent.input.message.text).routes).toEqual({
-    ...FACTORY_DEFAULT_TEST_ROUTES,
-    implementer: { ...FACTORY_DEFAULT_TEST_ROUTES.implementer, budgetUsd: 40 },
-  });
-});
-
-it("phase4 web AC3 drops the budget when the implementer runs on Codex", async () => {
-  await using _browserFixture0 = await setupBrowserFixture0();
-
-  await mountApp();
-  await choose("Implementer model", "GPT-6 Sol");
   expect(budgetInput()).toBeNull();
   const sent = await approve();
   const routes = readFactoryApprovalMessage(sent.input.message.text).routes as {
     implementer: Record<string, unknown>;
   };
-  expect(routes.implementer).toMatchObject({ harness: "codex", model: "gpt-6-sol" });
+  expect(routes.implementer).toMatchObject({ harness: "claude", model: "claude-opus-5-5" });
   expect(routes.implementer).not.toHaveProperty("budgetUsd");
 });
 
-it("phase4 web AC4 offers the verifier Codex models only and the reviewer the other family", async () => {
+it("offers every role the models of both harnesses", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
-  const verifier = await readOptions("Verifier model");
-  expect(verifier.length).toBeGreaterThan(0);
-  expect(verifier.every(isCodex), verifier.join(", ")).toBe(true);
-  const reviewer = await readOptions("Reviewer model");
-  expect(reviewer.length).toBeGreaterThan(0);
-  expect(reviewer.every(isCodex), reviewer.join(", ")).toBe(true);
-  const implementer = await readOptions("Implementer model");
-  expect(implementer.some(isClaude) && implementer.some(isCodex)).toBe(true);
+  for (const label of ["Implementer model", "Reviewer model", "Verifier model"]) {
+    const options = await readOptions(label);
+    expect(options.some(isClaude) && options.some(isCodex), options.join(", ")).toBe(true);
+  }
 });
 
-it("phase4 web AC4 moves the reviewer to Claude's default when the implementer switches to Codex", async () => {
-  await using _browserFixture0 = await setupBrowserFixture0();
+it.each(["Reviewer", "Verifier"] as const)(
+  "sends a Claude %s beside a Claude implementer",
+  async (role) => {
+    await using _browserFixture0 = await setupBrowserFixture0();
 
-  await mountApp();
-  await choose("Implementer model", "GPT-6 Sol");
-  expect(requireCombobox("Reviewer model").textContent?.trim()).toBe("Claude Opus 5.5");
-  expect(requireCombobox("Reviewer reasoning").textContent?.trim()).toBe("High");
-  const reviewer = await readOptions("Reviewer model");
-  expect(reviewer.length).toBeGreaterThan(0);
-  expect(reviewer.every(isClaude), reviewer.join(", ")).toBe(true);
-  const verifier = await readOptions("Verifier model");
-  expect(verifier.every(isCodex), verifier.join(", ")).toBe(true);
-});
+    await mountApp();
+    await choose(`${role} model`, "Claude Opus 5.5");
+    const sent = await approve();
+    const routes = readFactoryApprovalMessage(sent.input.message.text).routes as Record<
+      "implementer" | "reviewer" | "verifier",
+      Record<string, unknown>
+    >;
+    expect(routes.implementer).toMatchObject({ harness: "claude" });
+    expect(routes[role === "Reviewer" ? "reviewer" : "verifier"]).toMatchObject({
+      harness: "claude",
+      model: "claude-opus-5-5",
+    });
+  },
+);
 
 it("phase4 web AC5 shows a role without a model as unavailable with the reason and keeps Approve disabled", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();

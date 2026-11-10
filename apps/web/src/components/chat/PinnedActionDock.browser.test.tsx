@@ -604,16 +604,25 @@ async function virtualizeOutTimelinePlanRow(container: HTMLElement) {
   );
 }
 
-async function typeTimelineBudget(container: HTMLElement, value: string) {
-  const input = timelinePlanRow(container).querySelector<HTMLInputElement>(
-    'input[aria-label="Implementer budget"]',
+function timelineReviewerModel(container: HTMLElement): HTMLElement | null {
+  return timelinePlanRow(container).querySelector<HTMLElement>(
+    '[role="combobox"][aria-label="Reviewer model"]',
   );
-  expect(input, "Expected the timeline card's Implementer budget input").not.toBeNull();
+}
+
+/** Picks a reviewer model in the timeline card: the route edit these tests carry across renders. */
+async function chooseTimelineReviewer(container: HTMLElement, optionText: string) {
+  const trigger = timelineReviewerModel(container);
+  expect(trigger, "Expected the timeline card's Reviewer model select").not.toBeNull();
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
-    input!.dispatchEvent(new Event("input", { bubbles: true }));
-    input!.dispatchEvent(new Event("change", { bubbles: true }));
+    trigger!.focus();
+    trigger!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }));
   });
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+    (entry) => entry.textContent?.trim() === optionText,
+  );
+  expect(option, `Expected the Reviewer model select to offer ${optionText}`).toBeDefined();
+  await act(async () => option!.click());
 }
 
 function dockItem(container: HTMLElement, kind: string): HTMLElement {
@@ -699,9 +708,9 @@ it.each(WIDTHS)(
       "approval",
     ]);
     expect(plan.textContent).toContain("The developer builds with the factory from a thread.");
-    expect(plan.querySelector('input[aria-label="Implementer budget"]')).not.toBeNull();
+    expect(plan.querySelector('[role="combobox"][aria-label="Reviewer model"]')).not.toBeNull();
     expect(plan.scrollWidth).toBeLessThanOrEqual(plan.clientWidth);
-    await typeTimelineBudget(screen.container, "40");
+    await chooseTimelineReviewer(screen.container, "Claude Opus 5.5");
     const question = screen.container.querySelector<HTMLElement>(
       '[data-pending-user-input-request-id="pinned-dock-message-question"]',
     )!;
@@ -721,9 +730,7 @@ it.each(WIDTHS)(
     expect(pendingIds()).toEqual(["factory-plan", "pending-user-input", "pending-user-input"]);
     expect(timelinePlanRow(screen.container)).toBe(plan);
     expect(question.closest("[data-timeline-row]")).toBe(questionRow);
-    expect(
-      plan.querySelector<HTMLInputElement>('input[aria-label="Implementer budget"]')?.value,
-    ).toBe("40");
+    expect(timelineReviewerModel(screen.container)?.textContent?.trim()).toBe("Claude Opus 5.5");
     await act(async () => buttonNamed(plan, "Approve")!.click());
     await vi.waitFor(() => expect(fixture.startTurn).toHaveBeenCalledOnce());
     const sent = fixture.startTurn.mock.calls[0]![0] as { input: { message: { text: string } } };
@@ -743,7 +750,7 @@ it.each(WIDTHS)(
     );
     expect(timelinePlanRow(screen.container)).toBe(plan);
     expect(plan.textContent).toContain("Approved");
-    expect(sentApproval().routes).toMatchObject({ implementer: { budgetUsd: 40 } });
+    expect(sentApproval().routes).toMatchObject({ reviewer: { harness: "claude" } });
     const currentQuestion = screen.container.querySelector<HTMLElement>(
       '[data-pending-user-input-request-id="pinned-dock-message-question"]',
     )!;
@@ -1012,14 +1019,12 @@ it("the question shortcut still reveals and focuses the first inline card withou
 it("retains route edits and the pending Approve state while the full card leaves the virtualized list", async () => {
   await using _fixture = await setupDockFixture(PIXEL_7, { pending: true });
   await using screen = await mountApp();
-  await typeTimelineBudget(screen.container, "40");
+  await chooseTimelineReviewer(screen.container, "Claude Opus 5.5");
   await virtualizeOutTimelinePlanRow(screen.container);
   fixture.hiddenRows.clear();
   await refreshThread();
   let card = await vi.waitFor(() => timelinePlanRow(screen.container));
-  expect(
-    card.querySelector<HTMLInputElement>('input[aria-label="Implementer budget"]')?.value,
-  ).toBe("40");
+  expect(timelineReviewerModel(screen.container)?.textContent?.trim()).toBe("Claude Opus 5.5");
   await act(async () => buttonNamed(card, "Approve")!.click());
   await vi.waitFor(() => expect(fixture.startTurn).toHaveBeenCalledOnce());
   await virtualizeOutTimelinePlanRow(screen.container);
@@ -1029,7 +1034,7 @@ it("retains route edits and the pending Approve state while the full card leaves
   expect(buttonNamed(card, "Approve")?.disabled).toBe(true);
   await act(async () => buttonNamed(card, "Approve")!.click());
   expect(fixture.startTurn).toHaveBeenCalledOnce();
-  expect(sentApproval().routes).toMatchObject({ implementer: { budgetUsd: 40 } });
+  expect(sentApproval().routes).toMatchObject({ reviewer: { harness: "claude" } });
 });
 
 it("inline question P1-4 the X dismisses a question whose draft still prepares an attachment", async () => {

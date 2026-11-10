@@ -1,6 +1,5 @@
 import type { ServerProvider } from "@t3tools/contracts";
 import {
-  changeFactoryRouteBudget,
   changeFactoryRouteEffort,
   changeFactoryRouteModel,
   describeFactoryRoute,
@@ -9,8 +8,6 @@ import {
   FACTORY_ROUTE_ROLES,
   factoryRouteEffortOptions,
   factoryRouteModelOptions,
-  factoryRouteSlotHarness,
-  parseFactoryBudgetUsd,
   type FactoryHarness,
   type FactoryRouteRole,
   type FactoryRoutes,
@@ -20,9 +17,8 @@ import {
   approvedWithoutRoutesText,
   type FactoryApprovalRoutesBlock,
 } from "@t3tools/client-runtime/factory/plan-approval";
-import { memo, useState } from "react";
+import { memo } from "react";
 
-import { Input } from "../components/ui/input";
 import {
   Select,
   SelectGroup,
@@ -42,36 +38,6 @@ function parseModelValue(value: string): { harness: FactoryHarness; model: strin
   return { harness, model: value.slice(separator + 1) };
 }
 
-function BudgetInput(props: {
-  readonly budgetUsd: number | undefined;
-  readonly onChange: (budgetUsd: number) => void;
-}) {
-  // The typed text, so an empty or half-typed field stays as typed while the
-  // routes hold `NaN` and keep Approve disabled.
-  const [text, setText] = useState(() =>
-    props.budgetUsd === undefined || Number.isNaN(props.budgetUsd) ? "" : String(props.budgetUsd),
-  );
-  return (
-    <label className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-      $
-      <Input
-        aria-label="Implementer budget"
-        className="w-16"
-        inputMode="decimal"
-        min={1}
-        nativeInput
-        size="sm"
-        type="number"
-        value={text}
-        onChange={(event) => {
-          setText(event.currentTarget.value);
-          props.onChange(parseFactoryBudgetUsd(event.currentTarget.value));
-        }}
-      />
-    </label>
-  );
-}
-
 function FactoryRouteRow(props: {
   readonly role: FactoryRouteRole;
   readonly slots: FactoryRouteSlots;
@@ -82,11 +48,7 @@ function FactoryRouteRow(props: {
   const label = FACTORY_ROUTE_ROLE_LABELS[role];
   const slot = slots[role];
   const route = slot.status === "ready" ? slot.route : null;
-  const modelOptions = factoryRouteModelOptions(
-    providers,
-    role,
-    factoryRouteSlotHarness(slots.implementer),
-  );
+  const modelOptions = factoryRouteModelOptions(providers);
   const groups = (["claude", "codex"] as const).flatMap((harness) => {
     const models = modelOptions.filter((option) => option.harness === harness);
     return models.length === 0 ? [] : [{ harness, models }];
@@ -150,14 +112,6 @@ function FactoryRouteRow(props: {
             </SelectPopup>
           </Select>
         ) : null}
-        {route !== null && role === "implementer" && route.harness === "claude" ? (
-          // Keyed on the harness: switching back to Claude restores the default budget.
-          <BudgetInput
-            key={route.harness}
-            budgetUsd={route.budgetUsd}
-            onChange={(budgetUsd) => onChange(changeFactoryRouteBudget(slots, budgetUsd))}
-          />
-        ) : null}
       </div>
       {slot.status === "unavailable" ? (
         <p className="pl-26 text-xs text-muted-foreground">Unavailable: {slot.reason}.</p>
@@ -211,7 +165,6 @@ export const FactoryApprovedRoutes = memo(function FactoryApprovedRoutes(props: 
             <dt className="font-medium text-foreground">{FACTORY_ROUTE_ROLE_LABELS[role]}</dt>
             <dd className="text-foreground/80">
               {described.model} · {described.effort}
-              {route.budgetUsd === undefined ? null : ` · $${route.budgetUsd}`}
             </dd>
           </div>
         );

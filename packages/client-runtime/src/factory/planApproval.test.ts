@@ -46,9 +46,37 @@ describe("plan approval message (phase 4 fence, criterion 6)", () => {
     ]);
     expect(nonEmpty[4]).toBe("```json");
     expect(nonEmpty.at(-1)).toBe("```");
-    // Exactly sf-team's `--routes` shape: no key beyond harness, model,
-    // effort, and a budget for the Claude implementer only.
+    // Exactly sf-team's `--routes` shape: no key beyond harness, model and effort.
     expect(readJsonFence(text)).toEqual(ROUTES);
+  });
+
+  it("drops a budget that a card edited before its removal still carries", () => {
+    const text = formatPlanApprovalMessage({
+      digest: FACTORY_PLAN_DIGEST,
+      planPath: PLAN_PATH,
+      intentPath: INTENT_PATH,
+      routes: { ...ROUTES, implementer: { ...ROUTES.implementer, budgetUsd: 25 } },
+    });
+    expect(readJsonFence(text)).toEqual(ROUTES);
+  });
+
+  it("reads an older approval whose Claude implementer carries a budget, without the budget", () => {
+    const routesWithBudget = { ...ROUTES, implementer: { ...ROUTES.implementer, budgetUsd: 25 } };
+    const text = [
+      `Approve plan sha256:${FACTORY_PLAN_DIGEST}`,
+      "",
+      `Plan: ${PLAN_PATH}`,
+      `Intent: ${INTENT_PATH}`,
+      "",
+      "Build it with sf-team in this thread, with these routes:",
+      "",
+      "```json",
+      JSON.stringify(routesWithBudget, null, 2),
+      "```",
+    ].join("\n");
+    expect(findPlanApprovals([userMessage(text)])).toEqual([
+      expect.objectContaining({ digest: FACTORY_PLAN_DIGEST, routes: ROUTES }),
+    ]);
   });
 
   it("phase4 AC6 reads back the digest, the plan path and the routes it wrote", () => {

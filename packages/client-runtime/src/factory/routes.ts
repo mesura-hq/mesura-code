@@ -1,7 +1,7 @@
 /**
- * The shape is exactly sf-team's `--routes` file (`~/.agent-env/skills/core/sf-team/ROUTES.md`),
- * and the two rules are its *Frame*: the verifier runs on Codex, and the reviewer runs on the
- * other family from the implementer. Clients build their route picker from here only.
+ * The shape is exactly sf-team's `--routes` file (`~/.agent-env/skills/core/sf-team/ROUTES.md`).
+ * Any harness and model can fill any role; the defaults are sf-team's. Clients build their route
+ * picker from here only.
  */
 import {
   defaultInstanceIdForDriver,
@@ -19,7 +19,10 @@ export const FactoryRoute = Schema.Struct({
   harness: FactoryHarness,
   model: Schema.String,
   effort: Schema.String,
-  /** Dollars per launch; a Claude implementer carries it, no other role does. */
+  /**
+   * A dollar cap only sf-team's CLI launches enforce. The card no longer sets it; the key stays so an
+   * approval written before still parses, and the approval reader drops it.
+   */
   budgetUsd: Schema.optionalKey(Schema.Number),
 });
 export type FactoryRoute = typeof FactoryRoute.Type;
@@ -46,7 +49,6 @@ export const FACTORY_HARNESS_LABELS: Readonly<Record<FactoryHarness, string>> = 
   claude: "Claude",
   codex: "Codex",
 };
-export const DEFAULT_FACTORY_BUDGET_USD = 25;
 
 /** One role on the card: a route, or the reason it has none yet. */
 export type FactoryRouteSlot =
@@ -78,10 +80,11 @@ interface FamilyDefault {
   readonly effort: string;
 }
 
-/** Newest Opus at medium, Sol at high, Luna at xhigh, as the developer asked. */
-const ROLE_DEFAULTS: Readonly<
-  Record<FactoryRouteRole, Partial<Record<FactoryHarness, FamilyDefault>>>
-> = {
+/**
+ * Newest Opus at medium, Sol at high, Luna at xhigh, as the developer asked. The other harness's
+ * entry is the family a role starts on when the user switches it there.
+ */
+const ROLE_DEFAULTS: Readonly<Record<FactoryRouteRole, Record<FactoryHarness, FamilyDefault>>> = {
   implementer: {
     claude: { family: "opus", effort: "medium" },
     codex: { family: "sol", effort: "high" },
@@ -90,25 +93,13 @@ const ROLE_DEFAULTS: Readonly<
     claude: { family: "opus", effort: "high" },
     codex: { family: "sol", effort: "high" },
   },
-  verifier: { codex: { family: "luna", effort: "xhigh" } },
+  verifier: {
+    claude: { family: "opus", effort: "high" },
+    codex: { family: "luna", effort: "xhigh" },
+  },
 };
 
-const otherHarness = (harness: FactoryHarness): FactoryHarness =>
-  harness === "claude" ? "codex" : "claude";
-
-function allowedHarnesses(
-  role: FactoryRouteRole,
-  implementerHarness: FactoryHarness,
-): ReadonlyArray<FactoryHarness> {
-  if (role === "implementer") return ["claude", "codex"];
-  if (role === "reviewer") return [otherHarness(implementerHarness)];
-  return ["codex"];
-}
-
-/** The harness a slot runs on, whether or not it has a route. */
-export function factoryRouteSlotHarness(slot: FactoryRouteSlot): FactoryHarness {
-  return slot.status === "ready" ? slot.route.harness : slot.harness;
-}
+const FACTORY_HARNESSES: ReadonlyArray<FactoryHarness> = ["claude", "codex"];
 
 /** The levels a role may run a model at: its own, without the special modes. */
 export function factoryModelLevels(
@@ -241,16 +232,11 @@ function pickLevel(
 }
 
 function makeRoute(input: {
-  readonly role: FactoryRouteRole;
   readonly harness: FactoryHarness;
   readonly model: ServerProviderModel;
   readonly effort: string;
-  readonly budgetUsd: number | undefined;
 }): FactoryRoute {
-  const route = { harness: input.harness, model: input.model.slug, effort: input.effort };
-  return input.role === "implementer" && input.harness === "claude"
-    ? { ...route, budgetUsd: input.budgetUsd ?? DEFAULT_FACTORY_BUDGET_USD }
-    : route;
+  return { harness: input.harness, model: input.model.slug, effort: input.effort };
 }
 
 function defaultRouteSlot(
@@ -260,9 +246,6 @@ function defaultRouteSlot(
 ): FactoryRouteSlot {
   const preference = ROLE_DEFAULTS[role][harness];
   const label = FACTORY_HARNESS_LABELS[harness];
-  if (preference === undefined) {
-    return { status: "unavailable", harness, reason: `The ${role} does not run on ${label}` };
-  }
   const offer = harnessOffer(providers, harness);
   if (offer.unavailableReason !== null) {
     return {
@@ -282,11 +265,11 @@ function defaultRouteSlot(
   }
   return {
     status: "ready",
-    route: makeRoute({ role, harness, model, effort, budgetUsd: undefined }),
+    route: makeRoute({ harness, model, effort }),
   };
 }
 
-/** The card's starting routes: newest Opus at medium with a budget, Sol at high, Luna at xhigh. */
+/** The card's starting routes: newest Opus at medium, Sol at high, Luna at xhigh. */
 export function defaultFactoryRoutes(providers: ReadonlyArray<ServerProvider>): FactoryRouteSlots {
   return {
     implementer: defaultRouteSlot(providers, "implementer", "claude"),
@@ -295,14 +278,12 @@ export function defaultFactoryRoutes(providers: ReadonlyArray<ServerProvider>): 
   };
 }
 
-/** The models a role may pick from, grouped by harness in provider order. */
+/** The models any role may pick from, grouped by harness in provider order. */
 export function factoryRouteModelOptions(
   providers: ReadonlyArray<ServerProvider>,
-  role: FactoryRouteRole,
-  implementerHarness: FactoryHarness,
 ): ReadonlyArray<FactoryRouteModelOption> {
   const options: FactoryRouteModelOption[] = [];
-  for (const harness of allowedHarnesses(role, implementerHarness)) {
+  for (const harness of FACTORY_HARNESSES) {
     for (const model of harnessOffer(providers, harness).models) {
       options.push({ harness, model });
     }
@@ -328,43 +309,23 @@ export function factoryRouteEffortOptions(
   return model === undefined ? [] : factoryModelLevels(model);
 }
 
-/**
- * Picks a model for a role. The level carries over when the new model offers
- * it. When the implementer changes family, the reviewer moves to its default
- * in the other family; within a family, a chosen reviewer stays.
- */
+/** Picks a model for a role. The level carries over when the new model offers it. */
 export function changeFactoryRouteModel(
   slots: FactoryRouteSlots,
   providers: ReadonlyArray<ServerProvider>,
   role: FactoryRouteRole,
   selection: { readonly harness: FactoryHarness; readonly model: string },
 ): FactoryRouteSlots {
-  const implementerHarness = factoryRouteSlotHarness(slots.implementer);
-  if (!allowedHarnesses(role, implementerHarness).includes(selection.harness)) return slots;
   const model = findOfferedModel(providers, selection);
   if (model === undefined) return slots;
   const previous = slots[role].status === "ready" ? slots[role].route : null;
   const effort = pickLevel(model, [
     previous?.effort,
-    ROLE_DEFAULTS[role][selection.harness]?.effort,
+    ROLE_DEFAULTS[role][selection.harness].effort,
   ]);
   if (effort === null) return slots;
-  const route = makeRoute({
-    role,
-    harness: selection.harness,
-    model,
-    effort,
-    budgetUsd: previous?.harness === "claude" ? previous.budgetUsd : undefined,
-  });
-  const next: FactoryRouteSlots = { ...slots, [role]: { status: "ready", route } };
-  if (role !== "implementer") return next;
-  const reviewer = next.reviewer;
-  return reviewer.status === "ready" && reviewer.route.harness !== selection.harness
-    ? next
-    : {
-        ...next,
-        reviewer: defaultRouteSlot(providers, "reviewer", otherHarness(selection.harness)),
-      };
+  const route = makeRoute({ harness: selection.harness, model, effort });
+  return { ...slots, [role]: { status: "ready", route } };
 }
 
 /**
@@ -376,7 +337,6 @@ export function reconcileFactoryRouteSlots(
   slots: FactoryRouteSlots,
   providers: ReadonlyArray<ServerProvider>,
 ): FactoryRouteSlots {
-  const implementerHarness = factoryRouteSlotHarness(slots.implementer);
   let changed = false;
   const reconcile = (role: FactoryRouteRole): FactoryRouteSlot => {
     const slot = slots[role];
@@ -384,8 +344,7 @@ export function reconcileFactoryRouteSlots(
     const { route } = slot;
     const offer = harnessOffer(providers, route.harness);
     const model = offer.models.find((entry) => entry.slug === route.model);
-    const allowed = allowedHarnesses(role, implementerHarness).includes(route.harness);
-    if (!allowed || model === undefined) {
+    if (model === undefined) {
       changed = true;
       return {
         status: "unavailable",
@@ -395,7 +354,7 @@ export function reconcileFactoryRouteSlots(
           `${route.model} is no longer offered by ${FACTORY_HARNESS_LABELS[route.harness]}`,
       };
     }
-    const effort = pickLevel(model, [route.effort, ROLE_DEFAULTS[role][route.harness]?.effort]);
+    const effort = pickLevel(model, [route.effort, ROLE_DEFAULTS[role][route.harness].effort]);
     if (effort === route.effort || effort === null) return slot;
     changed = true;
     return { status: "ready", route: { ...route, effort } };
@@ -418,40 +377,7 @@ export function changeFactoryRouteEffort(
   return { ...slots, [role]: { status: "ready", route: { ...slot.route, effort } } };
 }
 
-/** Sets a Claude implementer's budget; `NaN` keeps Approve disabled until it is fixed. */
-export function changeFactoryRouteBudget(
-  slots: FactoryRouteSlots,
-  budgetUsd: number,
-): FactoryRouteSlots {
-  const slot = slots.implementer;
-  if (slot.status !== "ready" || slot.route.harness !== "claude") return slots;
-  return { ...slots, implementer: { status: "ready", route: { ...slot.route, budgetUsd } } };
-}
-
-/** A typed budget: a number, or `NaN` when the field holds none. */
-export function parseFactoryBudgetUsd(text: string): number {
-  const trimmed = text.trim();
-  return trimmed === "" ? Number.NaN : Number(trimmed);
-}
-
-/** sf-team's two rules, plus the budget a Claude implementer launches with. Empty when valid. */
-export function validateFactoryRoutes(routes: FactoryRoutes): ReadonlyArray<string> {
-  const violations: string[] = [];
-  if (routes.verifier.harness !== "codex") violations.push("The verifier runs on Codex.");
-  if (routes.reviewer.harness === routes.implementer.harness) {
-    violations.push("The reviewer runs on the other family from the implementer.");
-  }
-  const budget = routes.implementer.budgetUsd;
-  if (
-    routes.implementer.harness === "claude" &&
-    (budget === undefined || !Number.isFinite(budget) || budget <= 0)
-  ) {
-    violations.push("A Claude implementer needs a dollar budget above zero.");
-  }
-  return violations;
-}
-
-/** The routes Approve sends, or null while a role has none or a rule is broken. */
+/** The routes Approve sends, or null while a role has none. */
 export function readyFactoryRoutes(slots: FactoryRouteSlots): FactoryRoutes | null {
   const { implementer, reviewer, verifier } = slots;
   if (
@@ -461,12 +387,7 @@ export function readyFactoryRoutes(slots: FactoryRouteSlots): FactoryRoutes | nu
   ) {
     return null;
   }
-  const routes = {
-    implementer: implementer.route,
-    reviewer: reviewer.route,
-    verifier: verifier.route,
-  };
-  return validateFactoryRoutes(routes).length === 0 ? routes : null;
+  return { implementer: implementer.route, reviewer: reviewer.route, verifier: verifier.route };
 }
 
 /** What a read-only row shows: the model's name and the level's label, or their ids. */
