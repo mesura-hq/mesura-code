@@ -13,10 +13,13 @@ import {
   type OrchestrationV2ThreadHistoryPage,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { HttpClient } from "effect/http";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import {
@@ -572,6 +575,90 @@ describe("authenticated environment HTTP requests", () => {
         rejectedAccessToken: "current-token",
       });
       expect(harness.calls).toHaveLength(2);
+    }),
+  );
+
+  it.effect.each([
+    {
+      name: "request timeout",
+      fail: () => new Promise<Response>(() => {}),
+      advance: "11 seconds",
+    },
+    {
+      name: "transport failure",
+      fail: () => Promise.reject(new Error("Network unreachable")),
+      advance: "5 seconds",
+    },
+  ] as const)("recovers session permissions after a $name", ({ fail, advance }) =>
+    Effect.gen(function* () {
+      const firstRequestStarted = yield* Deferred.make<void>();
+      const harness = makeHarness((requestNumber) => {
+        if (requestNumber === 1) {
+          Deferred.doneUnsafe(firstRequestStarted, Effect.void);
+          return fail();
+        }
+        return Response.json(SESSION);
+      });
+      const session = yield* fetchEnvironmentSessionState(harness.input).pipe(
+        Effect.provide(harness.httpLayer),
+        Effect.forkChild,
+      );
+
+      yield* Deferred.await(firstRequestStarted);
+      yield* TestClock.adjust(advance);
+
+      expect(yield* Fiber.join(session)).toEqual(SESSION);
+      expect(harness.calls).toHaveLength(2);
+    }),
+  );
+
+  it.effect.each([
+    {
+      name: "insufficient scope",
+      reply: () => new Response("Forbidden", { status: 403 }),
+      expectedError: { _tag: "RemoteEnvironmentAuthUndeclaredStatusError", status: 403 },
+    },
+    {
+      name: "missing credential",
+      reply: () => credentialRejectedResponse("missing_credential"),
+      expectedError: { _tag: "RemoteEnvironmentAuthUndeclaredStatusError", status: 401 },
+    },
+    {
+      name: "invalid session response",
+      reply: () => Response.json({ authenticated: true }),
+      expectedError: { _tag: "RemoteEnvironmentAuthInvalidJsonError" },
+    },
+  ])("does not retry session permissions on $name", ({ reply, expectedError }) =>
+    Effect.gen(function* () {
+      const harness = makeHarness(reply);
+      const error = yield* fetchEnvironmentSessionState(harness.input).pipe(
+        Effect.provide(harness.httpLayer),
+        Effect.flip,
+      );
+
+      expect(error).toMatchObject(expectedError);
+      expect(harness.calls).toHaveLength(1);
+    }),
+  );
+
+  it.effect("cancels session recovery when the request is interrupted", () =>
+    Effect.gen(function* () {
+      const firstRequestStarted = yield* Deferred.make<void>();
+      const harness = makeHarness(() => {
+        Deferred.doneUnsafe(firstRequestStarted, Effect.void);
+        return Promise.reject(new Error("Network unreachable"));
+      });
+      const session = yield* fetchEnvironmentSessionState(harness.input).pipe(
+        Effect.provide(harness.httpLayer),
+        Effect.forkChild,
+      );
+
+      yield* Deferred.await(firstRequestStarted);
+      yield* TestClock.adjust("0 millis");
+      yield* Fiber.interrupt(session);
+      yield* TestClock.adjust("1 minute");
+
+      expect(harness.calls).toHaveLength(1);
     }),
   );
 
