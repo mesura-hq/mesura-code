@@ -44,17 +44,27 @@ const PROVIDERS: ReadonlyArray<FactoryRunQuotaProvider> = ["claude", "codex"];
 const USAGE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
- * The lines of a file that hold `marker`, streamed: a resumed session's rollout grows past
- * hundreds of megabytes, and only its reading lines are kept. A file that cannot be read has none.
+ * What `select` keeps from each line of a file, streamed: a resumed session's rollout grows past
+ * hundreds of megabytes of earlier turns, so lines are parsed and dropped as they pass, never held.
+ * A file that cannot be read keeps nothing.
  */
-const readLinesWith = (fs: FileSystem.FileSystem, file: string, marker: string) =>
+const selectFromLines = <A>(
+  fs: FileSystem.FileSystem,
+  file: string,
+  select: (line: string) => ReadonlyArray<A>,
+) =>
   fs.stream(file).pipe(
     Stream.decodeText,
     Stream.splitLines,
-    Stream.filter((line) => line.includes(marker)),
-    Stream.runCollect,
-    Effect.map((lines): ReadonlyArray<string> => Array.from(lines)),
-    Effect.orElseSucceed((): ReadonlyArray<string> => []),
+    Stream.runFold(
+      (): Array<A> => [],
+      (kept, line) => {
+        for (const item of select(line)) kept.push(item);
+        return kept;
+      },
+    ),
+    Effect.map((kept): ReadonlyArray<A> => kept),
+    Effect.orElseSucceed((): ReadonlyArray<A> => []),
   );
 
 /**
@@ -67,7 +77,8 @@ function claudeTurnSamples(
   runDir: string,
   dispatch: FactoryRunDispatch,
 ) {
-  return readLinesWith(fs, path.resolve(runDir, dispatch.outputFile), '"rate_limit_event"').pipe(
+  const keepEvent = (line: string) => (line.includes('"rate_limit_event"') ? [line] : []);
+  return selectFromLines(fs, path.resolve(runDir, dispatch.outputFile), keepEvent).pipe(
     Effect.map((events) => {
       const startMs = Date.parse(dispatch.startedAt);
       const endMs = dispatch.finishedAt === null ? startMs : Date.parse(dispatch.finishedAt);
@@ -211,21 +222,19 @@ function codexSamples(
       endMs: turn.finishedAt === null ? Number.POSITIVE_INFINITY : Date.parse(turn.finishedAt),
     }));
     const firstTurnMs = Math.min(...intervals.map((interval) => interval.startMs));
+    // Only this run's readings are kept: the rollout also holds the session's other turns.
+    const keepRunSample = (line: string) =>
+      readCodexQuotaLine(line).filter((sample) =>
+        intervals.some(
+          (interval) =>
+            sample.observedAtMs >= interval.startMs && sample.observedAtMs <= interval.endMs,
+        ),
+      );
     return findCodexRollouts(fs, path, codexHome, sessionId, firstTurnMs).pipe(
       Effect.flatMap((files) =>
-        Effect.forEach(files, (file) => readLinesWith(fs, file, '"rate_limits"')),
+        Effect.forEach(files, (file) => selectFromLines(fs, file, keepRunSample)),
       ),
-      Effect.map((files) =>
-        files
-          .flat()
-          .flatMap((line) => readCodexQuotaLine(line))
-          .filter((sample) =>
-            intervals.some(
-              (interval) =>
-                sample.observedAtMs >= interval.startMs && sample.observedAtMs <= interval.endMs,
-            ),
-          ),
-      ),
+      Effect.map((files) => files.flat()),
     );
   }).pipe(Effect.map((found): ReadonlyArray<FactoryQuotaSample> => found.flat()));
 }
