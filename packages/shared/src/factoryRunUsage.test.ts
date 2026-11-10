@@ -102,6 +102,29 @@ describe("provider readings", () => {
     ]);
   });
 
+  it("reads only the main Codex limit, never a model-specific allowance", () => {
+    const withLimit = (limitId: string, usedPercent: number, at: string) =>
+      JSON.stringify({
+        timestamp: at,
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          rate_limits: {
+            limit_id: limitId,
+            primary: { used_percent: usedPercent, window_minutes: 10080, resets_at: 1793382080 },
+            secondary: null,
+          },
+        },
+      });
+    const samples = [
+      withLimit("codex", 10, "2026-10-24T22:00:00.000Z"),
+      withLimit("codex_other_model", 80, "2026-10-24T22:10:00.000Z"),
+      withLimit("codex", 11, "2026-10-24T22:20:00.000Z"),
+    ].flatMap(readCodexQuotaLine);
+    expect(samples.map((sample) => sample.usedPercent)).toEqual([10, 11]);
+    expect(factoryQuotaMovement(samples)?.movedPercent).toBe(1);
+  });
+
   it("ignores lines that are not readings or not JSON", () => {
     expect(readClaudeQuotaLine('{"type":"assistant"}', 0)).toEqual([]);
     expect(readClaudeQuotaLine('{"type":"rate_limit_event"', 0)).toEqual([]);

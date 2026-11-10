@@ -24,6 +24,7 @@ const LAYOUT = `
     <button data-testid="panel-button">refresh</button>
     <div class="monaco-editor"><textarea data-testid="monaco-input"></textarea></div>
     <div role="tree" tabindex="0" data-testid="file-tree"></div>
+    <div data-key-scope="tree"><button data-testid="fold-heading">Context</button></div>
   </div>`;
 
 const byTestId = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
@@ -84,6 +85,11 @@ describe("resolveKeyScope by focused element", () => {
     expect(scopeAfterFocusing("owned")).toBe("control");
     expect(scopeAfterFocusing("answer")).toBe("insert");
     expect(scopeAfterFocusing("chat-focus")).toBe("chat");
+  });
+
+  it("reads the tree scope on a factory card's fold heading, so h, j, k and l move through the folds", () => {
+    using _fixture = mountKeyDom(LAYOUT);
+    expect(scopeAfterFocusing("fold-heading")).toBe("tree");
   });
 
   it("reads the tree scope in a tree, which leaves the leader to the keymap", () => {

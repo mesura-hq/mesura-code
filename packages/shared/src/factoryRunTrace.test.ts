@@ -122,6 +122,38 @@ describe("factory run trace", () => {
     expect(totals.coordinatorMs).toBe(0);
   });
 
+  it("reads a phase still running when its run stopped as stopped, and its unfinished turn as interrupted", () => {
+    const line = (event: Record<string, unknown>) => JSON.stringify({ v: 1, ...event });
+    const state = fold([
+      line({
+        at: "2026-10-24T07:00:00.000Z",
+        type: "run.started",
+        runId: "stopped",
+        request: "Stopped",
+        phases: [{ index: 1, title: "One", acceptance: [] }],
+      }),
+      line({ at: "2026-10-24T07:00:00.000Z", type: "phase.started", phase: 1 }),
+      line({
+        at: "2026-10-24T07:01:00.000Z",
+        type: "dispatch.started",
+        phase: 1,
+        role: "implementer",
+        turn: 1,
+        harness: "claude",
+        model: "opus",
+        promptFile: "p.md",
+        outputFile: "o.jsonl",
+      }),
+      line({ at: "2026-10-24T07:30:00.000Z", type: "run.finished", status: "stopped" }),
+    ]);
+    const trace = deriveFactoryRunTrace(state, Date.parse("2026-10-25T07:00:00.000Z"))!;
+
+    expect(trace.live).toBe(false);
+    expect(trace.phases[0]!.status).toBe("stopped");
+    expect(trace.phases[0]!.turns[0]).toMatchObject({ endMs: null, interrupted: true });
+    expect(trace.endMs).toBe(Date.parse("2026-10-24T07:30:00.000Z"));
+  });
+
   it("returns no trace for a run that has not started", () => {
     expect(deriveFactoryRunTrace(emptyFactoryRunState("/srv/runs/none"), 0)).toBeNull();
   });

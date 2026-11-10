@@ -1257,3 +1257,37 @@ it("report card opens a video capture in the app's media viewer", async () => {
   await click(play!);
   expect(document.querySelector('[aria-label="Close video preview"]')).not.toBeNull();
 });
+
+it("opens the run card's trace from the keyboard and walks into its phase lanes", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  fixture.turnItems = [runCard("degraded")];
+  streamRunAt("degraded");
+  await mountApp();
+  const trigger = runRow().querySelector<HTMLElement>('[aria-label="Run trace"]');
+  expect(trigger, "Expected the run card's trace fold").not.toBeNull();
+  // The composer takes focus once the thread settles; the reader then clicks into the card.
+  await settle();
+  trigger!.focus();
+  expect(document.activeElement).toBe(trigger);
+  const press = async (key: string) =>
+    act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+      await settle();
+    });
+
+  await press("l");
+  await vi.waitFor(() => expect(buttonsMatching(runRow(), /^1\. /)).toHaveLength(1));
+  expect(trigger!.hasAttribute("data-panel-open")).toBe(true);
+  // Opening mounts the trace's stream, and the harness's composer takes focus back on that render.
+  trigger!.focus();
+  await press("j");
+  const lane = buttonsMatching(runRow(), /^1\. /)[0]!;
+  expect(document.activeElement).toBe(lane);
+  await press("l");
+  expect(lane.getAttribute("aria-expanded")).toBe("true");
+  await press("h");
+  expect(lane.getAttribute("aria-expanded")).toBe("false");
+  await press("h");
+  expect(document.activeElement).toBe(trigger);
+});

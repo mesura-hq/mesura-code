@@ -43,16 +43,17 @@ const PROVIDERS: ReadonlyArray<FactoryRunQuotaProvider> = ["claude", "codex"];
 /** The usage service answers hourly windows of at most a day. */
 const USAGE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-/** A role output or rollout larger than this is not read for readings. */
-const MAX_READ_BYTES = 64 * 1024 * 1024;
-
-const readLines = (fs: FileSystem.FileSystem, file: string) =>
-  fs.stat(file).pipe(
-    Effect.flatMap((info) =>
-      Number(info.size) > MAX_READ_BYTES
-        ? Effect.succeed<ReadonlyArray<string>>([])
-        : fs.readFileString(file).pipe(Effect.map((text) => text.split("\n"))),
-    ),
+/**
+ * The lines of a file that hold `marker`, streamed: a resumed session's rollout grows past
+ * hundreds of megabytes, and only its reading lines are kept. A file that cannot be read has none.
+ */
+const readLinesWith = (fs: FileSystem.FileSystem, file: string, marker: string) =>
+  fs.stream(file).pipe(
+    Stream.decodeText,
+    Stream.splitLines,
+    Stream.filter((line) => line.includes(marker)),
+    Stream.runCollect,
+    Effect.map((lines): ReadonlyArray<string> => Array.from(lines)),
     Effect.orElseSucceed((): ReadonlyArray<string> => []),
   );
 
@@ -66,9 +67,8 @@ function claudeTurnSamples(
   runDir: string,
   dispatch: FactoryRunDispatch,
 ) {
-  return readLines(fs, path.resolve(runDir, dispatch.outputFile)).pipe(
-    Effect.map((lines) => {
-      const events = lines.filter((line) => line.includes('"rate_limit_event"'));
+  return readLinesWith(fs, path.resolve(runDir, dispatch.outputFile), '"rate_limit_event"').pipe(
+    Effect.map((events) => {
       const startMs = Date.parse(dispatch.startedAt);
       const endMs = dispatch.finishedAt === null ? startMs : Date.parse(dispatch.finishedAt);
       return events.flatMap((line, index) =>
@@ -212,7 +212,9 @@ function codexSamples(
     }));
     const firstTurnMs = Math.min(...intervals.map((interval) => interval.startMs));
     return findCodexRollouts(fs, path, codexHome, sessionId, firstTurnMs).pipe(
-      Effect.flatMap((files) => Effect.forEach(files, (file) => readLines(fs, file))),
+      Effect.flatMap((files) =>
+        Effect.forEach(files, (file) => readLinesWith(fs, file, '"rate_limits"')),
+      ),
       Effect.map((files) =>
         files
           .flat()
@@ -403,11 +405,16 @@ const readFactoryRunUsageWithAudit = Effect.fn("FactoryRunUsage.read")(function*
           : yield* codexSamples(fs, path, codexHome, dispatches);
       const windows = factoryQuotaWindows(provider, samples);
       const target = factoryEstimateWindow(windows);
-      // The machine's spend over exactly the span the estimate window's readings cover.
+      // The machine's spend over exactly the span the readings' movement covers: after the first
+      // reading, up to and with the last. The usage summary counts [since, until), hence the +1 ms.
       const spanBuckets =
         buckets === null || target === undefined
           ? null
-          : yield* machineBuckets(usage, Date.parse(target.firstAt), Date.parse(target.lastAt));
+          : yield* machineBuckets(
+              usage,
+              Date.parse(target.firstAt) + 1,
+              Date.parse(target.lastAt) + 1,
+            );
       const input = {
         provider,
         windows,

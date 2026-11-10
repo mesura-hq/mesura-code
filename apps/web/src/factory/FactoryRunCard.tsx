@@ -11,6 +11,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { cn } from "~/lib/utils";
 import { Fold } from "./FactoryPlanDocument";
+import { onFoldTreeKeyDown } from "./foldKeyboard";
 import { FactoryRunTraceFromStream, FactoryTraceStrip } from "./FactoryRunTrace";
 import { FACTORY_MARK_CLASS_BY_TONE, factoryEventClock } from "./factoryTones";
 
@@ -74,7 +75,7 @@ export const FactoryRunCard = memo(function FactoryRunCard({
         </ol>
       )}
       {factoryRun.run.trace === undefined ? null : (
-        <div className="mt-3">
+        <div className="mt-3" data-key-scope="tree" onKeyDown={onFoldTreeKeyDown}>
           {threadRef === null ? (
             <FactoryTraceStrip trace={factoryRun.run.trace} />
           ) : (

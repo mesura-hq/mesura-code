@@ -169,6 +169,39 @@ const setUp = setUpWith("2026-10-24");
 
 describe("factory run usage", () => {
   it.effect(
+    "counts the machine's spend after the first reading and with the last, as the movement does",
+    () =>
+      Effect.gen(function* () {
+        const { state, codexHome } = yield* setUp;
+        // The usage summary counts records in [sinceTime, untilTime), as UsageAggregator does.
+        const spends = [
+          { atMs: Date.parse("2026-10-24T07:03:30.000Z"), usd: 100 },
+          { atMs: Date.parse("2026-10-24T07:05:00.000Z"), usd: 5 },
+          { atMs: Date.parse("2026-10-24T07:07:30.000Z"), usd: 4 },
+        ];
+        const usage = yield* readFactoryRunUsageOf(
+          state,
+          Option.some(
+            usageStub((input) => {
+              const sinceMs = Date.parse(input.sinceTime!);
+              const untilMs = Date.parse(input.untilTime!);
+              const usd = spends
+                .filter((spend) => spend.atMs >= sinceMs && spend.atMs < untilMs)
+                .reduce((sum, spend) => sum + spend.usd, 0);
+              return usd === 0 ? [] : [bucket("codex", "gpt-6-luna", usd)];
+            }),
+          ),
+          codexHome,
+        );
+
+        const codex = usage.providers.find((provider) => provider.provider === "codex")!;
+        // 07:03:30 is the first reading itself, before the movement; 07:07:30 is the last.
+        expect(codex.windows).toMatchObject([{ firstAt: "2026-10-24T07:03:30.000Z" }]);
+        expect(codex.estimate?.machineSpendUsd).toBe(9);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
     "reads the account's movement from the role outputs and splits it by this machine's spend",
     () =>
       Effect.gen(function* () {
@@ -227,9 +260,32 @@ describe("factory run usage", () => {
       );
 
       const claude = usage.providers.find((provider) => provider.provider === "claude")!;
-      expect(queried).toContain("2026-10-24T06:44:00.000Z 2026-10-24T06:52:00.000Z");
+      expect(queried).toContain("2026-10-24T06:44:00.001Z 2026-10-24T06:52:00.001Z");
       expect(claude.machineSpendUsd).toBe(1_000);
       expect(claude.estimate).toMatchObject({ runSpendUsd: 20, machineSpendUsd: 40, percent: 1 });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reads the readings of a resumed session's rollout past 64 MiB", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { state, codexHome } = yield* setUp;
+      const rollout = path.join(
+        codexHome,
+        "sessions/2026/10/24",
+        `rollout-2026-10-24T07-03-00-${CODEX_SESSION}.jsonl`,
+      );
+      // Earlier turns of a long-lived session fill the file before this run's readings.
+      const filler = `${JSON.stringify({ type: "response_item", payload: "x".repeat(1_000) })}\n`;
+      const original = yield* fs.readFileString(rollout);
+      yield* fs.writeFileString(rollout, filler.repeat(70_000) + original);
+
+      const usage = yield* readFactoryRunUsageOf(state, Option.none(), codexHome);
+      const codex = usage.providers.find((provider) => provider.provider === "codex")!;
+      expect(codex.windows).toMatchObject([
+        { window: "seven_day", firstPercent: 12, lastPercent: 13, movedPercent: 1 },
+      ]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

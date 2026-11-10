@@ -100,6 +100,10 @@ export function readCodexQuotaLine(line: string): ReadonlyArray<FactoryQuotaSamp
     typeof record?.timestamp === "string" ? Date.parse(record.timestamp) : Number.NaN;
   const limits = record?.payload?.rate_limits;
   if (Number.isNaN(observedAtMs) || limits === null || typeof limits !== "object") return [];
+  // A model-specific allowance carries its own `limit_id`; only the main account limit forms the
+  // series, as `apps/server/src/provider/codexUsageLimits.ts` reads it.
+  const limitId = limits.limit_id;
+  if (typeof limitId === "string" && limitId !== "" && limitId !== "codex") return [];
   return (["primary", "secondary"] as const).flatMap((slot) => {
     const entry = limits[slot] as
       | { used_percent?: unknown; window_minutes?: unknown; resets_at?: unknown }

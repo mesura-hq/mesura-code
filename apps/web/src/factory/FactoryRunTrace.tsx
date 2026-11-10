@@ -26,6 +26,7 @@ import {
 
 import { Spinner } from "../components/ui/spinner";
 import { cn } from "~/lib/utils";
+import { FOLD_TRIGGER_ATTRIBUTE } from "./foldKeyboard";
 import { useFactoryRun } from "./useFactoryRun";
 
 /**
@@ -211,7 +212,7 @@ function PhaseTurns({ phase, endMs }: { phase: FactoryTracePhase; endMs: number 
             <span className="truncate text-muted-foreground">{turn.model}</span>
           </span>
           <span className="text-xs text-muted-foreground tabular-nums">
-            {turn.endMs === null ? "running · " : null}
+            {turn.endMs === null ? (turn.interrupted ? "stopped · " : "running · ") : null}
             {factoryTraceDurationText((turn.endMs ?? endMs) - turn.startMs)} · {turnSpend(turn)}
           </span>
           <Track className="col-span-2 h-1.5">
@@ -248,6 +249,8 @@ function PhaseLane({
       <button
         type="button"
         aria-expanded={open}
+        {...{ [FOLD_TRIGGER_ATTRIBUTE]: "" }}
+        data-panel-open={open ? "" : undefined}
         aria-label={`Phase ${phase.index}: ${phase.status}, ${phase.title}`}
         disabled={!started}
         onClick={onToggle}

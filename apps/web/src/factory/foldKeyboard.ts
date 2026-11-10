@@ -27,7 +27,10 @@ export function onFoldTreeKeyDown(event: KeyboardEvent<HTMLElement>): void {
   const root = event.currentTarget;
   const trigger = (event.target as HTMLElement).closest<HTMLElement>(TRIGGER_SELECTOR);
   if (trigger === null || !root.contains(trigger)) return;
-  const triggers = [...root.querySelectorAll<HTMLElement>(TRIGGER_SELECTOR)];
+  // A phase lane that has not started is a disabled button: it cannot take focus, so it is skipped.
+  const triggers = [...root.querySelectorAll<HTMLElement>(TRIGGER_SELECTOR)].filter(
+    (entry) => !entry.matches(":disabled"),
+  );
   const index = triggers.indexOf(trigger);
   let next: HTMLElement | null | undefined;
   switch (event.key) {

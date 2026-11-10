@@ -15,8 +15,10 @@ export interface FactoryTraceTurn {
   readonly model: string;
   readonly harness: string;
   readonly startMs: number;
-  /** Null while the turn runs; drawn to the trace's end. */
+  /** Null while the turn runs, or when a stopped run left it unfinished; drawn to the trace's end. */
   readonly endMs: number | null;
+  /** True when the run stopped while this turn had not finished: it will never finish. */
+  readonly interrupted: boolean;
   /** The turn's own spend; see `FactoryRunDispatch.costUsd`. */
   readonly costUsd: number | null;
   /** Input plus output tokens, under Codex's own counting; null when the turn reported none. */
@@ -33,7 +35,8 @@ export interface FactoryTraceStop {
 export interface FactoryTracePhase {
   readonly index: number;
   readonly title: string;
-  readonly status: FactoryRunState["phases"][number]["status"];
+  /** A phase still running when its run stopped reads `stopped`, as the old phase rail did. */
+  readonly status: FactoryRunState["phases"][number]["status"] | "stopped";
   readonly startMs: number | null;
   readonly endMs: number | null;
   readonly turns: ReadonlyArray<FactoryTraceTurn>;
@@ -140,6 +143,7 @@ export function deriveFactoryRunTrace(state: FactoryRunState, nowMs: number): Fa
         harness: dispatch.harness,
         startMs: turnStart,
         endMs: parse(dispatch.finishedAt),
+        interrupted: !live && dispatch.finishedAt === null,
         costUsd: dispatch.costUsd,
         tokens: tokenTotal(dispatch.tokens),
       };
@@ -147,7 +151,7 @@ export function deriveFactoryRunTrace(state: FactoryRunState, nowMs: number): Fa
     return {
       index: phase.index,
       title: phase.title,
-      status: phase.status,
+      status: phase.status === "running" && state.status === "stopped" ? "stopped" : phase.status,
       startMs: parse(phase.startedAt),
       endMs: parse(phase.closedAt),
       turns,
