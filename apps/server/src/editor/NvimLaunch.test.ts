@@ -76,8 +76,9 @@ it.layer(layer, { excludeTestServices: true })("resolveNvimLaunch", (it) => {
     return { root, stateDir, runtimeDir };
   });
 
-  for (const setting of ["~/.neovim", "~/.neovim/", ""]) {
-    it.effect(`falls back to ~/.config/nvim when the setting is ${JSON.stringify(setting)}`, () =>
+  it.effect.each(["~/.neovim", "~/.neovim/", ""])(
+    "falls back to ~/.config/nvim when the setting is %j",
+    (setting) =>
       Effect.gen(function* () {
         const { root, stateDir, runtimeDir } = yield* homeWith(".config/nvim");
         const plan = yield* resolveNvimLaunch(
@@ -86,8 +87,7 @@ it.layer(layer, { excludeTestServices: true })("resolveNvimLaunch", (it) => {
         assert.strictEqual(plan.configDirectory, `${root}/.config/nvim`);
         assert.strictEqual(plan.configHome, null, "Neovim reads its own default directory");
       }).pipe(Effect.scoped),
-    );
-  }
+  );
 
   it.effect("prefers ~/.neovim over ~/.config/nvim for the default setting", () =>
     Effect.gen(function* () {

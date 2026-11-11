@@ -444,25 +444,22 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       : options.configDirectory;
 
   const spawnBridge = (threadId: string, cwd: string, scope: Scope.Closeable) =>
-    readConfigDirectory
-      .pipe(
-        Effect.flatMap((configDirectory) =>
-          NvimBridge.spawn({
-            cols: INITIAL_GRID.cols,
-            rows: INITIAL_GRID.rows,
-            cwd,
-            configDirectory,
-            stateDir: options.stateDir,
-            homeDir: options.homeDir ?? NodeOS.homedir(),
-          }),
-        ),
-      )
-      .pipe(
-        Scope.provide(scope),
-        Effect.provideService(NvimAdapter, adapter),
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.mapError((cause) => spawnErrorFor(threadId, cause)),
-      );
+    readConfigDirectory.pipe(
+      Effect.flatMap((configDirectory) =>
+        NvimBridge.spawn({
+          cols: INITIAL_GRID.cols,
+          rows: INITIAL_GRID.rows,
+          cwd,
+          configDirectory,
+          stateDir: options.stateDir,
+          homeDir: options.homeDir ?? NodeOS.homedir(),
+        }),
+      ),
+      Scope.provide(scope),
+      Effect.provideService(NvimAdapter, adapter),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.mapError((cause) => spawnErrorFor(threadId, cause)),
+    );
 
   /**
    * `cwd` must be the thread's project: plugins root themselves at Neovim's working
