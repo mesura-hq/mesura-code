@@ -2,6 +2,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 
+import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 
 /**
@@ -21,7 +22,7 @@ export class NvimLaunchError extends Data.TaggedError("NvimLaunchError")<{
 }> {}
 
 export interface NvimLaunchInput {
-  /** As the developer typed it, `~` included. */
+  /** As the developer typed it, `~` included. Empty means the default. */
   readonly configDirectory: string;
   readonly env: Record<string, string | undefined>;
   readonly homeDir: string;
@@ -90,26 +91,58 @@ const relink = Effect.fn("NvimLaunch.relink")(function* (path: string, target: s
 const luaStringLiteral = (value: string) =>
   `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 
+const expandConfigDirectory = (value: string, homeDir: string) =>
+  withoutTrailingSeparator(expandHomePath(withoutTrailingSeparator(value), homeDir));
+
+/**
+ * The directory Neovim reads its configuration from. An explicit setting is used as typed. An
+ * empty or default setting tries `~/.neovim`, then Neovim's own `$XDG_CONFIG_HOME/nvim`, so a
+ * machine that keeps its configuration in the usual place needs no setting.
+ */
+const resolveConfigDirectory = Effect.fn("NvimLaunch.resolveConfigDirectory")(function* (
+  input: NvimLaunchInput,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const hasInitLua = (directory: string) =>
+    fs.exists(`${directory}/init.lua`).pipe(Effect.orElseSucceed(() => false));
+  const configured = withoutTrailingSeparator(input.configDirectory.trim());
+  const defaultDirectory = withoutTrailingSeparator(DEFAULT_SERVER_SETTINGS.neovimConfigDirectory);
+
+  if (configured !== "" && configured !== defaultDirectory) {
+    const configDirectory = expandConfigDirectory(configured, input.homeDir);
+    if (!(yield* fs.exists(configDirectory).pipe(Effect.orElseSucceed(() => false)))) {
+      return yield* new NvimLaunchError({
+        reason: "config-missing",
+        detail: `no Neovim configuration directory at ${configDirectory}`,
+      });
+    }
+    if (!(yield* hasInitLua(configDirectory))) {
+      return yield* new NvimLaunchError({
+        reason: "config-missing",
+        detail: `${configDirectory} holds no init.lua`,
+      });
+    }
+    return configDirectory;
+  }
+
+  const candidates = [
+    expandConfigDirectory(defaultDirectory, input.homeDir),
+    `${defaultConfigHome(input.env, input.homeDir)}/nvim`,
+  ];
+  for (const candidate of candidates) {
+    if (yield* hasInitLua(candidate)) return candidate;
+  }
+  return yield* new NvimLaunchError({
+    reason: "config-missing",
+    detail: `no init.lua in ${candidates.join(" or ")}`,
+  });
+});
+
 export const resolveNvimLaunch = Effect.fn("NvimLaunch.resolve")(function* (
   input: NvimLaunchInput,
 ) {
   const fs = yield* FileSystem.FileSystem;
-  const configDirectory = withoutTrailingSeparator(
-    expandHomePath(withoutTrailingSeparator(input.configDirectory), input.homeDir),
-  );
-
-  if (!(yield* fs.exists(configDirectory).pipe(Effect.orElseSucceed(() => false)))) {
-    return yield* new NvimLaunchError({
-      reason: "config-missing",
-      detail: `no Neovim configuration directory at ${configDirectory}`,
-    });
-  }
-  if (!(yield* fs.exists(`${configDirectory}/init.lua`).pipe(Effect.orElseSucceed(() => false)))) {
-    return yield* new NvimLaunchError({
-      reason: "config-missing",
-      detail: `${configDirectory} holds no init.lua`,
-    });
-  }
+  const configDirectory = yield* resolveConfigDirectory(input);
 
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(input.env)) {

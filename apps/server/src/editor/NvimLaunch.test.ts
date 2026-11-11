@@ -65,6 +65,81 @@ it.layer(layer, { excludeTestServices: true })("resolveNvimLaunch", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  /** A home directory with an `init.lua` in each named subdirectory. */
+  const homeWith = Effect.fn("homeWith")(function* (...configured: ReadonlyArray<string>) {
+    const fs = yield* FileSystem.FileSystem;
+    const { root, stateDir, runtimeDir } = yield* scratch();
+    for (const directory of configured) {
+      yield* fs.makeDirectory(`${root}/${directory}`, { recursive: true });
+      yield* fs.writeFileString(`${root}/${directory}/init.lua`, "-- a configuration\n");
+    }
+    return { root, stateDir, runtimeDir };
+  });
+
+  for (const setting of ["~/.neovim", "~/.neovim/", ""]) {
+    it.effect(`falls back to ~/.config/nvim when the setting is ${JSON.stringify(setting)}`, () =>
+      Effect.gen(function* () {
+        const { root, stateDir, runtimeDir } = yield* homeWith(".config/nvim");
+        const plan = yield* resolveNvimLaunch(
+          input({ configDirectory: setting, homeDir: root, stateDir, runtimeDir }),
+        );
+        assert.strictEqual(plan.configDirectory, `${root}/.config/nvim`);
+        assert.strictEqual(plan.configHome, null, "Neovim reads its own default directory");
+      }).pipe(Effect.scoped),
+    );
+  }
+
+  it.effect("prefers ~/.neovim over ~/.config/nvim for the default setting", () =>
+    Effect.gen(function* () {
+      const { root, stateDir, runtimeDir } = yield* homeWith(".neovim", ".config/nvim");
+      const plan = yield* resolveNvimLaunch(
+        input({ configDirectory: "~/.neovim", homeDir: root, stateDir, runtimeDir }),
+      );
+      assert.strictEqual(plan.configDirectory, `${root}/.neovim`);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("falls back to $XDG_CONFIG_HOME/nvim when the variable is set", () =>
+    Effect.gen(function* () {
+      const { root, stateDir, runtimeDir } = yield* homeWith("xdg/nvim");
+      const plan = yield* resolveNvimLaunch(
+        input({
+          configDirectory: "~/.neovim",
+          env: { XDG_CONFIG_HOME: `${root}/xdg` },
+          homeDir: root,
+          stateDir,
+          runtimeDir,
+        }),
+      );
+      assert.strictEqual(plan.configDirectory, `${root}/xdg/nvim`);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("names both directories when the default setting finds neither", () =>
+    Effect.gen(function* () {
+      const { root, stateDir, runtimeDir } = yield* homeWith();
+      const error = yield* failureOf(
+        resolveNvimLaunch(input({ configDirectory: "", homeDir: root, stateDir, runtimeDir })),
+      );
+      assert.strictEqual(error.reason, "config-missing");
+      assert.include(error.detail, `${root}/.neovim`);
+      assert.include(error.detail, `${root}/.config/nvim`);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("does not fall back from a directory the developer named", () =>
+    Effect.gen(function* () {
+      const { root, stateDir, runtimeDir } = yield* homeWith(".config/nvim");
+      const error = yield* failureOf(
+        resolveNvimLaunch(
+          input({ configDirectory: "~/dotfiles/nvim", homeDir: root, stateDir, runtimeDir }),
+        ),
+      );
+      assert.strictEqual(error.reason, "config-missing");
+      assert.include(error.detail, `${root}/dotfiles/nvim`);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("refuses a directory that holds no init.lua", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
