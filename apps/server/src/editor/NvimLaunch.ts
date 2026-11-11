@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off - hashes a path into a directory name.
+import * as NodeCrypto from "node:crypto";
+
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -154,7 +157,10 @@ export const resolveNvimLaunch = Effect.fn("NvimLaunch.resolve")(function* (
 
   let configHome: string | null = null;
   if (!alreadyTheConfigHome) {
-    configHome = `${input.stateDir}/neovim/config-home`;
+    // One scratch home per configuration directory. A shared one would be relinked by the next
+    // spawn after a Settings change, and a running Neovim would load Lua from the other directory.
+    const configKey = NodeCrypto.createHash("sha256").update(configDirectory).digest("hex");
+    configHome = `${input.stateDir}/neovim/config-homes/${configKey.slice(0, 16)}`;
     yield* fs.makeDirectory(configHome, { recursive: true }).pipe(
       Effect.mapError(
         (cause) =>

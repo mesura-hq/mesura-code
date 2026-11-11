@@ -89,6 +89,23 @@ it.layer(layer, { excludeTestServices: true })("resolveNvimLaunch", (it) => {
       }).pipe(Effect.scoped),
   );
 
+  it.effect("keeps a running configuration's link when another configuration launches", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { root, stateDir, runtimeDir } = yield* homeWith("first", "second");
+      const launch = (configDirectory: string) =>
+        resolveNvimLaunch(input({ configDirectory, homeDir: root, stateDir, runtimeDir }));
+
+      const first = yield* launch("~/first");
+      const second = yield* launch("~/second");
+      const again = yield* launch("~/first");
+
+      assert.notStrictEqual(first.configHome, second.configHome);
+      assert.strictEqual(yield* fs.readLink(`${first.configHome!}/nvim`), `${root}/first`);
+      assert.strictEqual(again.configHome, first.configHome, "stable for lazy.nvim's cache");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("prefers ~/.neovim over ~/.config/nvim for the default setting", () =>
     Effect.gen(function* () {
       const { root, stateDir, runtimeDir } = yield* homeWith(".neovim", ".config/nvim");
