@@ -132,6 +132,25 @@ it.layer(layer, { excludeTestServices: true })("resolveNvimLaunch", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("falls back to ~/.config/nvim when XDG_CONFIG_HOME points elsewhere", () =>
+    Effect.gen(function* () {
+      // The laptop's launcher isolates the app's state this way, and Neovim inherits it.
+      const { root, stateDir, runtimeDir } = yield* homeWith(".config/nvim");
+      const plan = yield* resolveNvimLaunch(
+        input({
+          configDirectory: "~/.neovim",
+          env: { XDG_CONFIG_HOME: `${root}/app-state/config` },
+          homeDir: root,
+          stateDir,
+          runtimeDir,
+        }),
+      );
+      assert.strictEqual(plan.configDirectory, `${root}/.config/nvim`);
+      assert.isNotNull(plan.configHome, "XDG_CONFIG_HOME must move to reach it");
+      assert.strictEqual(plan.env["XDG_CONFIG_HOME"], plan.configHome);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("names both directories when the default setting finds neither", () =>
     Effect.gen(function* () {
       const { root, stateDir, runtimeDir } = yield* homeWith();

@@ -99,8 +99,8 @@ const expandConfigDirectory = (value: string, homeDir: string) =>
 
 /**
  * The directory Neovim reads its configuration from. An explicit setting is used as typed. An
- * empty or default setting tries `~/.neovim`, then Neovim's own `$XDG_CONFIG_HOME/nvim`, so a
- * machine that keeps its configuration in the usual place needs no setting.
+ * empty or default setting tries `~/.neovim`, then `$XDG_CONFIG_HOME/nvim`, then `~/.config/nvim`,
+ * so a machine that keeps its configuration in the usual place needs no setting.
  */
 const resolveConfigDirectory = Effect.fn("NvimLaunch.resolveConfigDirectory")(function* (
   input: NvimLaunchInput,
@@ -128,9 +128,14 @@ const resolveConfigDirectory = Effect.fn("NvimLaunch.resolveConfigDirectory")(fu
     return configDirectory;
   }
 
+  // `~/.config/nvim` as well as `$XDG_CONFIG_HOME/nvim`: a launcher that isolates the app's own
+  // state through XDG_CONFIG_HOME hides the developer's configuration from the second one.
   const candidates = [
-    expandConfigDirectory(defaultDirectory, input.homeDir),
-    `${defaultConfigHome(input.env, input.homeDir)}/nvim`,
+    ...new Set([
+      expandConfigDirectory(defaultDirectory, input.homeDir),
+      `${defaultConfigHome(input.env, input.homeDir)}/nvim`,
+      `${withoutTrailingSeparator(input.homeDir)}/.config/nvim`,
+    ]),
   ];
   for (const candidate of candidates) {
     if (yield* hasInitLua(candidate)) return candidate;
