@@ -62,20 +62,23 @@ function makeBinds(
   toolPath: (name: string) => string = (name) => `/usr/bin/${name}`,
 ) {
   // While the session's binds are in place, Hyprland reports them instead of the ones they replaced.
-  let sessionBound = false;
+  let sessionBinds: Array<Record<string, unknown>> = [];
   const execute = vi.fn(async (_file: string, args: ReadonlyArray<string>) => {
-    if (args[0] === "--batch")
-      sessionBound =
-        args[1]!.includes("keyword bind ALT,") ||
-        (sessionBound && !args[1]!.includes("keyword unbind"));
+    if (args[0] === "--batch") {
+      const sent = args[1]!
+        .split(" ; ")
+        .filter((line) => line.startsWith("keyword bind ALT,"))
+        .map((line) => {
+          const [key, , ...arg] = line.slice("keyword bind ALT,".length).split(",");
+          return reportedBind({ key, arg: arg.join(",") });
+        });
+      if (sent.length > 0) sessionBinds = sent;
+      else if (args[1]!.includes("keyword unbind")) sessionBinds = [];
+    }
     if (args[0] !== "-j") return undefined;
     if (existing instanceof Error) throw existing;
-    if (args[1] === "binds" && sessionBound)
-      return {
-        stdout: JSON.stringify([
-          reportedBind({ key: "X", arg: `${launcher.join(" ")} --dictation cancel` }),
-        ]),
-      };
+    if (args[1] === "binds" && sessionBinds.length > 0)
+      return { stdout: JSON.stringify(sessionBinds) };
     return { stdout: JSON.stringify(existing) };
   });
   const onError = vi.fn();
@@ -787,8 +790,11 @@ function makeStatefulHyprlang(config: ReadonlyArray<Record<string, unknown>>) {
       );
     }
   };
+  let provider: "hyprlang" | "lua" = "hyprlang";
   const execute = vi.fn(async (_file: string, args: ReadonlyArray<string>) => {
-    if (args[0] === "-j" && args[1] === "status") return { stdout: "{}" };
+    if (args[0] === "-j" && args[1] === "status")
+      return { stdout: provider === "lua" ? '{"configProvider": "lua"}' : "{}" };
+    if (args[0] === "eval") return { stdout: "ok" };
     if (args[0] === "-j") return { stdout: JSON.stringify(live) };
     if (args[0] === "--batch")
       for (const line of args[1]!.split(" ; ")) {
@@ -804,6 +810,9 @@ function makeStatefulHyprlang(config: ReadonlyArray<Record<string, unknown>>) {
     /** `changed` is the config as the file now says, when it was edited before the reload. */
     reload: (changed: ReadonlyArray<Record<string, unknown>> = config) => {
       live = changed.map((bind) => ({ ...bind }));
+    },
+    setProvider: (next: "hyprlang" | "lua") => {
+      provider = next;
     },
   };
 }
@@ -938,13 +947,84 @@ describe("dictation session binds under a Lua config, after a reload with two se
       vi.setSystemTime(2_000);
       await older.binds.reapply();
       const [first, again] = older.writes().map(({ text }) => text);
-      // Started at 1000, it binds over a holder that started no later, and so does its reapply.
+      // Started at 1000, it binds over a holder that started earlier, or at once with a lower socket
+      // path, and so does its reapply.
       for (const lua of [first, again])
         expect(lua).toMatch(
-          /^local held = _G\.__mesura_dictation_binds if held == nil or held\.owner == ".+" or held\.startedAt <= 1000 then /,
+          /^local held = _G\.__mesura_dictation_binds if held == nil or held\.owner == (".+") or held\.startedAt < 1000 or \(held\.startedAt == 1000 and held\.owner < \1\) then /,
         );
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("dictation session binds tell this session's binds from any other", () => {
+  const RECORDER = (action: string) =>
+    reportedBind({ key: "X", arg: `qs -c symmetria ipc call recorder ${action}` });
+  const keysAndArgs = (hyprland: ReturnType<typeof makeStatefulHyprlang>) =>
+    hyprland.binds().map(({ key, arg }) => ({ key, arg }));
+
+  it("leaves a reloaded config alone when only another instance's leftover bind remains", async () => {
+    const hyprland = makeStatefulHyprlang([RECORDER("cancel")]);
+    const binds = createHyprlandSessionBinds({
+      env: HYPRLAND,
+      launcher: LAUNCHER,
+      socketPath: SOCKET_PATH,
+      resolveCommand: async (name) => (name === "python3" ? "/usr/bin/python3" : null),
+      execute: hyprland.execute,
+    });
+    await binds.setSessionActive(true);
+    // A crashed instance's bind writes to its own socket; it is shaped like ours but is not.
+    const leftover = reportedBind({
+      key: "S",
+      arg: "/usr/bin/python3 -c x /run/user/1000/mesura-dictation-999.sock --dictation mode clipboard",
+    });
+    hyprland.reload([RECORDER("stop"), leftover]);
+    await binds.setSessionActive(false);
+    expect(keysAndArgs(hyprland)).toEqual([
+      { key: "X", arg: "qs -c symmetria ipc call recorder stop" },
+      { key: "S", arg: leftover.arg },
+    ]);
+  });
+
+  it("takes a new snapshot after the config moved from Lua to Hyprlang", async () => {
+    const hyprland = makeStatefulHyprlang([RECORDER("cancel")]);
+    hyprland.setProvider("lua");
+    const binds = createHyprlandSessionBinds({
+      env: HYPRLAND,
+      launcher: LAUNCHER,
+      socketPath: SOCKET_PATH,
+      resolveCommand: async () => null,
+      execute: hyprland.execute,
+    });
+    await binds.setSessionActive(true);
+    hyprland.setProvider("hyprlang");
+    hyprland.reload();
+    await binds.reapply();
+    await binds.setSessionActive(false);
+    expect(keysAndArgs(hyprland)).toEqual([
+      { key: "X", arg: "qs -c symmetria ipc call recorder cancel" },
+    ]);
+  });
+});
+
+describe("dictation session binds retry a removal Hyprland did not take", () => {
+  it("sends the removal again at the next end, since the keys and the global are still there", async () => {
+    const { binds, execute, writes } = makeSwitchingBinds("lua");
+    await binds.setSessionActive(true);
+    // The removal is the end's first and only call; Hyprland refuses it once.
+    execute.mockImplementationOnce(async () => {
+      throw Object.assign(new Error("Command failed"), { code: 7, stdout: "error: busy" });
+    });
+    await binds.setSessionActive(false);
+    await binds.dispose();
+    const removals = writes().filter(
+      ({ text }) => text.includes("pcall(handle.remove, handle)") && !text.includes("hl.bind("),
+    );
+    expect(removals).toHaveLength(2);
+    // Once Hyprland took it, a further end sends nothing.
+    await binds.dispose();
+    expect(writes()).toHaveLength(3);
   });
 });

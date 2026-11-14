@@ -85,16 +85,16 @@ const isOwnBind = (arg: string) =>
   (SESSION_SOCKET_NAME.test(arg) && arg.includes(DICTATION_FLAG));
 
 /**
- * The binds on the session combos, from `hyprctl -j binds`, and whether binds this module made
- * are among them; throws on output it cannot read.
+ * The binds on the session combos, from `hyprctl -j binds`, and the commands of the ones shaped
+ * like this module's, from this process or another; throws on output it cannot read.
  */
 function readSessionComboBinds(json: string): {
   readonly saved: ReadonlyArray<SavedBind>;
-  readonly ownBound: boolean;
+  readonly generated: ReadonlyArray<string>;
 } {
   const binds: unknown = JSON.parse(json);
   if (!Array.isArray(binds)) throw new Error("hyprctl binds did not return a list.");
-  let ownBound = false;
+  const generated: string[] = [];
   const saved = binds.flatMap((raw: unknown): SavedBind[] => {
     if (typeof raw !== "object" || raw === null) return [];
     const bind = raw as Record<string, unknown>;
@@ -103,7 +103,7 @@ function readSessionComboBinds(json: string): {
     if (typeof key !== "string" || !SESSION_KEY_NAMES.has(key.toLowerCase())) return [];
     if (typeof dispatcher !== "string" || typeof arg !== "string") return [];
     if (isOwnBind(arg)) {
-      ownBound = true;
+      generated.push(arg);
       return [];
     }
     const description =
@@ -116,7 +116,7 @@ function readSessionComboBinds(json: string): {
         .join("") + (description === null ? "" : "d");
     return [{ key, flags, description, dispatcher, arg }];
   });
-  return { saved, ownBound };
+  return { saved, generated };
 }
 
 /** The binds on the session combos, from `hyprctl -j binds`; throws on output it cannot read. */
@@ -220,8 +220,9 @@ const LUA_BINDS_GLOBAL = "__mesura_dictation_binds";
 const releaseOwnedBinds = `${releaseLuaHandles(`(_G.${LUA_BINDS_GLOBAL} or {}).handles`, "remove")} _G.${LUA_BINDS_GLOBAL} = nil`;
 
 /**
- * Lua that binds the keys unless a session that started later holds them. A reload empties the
- * Lua state and every active session binds again, in any order, so the newest start must win.
+ * Lua that binds the keys unless a session that started later holds them; the socket path breaks a
+ * tie. A reload empties the Lua state and every active session binds again, in any order, so the
+ * newest start must win. A clock set back between two starts can reverse that order.
  */
 function bindLua(target: BindTarget, startedAt: number): string {
   const binds = SESSION_KEYS.map(
@@ -231,7 +232,7 @@ function bindLua(target: BindTarget, startedAt: number): string {
       )}), ${luaTable([["description", luaString(`Mesura dictation: ${command}`)]])})`,
   );
   const owner = luaString(target.socketPath);
-  return `local held = _G.${LUA_BINDS_GLOBAL} if held == nil or held.owner == ${owner} or held.startedAt <= ${startedAt} then ${releaseOwnedBinds} _G.${LUA_BINDS_GLOBAL} = { owner = ${owner}, startedAt = ${startedAt}, handles = { ${binds.join(", ")} } } end`;
+  return `local held = _G.${LUA_BINDS_GLOBAL} if held == nil or held.owner == ${owner} or held.startedAt < ${startedAt} or (held.startedAt == ${startedAt} and held.owner < ${owner}) then ${releaseOwnedBinds} _G.${LUA_BINDS_GLOBAL} = { owner = ${owner}, startedAt = ${startedAt}, handles = { ${binds.join(", ")} } } end`;
 }
 
 /** Lua that removes the keys only while this process still owns them: a later session took them. */
@@ -293,6 +294,8 @@ export function createHyprlandSessionBinds(input: {
   let boundWith: HyprlandConfigProvider | null = null;
   /** When the session started; under Lua, a later start takes the keys and keeps them. */
   let startedAt = 0;
+  /** The commands of the binds this session sent (Hyprlang only), to tell them from others. */
+  let sentLines: ReadonlySet<string> = new Set();
   /** What sat on the session combos before this session bound them (Hyprlang only). */
   let saved: ReadonlyArray<SavedBind> = [];
   // Serialized, so a quick start and end cannot reach Hyprland out of order, and a reload that
@@ -318,13 +321,18 @@ export function createHyprlandSessionBinds(input: {
     }
   };
 
+  /** Whether Hyprland still holds a bind this session sent: another process's are not ours. */
+  const holdsOwnBinds = (reported: { readonly generated: ReadonlyArray<string> }) =>
+    reported.generated.some((arg) => sentLines.has(arg));
+
   const bindKeywords = async (target: BindTarget, rebinding: boolean) => {
     const reported = await readComboBinds();
     // A first bind always takes the snapshot. A rebind that finds this session's binds still in
     // place keeps it, since no reload brought the config's back; after one, it takes the new one.
     // A failed read keeps any snapshot: the keys matter more than restoring what they covered.
-    if (reported !== null && (!rebinding || !reported.ownBound)) saved = reported.saved;
+    if (reported !== null && (!rebinding || !holdsOwnBinds(reported))) saved = reported.saved;
     throwRejections(await runKeywordCommands(input.execute, bindCommands(target, saved)));
+    sentLines = new Set(SESSION_KEYS.map(([, command]) => execLine(target, command)));
   };
 
   const bind = async () => {
@@ -334,32 +342,34 @@ export function createHyprlandSessionBinds(input: {
       : { tool: "launcher" };
     const target = { transport, launcher: input.launcher, socketPath: input.socketPath };
     const provider = await readConfigProvider();
-    const rebinding = boundWith !== null;
+    // A provider switch means a reload, which dropped whatever this session had bound.
+    const rebinding = boundWith === provider;
     boundWith = provider;
     if (provider === "lua")
       throwRejections(await runLuaEval(input.execute, bindLua(target, startedAt)));
     else await bindKeywords(target, rebinding);
   };
 
+  /** Cleared only once Hyprland took the removal, so a failed one runs again at the next end. */
   const unbind = async () => {
     if (active || boundWith === null) return;
-    const provider = boundWith;
-    boundWith = null;
-    if (provider === "lua") {
+    if (boundWith === "lua") {
       throwRejections(await runLuaEval(input.execute, unbindLua(input.socketPath)));
-      return;
+    } else {
+      // A reload this module missed already put the config's binds back, maybe changed since the
+      // snapshot: with none of this session's binds left, there is nothing to undo.
+      const reported = await readComboBinds();
+      if (reported === null || holdsOwnBinds(reported))
+        throwRejections(await runKeywordCommands(input.execute, unbindCommands(saved)));
     }
-    const restore = saved;
+    boundWith = null;
     saved = [];
-    // A reload this module missed already put the config's binds back, maybe changed since the
-    // snapshot: with none of this session's binds left, there is nothing to undo.
-    const reported = await readComboBinds();
-    if (reported !== null && !reported.ownBound) return;
-    throwRejections(await runKeywordCommands(input.execute, unbindCommands(restore)));
+    sentLines = new Set();
   };
 
   const setSessionActive = (next: boolean, listening = true): Promise<void> => {
-    if (!enabled || next === active) return queue;
+    // An end with binds still recorded runs again: the last removal failed.
+    if (!enabled || (next === active && (next || boundWith === null))) return queue;
     active = next;
     if (next) {
       socketListening = listening;

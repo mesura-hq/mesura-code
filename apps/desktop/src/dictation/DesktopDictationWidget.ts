@@ -187,7 +187,9 @@ export const make = Effect.gen(function* () {
     setImmediate(() => widget.setFocusedWindow(Electron.BrowserWindow.getFocusedWindow()));
   yield* electronApp.on("browser-window-focus", syncFocus);
   yield* electronApp.on("browser-window-blur", syncFocus);
-  yield* electronApp.on("before-quit", () => void sessionKeys.dispose());
+  // `binds.dispose` runs a bind removal that failed at session end once more.
+  const disposeKeys = () => sessionKeys.dispose().then(binds.dispose);
+  yield* electronApp.on("before-quit", () => void disposeKeys());
 
   /** The renderer that publishes; when it goes away its dictation goes with it. */
   const publishers = new Set<number>();
@@ -229,7 +231,7 @@ export const make = Effect.gen(function* () {
   // Runs before the socket's own finalizer, which was registered first: the binds are restored
   // and the socket closed in order, after any start still running.
   yield* Effect.addFinalizer(() =>
-    Effect.promise(() => sessionKeys.dispose()).pipe(Effect.andThen(Effect.sync(widget.dispose))),
+    Effect.promise(disposeKeys).pipe(Effect.andThen(Effect.sync(widget.dispose))),
   );
 
   return DesktopDictationWidget.of({});

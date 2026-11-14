@@ -331,11 +331,13 @@ describe("dictation widget rules under a Lua config", () => {
     // The same rules are keyed the same way, so the second apply finds the first one's handles.
     expect(keys(second!)).toEqual(keys(first!));
     expect(second).toContain(
-      "if not (handle and pcall(handle.set_enabled, handle, true)) then handle = make() end",
+      "if not (handle and pcall(handle.set_enabled, handle, true)) then registry[key] = make() end",
     );
+    // Disabled rules stay in the registry, so a value that comes back finds its rule again.
     expect(second).toContain(
-      "for _, handle in pairs(previous) do pcall(handle.set_enabled, handle, false) end",
+      "for key, handle in pairs(registry) do if not sent[key] then pcall(handle.set_enabled, handle, false) end end",
     );
+    expect(second).toContain("_G.__mesura_dictation_widget_rules = registry");
   });
 
   it("logs a rule Hyprland refused, and sends it again on the next apply", async () => {
