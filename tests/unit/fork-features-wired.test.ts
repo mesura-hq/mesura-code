@@ -274,7 +274,9 @@ it("renders the composer footer controls in one group, in order", () => {
   const group = between(composer, 'data-chat-composer-actions="right"', "</div>");
 
   const row = [
-    ["context meter", "{contextWindowMeterElement}"],
+    // On a phone the meter moves to its own row above (`stackPhoneFooterRows`), so the group
+    // renders it conditionally; the marker matches that expression's end.
+    ["context meter", "contextWindowMeterElement}"],
     ["attach button", "{composerAttachButton}"],
     ["voice call", "{voiceConversationControl}"],
     ["dictation microphone", "{dictationStartControl}"],
@@ -298,6 +300,11 @@ it("renders the composer footer controls in one group, in order", () => {
     composer,
     /const contextWindowMeterElement =[\s\S]*?<ContextWindowMeter/,
     "the shared context meter no longer renders the meter component",
+  );
+  assert.include(
+    composer,
+    "{stackPhoneFooterRows && contextWindowMeterElement ? (",
+    "the phone's stacked footer no longer gives the context meter its own row",
   );
   assert.include(
     composer,
