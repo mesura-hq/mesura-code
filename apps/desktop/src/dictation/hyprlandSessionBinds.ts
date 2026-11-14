@@ -331,8 +331,12 @@ export function createHyprlandSessionBinds(input: {
     // place keeps it, since no reload brought the config's back; after one, it takes the new one.
     // A failed read keeps any snapshot: the keys matter more than restoring what they covered.
     if (reported !== null && (!rebinding || !holdsOwnBinds(reported))) saved = reported.saved;
+    const lines = SESSION_KEYS.map(([, command]) => execLine(target, command));
+    // Recorded before sending: Hyprland can apply a batch whose reply then times out, and the
+    // end must still know these binds. Earlier lines stay until this batch is confirmed.
+    sentLines = new Set([...sentLines, ...lines]);
     throwRejections(await runKeywordCommands(input.execute, bindCommands(target, saved)));
-    sentLines = new Set(SESSION_KEYS.map(([, command]) => execLine(target, command)));
+    sentLines = new Set(lines);
   };
 
   const bind = async () => {

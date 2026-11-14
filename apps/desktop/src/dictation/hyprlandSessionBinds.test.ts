@@ -1028,3 +1028,30 @@ describe("dictation session binds retry a removal Hyprland did not take", () => 
     expect(writes()).toHaveLength(3);
   });
 });
+
+describe("dictation session binds whose bind reply failed", () => {
+  it("restores the config's bind when Hyprland applied the batch but its reply timed out", async () => {
+    const hyprland = makeStatefulHyprlang([
+      reportedBind({ key: "X", arg: "qs -c symmetria ipc call recorder cancel" }),
+    ]);
+    const apply = hyprland.execute.getMockImplementation()!;
+    hyprland.execute.mockImplementation(async (file, args) => {
+      const result = await apply(file, args);
+      if (args[0] === "--batch" && args[1]!.includes("keyword bind ALT,"))
+        throw Object.assign(new Error("hyprctl timed out"), { killed: true });
+      return result;
+    });
+    const binds = createHyprlandSessionBinds({
+      env: HYPRLAND,
+      launcher: LAUNCHER,
+      socketPath: SOCKET_PATH,
+      resolveCommand: async () => null,
+      execute: hyprland.execute,
+    });
+    await binds.setSessionActive(true);
+    await binds.setSessionActive(false);
+    expect(hyprland.binds().map(({ key, arg }) => ({ key, arg }))).toEqual([
+      { key: "X", arg: "qs -c symmetria ipc call recorder cancel" },
+    ]);
+  });
+});
