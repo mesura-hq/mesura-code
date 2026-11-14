@@ -44,6 +44,9 @@ const UNBIND_BATCH = [
 
 const READ_BINDS = ["hyprctl", ["-j", "binds"]];
 
+/** Asked before each bind; a Hyprlang Hyprland 0.56.2 has no `configProvider` to report. */
+const READ_STATUS = ["hyprctl", ["-j", "status"]];
+
 const SOCKET_PATH = "/run/user/1000/mesura-dictation-4242.sock";
 
 /**
@@ -126,14 +129,18 @@ describe("dictation phase 6 fence: Hyprland session binds", () => {
   it("dictation phase 6 AC5: a session start issues one hyprctl batch that unbinds then binds the six Alt keys", async () => {
     const { binds, execute } = makeBinds(HYPRLAND);
     await binds.setSessionActive(true);
-    expect(execute.mock.calls).toEqual([READ_BINDS, ["hyprctl", ["--batch", BIND_BATCH]]]);
+    expect(execute.mock.calls).toEqual([
+      READ_STATUS,
+      READ_BINDS,
+      ["hyprctl", ["--batch", BIND_BATCH]],
+    ]);
   });
 
   it("dictation phase 6 AC5: a session that is already bound is not bound a second time", async () => {
     const { binds, execute } = makeBinds(HYPRLAND);
     await binds.setSessionActive(true);
     await binds.setSessionActive(true);
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(3);
   });
 
   it("dictation phase 6 AC5: a session end unbinds the six Alt keys", async () => {
@@ -141,7 +148,7 @@ describe("dictation phase 6 fence: Hyprland session binds", () => {
     await binds.setSessionActive(true);
     await binds.setSessionActive(false);
     expect(execute.mock.calls.at(-1)).toEqual(["hyprctl", ["--batch", UNBIND_BATCH]]);
-    expect(execute).toHaveBeenCalledTimes(3);
+    expect(execute).toHaveBeenCalledTimes(4);
   });
 
   it("dictation phase 6 AC5: app quit during a session unbinds the six Alt keys", async () => {
@@ -630,5 +637,114 @@ describe("search unification phase 4 rework: binds that existed before the sessi
       "bind",
       "ALT,S,exec,notify-send 'colour ##ff0000'",
     ]);
+  });
+});
+
+/**
+ * A Hyprland 0.57.1 whose provider can switch, as a config migrated while the app runs does at
+ * its next reload. Under Lua, `keyword` and `--batch` print `unknown request` and exit 0.
+ */
+function makeSwitchingBinds(initial: "hyprlang" | "lua") {
+  let provider = initial;
+  const execute = vi.fn(async (_file: string, args: ReadonlyArray<string>) => {
+    if (args[0] === "-j" && args[1] === "status")
+      return { stdout: JSON.stringify(provider === "lua" ? { configProvider: "lua" } : {}) };
+    if (args[0] === "-j") return { stdout: "[]" };
+    if (args[0] === "eval") return { stdout: provider === "lua" ? "ok" : "unknown request" };
+    return { stdout: provider === "lua" ? "unknown request" : "ok" };
+  });
+  const onError = vi.fn();
+  const binds = createHyprlandSessionBinds({
+    env: HYPRLAND,
+    launcher: LAUNCHER,
+    socketPath: SOCKET_PATH,
+    resolveCommand: async () => null,
+    execute,
+    onError,
+  });
+  const writes = () =>
+    execute.mock.calls
+      .filter(([, args]) => args[0] === "eval" || args[0] === "--batch")
+      .map(([, args]) => ({ via: args[0]!, text: args[1]! }));
+  return {
+    binds,
+    execute,
+    onError,
+    writes,
+    switchTo: (next: "hyprlang" | "lua") => {
+      provider = next;
+    },
+  };
+}
+
+const SESSION_COMBOS = ["S", "I", "Return", "space", "R", "X"];
+
+describe("dictation session binds under a Lua config", () => {
+  it("adds the six Alt keys as handles through hyprctl eval, unbinding nothing the config owns", async () => {
+    const { binds, writes, onError } = makeSwitchingBinds("lua");
+    await binds.setSessionActive(true);
+    expect(onError).not.toHaveBeenCalled();
+    expect(writes()).toHaveLength(1);
+    const { via, text } = writes()[0]!;
+    expect(via).toBe("eval");
+    for (const key of SESSION_COMBOS) expect(text).toContain(`hl.bind("ALT + ${key}", `);
+    expect(text).toContain('hl.dsp.exec_cmd("/usr/bin/mesura-code --dictation pause")');
+    // `hl.unbind` would also delete Symmetria's recorder keys, which Lua cannot bind again.
+    expect(text).not.toContain("hl.unbind");
+  });
+
+  it("removes only its own handles at session end", async () => {
+    const { binds, writes } = makeSwitchingBinds("lua");
+    await binds.setSessionActive(true);
+    await binds.setSessionActive(false);
+    const end = writes().at(-1)!;
+    expect(end.via).toBe("eval");
+    expect(end.text).toContain("pcall(handle.remove, handle)");
+    expect(end.text).not.toContain("hl.bind(");
+    expect(end.text).not.toContain("hl.unbind");
+  });
+});
+
+describe("dictation session binds after a Hyprland config reload", () => {
+  it("binds the keys again while the session lasts", async () => {
+    const { binds, writes } = makeSwitchingBinds("lua");
+    await binds.setSessionActive(true);
+    await binds.reapply();
+    expect(writes().filter(({ text }) => text.includes("hl.bind("))).toHaveLength(2);
+  });
+
+  it("binds nothing once the session has ended", async () => {
+    const { binds, writes } = makeSwitchingBinds("hyprlang");
+    await binds.setSessionActive(true);
+    await binds.setSessionActive(false);
+    const before = writes().length;
+    await binds.reapply();
+    expect(writes()).toHaveLength(before);
+  });
+
+  it("leaves no session keys when the session ends while the reload is still binding", async () => {
+    const { binds, writes } = makeSwitchingBinds("lua");
+    await binds.setSessionActive(true);
+    const reload = binds.reapply();
+    const end = binds.setSessionActive(false);
+    await Promise.all([reload, end]);
+    const last = writes().at(-1)!;
+    expect(last.text).toContain("pcall(handle.remove, handle)");
+    expect(last.text).not.toContain("hl.bind(");
+  });
+
+  it("follows a config migrated to Lua mid-session, and unbinds the way it last bound", async () => {
+    const { binds, writes, switchTo, onError } = makeSwitchingBinds("hyprlang");
+    await binds.setSessionActive(true);
+    expect(writes()[0]!.via).toBe("--batch");
+    switchTo("lua");
+    await binds.reapply();
+    await binds.setSessionActive(false);
+    expect(
+      writes()
+        .slice(1)
+        .map(({ via }) => via),
+    ).toEqual(["eval", "eval"]);
+    expect(onError).not.toHaveBeenCalled();
   });
 });

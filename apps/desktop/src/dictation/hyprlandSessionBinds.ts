@@ -8,16 +8,26 @@ import { DICTATION_FLAG, dictationCommandLineArguments } from "./dictationComman
 import {
   generatedKeyword,
   isHyprlandSession,
+  luaString,
+  luaTable,
+  readHyprlandConfigProvider,
+  releaseLuaHandles,
   runKeywordCommands,
+  runLuaEval,
   type HyprctlExecute,
+  type HyprlandConfigProvider,
   type KeywordCommand,
 } from "./hyprctl.ts";
 
 /**
  * Bound only while a session exists. Each key writes its `--dictation …` words to the command
  * socket via `socat` or `python3`; failing both, it launches the binary (a full Electron start).
- * Every bind is preceded by its unbind: a crashed instance leaves its binds and `bind` duplicates.
- * Existing binds on these combos are read at start and restored at end; an unbind deletes them.
+ * Under Hyprlang every bind is preceded by its unbind: a crashed instance leaves its binds and
+ * `bind` duplicates. Existing binds on these combos are read at start and restored at end; an
+ * unbind deletes them. Under Lua, `hyprctl -j binds` reports a config bind's callback as an opaque
+ * id that cannot be bound again, so the session binds are added beside the config's and removed
+ * by their own handles: both fire, and the config's (Symmetria's recorder keys) do nothing while
+ * Symmetria records nothing.
  */
 const SESSION_KEYS: ReadonlyArray<readonly [key: string, command: DictationKeybindingCommand]> = [
   ["S", "dictation.mode.clipboard"],
@@ -189,6 +199,22 @@ function unbindCommands(saved: ReadonlyArray<SavedBind>): ReadonlyArray<KeywordC
   ];
 }
 
+/** The Lua global holding this session's bind handles, whichever process made them. */
+const LUA_BINDS_GLOBAL = "__mesura_dictation_binds";
+
+/** Lua that replaces any binds a previous session left with this session's. */
+function bindLua(target: BindTarget): string {
+  const binds = SESSION_KEYS.map(
+    ([key, command]) =>
+      `hl.bind(${luaString(`ALT + ${key}`)}, hl.dsp.exec_cmd(${luaString(
+        execLine(target, command),
+      )}), ${luaTable([["description", luaString(`Mesura dictation: ${command}`)]])})`,
+  );
+  return `${releaseLuaHandles(LUA_BINDS_GLOBAL, "remove")} _G.${LUA_BINDS_GLOBAL} = { ${binds.join(", ")} }`;
+}
+
+const unbindLua = () => releaseLuaHandles(LUA_BINDS_GLOBAL, "remove");
+
 /** The absolute path `name` resolves to on this process's PATH, or null. */
 export const resolveCommandPath = async (name: string): Promise<string | null> => {
   try {
@@ -231,54 +257,76 @@ export function createHyprlandSessionBinds(input: {
   readonly enabled: boolean;
   /** `socketListening: false` keeps the keys on the launcher for this session. */
   readonly setSessionActive: (active: boolean, socketListening?: boolean) => Promise<void>;
+  /** Binds again while a session is active: a config reload dropped the runtime binds. */
+  readonly reapply: () => Promise<void>;
   readonly dispose: () => Promise<void>;
 } {
   const enabled = isHyprlandSession(input.env);
-  let bound = false;
-  /** What sat on the session combos before this session bound them. */
+  /** Whether a session wants the binds; what Hyprland holds can differ after a reload. */
+  let active = false;
+  let socketListening = true;
+  /** How the binds now in Hyprland were sent, so they are removed the same way. */
+  let boundWith: HyprlandConfigProvider | null = null;
+  /** What sat on the session combos before this session bound them (Hyprlang only). */
   let saved: ReadonlyArray<SavedBind> = [];
-  // Serialized, so a quick start and end cannot reach Hyprland out of order.
+  // Serialized, so a quick start and end cannot reach Hyprland out of order, and a reload that
+  // lands after the session ended binds nothing.
   let queue: Promise<void> = Promise.resolve();
   const enqueue = (step: () => Promise<void>) => {
     queue = queue.then(step).catch((cause: unknown) => input.onError?.(cause));
     return queue;
   };
 
-  const reportRejections = (rejections: ReadonlyArray<string>) => {
-    if (rejections.length > 0) input.onError?.(new Error(rejections.join("; ")));
+  const throwRejections = (rejections: ReadonlyArray<string>) => {
+    if (rejections.length > 0) throw new Error(rejections.join("; "));
   };
 
-  const bind = async (socketListening: boolean) => {
-    const transport: BindTransport = socketListening
-      ? await resolveBindTransport(input.socketPath, input.resolveCommand)
-      : { tool: "launcher" };
+  const bindKeywords = async (target: BindTarget) => {
     try {
       const output = await input.execute("hyprctl", ["-j", "binds"]);
+      // After a reload, the combos hold the config's binds again, which is what to restore.
       saved = parseSessionComboBinds(output?.stdout ?? "");
     } catch (cause) {
       // Bind anyway: the keys matter more than restoring what they covered.
       saved = [];
       input.onError?.(cause);
     }
-    reportRejections(
-      await runKeywordCommands(
-        input.execute,
-        bindCommands({ transport, launcher: input.launcher, socketPath: input.socketPath }, saved),
-      ),
-    );
+    throwRejections(await runKeywordCommands(input.execute, bindCommands(target, saved)));
+  };
+
+  const bind = async () => {
+    if (!active) return;
+    const transport: BindTransport = socketListening
+      ? await resolveBindTransport(input.socketPath, input.resolveCommand)
+      : { tool: "launcher" };
+    const target = { transport, launcher: input.launcher, socketPath: input.socketPath };
+    const provider = await readHyprlandConfigProvider(input.execute);
+    boundWith = provider;
+    if (provider === "lua") throwRejections(await runLuaEval(input.execute, bindLua(target)));
+    else await bindKeywords(target);
   };
 
   const unbind = async () => {
+    if (active || boundWith === null) return;
+    const provider = boundWith;
+    boundWith = null;
+    if (provider === "lua") {
+      throwRejections(await runLuaEval(input.execute, unbindLua()));
+      return;
+    }
     const restore = saved;
     saved = [];
-    reportRejections(await runKeywordCommands(input.execute, unbindCommands(restore)));
+    throwRejections(await runKeywordCommands(input.execute, unbindCommands(restore)));
   };
 
-  const setSessionActive = (active: boolean, socketListening = true): Promise<void> => {
-    if (!enabled || active === bound) return queue;
-    bound = active;
-    return enqueue(active ? () => bind(socketListening) : unbind);
+  const setSessionActive = (next: boolean, listening = true): Promise<void> => {
+    if (!enabled || next === active) return queue;
+    active = next;
+    if (next) socketListening = listening;
+    return enqueue(next ? bind : unbind);
   };
 
-  return { enabled, setSessionActive, dispose: () => setSessionActive(false) };
+  const reapply = () => (enabled ? enqueue(bind) : queue);
+
+  return { enabled, setSessionActive, reapply, dispose: () => setSessionActive(false) };
 }

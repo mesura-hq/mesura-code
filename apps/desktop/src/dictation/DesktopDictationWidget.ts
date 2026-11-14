@@ -89,27 +89,6 @@ export const make = Effect.gen(function* () {
       ),
   });
 
-  if (widgetRules.enabled) {
-    yield* Effect.acquireRelease(
-      Effect.sync(() =>
-        watchHyprlandConfigReloads({
-          env: process.env,
-          onReload: () => void widgetRules.reapply(),
-          onError: (cause) =>
-            runFork(
-              logWarning(
-                "the Hyprland event socket closed; a config reload drops the widget rules",
-                {
-                  message: causeMessage(cause),
-                },
-              ),
-            ),
-        }),
-      ),
-      (stop) => Effect.sync(stop),
-    );
-  }
-
   const widgetUrl = `${getDesktopUrl(environment.isDevelopment)}${WIDGET_PAGE_QUERY}`;
   const widget = createDictationWidgetWindow({
     createWindow: (options) => {
@@ -160,6 +139,31 @@ export const make = Effect.gen(function* () {
         }),
       ),
   });
+
+  if (widgetRules.enabled) {
+    yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        watchHyprlandConfigReloads({
+          env: process.env,
+          // A reload drops every runtime rule and bind, the session's keys included.
+          onReload: () => {
+            void widgetRules.reapply();
+            void binds.reapply();
+          },
+          onError: (cause) =>
+            runFork(
+              logWarning(
+                "the Hyprland event socket closed; a config reload drops the widget rules and dictation keys",
+                {
+                  message: causeMessage(cause),
+                },
+              ),
+            ),
+        }),
+      ),
+      (stop) => Effect.sync(stop),
+    );
+  }
 
   const runPromise = Effect.runPromiseWith(context);
   const sessionKeys = createDictationSessionKeys({
