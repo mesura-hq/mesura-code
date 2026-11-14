@@ -22,12 +22,7 @@ import {
 /**
  * Bound only while a session exists. Each key writes its `--dictation …` words to the command
  * socket via `socat` or `python3`; failing both, it launches the binary (a full Electron start).
- * Under Hyprlang every bind is preceded by its unbind: a crashed instance leaves its binds and
- * `bind` duplicates. Existing binds on these combos are read at start and restored at end; an
- * unbind deletes them. Under Lua, `hyprctl -j binds` reports a config bind's callback as an opaque
- * id that cannot be bound again, so the session binds are added beside the config's and removed
- * by their own handles: both fire, and the config's (Symmetria's recorder keys) do nothing while
- * Symmetria records nothing.
+ * Under Hyprlang each bind follows its unbind, and the combos' earlier binds come back at end.
  */
 const SESSION_KEYS: ReadonlyArray<readonly [key: string, command: DictationKeybindingCommand]> = [
   ["S", "dictation.mode.clipboard"],
@@ -199,7 +194,11 @@ function unbindCommands(saved: ReadonlyArray<SavedBind>): ReadonlyArray<KeywordC
   ];
 }
 
-/** The Lua global holding this session's bind handles, whichever process made them. */
+/**
+ * The Lua global holding this session's bind handles, whichever process made them. They sit
+ * beside the config's binds and leave by handle: `hyprctl -j binds` reports a Lua callback as an
+ * opaque id, so an unbound config bind could not come back. Both fire; Symmetria's idle ones no-op.
+ */
 const LUA_BINDS_GLOBAL = "__mesura_dictation_binds";
 
 /** Lua that replaces any binds a previous session left with this session's. */
