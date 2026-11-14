@@ -767,7 +767,7 @@ function NeovimConfigDirectoryRow() {
   return (
     <SettingsRow
       {...searchableSetting("neovim-config-directory")}
-      description="Where the Neovim that edits files in the file panel reads its configuration. Leave empty to use ~/.neovim."
+      description="Where the Neovim that edits files in the file panel reads its configuration. Leave empty to use ~/.neovim, or $XDG_CONFIG_HOME/nvim or ~/.config/nvim when ~/.neovim has no init.lua."
       resetAction={
         settings.neovimConfigDirectory !== DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory ? (
           <SettingResetButton

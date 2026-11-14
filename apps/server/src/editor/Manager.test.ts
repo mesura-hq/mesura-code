@@ -511,6 +511,29 @@ it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("reads the configuration directory again for each Neovim it starts", () =>
+    Effect.gen(function* () {
+      const { root, configDirectory } = yield* scratchConfig();
+      const fake = new FakeNvim();
+      const setting = yield* Ref.make(`${root}/nowhere`);
+      const manager = yield* EditorSessionManager.makeWithOptions({
+        configDirectory: Ref.get(setting),
+        stateDir: root,
+      }).pipe(Effect.provide(fakeAdapterLayer(fake)));
+      const open = manager.open({
+        threadId: "thread-1",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: ["one"],
+      });
+
+      assert.isTrue(Result.isFailure(yield* Effect.result(open)), "the first setting is missing");
+      yield* Ref.set(setting, configDirectory);
+      yield* open;
+      assert.lengthOf(fake.spawns, 1, "the corrected setting started Neovim");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("applies a re-sent input batch once when its sequence was already applied", () =>
     Effect.gen(function* () {
       const { manager, fake, root } = yield* createManager();

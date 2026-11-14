@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - the home directory a launch defaults to.
 import * as NodeOS from "node:os";
 import {
+  DEFAULT_SERVER_SETTINGS,
   type EditorHighlightDefinition,
   type EditorSessionEndReason,
   EditorSessionInputLostError,
@@ -183,8 +184,11 @@ interface Session {
 }
 
 export interface EditorSessionManagerOptions {
-  /** Where Neovim reads its configuration. Normally the server setting. */
-  readonly configDirectory: string;
+  /**
+   * Where Neovim reads its configuration. The server passes the setting as an Effect, read at
+   * each spawn, so a change in Settings reaches the next Neovim without a server restart.
+   */
+  readonly configDirectory: string | Effect.Effect<string>;
   readonly stateDir: string;
   readonly homeDir?: string | undefined;
   readonly maxSessions?: number | undefined;
@@ -434,15 +438,23 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     yield* Effect.forEach(doomed, (session) => stopSession(session, "closed"), { discard: true });
   });
 
+  const readConfigDirectory =
+    typeof options.configDirectory === "string"
+      ? Effect.succeed(options.configDirectory)
+      : options.configDirectory;
+
   const spawnBridge = (threadId: string, cwd: string, scope: Scope.Closeable) =>
-    NvimBridge.spawn({
-      cols: INITIAL_GRID.cols,
-      rows: INITIAL_GRID.rows,
-      cwd,
-      configDirectory: options.configDirectory,
-      stateDir: options.stateDir,
-      homeDir: options.homeDir ?? NodeOS.homedir(),
-    }).pipe(
+    readConfigDirectory.pipe(
+      Effect.flatMap((configDirectory) =>
+        NvimBridge.spawn({
+          cols: INITIAL_GRID.cols,
+          rows: INITIAL_GRID.rows,
+          cwd,
+          configDirectory,
+          stateDir: options.stateDir,
+          homeDir: options.homeDir ?? NodeOS.homedir(),
+        }),
+      ),
       Scope.provide(scope),
       Effect.provideService(NvimAdapter, adapter),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -1444,11 +1456,11 @@ export const attachEventStream = (
 export const make = Effect.fn("EditorSessionManager.make")(function* () {
   const config = yield* ServerConfig;
   const settings = yield* ServerSettingsService;
-  const current = yield* settings.getSettings.pipe(
-    Effect.catchCause(() => Effect.succeed({ neovimConfigDirectory: "~/.neovim" })),
-  );
   return yield* makeWithOptions({
-    configDirectory: current.neovimConfigDirectory,
+    configDirectory: settings.getSettings.pipe(
+      Effect.map((current) => current.neovimConfigDirectory),
+      Effect.catchCause(() => Effect.succeed(DEFAULT_SERVER_SETTINGS.neovimConfigDirectory)),
+    ),
     stateDir: config.neovimRuntimeDir,
     tracePath: Option.getOrUndefined(
       yield* Config.String("MESURA_EDITOR_TRACE").pipe(Config.option),
