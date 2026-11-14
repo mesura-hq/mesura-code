@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- `hyprctl` is a native compositor boundary, as in CaptureShortcutConfig.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off -- `hyprctl` is a native compositor boundary, as in CaptureShortcutConfig; the session state changes from IPC callbacks outside any Effect fiber.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeUtil from "node:util";
 
