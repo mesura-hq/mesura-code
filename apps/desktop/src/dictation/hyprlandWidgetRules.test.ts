@@ -316,21 +316,26 @@ describe("dictation widget rules under a Lua config", () => {
     ])
       expect(lua).toContain(effect);
     expect(lua).toContain(`match = { title = "${TITLE_PATTERN}", workspace = "m[eDP-1]" }`);
-    // Named, so Hyprland reuses the rule on the next apply instead of keeping a disabled copy.
-    expect(lua).toContain('hl.window_rule({ name = "mesura-dictation-widget", match = ');
-    expect(lua).toContain('hl.window_rule({ name = "mesura-dictation-widget-eDP-1", match = ');
+    // Unnamed: Hyprland 0.57.1 appends a named rule's effects each time the name is sent.
+    expect(lua).not.toContain("name = ");
   });
 
-  it("disables the rules a previous apply left before adding its own", async () => {
+  it("enables the rules it sends again instead of adding them, and disables the rest", async () => {
     const { rules, evals } = makeLuaRules();
     await rules.apply();
     await rules.reapply();
     expect(evals()).toHaveLength(2);
-    for (const lua of evals()) {
-      const release = lua.indexOf("pcall(handle.set_enabled, handle, false)");
-      expect(release).toBeGreaterThanOrEqual(0);
-      expect(release).toBeLessThan(lua.indexOf("hl.window_rule("));
-    }
+    const keys = (lua: string) =>
+      [...lua.matchAll(/rule\("((?:[^"\\]|\\.)*)", function/g)].map((m) => m[1]);
+    const [first, second] = evals();
+    // The same rules are keyed the same way, so the second apply finds the first one's handles.
+    expect(keys(second!)).toEqual(keys(first!));
+    expect(second).toContain(
+      "if not (handle and pcall(handle.set_enabled, handle, true)) then handle = make() end",
+    );
+    expect(second).toContain(
+      "for _, handle in pairs(previous) do pcall(handle.set_enabled, handle, false) end",
+    );
   });
 
   it("logs a rule Hyprland refused, and sends it again on the next apply", async () => {

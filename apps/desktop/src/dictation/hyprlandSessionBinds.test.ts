@@ -61,9 +61,21 @@ function makeBinds(
   socketPath = SOCKET_PATH,
   toolPath: (name: string) => string = (name) => `/usr/bin/${name}`,
 ) {
+  // While the session's binds are in place, Hyprland reports them instead of the ones they replaced.
+  let sessionBound = false;
   const execute = vi.fn(async (_file: string, args: ReadonlyArray<string>) => {
+    if (args[0] === "--batch")
+      sessionBound =
+        args[1]!.includes("keyword bind ALT,") ||
+        (sessionBound && !args[1]!.includes("keyword unbind"));
     if (args[0] !== "-j") return undefined;
     if (existing instanceof Error) throw existing;
+    if (args[1] === "binds" && sessionBound)
+      return {
+        stdout: JSON.stringify([
+          reportedBind({ key: "X", arg: `${launcher.join(" ")} --dictation cancel` }),
+        ]),
+      };
     return { stdout: JSON.stringify(existing) };
   });
   const onError = vi.fn();
@@ -148,7 +160,8 @@ describe("dictation phase 6 fence: Hyprland session binds", () => {
     await binds.setSessionActive(true);
     await binds.setSessionActive(false);
     expect(execute.mock.calls.at(-1)).toEqual(["hyprctl", ["--batch", UNBIND_BATCH]]);
-    expect(execute).toHaveBeenCalledTimes(4);
+    // Status and binds read, the bind batch, the binds read again, the unbind batch.
+    expect(execute).toHaveBeenCalledTimes(5);
   });
 
   it("dictation phase 6 AC5: app quit during a session unbinds the six Alt keys", async () => {
@@ -788,8 +801,9 @@ function makeStatefulHyprlang(config: ReadonlyArray<Record<string, unknown>>) {
   return {
     execute,
     binds: () => live,
-    reload: () => {
-      live = config.map((bind) => ({ ...bind }));
+    /** `changed` is the config as the file now says, when it was edited before the reload. */
+    reload: (changed: ReadonlyArray<Record<string, unknown>> = config) => {
+      live = changed.map((bind) => ({ ...bind }));
     },
   };
 }
@@ -867,5 +881,70 @@ describe("dictation session binds under a Lua config, across processes and faile
     await binds.setSessionActive(false);
     expect(writes().map(({ via }) => via)).toEqual(["eval", "eval", "eval"]);
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe("dictation session binds take the config's binds as Hyprland reports them", () => {
+  const RECORDER_CANCEL = reportedBind({
+    key: "X",
+    arg: "qs -c symmetria ipc call recorder cancel",
+  });
+  const makeSession = (hyprland: ReturnType<typeof makeStatefulHyprlang>) =>
+    createHyprlandSessionBinds({
+      env: HYPRLAND,
+      launcher: LAUNCHER,
+      socketPath: SOCKET_PATH,
+      resolveCommand: async () => null,
+      execute: hyprland.execute,
+    });
+  const remaining = (hyprland: ReturnType<typeof makeStatefulHyprlang>) =>
+    hyprland.binds().map(({ key, arg }) => ({ key, arg }));
+
+  it("snapshots every other combo at the first bind, even beside a bind shaped like its own", async () => {
+    // A user bind that runs the launcher's own words looks generated and is not restored; the
+    // recorder's bind on another combo must not be lost with it.
+    const hyprland = makeStatefulHyprlang([
+      reportedBind({ key: "S", arg: "/usr/bin/mesura-code --dictation mode clipboard" }),
+      RECORDER_CANCEL,
+    ]);
+    const binds = makeSession(hyprland);
+    await binds.setSessionActive(true);
+    await binds.setSessionActive(false);
+    expect(remaining(hyprland)).toEqual([
+      { key: "X", arg: "qs -c symmetria ipc call recorder cancel" },
+    ]);
+  });
+
+  it("leaves the reloaded config alone when a reload it missed already removed its binds", async () => {
+    const hyprland = makeStatefulHyprlang([RECORDER_CANCEL]);
+    const binds = makeSession(hyprland);
+    await binds.setSessionActive(true);
+    // The config file changed and Hyprland reloaded it; the event socket did not report it.
+    hyprland.reload([reportedBind({ key: "X", arg: "qs -c symmetria ipc call recorder stop" })]);
+    await binds.setSessionActive(false);
+    expect(remaining(hyprland)).toEqual([
+      { key: "X", arg: "qs -c symmetria ipc call recorder stop" },
+    ]);
+  });
+});
+
+describe("dictation session binds under a Lua config, after a reload with two sessions", () => {
+  it("binds again only while no session that started later holds the keys", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const older = makeSwitchingBinds("lua");
+      await older.binds.setSessionActive(true);
+      vi.setSystemTime(2_000);
+      await older.binds.reapply();
+      const [first, again] = older.writes().map(({ text }) => text);
+      // Started at 1000, it binds over a holder that started no later, and so does its reapply.
+      for (const lua of [first, again])
+        expect(lua).toMatch(
+          /^local held = _G\.__mesura_dictation_binds if held == nil or held\.owner == ".+" or held\.startedAt <= 1000 then /,
+        );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
