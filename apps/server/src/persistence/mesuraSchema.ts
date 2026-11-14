@@ -95,6 +95,22 @@ export const MESURA_SCHEMA_STATEMENTS: ReadonlyArray<string> = [
     content_digest TEXT NOT NULL,
     PRIMARY KEY (call_id, batch_id)
   )`,
+  // MCP OAuth refresh tokens (`auth/McpRefreshTokens.ts`), stored only as SHA-256 hashes.
+  // `access` and `peer_link` restore the signed claims the `auth_sessions` row does not keep.
+  // `used_at` marks a rotated token; `replaced_by` is the hash of the token it was rotated into.
+  `CREATE TABLE IF NOT EXISTS mesura_mcp_refresh_tokens (
+    token_hash TEXT PRIMARY KEY NOT NULL,
+    session_id TEXT NOT NULL,
+    client_id_hash TEXT NOT NULL,
+    access TEXT NOT NULL,
+    peer_link INTEGER NOT NULL,
+    issued_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    replaced_by TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_mesura_mcp_refresh_tokens_session
+    ON mesura_mcp_refresh_tokens(session_id)`,
 ];
 
 export const ensureMesuraSchema = Effect.fn("ensureMesuraSchema")(function* () {

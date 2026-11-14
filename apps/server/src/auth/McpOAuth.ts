@@ -31,6 +31,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import type * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
+import * as McpRefreshTokens from "./McpRefreshTokens.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 import {
   base64UrlDecodeUtf8,
@@ -86,7 +87,7 @@ export const authorizationServerMetadata = (
   token_endpoint: `${urls.issuer}/oauth/mcp/token`,
   registration_endpoint: `${urls.issuer}/oauth/mcp/register`,
   response_types_supported: ["code"],
-  grant_types_supported: ["authorization_code"],
+  grant_types_supported: ["authorization_code", "refresh_token"],
   code_challenge_methods_supported: ["S256"],
   token_endpoint_auth_methods_supported: ["none"],
   scopes_supported: MCP_OAUTH_SCOPES,
@@ -145,6 +146,18 @@ export interface McpOAuthClient {
   readonly redirectUris: ReadonlyArray<string>;
   readonly peerLink: boolean;
 }
+
+/**
+ * Mesura: the grants a registration response lists. `refresh_token` only when the client asked
+ * for it: releases before the refresh grant decode `grant_types` as `["authorization_code"]` and
+ * would refuse the link otherwise. The token endpoint issues refresh tokens either way.
+ */
+export const registeredGrantTypes = (
+  metadata: AuthMcpClientRegistration,
+): ReadonlyArray<"authorization_code" | "refresh_token"> =>
+  metadata.grant_types?.includes("refresh_token") === true
+    ? ["authorization_code", "refresh_token"]
+    : ["authorization_code"];
 
 export class McpOAuthPageError extends Schema.TaggedError<McpOAuthPageError>()(
   "McpOAuthPageError",
@@ -237,6 +250,7 @@ export const redirectForError = (error: McpOAuthRedirectError, issuer: string) =
 
 const make = Effect.gen(function* () {
   const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
+  const refreshTokens = yield* McpRefreshTokens.McpRefreshTokens;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const crypto = yield* Crypto.Crypto;
   const signingKey = yield* secretStore
@@ -464,12 +478,83 @@ const make = Effect.gen(function* () {
       iss: authorization.issuer,
     });
 
+  const tokenResult = (
+    issued: { readonly token: string; readonly expiresAt: { readonly epochMilliseconds: number } },
+    access: AuthMcpClientAccess,
+    now: number,
+    refreshToken: string,
+  ): AuthMcpTokenResult => ({
+    access_token: issued.token,
+    token_type: "Bearer",
+    expires_in: Math.max(0, Math.floor((issued.expiresAt.epochMilliseconds - now) / 1000)),
+    scope: encodeOAuthScope(mcpClientScopes(access)),
+    refresh_token: refreshToken,
+  });
+
+  // An answer without a refresh token looks configured and dies with its access token, after
+  // the code is spent; failing lets the client sign in again now. The new session goes with it.
+  const issueRefreshToken = (
+    input: Parameters<typeof refreshTokens.issue>[0],
+    fail: (error: AuthMcpTokenError["error"], description: string) => AuthMcpTokenError,
+  ) =>
+    refreshTokens.issue(input).pipe(
+      Effect.catch((cause) =>
+        Effect.logError("Could not issue an MCP refresh token.", { cause }).pipe(
+          Effect.andThen(
+            environmentAuth.revokeSession(input.sessionId).pipe(
+              Effect.catch((revokeCause) =>
+                Effect.logError("Could not revoke an MCP session left without a refresh token.", {
+                  cause: revokeCause,
+                }),
+              ),
+            ),
+          ),
+          Effect.andThen(Effect.fail(fail("invalid_grant", "The session could not be issued."))),
+        ),
+      ),
+    );
+
+  const renewWithRefreshToken = Effect.fn("McpOAuth.renewWithRefreshToken")(function* (
+    refreshToken: string,
+    clientId: string,
+    fail: (error: AuthMcpTokenError["error"], description: string) => AuthMcpTokenError,
+  ) {
+    const renewed = yield* refreshTokens.renew({ refreshToken, clientId }).pipe(
+      Effect.catchTags({
+        McpRefreshTokenRejectedError: () =>
+          Effect.fail(fail("invalid_grant", "The refresh token is invalid or expired.")),
+        McpRefreshTokenStoreError: (cause) =>
+          Effect.logError("Could not renew an MCP client session.", { cause }).pipe(
+            Effect.andThen(Effect.fail(fail("invalid_grant", "The session could not be renewed."))),
+          ),
+      }),
+    );
+    const now = yield* Clock.currentTimeMillis;
+    return tokenResult(renewed, renewed.access, now, renewed.refreshToken);
+  });
+
   const exchangeCode: McpOAuth["Service"]["exchangeCode"] = Effect.fn("McpOAuth.exchangeCode")(
     function* ({ request, urls, token }) {
       const fail = (error: AuthMcpTokenError["error"], description: string) =>
         new AuthMcpTokenError({ error, error_description: description });
+      if (token.grant_type === "refresh_token") {
+        // Mesura: the refresh grant; see McpRefreshTokens.ts.
+        if (!token.refresh_token || !token.client_id) {
+          return yield* fail("invalid_request", "refresh_token and client_id are required.");
+        }
+        if (parseClientId(token.client_id) === undefined) {
+          return yield* fail("invalid_client", "The client is unknown.");
+        }
+        if (!sameResource(urls, token.resource)) {
+          return yield* fail("invalid_grant", "The refresh token is invalid or expired.");
+        }
+        return yield* renewWithRefreshToken(token.refresh_token, token.client_id, fail);
+      }
       if (token.grant_type !== "authorization_code") {
-        return yield* fail("unsupported_grant_type", "Only authorization_code is supported.");
+        return yield* fail(
+          "unsupported_grant_type",
+          "Only authorization_code and refresh_token are supported.",
+        );
       }
       const { code, redirect_uri: redirectUri, client_id: clientId } = token;
       const verifier = token.code_verifier;
@@ -518,12 +603,16 @@ const make = Effect.gen(function* () {
             ),
           ),
         );
-      return {
-        access_token: issued.token,
-        token_type: "Bearer",
-        expires_in: Math.max(0, Math.floor((issued.expiresAt.epochMilliseconds - now) / 1000)),
-        scope: encodeOAuthScope(mcpClientScopes(pending.access)),
-      };
+      const refreshToken = yield* issueRefreshToken(
+        {
+          sessionId: issued.sessionId,
+          access: pending.access,
+          peerLink: pending.peerLink,
+          clientId,
+        },
+        fail,
+      );
+      return tokenResult(issued, pending.access, now, refreshToken);
     },
   );
 

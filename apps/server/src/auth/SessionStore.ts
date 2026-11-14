@@ -387,6 +387,17 @@ export class SessionStore extends Context.Service<
       readonly replaceActiveForSubjectAndMethod?: boolean;
       readonly replaceSessionId?: AuthSessionId;
     }) => Effect.Effect<IssuedSession, SessionCredentialInternalError>;
+    /**
+     * Mesura: signs a new token for an existing, unrevoked session and moves the row's expiry to
+     * it. The session keeps its id, subject, scopes and method; `issue` always mints a new id.
+     * It signs no proof-key binding, so it serves bearer sessions only (the MCP refresh grant).
+     */
+    readonly reissue: (input: {
+      readonly sessionId: AuthSessionId;
+      readonly ttl: Duration.Duration;
+      readonly runtimeModeCeiling?: RuntimeMode;
+      readonly peerLink?: boolean;
+    }) => Effect.Effect<IssuedSession, SessionCredentialError>;
     readonly verify: (token: string) => Effect.Effect<VerifiedSession, SessionCredentialError>;
     readonly issueWebSocketToken: (
       sessionId: AuthSessionId,
@@ -668,6 +679,24 @@ const make = Effect.gen(function* () {
     );
 
   const encodeClaims = Schema.encodeEffect(Schema.fromJsonString(SessionClaims));
+  const signClaims = (claims: SessionClaims) =>
+    encodeClaims(claims).pipe(
+      Effect.map(base64UrlEncode),
+      Effect.map(
+        (encodedPayload) => `${encodedPayload}.${signPayload(encodedPayload, signingSecret)}`,
+      ),
+      Effect.mapError(
+        (cause) =>
+          new SessionCredentialIssueError({
+            sessionId: claims.sid,
+            cause: new SessionClaimsEncodingError({
+              sessionId: claims.sid,
+              operation: "encode_session_claims",
+              cause,
+            }),
+          }),
+      ),
+    );
   const issue: SessionStore["Service"]["issue"] = Effect.fn("SessionStore.issue")(
     function* (input) {
       const sessionId = AuthSessionId.make(
@@ -693,21 +722,7 @@ const make = Effect.gen(function* () {
         exp: expiresAt.epochMilliseconds,
       };
 
-      const encodedPayload = yield* encodeClaims(claims).pipe(
-        Effect.map(base64UrlEncode),
-        Effect.mapError(
-          (cause) =>
-            new SessionCredentialIssueError({
-              sessionId,
-              cause: new SessionClaimsEncodingError({
-                sessionId,
-                operation: "encode_session_claims",
-                cause,
-              }),
-            }),
-        ),
-      );
-      const signature = signPayload(encodedPayload, signingSecret);
+      const token = yield* signClaims(claims);
       const client = input?.client ?? createDefaultClientMetadata();
       const sessionRecord = {
         sessionId,
@@ -765,12 +780,70 @@ const make = Effect.gen(function* () {
 
       return {
         sessionId,
-        token: `${encodedPayload}.${signature}`,
+        token,
         method: claims.method,
         client,
         expiresAt: expiresAt,
         scopes: claims.scopes,
         ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
+      } satisfies IssuedSession;
+    },
+  );
+
+  const reissue: SessionStore["Service"]["reissue"] = Effect.fn("SessionStore.reissue")(
+    function* (input) {
+      const { sessionId } = input;
+      const row = yield* authSessions
+        .getById({ sessionId })
+        .pipe(Effect.mapError((cause) => new SessionCredentialIssueError({ sessionId, cause })));
+      if (Option.isNone(row)) {
+        return yield* new UnknownSessionTokenError({ sessionId });
+      }
+      if (row.value.revokedAt !== null) {
+        return yield* new SessionTokenRevokedError({ sessionId, revokedAt: row.value.revokedAt });
+      }
+      const issuedAt = yield* DateTime.now;
+      const expiresAt = DateTime.add(issuedAt, { milliseconds: Duration.toMillis(input.ttl) });
+      const token = yield* signClaims({
+        v: 1,
+        kind: "session",
+        sid: sessionId,
+        sub: row.value.subject,
+        scopes: row.value.scopes,
+        method: row.value.method,
+        ...(input.runtimeModeCeiling ? { rtc: input.runtimeModeCeiling } : {}),
+        ...(input.peerLink === true ? { plk: 1 as const } : {}),
+        iat: issuedAt.epochMilliseconds,
+        exp: expiresAt.epochMilliseconds,
+      });
+      const extended = yield* authSessions
+        .extend({ sessionId, expiresAt })
+        .pipe(Effect.mapError((cause) => new SessionCredentialIssueError({ sessionId, cause })));
+      if (!extended) {
+        return yield* new SessionTokenRevokedError({ sessionId, revokedAt: issuedAt });
+      }
+      const client = toClientMetadata(row.value.client);
+      const connected = (yield* Ref.get(connectedSessionsRef)).has(sessionId);
+      yield* emitUpsert(
+        toAuthClientSession({
+          sessionId,
+          subject: row.value.subject,
+          scopes: row.value.scopes,
+          method: row.value.method,
+          client,
+          issuedAt: row.value.issuedAt,
+          expiresAt,
+          lastConnectedAt: row.value.lastConnectedAt,
+          connected,
+        }),
+      );
+      return {
+        sessionId,
+        token,
+        method: row.value.method,
+        client,
+        expiresAt,
+        scopes: row.value.scopes,
       } satisfies IssuedSession;
     },
   );
@@ -1100,6 +1173,7 @@ const make = Effect.gen(function* () {
     cookieName,
     legacyCookieName,
     issue,
+    reissue,
     verify,
     issueWebSocketToken,
     verifyWebSocketToken,
