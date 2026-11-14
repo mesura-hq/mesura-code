@@ -844,6 +844,8 @@ describe("dictation session binds under a Lua config, across processes and faile
     await binds.setSessionActive(true);
     await binds.setSessionActive(false);
     const [start, end] = writes().map(({ text }) => text);
+    // The operator's keybindings.lua guards its recorder keys on this exact global.
+    expect(start).toMatch(/^.* _G\.__mesura_dictation_binds = \{ owner = /);
     expect(start).toContain(`owner = "${SOCKET_PATH}"`);
     // Another process that started later replaced the owner, and keeps its keys.
     expect(end).toMatch(

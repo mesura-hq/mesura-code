@@ -211,9 +211,9 @@ function unbindCommands(saved: ReadonlyArray<SavedBind>): ReadonlyArray<KeywordC
 }
 
 /**
- * The Lua global holding the session's bind handles and the socket of the process that owns them.
- * They sit beside the config's binds and leave by handle: `hyprctl -j binds` reports a Lua callback
- * as an opaque id, so an unbound config bind could not come back. Both fire; Symmetria's idle ones no-op.
+ * The session's bind handles and owning socket. The operator's Hyprland config reads this name: its
+ * recorder binds on Alt+Space and Alt+X do nothing while it is set, so a rename breaks them. The
+ * handles sit beside the config's binds, because a Lua callback cannot be unbound and bound again.
  */
 const LUA_BINDS_GLOBAL = "__mesura_dictation_binds";
 
