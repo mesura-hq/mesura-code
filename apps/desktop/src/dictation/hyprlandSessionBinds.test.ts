@@ -748,3 +748,122 @@ describe("dictation session binds after a Hyprland config reload", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * A Hyprlang compositor that keeps its binds: `unbind ALT,<key>` deletes every bind on the combo,
+ * `bind…` adds one, and `reload()` puts the config's binds back, as Hyprland 0.56.2 does.
+ */
+function makeStatefulHyprlang(config: ReadonlyArray<Record<string, unknown>>) {
+  let live = config.map((bind) => ({ ...bind }));
+  const apply = (keyword: string, value: string) => {
+    const [, key, ...rest] = value.split(",");
+    if (keyword === "unbind") live = live.filter((bind) => bind.key !== key);
+    else if (keyword.startsWith("bind")) {
+      // The flag letters follow `bind`, whose own letters include a `d`.
+      const described = keyword.slice("bind".length).includes("d");
+      const description = described ? rest.shift()! : "";
+      const [dispatcher, ...arg] = rest;
+      live.push(
+        reportedBind({
+          key,
+          dispatcher,
+          arg: arg.join(","),
+          has_description: described,
+          description,
+        }),
+      );
+    }
+  };
+  const execute = vi.fn(async (_file: string, args: ReadonlyArray<string>) => {
+    if (args[0] === "-j" && args[1] === "status") return { stdout: "{}" };
+    if (args[0] === "-j") return { stdout: JSON.stringify(live) };
+    if (args[0] === "--batch")
+      for (const line of args[1]!.split(" ; ")) {
+        const [, keyword, ...value] = line.split(" ");
+        apply(keyword!, value.join(" "));
+      }
+    else if (args[0] === "keyword") apply(args[1]!, args[2]!);
+    return { stdout: "ok" };
+  });
+  return {
+    execute,
+    binds: () => live,
+    reload: () => {
+      live = config.map((bind) => ({ ...bind }));
+    },
+  };
+}
+
+describe("dictation session binds keep the config's binds across a reload", () => {
+  const RECORDER_CANCEL = reportedBind({
+    key: "X",
+    arg: "qs -c symmetria ipc call recorder cancel",
+  });
+
+  it("restores the config's bind when a second bind found its own binds still in place", async () => {
+    // The reload landed before the first bind ran, so the reapply it queued finds this session's
+    // binds, not the config's, and must not take them for the config's.
+    const hyprland = makeStatefulHyprlang([RECORDER_CANCEL]);
+    const binds = createHyprlandSessionBinds({
+      env: HYPRLAND,
+      launcher: LAUNCHER,
+      socketPath: SOCKET_PATH,
+      resolveCommand: async () => null,
+      execute: hyprland.execute,
+    });
+    await binds.setSessionActive(true);
+    await binds.reapply();
+    await binds.setSessionActive(false);
+    expect(hyprland.binds().map(({ key, arg }) => ({ key, arg }))).toEqual([
+      { key: "X", arg: "qs -c symmetria ipc call recorder cancel" },
+    ]);
+  });
+
+  it("takes a new snapshot after a real reload, and still restores the config's bind", async () => {
+    const hyprland = makeStatefulHyprlang([RECORDER_CANCEL]);
+    const binds = createHyprlandSessionBinds({
+      env: HYPRLAND,
+      launcher: LAUNCHER,
+      socketPath: SOCKET_PATH,
+      resolveCommand: async () => null,
+      execute: hyprland.execute,
+    });
+    await binds.setSessionActive(true);
+    hyprland.reload();
+    await binds.reapply();
+    await binds.setSessionActive(false);
+    expect(hyprland.binds().map(({ key, arg }) => ({ key, arg }))).toEqual([
+      { key: "X", arg: "qs -c symmetria ipc call recorder cancel" },
+    ]);
+  });
+});
+
+describe("dictation session binds under a Lua config, across processes and failed reads", () => {
+  it("removes the keys at session end only while this process still owns them", async () => {
+    const { binds, writes } = makeSwitchingBinds("lua");
+    await binds.setSessionActive(true);
+    await binds.setSessionActive(false);
+    const [start, end] = writes().map(({ text }) => text);
+    expect(start).toContain(`owner = "${SOCKET_PATH}"`);
+    // Another process that started later replaced the owner, and keeps its keys.
+    expect(end).toMatch(
+      new RegExp(
+        `^if \\(_G\\.__mesura_dictation_binds or \\{\\}\\)\\.owner == "${SOCKET_PATH}" then `,
+      ),
+    );
+  });
+
+  it("stays on Lua when the provider read fails after Lua was reported", async () => {
+    const { binds, execute, writes, onError } = makeSwitchingBinds("lua");
+    await binds.setSessionActive(true);
+    const answer = execute.getMockImplementation()!;
+    execute.mockImplementation(async (file, args) => {
+      if (args[0] === "-j" && args[1] === "status") throw new Error("hyprctl timed out");
+      return answer(file, args);
+    });
+    await binds.reapply();
+    await binds.setSessionActive(false);
+    expect(writes().map(({ via }) => via)).toEqual(["eval", "eval", "eval"]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+});

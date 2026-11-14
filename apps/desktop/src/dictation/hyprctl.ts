@@ -99,24 +99,41 @@ export async function runKeywordCommands(
 export type HyprlandConfigProvider = "hyprlang" | "lua";
 
 /**
- * Read on each use, because a config migrated while the app runs switches the provider at the
- * next reload. `hyprctl -j status` names it since Hyprland 0.57; an older Hyprland answers
- * `unknown request` and reads Hyprlang.
+ * What `hyprctl -j status` says, or `null` when the read failed and says nothing. It names the
+ * provider since Hyprland 0.57; an older Hyprland answers `unknown request` and reads Hyprlang.
  */
-export async function readHyprlandConfigProvider(
+async function readReportedConfigProvider(
   execute: HyprctlExecute,
-): Promise<HyprlandConfigProvider> {
+): Promise<HyprlandConfigProvider | null> {
+  let stdout: string;
   try {
-    const output = await execute("hyprctl", ["-j", "status"]);
-    const status: unknown = JSON.parse(output?.stdout ?? "");
-    return typeof status === "object" &&
-      status !== null &&
-      (status as Record<string, unknown>).configProvider === "lua"
-      ? "lua"
-      : "hyprlang";
+    stdout = (await execute("hyprctl", ["-j", "status"]))?.stdout ?? "";
   } catch {
-    return "hyprlang";
+    return null;
   }
+  if (stdout.trim() === "unknown request") return "hyprlang";
+  try {
+    const status: unknown = JSON.parse(stdout);
+    if (typeof status !== "object" || status === null) return null;
+    return (status as Record<string, unknown>).configProvider === "lua" ? "lua" : "hyprlang";
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads the provider on each use, because a config migrated while the app runs switches it at
+ * the next reload. A failed read keeps the last provider Hyprland reported: guessing Hyprlang on
+ * a Lua config would send keywords it rejects.
+ */
+export function createHyprlandConfigProviderReader(
+  execute: HyprctlExecute,
+): () => Promise<HyprlandConfigProvider> {
+  let last: HyprlandConfigProvider | null = null;
+  return async () => {
+    last = (await readReportedConfigProvider(execute)) ?? last;
+    return last ?? "hyprlang";
+  };
 }
 
 /**
@@ -162,8 +179,12 @@ export async function runLuaEval(
 }
 
 /**
- * Calls `method` with `args` on every handle in a Lua global table, then clears it. A handle a
- * reload made stale fails inside `pcall` and is skipped.
+ * Calls `method` with `args` on every handle in the Lua table `handles` evaluates to, if any. A
+ * handle a reload made stale fails inside `pcall` and is skipped.
  */
-export const releaseLuaHandles = (global: string, method: string, ...args: ReadonlyArray<string>) =>
-  `for _, handle in ipairs(_G.${global} or {}) do pcall(${[`handle.${method}`, "handle", ...args].join(", ")}) end _G.${global} = nil`;
+export const releaseLuaHandles = (
+  handles: string,
+  method: string,
+  ...args: ReadonlyArray<string>
+) =>
+  `for _, handle in ipairs(${handles} or {}) do pcall(${[`handle.${method}`, "handle", ...args].join(", ")}) end`;

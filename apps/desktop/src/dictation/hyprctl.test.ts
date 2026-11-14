@@ -5,7 +5,7 @@
  */
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { luaString, readHyprlandConfigProvider, runLuaEval } from "./hyprctl.ts";
+import { createHyprlandConfigProviderReader, luaString, runLuaEval } from "./hyprctl.ts";
 
 const exitSeven = (stdout: string) =>
   Object.assign(new Error("Command failed: hyprctl eval"), { code: 7, stdout });
@@ -13,19 +13,32 @@ const exitSeven = (stdout: string) =>
 describe("hyprctl under a Lua config", () => {
   it("reads the provider from hyprctl -j status", async () => {
     const execute = vi.fn(async () => ({ stdout: '{"configProvider": "lua", "backend": "drm"}' }));
-    await expect(readHyprlandConfigProvider(execute)).resolves.toBe("lua");
+    await expect(createHyprlandConfigProviderReader(execute)()).resolves.toBe("lua");
     expect(execute).toHaveBeenCalledWith("hyprctl", ["-j", "status"]);
   });
 
-  it("treats a Hyprland without status, or a failed read, as Hyprlang", async () => {
-    await expect(
-      readHyprlandConfigProvider(async () => ({ stdout: "unknown request" })),
-    ).resolves.toBe("hyprlang");
-    await expect(
-      readHyprlandConfigProvider(async () => {
-        throw new Error("spawn hyprctl ENOENT");
-      }),
-    ).resolves.toBe("hyprlang");
+  it("treats a Hyprland without status as Hyprlang", async () => {
+    const read = createHyprlandConfigProviderReader(async () => ({ stdout: "unknown request" }));
+    await expect(read()).resolves.toBe("hyprlang");
+  });
+
+  it("keeps the last reported provider when a later read fails", async () => {
+    const replies: Array<() => { stdout: string }> = [
+      () => ({ stdout: '{"configProvider": "lua"}' }),
+      () => {
+        throw new Error("hyprctl timed out");
+      },
+      () => ({ stdout: "{ truncated" }),
+    ];
+    const read = createHyprlandConfigProviderReader(async () => replies.shift()!());
+    expect([await read(), await read(), await read()]).toEqual(["lua", "lua", "lua"]);
+  });
+
+  it("assumes Hyprlang when no read has ever succeeded", async () => {
+    const read = createHyprlandConfigProviderReader(async () => {
+      throw new Error("spawn hyprctl ENOENT");
+    });
+    await expect(read()).resolves.toBe("hyprlang");
   });
 
   it("reports an eval that Hyprland refused, from the output of its non-zero exit", async () => {

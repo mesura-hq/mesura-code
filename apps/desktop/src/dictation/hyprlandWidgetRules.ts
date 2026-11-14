@@ -10,7 +10,7 @@ import {
   luaString,
   luaTable,
   luaValue,
-  readHyprlandConfigProvider,
+  createHyprlandConfigProviderReader,
   releaseLuaHandles,
   runKeywordCommands,
   runLuaEval,
@@ -27,8 +27,9 @@ import {
 const RULE_NAME = "mesura-dictation-widget";
 
 /**
- * Under a Lua config the rules are anonymous `hl.window_rule` handles kept in this global, and a
- * new apply disables the previous ones, whichever process made them.
+ * Under a Lua config the rules are named `hl.window_rule` handles kept in this global. A new apply
+ * disables the previous ones, whichever process made them; a name sent again is reused and
+ * enabled, so only the rule of a monitor that went away stays disabled.
  */
 const LUA_RULES_GLOBAL = "__mesura_dictation_widget_rules";
 
@@ -116,11 +117,12 @@ export function hyprlandWidgetRuleLua(input: {
   const rules = widgetRules(input).map(
     (rule) =>
       `hl.window_rule(${luaTable([
+        ["name", luaString(rule.name)],
         ["match", luaTable(rule.match.map(([field, value]) => [field, luaString(value)] as const))],
         ...rule.effects.map(([effect, value]) => [effect, luaValue(value)] as const),
       ])})`,
   );
-  return `${releaseLuaHandles(LUA_RULES_GLOBAL, "set_enabled", "false")} _G.${LUA_RULES_GLOBAL} = { ${rules.join(", ")} }`;
+  return `${releaseLuaHandles(`_G.${LUA_RULES_GLOBAL}`, "set_enabled", "false")} _G.${LUA_RULES_GLOBAL} = { ${rules.join(", ")} }`;
 }
 
 /** Every monitor in `hyprctl -j monitors` with its reserved bottom; throws on bad output. */
@@ -149,6 +151,7 @@ export function createHyprlandWidgetRules(input: {
   readonly reapply: () => Promise<void>;
 } {
   const enabled = isHyprlandSession(input.env);
+  const readConfigProvider = createHyprlandConfigProviderReader(input.execute);
   let applied: Promise<void> | null = null;
 
   const run = async () => {
@@ -162,7 +165,7 @@ export function createHyprlandWidgetRules(input: {
       input.onError?.(cause);
     }
     const rejections =
-      (await readHyprlandConfigProvider(input.execute)) === "lua"
+      (await readConfigProvider()) === "lua"
         ? await runLuaEval(input.execute, hyprlandWidgetRuleLua({ monitors }))
         : await runKeywordCommands(input.execute, hyprlandWidgetRuleCommands({ monitors }));
     if (rejections.length > 0) throw new Error(rejections.join("; "));

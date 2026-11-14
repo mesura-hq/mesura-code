@@ -316,6 +316,9 @@ describe("dictation widget rules under a Lua config", () => {
     ])
       expect(lua).toContain(effect);
     expect(lua).toContain(`match = { title = "${TITLE_PATTERN}", workspace = "m[eDP-1]" }`);
+    // Named, so Hyprland reuses the rule on the next apply instead of keeping a disabled copy.
+    expect(lua).toContain('hl.window_rule({ name = "mesura-dictation-widget", match = ');
+    expect(lua).toContain('hl.window_rule({ name = "mesura-dictation-widget-eDP-1", match = ');
   });
 
   it("disables the rules a previous apply left before adding its own", async () => {
