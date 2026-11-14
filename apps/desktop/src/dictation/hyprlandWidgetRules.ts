@@ -7,18 +7,30 @@ import {
 import {
   generatedKeyword,
   isHyprlandSession,
+  luaString,
+  luaTable,
+  luaValue,
+  createHyprlandConfigProviderReader,
   runKeywordCommands,
+  runLuaEval,
   type HyprctlExecute,
   type KeywordCommand,
 } from "./hyprctl.ts";
 
 /**
  * Applied at runtime so no dotfile carries them: Hyprland ignores a Wayland client's position and
- * size unless a rule floats it. Named rules (`windowrule[name]:effect value`), because a second
- * process then replaces the keys; anonymous runtime rules stack until a reload, and Hyprland
- * 0.56.2 cannot remove one.
+ * size unless a rule floats it. Under Hyprlang they are named rules (`windowrule[name]:effect
+ * value`), because a second process then replaces the keys; anonymous runtime rules stack until a
+ * reload, and Hyprland 0.56.2 cannot remove one.
  */
 const RULE_NAME = "mesura-dictation-widget";
+
+/**
+ * Under a Lua config the rules are anonymous `hl.window_rule` handles in this global, keyed by
+ * their Lua text and kept while disabled. An apply enables the ones it sends and disables the rest:
+ * Hyprland 0.57.1 appends a named rule's effects each time it is sent, and keeps every anonymous one.
+ */
+const LUA_RULES_GLOBAL = "__mesura_dictation_widget_rules";
 
 /** A monitor as far as placement reads it: its name and its reserved bottom edge. */
 export interface WidgetMonitor {
@@ -43,36 +55,79 @@ const moveToBottomCentre = (reservedBottom: number) =>
     WIDGET_BOTTOM_MARGIN + reservedBottom
   })`;
 
+type RuleValue = string | number | boolean;
+
+/** One rule as both config languages write it: what it matches, then its effects in order. */
+interface WidgetRule {
+  readonly name: string;
+  readonly match: ReadonlyArray<readonly [field: string, value: string]>;
+  readonly effects: ReadonlyArray<readonly [effect: string, value: RuleValue]>;
+}
+
+function widgetRules(input: { readonly monitors: ReadonlyArray<WidgetMonitor> }): WidgetRule[] {
+  const title: readonly [string, string] = ["title", `^(${DICTATION_WIDGET_TITLE})$`];
+  return [
+    {
+      name: RULE_NAME,
+      match: [title],
+      effects: [
+        ["float", true],
+        ["pin", true],
+        ["no_initial_focus", true],
+        ["no_focus", true],
+        ["border_size", 0],
+        ["rounding", 0],
+        ["no_shadow", true],
+        ["no_blur", true],
+        ["size", `${WIDGET_WIDTH} ${WIDGET_HEIGHT}`],
+        ["move", moveToBottomCentre(0)],
+      ],
+    },
+    ...input.monitors
+      .filter((monitor) => SELECTABLE_MONITOR.test(monitor.name))
+      .map((monitor) => ({
+        name: `${RULE_NAME}-${monitor.name}`,
+        match: [title, ["workspace", `m[${monitor.name}]`] as const],
+        effects: [["move", moveToBottomCentre(monitor.reservedBottom)] as const],
+      })),
+  ];
+}
+
+const hyprlangValue = (value: RuleValue) =>
+  typeof value === "boolean" ? (value ? "on" : "off") : String(value);
+
 export function hyprlandWidgetRuleCommands(input: {
   readonly monitors: ReadonlyArray<WidgetMonitor>;
 }): ReadonlyArray<KeywordCommand> {
-  const title = `^(${DICTATION_WIDGET_TITLE})$`;
-  const key = (rule: string, name: string, value: string) =>
-    generatedKeyword(`windowrule[${rule}]:${name}`, value);
-  const base = (name: string, value: string) => key(RULE_NAME, name, value);
+  return widgetRules(input).flatMap((rule) => {
+    const key = (name: string, value: string) =>
+      generatedKeyword(`windowrule[${rule.name}]:${name}`, value);
+    return [
+      ...rule.match.map(([field, value]) => key(`match:${field}`, value)),
+      ...rule.effects.map(([effect, value]) => key(effect, hyprlangValue(value))),
+    ];
+  });
+}
+
+/** The same rules for a Lua config, reusing the ones a previous apply left, from any process. */
+export function hyprlandWidgetRuleLua(input: {
+  readonly monitors: ReadonlyArray<WidgetMonitor>;
+}): string {
+  const rules = widgetRules(input).map((rule) => {
+    const call = `hl.window_rule(${luaTable([
+      ["match", luaTable(rule.match.map(([field, value]) => [field, luaString(value)] as const))],
+      ...rule.effects.map(([effect, value]) => [effect, luaValue(value)] as const),
+    ])})`;
+    return `rule(${luaString(call)}, function() return ${call} end)`;
+  });
   return [
-    base("match:title", title),
-    base("float", "on"),
-    base("pin", "on"),
-    base("no_initial_focus", "on"),
-    base("no_focus", "on"),
-    base("border_size", "0"),
-    base("rounding", "0"),
-    base("no_shadow", "on"),
-    base("no_blur", "on"),
-    base("size", `${WIDGET_WIDTH} ${WIDGET_HEIGHT}`),
-    base("move", moveToBottomCentre(0)),
-    ...input.monitors
-      .filter((monitor) => SELECTABLE_MONITOR.test(monitor.name))
-      .flatMap((monitor) => {
-        const rule = `${RULE_NAME}-${monitor.name}`;
-        return [
-          key(rule, "match:title", title),
-          key(rule, "match:workspace", `m[${monitor.name}]`),
-          key(rule, "move", moveToBottomCentre(monitor.reservedBottom)),
-        ];
-      }),
-  ];
+    `local registry = _G.${LUA_RULES_GLOBAL} or {} local sent = {}`,
+    "local function rule(key, make) sent[key] = true local handle = registry[key]",
+    "if not (handle and pcall(handle.set_enabled, handle, true)) then registry[key] = make() end end",
+    ...rules,
+    "for key, handle in pairs(registry) do if not sent[key] then pcall(handle.set_enabled, handle, false) end end",
+    `_G.${LUA_RULES_GLOBAL} = registry`,
+  ].join(" ");
 }
 
 /** Every monitor in `hyprctl -j monitors` with its reserved bottom; throws on bad output. */
@@ -95,12 +150,13 @@ export function createHyprlandWidgetRules(input: {
 }): {
   /** Whether this process runs under Hyprland, the only place the rules go. */
   readonly enabled: boolean;
-  /** Applies the rules once per process; never rejects, and logs what fails. */
+  /** Applies the rules once per process; never rejects, and logs what fails. A failure is not kept. */
   readonly apply: () => Promise<void>;
   /** Sends the rules again, with the monitors read again: a config reload dropped them. */
   readonly reapply: () => Promise<void>;
 } {
   const enabled = isHyprlandSession(input.env);
+  const readConfigProvider = createHyprlandConfigProviderReader(input.execute);
   let applied: Promise<void> | null = null;
 
   const run = async () => {
@@ -113,16 +169,20 @@ export function createHyprlandWidgetRules(input: {
     } catch (cause) {
       input.onError?.(cause);
     }
-    const rejections = await runKeywordCommands(
-      input.execute,
-      hyprlandWidgetRuleCommands({ monitors }),
-    );
-    if (rejections.length > 0) input.onError?.(new Error(rejections.join("; ")));
+    const rejections =
+      (await readConfigProvider()) === "lua"
+        ? await runLuaEval(input.execute, hyprlandWidgetRuleLua({ monitors }))
+        : await runKeywordCommands(input.execute, hyprlandWidgetRuleCommands({ monitors }));
+    if (rejections.length > 0) throw new Error(rejections.join("; "));
   };
 
   const apply = () => {
     if (!enabled) return Promise.resolve();
-    applied ??= run().catch((cause: unknown) => input.onError?.(cause));
+    // Only a success is kept, so the next config reload sends rejected rules again.
+    applied ??= run().catch((cause: unknown) => {
+      applied = null;
+      input.onError?.(cause);
+    });
     return applied;
   };
 

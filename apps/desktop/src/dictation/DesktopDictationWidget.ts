@@ -89,27 +89,6 @@ export const make = Effect.gen(function* () {
       ),
   });
 
-  if (widgetRules.enabled) {
-    yield* Effect.acquireRelease(
-      Effect.sync(() =>
-        watchHyprlandConfigReloads({
-          env: process.env,
-          onReload: () => void widgetRules.reapply(),
-          onError: (cause) =>
-            runFork(
-              logWarning(
-                "the Hyprland event socket closed; a config reload drops the widget rules",
-                {
-                  message: causeMessage(cause),
-                },
-              ),
-            ),
-        }),
-      ),
-      (stop) => Effect.sync(stop),
-    );
-  }
-
   const widgetUrl = `${getDesktopUrl(environment.isDevelopment)}${WIDGET_PAGE_QUERY}`;
   const widget = createDictationWidgetWindow({
     createWindow: (options) => {
@@ -161,6 +140,31 @@ export const make = Effect.gen(function* () {
       ),
   });
 
+  if (widgetRules.enabled) {
+    yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        watchHyprlandConfigReloads({
+          env: process.env,
+          // A reload drops every runtime rule and bind, the session's keys included.
+          onReload: () => {
+            void widgetRules.reapply();
+            void binds.reapply();
+          },
+          onError: (cause) =>
+            runFork(
+              logWarning(
+                "the Hyprland event socket closed; a config reload drops the widget rules and dictation keys",
+                {
+                  message: causeMessage(cause),
+                },
+              ),
+            ),
+        }),
+      ),
+      (stop) => Effect.sync(stop),
+    );
+  }
+
   const runPromise = Effect.runPromiseWith(context);
   const sessionKeys = createDictationSessionKeys({
     binds,
@@ -183,7 +187,9 @@ export const make = Effect.gen(function* () {
     setImmediate(() => widget.setFocusedWindow(Electron.BrowserWindow.getFocusedWindow()));
   yield* electronApp.on("browser-window-focus", syncFocus);
   yield* electronApp.on("browser-window-blur", syncFocus);
-  yield* electronApp.on("before-quit", () => void sessionKeys.dispose());
+  // `binds.dispose` runs a bind removal that failed at session end once more.
+  const disposeKeys = () => sessionKeys.dispose().then(binds.dispose);
+  yield* electronApp.on("before-quit", () => void disposeKeys());
 
   /** The renderer that publishes; when it goes away its dictation goes with it. */
   const publishers = new Set<number>();
@@ -225,7 +231,7 @@ export const make = Effect.gen(function* () {
   // Runs before the socket's own finalizer, which was registered first: the binds are restored
   // and the socket closed in order, after any start still running.
   yield* Effect.addFinalizer(() =>
-    Effect.promise(() => sessionKeys.dispose()).pipe(Effect.andThen(Effect.sync(widget.dispose))),
+    Effect.promise(disposeKeys).pipe(Effect.andThen(Effect.sync(widget.dispose))),
   );
 
   return DesktopDictationWidget.of({});

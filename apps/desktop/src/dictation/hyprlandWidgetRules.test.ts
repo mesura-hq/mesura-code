@@ -257,7 +257,96 @@ describe("search unification phase 5 rework: placement per monitor", () => {
     await rules.apply();
     expect(moveOnMonitor(windowruleValues(), "HDMI-A-1")).toBe(moveTo(BOTTOM_MARGIN + 80));
     expect(moveOnMonitor(windowruleValues(), "eDP-1")).toBe(moveTo(BOTTOM_MARGIN + 30));
-    // One monitor read and one batch, however many monitors there are.
-    expect(execute.mock.calls.map(([, args]) => args[0])).toEqual(["-j", "--batch"]);
+    // One monitor read, one provider read and one batch, however many monitors there are.
+    expect(execute.mock.calls.map(([, args]) => (args[0] === "-j" ? args[1] : args[0]))).toEqual([
+      "monitors",
+      "status",
+      "--batch",
+    ]);
+  });
+});
+
+/**
+ * A Hyprland 0.57.1 with a Lua config, as the laptop runs since 2026-11-08: `keyword` and
+ * `--batch` print `unknown request` and exit 0, `eval` prints `ok`, or `error: …` with exit 7.
+ */
+function makeLuaRules(evalResult: () => string = () => "ok") {
+  const execute = vi.fn(async (_file: string, args: ReadonlyArray<string>) => {
+    if (args[0] === "-j" && args[1] === "status")
+      return { stdout: JSON.stringify({ configProvider: "lua", backend: "drm" }) };
+    if (args[0] === "-j" && args[1] === "monitors")
+      return { stdout: JSON.stringify([monitor({ reserved: [0, 36, 0, 0] })]) };
+    if (args[0] === "eval") {
+      const result = evalResult();
+      if (result.startsWith("error:"))
+        throw Object.assign(new Error("Command failed"), { code: 7, stdout: result });
+      return { stdout: result };
+    }
+    return { stdout: "unknown request" };
+  });
+  const onError = vi.fn();
+  const rules = createHyprlandWidgetRules({ env: HYPRLAND, execute, onError });
+  const evals = () =>
+    execute.mock.calls.filter(([, args]) => args[0] === "eval").map(([, args]) => args[1]!);
+  return { rules, execute, onError, evals };
+}
+
+describe("dictation widget rules under a Lua config", () => {
+  it("sends the whole rule through hyprctl eval, and no keyword Hyprland would reject", async () => {
+    const { rules, execute, onError, evals } = makeLuaRules();
+    await rules.apply();
+    expect(onError).not.toHaveBeenCalled();
+    expect(
+      execute.mock.calls.some(([, args]) => args[0] === "--batch" || args[0] === "keyword"),
+    ).toBe(false);
+    expect(evals()).toHaveLength(1);
+    const lua = evals()[0]!;
+    expect(lua).toContain(`match = { title = "${TITLE_PATTERN}" }`);
+    for (const effect of [
+      "float = true",
+      "pin = true",
+      "no_initial_focus = true",
+      "no_focus = true",
+      "border_size = 0",
+      "rounding = 0",
+      "no_shadow = true",
+      "no_blur = true",
+      'size = "440 64"',
+      `move = "${moveTo(BOTTOM_MARGIN)}"`,
+    ])
+      expect(lua).toContain(effect);
+    expect(lua).toContain(`match = { title = "${TITLE_PATTERN}", workspace = "m[eDP-1]" }`);
+    // Unnamed: Hyprland 0.57.1 appends a named rule's effects each time the name is sent.
+    expect(lua).not.toContain("name = ");
+  });
+
+  it("enables the rules it sends again instead of adding them, and disables the rest", async () => {
+    const { rules, evals } = makeLuaRules();
+    await rules.apply();
+    await rules.reapply();
+    expect(evals()).toHaveLength(2);
+    const keys = (lua: string) =>
+      [...lua.matchAll(/rule\("((?:[^"\\]|\\.)*)", function/g)].map((m) => m[1]);
+    const [first, second] = evals();
+    // The same rules are keyed the same way, so the second apply finds the first one's handles.
+    expect(keys(second!)).toEqual(keys(first!));
+    expect(second).toContain(
+      "if not (handle and pcall(handle.set_enabled, handle, true)) then registry[key] = make() end",
+    );
+    // Disabled rules stay in the registry, so a value that comes back finds its rule again.
+    expect(second).toContain(
+      "for key, handle in pairs(registry) do if not sent[key] then pcall(handle.set_enabled, handle, false) end end",
+    );
+    expect(second).toContain("_G.__mesura_dictation_widget_rules = registry");
+  });
+
+  it("logs a rule Hyprland refused, and sends it again on the next apply", async () => {
+    let result = "error: hl.window_rule: unknown field 'no_blur'";
+    const { rules, onError, evals } = makeLuaRules(() => result);
+    await rules.apply();
+    expect(onError).toHaveBeenCalledWith(new Error(result));
+    result = "ok";
+    await rules.apply();
+    expect(evals()).toHaveLength(2);
   });
 });
