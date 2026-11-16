@@ -444,3 +444,21 @@ it.layer(testLayer)("Mesura Factory lifecycle through the orchestrator", (it) =>
       }),
   );
 });
+
+it.layer(testLayer)("Mesura Factory import on a database upstream migrated", (it) => {
+  it.effect("imports v1 shells when upstream's migration 063 dropped the activity table", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make("thread:upstream-migrated-v1");
+      yield* seedLegacyMessages(threadId);
+      yield* sql`DROP TABLE projection_thread_activities`;
+
+      const result = yield* importer.reconcileShells;
+
+      assert.equal(result.importedThreadCount, 1);
+      assert.isDefined(yield* projections.getThreadShell(threadId));
+    }),
+  );
+});

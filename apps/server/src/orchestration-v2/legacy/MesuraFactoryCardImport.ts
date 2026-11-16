@@ -76,6 +76,11 @@ export const writeLegacyFactoryEvents = Effect.fn("MesuraFactoryCardImport.write
 export const importLegacyFactoryCards = Effect.fn("MesuraFactoryCardImport.import")(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* restoreMesuraFactoryMessagePositions();
+  // Upstream's migration 063 drops the activity table; a database it touched has no cards to import.
+  const activityTable = yield* sql`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'projection_thread_activities'
+  `;
+  if (activityTable.length === 0) return;
   const threads = yield* sql<{ readonly thread_id: string }>`
     SELECT DISTINCT activity.thread_id
     FROM projection_thread_activities AS activity
