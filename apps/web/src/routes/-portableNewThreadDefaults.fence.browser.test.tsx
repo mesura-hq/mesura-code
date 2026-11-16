@@ -190,7 +190,10 @@ vi.mock("../lib/utils", () => ({
   cn: (...classes: unknown[]) => classes.filter(Boolean).join(" "),
   isMacPlatform: () => false,
   isWindowsPlatform: () => false,
-  randomUUID: () => crypto.randomUUID(),
+  randomUUID: (() => {
+    let count = 0;
+    return () => `fence-uuid-${++count}`;
+  })(),
   newDraftId: () => "draft-from-index",
   newThreadId: () => "thread-from-index",
 }));

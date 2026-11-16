@@ -58,7 +58,9 @@ vi.mock("../../state/server", async () => {
   const Cause = await import("effect/Cause");
   const { appAtomRegistry } = await import("../../rpc/atomRegistry");
   const authState = Atom.make(AsyncResult.success<unknown>(null)).pipe(Atom.keepAlive);
-  const handoffState = Atom.make(AsyncResult.success<unknown>(null)).pipe(Atom.keepAlive);
+  const handoffState = Atom.make<AsyncResult.AsyncResult<unknown, Error>>(
+    AsyncResult.success(null),
+  ).pipe(Atom.keepAlive);
   fixture.authQuery = Object.assign(
     Atom.make((get) => get(authState)),
     { kind: "auth" } as const,
