@@ -1,4 +1,4 @@
-import { beforeEach } from "vite-plus/test";
+import { beforeAll, beforeEach } from "vite-plus/test";
 import { commands } from "vite-plus/test/browser";
 
 import { initializeI18n } from "../src/i18n/initializeI18n";
@@ -7,8 +7,15 @@ declare module "vite-plus/test/browser" {
   interface BrowserCommands {
     /** Defined in vite.config.ts. Moves Playwright's mouse off the page. */
     resetPointer: () => Promise<void>;
+    /** Defined in vite.config.ts. Runs a full GC in the test page's renderer. */
+    collectGarbage: () => Promise<void>;
   }
 }
+
+// Frees the previous files' module loads, which hold renderer fds until a GC.
+beforeAll(async () => {
+  await commands.collectGarbage();
+});
 
 // Playwright's mouse outlives each test and each file, so whatever the next test mounts
 // under its last position starts hovered. Registered here rather than in render() so tests

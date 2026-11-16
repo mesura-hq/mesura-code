@@ -153,6 +153,17 @@ const browserTestProject = {
         resetPointer: async ({ page }) => {
           await page.mouse.move(-1, -1);
         },
+        // WORKAROUND: each module a test iframe loads leaves a 2 MiB data-pipe fd in the renderer
+        // until a major GC, and near 16k fds Chromium drops the page's sockets mid-run.
+        // test/browserSetup.ts collects before each file. Remove once Vitest recycles pages.
+        collectGarbage: async ({ page }) => {
+          const session = await page.context().newCDPSession(page);
+          try {
+            await session.send("HeapProfiler.collectGarbage");
+          } finally {
+            await session.detach();
+          }
+        },
       },
     },
   },
