@@ -1,10 +1,5 @@
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type {
-  ProviderApprovalDecision,
-  RuntimeRequestId,
-  ScopedThreadRef,
-} from "@t3tools/contracts";
-import { FileTextIcon, ShieldIcon } from "lucide-react";
+import type { ProviderApprovalDecision, RuntimeRequestId } from "@t3tools/contracts";
+import { ShieldIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -16,13 +11,10 @@ import {
   derivePinnedActionDockItems,
   layoutPinnedActionDock,
   pinnedActionDockCloseAction,
-  type PinnedActionDockFollowUp,
   type PinnedActionDockItem,
 } from "./pinnedActionDock.logic";
-import { usePinnedActionDockStore } from "./pinnedActionDockStore";
 
 interface PinnedActionDockProps {
-  readonly threadRef: ScopedThreadRef;
   readonly approvals: ReadonlyArray<PendingApproval>;
   readonly respondingRequestIds: ReadonlyArray<RuntimeRequestId>;
   readonly canOperate: boolean;
@@ -30,26 +22,17 @@ interface PinnedActionDockProps {
     requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,
   ) => Promise<unknown>;
-  readonly planFollowUp: PinnedActionDockFollowUp | null;
 }
 
 /**
- * Pending approvals and plan follow-ups stay visible above the composer input.
+ * Pending approvals stay visible above the composer input.
  * Each item closes with an X; `pinnedActionDock.logic.ts` decides what that X does.
  */
 export function PinnedActionDock(props: PinnedActionDockProps) {
-  const { threadRef } = props;
-  const threadKey = scopedThreadKey(threadRef);
-  const unpins = usePinnedActionDockStore((state) => state.unpins);
   const phoneWidth = useMediaQuery("max-sm");
   const [tappedKey, setTappedKey] = useState<string | null>(null);
 
-  const items = derivePinnedActionDockItems({
-    threadKey,
-    approvals: props.approvals,
-    planFollowUp: props.planFollowUp,
-    unpins,
-  });
+  const items = derivePinnedActionDockItems({ approvals: props.approvals });
   if (items.length === 0) return null;
   const layout = layoutPinnedActionDock(items, {
     phoneWidth,
@@ -58,25 +41,12 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
 
   const isResponding = (requestId: RuntimeRequestId) =>
     props.respondingRequestIds.includes(requestId);
-  const closeDisabled = (item: PinnedActionDockItem) => {
-    switch (item.kind) {
-      case "approval":
-        return !props.canOperate || isResponding(item.approval.requestId);
-      default:
-        return false;
-    }
-  };
-  // A failed respond or dismiss reports through the thread error its handler already sets.
+  const closeDisabled = (item: PinnedActionDockItem) =>
+    !props.canOperate || isResponding(item.approval.requestId);
+  // A failed respond reports through the thread error its handler already sets.
   const close = (item: PinnedActionDockItem) => {
     const action = pinnedActionDockCloseAction(item);
-    switch (action.type) {
-      case "respond-approval":
-        void props.onRespondToApproval(action.requestId, action.decision);
-        return;
-      case "dismiss-plan-follow-up":
-        usePinnedActionDockStore.getState().dismissFollowUp(threadKey, action.planId);
-        return;
-    }
+    void props.onRespondToApproval(action.requestId, action.decision);
   };
 
   const closeButton = (item: PinnedActionDockItem) => (
@@ -89,10 +59,7 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
 
   return (
     <ComposerBanner.Attachment data-chat-composer-top-drawer="true">
-      <ComposerBanner.Root
-        variant={items.some((item) => item.kind === "approval") ? "warning" : "default"}
-        density="comfortable"
-      >
+      <ComposerBanner.Root variant="warning" density="comfortable">
         {/* Scrolls inside itself, so a tall stack never pushes the input off a phone's screen. */}
         <div
           role="region"
@@ -107,12 +74,14 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
               className="min-w-0"
             >
               {expanded ? (
-                <ComposerBanner.Row layout={item.kind === "approval" ? "approval" : "wrap-actions"}>
-                  <ComposerBanner.Icon>{itemIcon(item)}</ComposerBanner.Icon>
+                <ComposerBanner.Row layout="approval">
+                  <ComposerBanner.Icon>
+                    <ShieldIcon />
+                  </ComposerBanner.Icon>
                   <DockItemBody
                     item={item}
                     dock={props}
-                    responding={item.kind === "approval" && isResponding(item.approval.requestId)}
+                    responding={isResponding(item.approval.requestId)}
                     close={closeButton(item)}
                   />
                 </ComposerBanner.Row>
@@ -131,24 +100,6 @@ export function PinnedActionDock(props: PinnedActionDockProps) {
   );
 }
 
-function itemIcon(item: PinnedActionDockItem): ReactNode {
-  switch (item.kind) {
-    case "approval":
-      return <ShieldIcon />;
-    case "plan-follow-up":
-      return <FileTextIcon />;
-  }
-}
-
-function collapsedTitle(item: PinnedActionDockItem): string {
-  switch (item.kind) {
-    case "plan-follow-up":
-      return item.title ? `Plan ready: ${item.title}` : "Plan ready";
-    default:
-      return item.title;
-  }
-}
-
 /** A collapsed item: one line that a tap expands, and its X. */
 function CollapsedDockRow(props: {
   readonly item: PinnedActionDockItem;
@@ -157,7 +108,9 @@ function CollapsedDockRow(props: {
 }) {
   return (
     <ComposerBanner.Row>
-      <ComposerBanner.Icon>{itemIcon(props.item)}</ComposerBanner.Icon>
+      <ComposerBanner.Icon>
+        <ShieldIcon />
+      </ComposerBanner.Icon>
       <ComposerBanner.Content>
         <button
           type="button"
@@ -166,7 +119,7 @@ function CollapsedDockRow(props: {
           className="min-h-7 min-w-0 flex-1 truncate rounded-md text-start text-foreground/85 focus-visible:outline-2 focus-visible:outline-ring"
           onClick={props.onExpand}
         >
-          {collapsedTitle(props.item)}
+          {props.item.title}
         </button>
       </ComposerBanner.Content>
       <ComposerBanner.Actions>{props.close}</ComposerBanner.Actions>
@@ -181,37 +134,22 @@ function DockItemBody(props: {
   readonly close: ReactNode;
 }) {
   const { item, dock, close } = props;
-  switch (item.kind) {
-    case "approval":
-      return (
-        <>
-          <ComposerBanner.Content>
-            <ComposerPendingApprovalPanel approval={item.approval} pendingCount={1} />
-          </ComposerBanner.Content>
-          <ComposerBanner.Actions>
-            <ComposerPendingApprovalActions
-              requestId={item.approval.requestId}
-              disabled={!dock.canOperate}
-              isResponding={props.responding}
-              options={item.approval.options}
-              canRespond={item.approval.responseCapability === "live"}
-              onRespondToApproval={dock.onRespondToApproval}
-            />
-            {close}
-          </ComposerBanner.Actions>
-        </>
-      );
-    case "plan-follow-up":
-      return (
-        <>
-          <ComposerBanner.Content>
-            <span className="shrink-0 font-medium text-muted-foreground">Plan ready</span>
-            {item.title ? (
-              <span className="min-w-0 flex-1 truncate text-foreground/85">{item.title}</span>
-            ) : null}
-          </ComposerBanner.Content>
-          <ComposerBanner.Actions>{close}</ComposerBanner.Actions>
-        </>
-      );
-  }
+  return (
+    <>
+      <ComposerBanner.Content>
+        <ComposerPendingApprovalPanel approval={item.approval} pendingCount={1} />
+      </ComposerBanner.Content>
+      <ComposerBanner.Actions>
+        <ComposerPendingApprovalActions
+          requestId={item.approval.requestId}
+          disabled={!dock.canOperate}
+          isResponding={props.responding}
+          options={item.approval.options}
+          canRespond={item.approval.responseCapability === "live"}
+          onRespondToApproval={dock.onRespondToApproval}
+        />
+        {close}
+      </ComposerBanner.Actions>
+    </>
+  );
 }

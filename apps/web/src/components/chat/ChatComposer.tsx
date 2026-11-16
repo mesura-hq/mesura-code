@@ -3483,12 +3483,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <ComposerBannerStack items={shelfItems} />
           {props.pinnedActions ? (
             <PinnedActionDock
-              threadRef={routeThreadRef}
               approvals={shownPendingApprovals}
               respondingRequestIds={respondingRequestIds}
               canOperate={canOperateThread}
               onRespondToApproval={onRespondToApproval}
-              planFollowUp={null}
             />
           ) : showComposerTopDrawer ? (
             <ComposerBanner.Attachment>

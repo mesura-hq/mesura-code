@@ -247,7 +247,6 @@ import {
   changeQuestionAttachmentPreparation,
   questionAttachmentDraftId,
 } from "../../questionAttachments";
-import { usePinnedActionDockStore } from "./pinnedActionDockStore";
 import { usePendingUserInputDraftStore } from "../../pendingUserInputDraftStore";
 import { dispatchPickerAction } from "../../lib/pickerActionBus";
 import { createDeferredPromise } from "../../test/threadLinkFixture";
@@ -442,9 +441,7 @@ async function setupDockFixture(
   seedLongThread();
   if (options.pending) addPendingRequests();
   if (options.agentSignal) fixture.thread = { ...fixture.thread, agentSignal: options.agentSignal };
-  // Dock unpins persist in browser storage; every test starts from none, in storage and memory.
   localStorage.clear();
-  usePinnedActionDockStore.setState({ unpins: {} });
   resources.defer(() => {
     localStorage.clear();
     useComposerDraftStore.getState().clearComposerContent(scopeThreadRef(environmentId, threadId));
@@ -781,22 +778,6 @@ it.each(WIDTHS)(
   },
 );
 
-it("ignores persisted plan unpins and retains the full plan", async () => {
-  await using _fixture = await setupDockFixture();
-  localStorage.setItem(
-    usePinnedActionDockStore.persist.getOptions().name!,
-    JSON.stringify({
-      version: 1,
-      state: { unpins: { legacy: { planDigests: [FACTORY_PLAN_DIGEST], followUpPlanIds: [] } } },
-    }),
-  );
-  await usePinnedActionDockStore.persist.rehydrate();
-  await using screen = await mountApp();
-  expect(timelineRows(screen.container).at(-1)).toBe(timelinePlanRow(screen.container));
-  expect(dock(screen.container)).toBeNull();
-  expect(usePinnedActionDockStore.getState().unpins).toEqual({ legacy: { followUpPlanIds: [] } });
-});
-
 it("the full plan Open opens its Factory pane", async () => {
   await using _fixture = await setupDockFixture();
   await using screen = await mountApp();
@@ -887,7 +868,7 @@ it("phase6 dock browser AC6 at Pixel 7 width the dock expands the two newest ite
   addApproval("newest-approval", "2026-10-24T10:05:00.000Z", "pnpm build");
   addApproval("second-approval", "2026-10-24T10:04:00.000Z", "pnpm install");
   await using screen = await mountApp();
-  // Plan follow-ups wait for approvals to clear; three approvals exercise the phone collapse.
+  // Three approvals exercise the phone collapse.
   await vi.waitFor(() => expect(dockItems(screen.container)).toHaveLength(3));
   const items = dockItems(screen.container);
   expect(items.map((entry) => entry.dataset.pinnedActionDockItem)).toEqual([
