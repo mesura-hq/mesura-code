@@ -38,6 +38,21 @@ describe("messageModeAnswerText", () => {
     expect(messageModeAnswerText(choiceOnly, value)).toBe(value);
   });
 
+  it("accepts the exact choices of a choice-only multiselect question", () => {
+    const choiceOnlyMultiSelect = {
+      allowCustomAnswer: false,
+      multiSelect: true,
+      options: [
+        { label: "Tests", description: "Cover behavior" },
+        { label: "Docs", description: "Explain usage" },
+      ],
+    };
+    expect(messageModeAnswerText(choiceOnlyMultiSelect, ["Tests"])).toBe("Tests");
+    expect(messageModeAnswerText(choiceOnlyMultiSelect, ["Tests", "Docs"])).toBe("Tests, Docs");
+    expect(messageModeAnswerText(choiceOnlyMultiSelect, ["Tests", "Other"])).toBeNull();
+    expect(messageModeAnswerText(choiceOnlyMultiSelect, [" Tests"])).toBeNull();
+  });
+
   it("refuses blank, empty-array and non-string answers", () => {
     for (const answer of ["", "   ", [], [1], ["Keep", " "], undefined, null, 3]) {
       expect(messageModeAnswerText(question, answer)).toBeNull();
