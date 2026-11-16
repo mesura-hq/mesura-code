@@ -11,7 +11,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { useDiffPanelStore } from "../../diffPanelStore";
+import { replaceHistoricalDiffSelection, useDiffPanelStore } from "../../diffPanelStore";
 import { type ThreadPanelPresentation } from "../../rightPanelLayout";
 import {
   selectThreadPanelOpen,
@@ -102,6 +102,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
       onDiffPanelOpen?.();
     }
     if (activeThreadRef) {
+      if (!diffOpen) replaceHistoricalDiffSelection(activeThreadRef);
       useRightPanelStore.getState().toggle(activeThreadRef, "diff");
     }
   };

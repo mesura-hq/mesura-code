@@ -215,6 +215,16 @@ export function selectThreadDiffPanelSelection(
   );
 }
 
+/**
+ * Mesura: a generic opening (Ctrl+Shift+D) shows Branch changes, not an old turn or tool call.
+ * Git modes stay: resetting them broke stored Tree diff choices and the dirty-tree default.
+ */
+export function replaceHistoricalDiffSelection(ref: ScopedThreadRef): void {
+  const state = useDiffPanelStore.getState();
+  const kind = state.byThreadKey[scopedThreadKey(ref)]?.kind;
+  if (kind === "turn" || kind === "tool-call") state.selectGitScope(ref, "branch");
+}
+
 export function selectThreadBranchBaseRef(
   state: Pick<DiffPanelStoreState, "byThreadKey" | "branchBaseRefByThreadKey">,
   ref: ScopedThreadRef | null | undefined,
