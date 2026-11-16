@@ -1220,37 +1220,35 @@ it("modal keys seam guard round 2: a terminal close confirmation opens on Confir
       "}",
       "packages/contracts/src/ipc.ts",
     ),
-    /readonly initialFocus\?:"confirm";/,
+    /readonly initialFocus\?:"confirm"\|"cancel";/,
     "ConfirmDialogOptions lost initialFocus",
   );
+  const terminalClose = read("apps/web/src/lib/terminalCloseConfirm.ts");
   assert.include(
-    read("apps/web/src/lib/terminalCloseConfirm.ts"),
-    tokens('initialFocus: "confirm"'),
+    terminalClose,
+    tokens('{ initialFocus: "confirm" }'),
     "closing a terminal no longer asks for focus on Confirm",
+  );
+  // The host keeps a destructive confirmation on Cancel, whatever focus it asks for.
+  assert.notInclude(
+    terminalClose,
+    tokens('variant: "destructive"'),
+    "a destructive terminal close opens on Cancel, so Enter no longer closes the terminal",
   );
   const store = read("apps/web/src/confirmDialog.ts");
   assert.include(
     store,
-    tokens('focusConfirm: options?.initialFocus === "confirm"'),
+    tokens("initialFocus: options?.initialFocus,"),
     "the confirm dialog store drops the requested initial focus",
   );
   assert.include(
-    store,
-    tokens("...(pending.focusConfirm ? { focusConfirm: true } : {})"),
-    "the shown confirmation no longer carries focusConfirm",
+    region(store, "function confirmingState(", "}", "apps/web/src/confirmDialog.ts"),
+    tokens("initialFocus: pending.initialFocus,"),
+    "the shown confirmation no longer carries its initial focus",
   );
-  // Both places that show a confirmation build the state through confirmingState.
-  assert.equal(
-    countOf(store, "publish(confirmingState("),
-    2,
-    "a confirmation is shown without its focusConfirm",
-  );
-  for (const field of ["readonly focusConfirm?: boolean;", "readonly focusConfirm: boolean;"]) {
-    assert.include(store, tokens(field), `the confirm dialog store lost ${field}`);
-  }
   const host = read("apps/web/src/components/ConfirmDialogHost.tsx");
   for (const fragment of [
-    'state.status === "confirming" && state.focusConfirm === true',
+    'state.initialFocus === "confirm"',
     "{...(focusConfirm ? { initialFocus: confirmButtonRef } : {})}",
     "ref={confirmButtonRef}",
   ]) {
