@@ -157,7 +157,7 @@ it("handles the attach shortcut in the composer that owns the file input", () =>
   // chord are insufficient if either stops reaching the one real file input.
   assert.match(
     composer,
-    /const composerAttachButton = showComposerAttachAction && !dictationTakesFooter \? \(\s*<ComposerAttachButton\s+addComposerAttachments=\{addComposerAttachments\}\s+focusComposer=\{focusComposer\}\s*\/>\s*\) : null;/,
+    /const composerAttachButton =\s*showComposerAttachAction && !dictationTakesFooter \? \(\s*<ComposerAttachButton\s+addComposerAttachments=\{addComposerAttachments\}\s+focusComposer=\{focusComposer\}\s*\/>\s*\) : null;/,
     "the composer no longer mounts upstream's attach button with the shared attachment intake",
   );
   const buttonStart = attachButton.indexOf("export function ComposerAttachButton(");
