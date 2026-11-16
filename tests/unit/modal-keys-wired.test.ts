@@ -515,10 +515,10 @@ it("modal keys seam guard: the sidebar rail is a pane edge", () => {
 // The command registry: each upstream owner's block.
 
 it("modal keys seam guard: the chat route registers new thread and preview", () => {
-  assertRegistersCommands("apps/web/src/routes/_chat.tsx", [
-    "chat.new",
-    "chat.newLocal",
-    "preview.toggle",
+  assertCallCarries("apps/web/src/shortcuts/chatRouteCommands.ts", "registerCommandHandlers", [
+    '"chat.new":',
+    '"chat.newLocal":',
+    '"preview.toggle":',
   ]);
 });
 
@@ -584,12 +584,12 @@ it("modal keys seam guard: the pull requests page registers its panel commands",
 });
 
 it("modal keys seam guard: the command palette registers its overlay toggles", () => {
-  assertCallCarries("apps/web/src/components/CommandPalette.tsx", "useCommandHandlers", [
-    '["commandPalette.toggle", "command"]',
-    '["filePicker.toggle", "files"]',
-    '["projectSearch.toggle", "content"]',
-    "toggleMode(mode as SearchOverlayMode)",
-  ]);
+  const file = "apps/web/src/shortcuts/commandPaletteCommands.ts";
+  assertCallCarries(file, "registerCommandHandlers", ["Object.entries(commandHandlers)"]);
+  const handlers = blockAfter(read(file), "const commandHandlers =", file);
+  for (const command of ["commandPalette.toggle", "filePicker.toggle", "projectSearch.toggle"]) {
+    assert.include(handlers, tokens(`"${command}":`), `the palette no longer registers ${command}`);
+  }
 });
 
 // The thread search and the project filter left the palette for the sidebar's

@@ -29,7 +29,8 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
-import { type CommandHandler, registerCommands } from "./dispatcher";
+import { registerCommandHandlers } from "../commands/commandRegistry";
+import { type CommandHandler, type CommandHandlers, registerCommands } from "./dispatcher";
 
 const CHAT_ROUTE_ID = "/_chat";
 
@@ -118,82 +119,94 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       if (threadRef && canOperatePreview(threadRef.environmentId)) dispatchPreviewAction(action);
     };
 
-  return registerCommands(
-    {
-      "chat.newLocal": startNewLocal,
-      "chat.newWithoutProject": (event) => {
-        const { activeThread, activeDraftThread } = readThreadContext();
-        const environmentId = scratch.scratchEnvironmentId(
-          activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null,
+  const commands = {
+    "chat.newLocal": startNewLocal,
+    "chat.newWithoutProject": (event) => {
+      const { activeThread, activeDraftThread } = readThreadContext();
+      const environmentId = scratch.scratchEnvironmentId(
+        activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null,
+      );
+      if (environmentId === null) return;
+      claim(event);
+      void scratch.startScratchThread(environmentId);
+    },
+    "chat.new": (event) => {
+      const groups = readProjectGroups();
+      if (
+        !shouldCreateNewThreadInCurrentProject(
+          false,
+          groups.filter((group) => !group.archived).length,
+          groups.length,
+        )
+      ) {
+        claim(event);
+        openCommandPalette({ open: "new-thread-in" });
+        return;
+      }
+      startNewLocal(event);
+    },
+    "preview.toggle": (event) => {
+      claim(event);
+      const threadRef = readRouteThreadRef();
+      if (!threadRef || (!canOperatePreview(threadRef.environmentId) && !readPreviewOpen())) {
+        return;
+      }
+      if (!isPreviewAvailableFor(threadRef.environmentId)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "info",
+            title: "Preview is desktop-only",
+            description: "Open T3 Code in the desktop app to use the in-app preview.",
+          }),
         );
-        if (environmentId === null) return;
-        claim(event);
-        void scratch.startScratchThread(environmentId);
-      },
-      "chat.new": (event) => {
-        const groups = readProjectGroups();
-        if (
-          !shouldCreateNewThreadInCurrentProject(
-            false,
-            groups.filter((group) => !group.archived).length,
-            groups.length,
-          )
-        ) {
-          claim(event);
-          openCommandPalette({ open: "new-thread-in" });
-          return;
-        }
-        startNewLocal(event);
-      },
-      "preview.toggle": (event) => {
-        claim(event);
-        const threadRef = readRouteThreadRef();
-        if (!threadRef || (!canOperatePreview(threadRef.environmentId) && !readPreviewOpen())) {
-          return;
-        }
-        if (!isPreviewAvailableFor(threadRef.environmentId)) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "info",
-              title: "Preview is desktop-only",
-              description: "Open T3 Code in the desktop app to use the in-app preview.",
-            }),
-          );
-          return;
-        }
-        dispatchPreviewAction("toggle-panel");
-      },
-      "preview.refresh": previewCommand("refresh"),
-      "preview.focusUrl": previewCommand("focus-url"),
-      "preview.zoomIn": previewCommand("zoom-in"),
-      "preview.zoomOut": previewCommand("zoom-out"),
-      "preview.resetZoom": previewCommand("reset-zoom"),
-      "preview.find": previewCommand("find"),
+        return;
+      }
+      dispatchPreviewAction("toggle-panel");
     },
-    {
-      when: () =>
-        router.state.matches.some((match) => match.routeId === CHAT_ROUTE_ID) &&
-        !router.state.matches.some((match) => isAppModalPage(match.pathname)) &&
-        !isCommandPaletteOpen(),
-      context: () => {
-        const threadRef = readRouteThreadRef();
-        return {
-          terminalOpen: threadRef
-            ? selectThreadTerminalUiState(
-                useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
-                threadRef,
-              ).terminalOpen
-            : false,
-          previewOpen: readPreviewOpen(),
-        };
-      },
-      onKeyDown: (event) => {
-        if (event.key !== "Escape") return false;
-        const selection = useThreadSelectionStore.getState();
-        if (selection.selectedThreadKeys.size === 0) return false;
-        event.preventDefault();
-        selection.clearSelection();
-      },
+    "preview.refresh": previewCommand("refresh"),
+    "preview.focusUrl": previewCommand("focus-url"),
+    "preview.zoomIn": previewCommand("zoom-in"),
+    "preview.zoomOut": previewCommand("zoom-out"),
+    "preview.resetZoom": previewCommand("reset-zoom"),
+    "preview.find": previewCommand("find"),
+  } satisfies CommandHandlers;
+  const isChatRouteLive = () =>
+    router.state.matches.some((match) => match.routeId === CHAT_ROUTE_ID) &&
+    !router.state.matches.some((match) => isAppModalPage(match.pathname)) &&
+    !isCommandPaletteOpen();
+  // Mesura: Vim leaders run these through the command registry, which passes no keyboard event.
+  const runFromRegistry = (run: CommandHandler) => () => {
+    if (isChatRouteLive()) run(new KeyboardEvent("keydown"));
+  };
+  const disposeRegistry = registerCommandHandlers({
+    "chat.new": runFromRegistry(commands["chat.new"]),
+    "chat.newLocal": runFromRegistry(commands["chat.newLocal"]),
+    "preview.toggle": runFromRegistry(commands["preview.toggle"]),
+  });
+  const disposeCommands = registerCommands(commands, {
+    when: isChatRouteLive,
+    context: () => {
+      const threadRef = readRouteThreadRef();
+      return {
+        terminalOpen: threadRef
+          ? selectThreadTerminalUiState(
+              useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+              threadRef,
+            ).terminalOpen
+          : false,
+        previewOpen: readPreviewOpen(),
+      };
     },
-  );
+    onKeyDown: (event) => {
+      if (event.key !== "Escape") return false;
+      const selection = useThreadSelectionStore.getState();
+      if (selection.selectedThreadKeys.size === 0) return false;
+      event.preventDefault();
+      selection.clearSelection();
+    },
+  });
+  return () => {
+    disposeRegistry();
+    disposeCommands();
+  };
 }
