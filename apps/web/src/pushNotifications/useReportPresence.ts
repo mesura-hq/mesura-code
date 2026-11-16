@@ -112,7 +112,7 @@ function createPresenceHub(): PresenceHub {
 /** Follows the page for as long as the caller is mounted; the hub carries its reports. */
 export function useReportPresence(): PresenceHub {
   const [hub] = useState(createPresenceHub);
-  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes to page input, focus and visibility events while mounted
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to page input, focus and visibility events while mounted
   useEffect(() => followPresence(hub.report), [hub]);
   return hub;
 }

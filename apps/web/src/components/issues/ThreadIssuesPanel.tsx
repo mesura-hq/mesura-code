@@ -48,7 +48,7 @@ export function ThreadIssuesPanel({
     pending !== undefined && pending.requestId === state.consumedRequestId
       ? pending.requestId
       : null;
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: tells the parent after commit that its pending issue selection was shown
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: tells the parent after commit that its pending issue selection was shown
   useEffect(() => {
     if (shownRequestId !== null) onSelectionConsumed?.(shownRequestId);
   }, [onSelectionConsumed, shownRequestId]);

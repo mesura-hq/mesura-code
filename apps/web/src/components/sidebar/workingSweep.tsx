@@ -28,7 +28,7 @@ export function WorkingSweepText(props: { readonly text: string }) {
 export function useWorkingSweep(ref: RefObject<HTMLElement | null>, running: boolean): void {
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const sweeping = running && !reducedMotion;
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: owns the section's one interval timer, cleared when the band must stop
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: owns the section's one interval timer, cleared when the band must stop
   useEffect(() => {
     const element = ref.current;
     if (element === null || !sweeping) return undefined;
@@ -51,7 +51,7 @@ export function useWorkingSweep(ref: RefObject<HTMLElement | null>, running: boo
 export function useSeenOnScreen(ref: RefObject<HTMLElement | null>): boolean {
   const [onScreen, setOnScreen] = useState(true);
   const [tabVisible, setTabVisible] = useState(() => document.visibilityState === "visible");
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to an IntersectionObserver and visibilitychange, removed on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: subscribes to an IntersectionObserver and visibilitychange, removed on unmount
   useEffect(() => {
     const element = ref.current;
     if (element === null) return undefined;

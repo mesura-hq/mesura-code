@@ -10,7 +10,7 @@ const SAMPLE_INTERVAL_MS = 100;
 
 export function SidebarDictationWaveform({ recording }: { readonly recording: boolean }) {
   const waveformRef = useRef<HTMLSpanElement>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- Synchronize DOM bars with microphone samples and browser visibility.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Synchronize DOM bars with microphone samples and browser visibility.
   useEffect(() => {
     const waveform = waveformRef.current;
     if (!waveform) return;

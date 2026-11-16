@@ -54,7 +54,7 @@ export function useHostStatsSources(enabled: boolean): HostStatsSources {
   // so a device paired again in Settings, where the dock does not exist, reads
   // its hosts on return. Nothing else restarts: the TTL keeps a re-peek instant.
   const registry = useContext(RegistryContext);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: opening the dock retries refused host-stats subscriptions from every caller of this hook
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: opening the dock retries refused host-stats subscriptions from every caller of this hook
   useEffect(() => {
     if (!enabled) return;
     for (const environmentId of registry.get(environmentPresentations.presentationsAtom).keys()) {

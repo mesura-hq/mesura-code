@@ -1,4 +1,4 @@
-import { SparklesIcon } from "lucide-react";
+import { BotIcon } from "lucide-react";
 
 import { Button } from "../ui/button";
 import { shouldShowAgentSearchSparkle } from "./agentSearchPopup.logic";
@@ -33,7 +33,7 @@ export function AgentSearchFieldAccessory({ query }: { query: string }) {
       }}
     >
       <span className="relative inline-flex">
-        <SparklesIcon />
+        <BotIcon />
         {unseen ? (
           <span
             aria-hidden

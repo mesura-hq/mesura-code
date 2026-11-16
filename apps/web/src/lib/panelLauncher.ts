@@ -71,7 +71,7 @@ export function usePanelLauncherOwner(
   ref: RefObject<HTMLElement | null>,
   panelOpen: boolean,
 ): boolean {
-  // oxlint-disable-next-line t3code/react-effect-budget -- registers the mounted panel in the module's launcher registry and releases ownership on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the mounted panel in the module's launcher registry and releases ownership on unmount
   useLayoutEffect(() => {
     const panel = panelRoot(ref);
     if (panel === null) return;

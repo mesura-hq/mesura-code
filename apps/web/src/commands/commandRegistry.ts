@@ -55,7 +55,7 @@ export function runRegisteredCommand(command: KeybindingCommand): boolean {
  */
 export function useCommandHandlers(entries: CommandHandlers): void {
   const latest = useRef(entries);
-  // oxlint-disable-next-line t3code/react-effect-budget -- latest-ref: the registered closures read the newest handlers without re-registering
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- latest-ref: the registered closures read the newest handlers without re-registering
   useLayoutEffect(() => {
     latest.current = entries;
   });
@@ -71,6 +71,6 @@ export function useCommandHandlers(entries: CommandHandlers): void {
     ) as CommandHandlers;
   }, [commandsKey]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- registers in the module-level registry while mounted; cleanup unregisters
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers in the module-level registry while mounted; cleanup unregisters
   useEffect(() => registerCommandHandlers(stable), [stable]);
 }

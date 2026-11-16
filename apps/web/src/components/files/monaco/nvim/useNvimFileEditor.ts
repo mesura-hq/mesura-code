@@ -101,7 +101,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   // A ref, so a new refresh function never makes `openFile` a new callback:
   // the driver opens the file again whenever that identity changes.
   const refreshAttachRef = useRef(refreshAttach);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-ref, so a new refresh function never gives `openFile` a new identity
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-ref, so a new refresh function never gives `openFile` a new identity
   useEffect(() => {
     refreshAttachRef.current = refreshAttach;
   }, [refreshAttach]);
@@ -110,7 +110,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   const opensInFlightRef = useRef(0);
   const reopensInARowRef = useRef(0);
   const mountedRef = useRef(true);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: tracks mount so async open results never touch an unmounted editor
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: tracks mount so async open results never touch an unmounted editor
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -119,7 +119,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   }, []);
   // Nothing opens while the driver is off, so a pending reattach would wait
   // for an open that is not coming.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: drops a pending reattach when the driver turns off, since no open will land
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: drops a pending reattach when the driver turns off, since no open will land
   useEffect(() => {
     if (!enabled) reattachPendingRef.current = false;
   }, [enabled]);
@@ -131,7 +131,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     enabled && AsyncResult.isFailure(result) && !result.waiting && isSessionMissing(result.cause);
   const ended = enabled ? state.ended : null;
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reacts to the attach stream's ended/missing state, which no handler owns
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: reacts to the attach stream's ended/missing state, which no handler owns
   useEffect(() => {
     const action = decideSessionRecovery({
       ended,
@@ -161,7 +161,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   }, [ended, attachFoundNoSession]);
 
   // A session that answers resets the count: the next loss is a new one.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: resets the reopen count when the external session answers with a snapshot
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: resets the reopen count when the external session answers with a snapshot
   useEffect(() => {
     if (state.latestEvent?.type === "snapshot") reopensInARowRef.current = 0;
   }, [state.latestEvent]);

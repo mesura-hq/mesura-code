@@ -63,11 +63,11 @@ function useHostStatsNow(open: boolean): number {
       onTick: setNowLocal,
     }),
   );
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: starts or stops the external age clock as the dock opens and closes
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: starts or stops the external age clock as the dock opens and closes
   useEffect(() => {
     clock.setOpen(open);
   }, [clock, open]);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: disposes the external age clock on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: disposes the external age clock on unmount
   useEffect(() => () => clock.dispose(), [clock]);
   return nowLocal;
 }

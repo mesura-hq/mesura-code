@@ -30,7 +30,7 @@ function dropSession(planKey: string) {
 
 /** Keeps one plan's session alive while the caller is mounted; `null` holds nothing. */
 export function useHoldFactoryPlanCardSession(planKey: string | null) {
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reference-counts this mount as a holder of the module-level plan session
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: reference-counts this mount as a holder of the module-level plan session
   useEffect(() => {
     if (planKey === null) return;
     holdersByPlan.set(planKey, (holdersByPlan.get(planKey) ?? 0) + 1);

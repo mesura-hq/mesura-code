@@ -47,7 +47,7 @@ export function useProjectFileWatch(input: {
    */
   const seenRevisionsRef = useRef(new Map<string, string>());
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: feeds watch-stream events from the external subscription into the refresh decision
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: feeds watch-stream events from the external subscription into the refresh decision
   useEffect(() => {
     // A different file is a different subscription, so nothing carried over
     // from the previous one is true of this one.
