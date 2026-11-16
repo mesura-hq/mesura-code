@@ -1,10 +1,16 @@
-import type { RefObject } from "react";
+import { type RefObject, useLayoutEffect, useRef } from "react";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { cancelComposerNormalResume } from "../../keys/composer/composerSurface";
 import type { ComposerPromptEditorHandle } from "../ComposerPromptEditorTiptap";
 import { isInsideRestingComposerControlScope } from "./composerEventScope";
 import { useFileManagerStore } from "../files/mesuraFileManager/fileManagerStore";
+
+interface ExpandFocusRequest {
+  readonly cursor: number | undefined;
+  readonly previousFocus: Element | null;
+  readonly draftKey: string;
+}
 
 /** Reveal a collapsed phone composer before restoring its caret and keyboard mode. */
 export function useMesuraComposerFocus(input: {
@@ -52,57 +58,78 @@ export function useMesuraComposerFocus(input: {
       setIsComposerFocused(false);
     });
   });
+  const pendingExpandFocusRef = useRef<ExpandFocusRequest | null>(null);
+  const scheduleExpandFocus = useStableCallback(
+    ({ cursor, previousFocus, draftKey }: ExpandFocusRequest) => {
+      mobileComposerExpandFrameRef.current = window.requestAnimationFrame(() => {
+        mobileComposerExpandFrameRef.current = null;
+        const active = document.activeElement;
+        const editor = composerSurfaceRef.current?.querySelector('[data-testid="composer-editor"]');
+        // The expansion is committed by now. A new owner or draft cancels the
+        // old request; restoring focus unconditionally stole that owner's keyboard.
+        if (
+          composerDraftTargetKeyRef.current !== draftKey ||
+          isCommandPaletteOpen() ||
+          useFileManagerStore.getState().open ||
+          document.querySelector(
+            '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+          ) ||
+          (active !== previousFocus && active !== document.body && !editor?.contains(active))
+        ) {
+          mobileComposerExpandInFlightRef.current = false;
+          cancelComposerNormalResume();
+          // A composer control keeps the body expanded so its focused node survives.
+          if (
+            !isInsideRestingComposerControlScope(active) &&
+            !composerSurfaceRef.current?.contains(active) &&
+            !composerFormRef.current?.contains(active)
+          ) {
+            setIsComposerFocused(false);
+          }
+          return;
+        }
+        if (cursor === undefined) composerEditorRef.current?.focusAtEnd();
+        else composerEditorRef.current?.focusAt(cursor);
+        mobileComposerExpandReleaseFrameRef.current = window.requestAnimationFrame(() => {
+          mobileComposerExpandReleaseFrameRef.current = null;
+          mobileComposerExpandInFlightRef.current = false;
+          // A real blur during expansion must still collapse after the focus frames.
+          scheduleComposerCollapseCheck();
+        });
+      });
+    },
+  );
+  // The hidden editor cannot take focus until React commits the expansion, which can land after
+  // the next animation frame; the focus frame starts once it has.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves DOM focus into the editor once the expansion is committed
+  useLayoutEffect(() => {
+    const request = pendingExpandFocusRef.current;
+    if (isComposerCollapsedMobile || request === null) return;
+    pendingExpandFocusRef.current = null;
+    scheduleExpandFocus(request);
+  }, [isComposerCollapsedMobile, scheduleExpandFocus]);
   const expandMobileComposerAt = useStableCallback((cursor?: number) => {
-    const previousFocus = document.activeElement;
-    const draftKey = composerDraftTargetKeyRef.current;
+    const request = {
+      cursor,
+      previousFocus: document.activeElement,
+      draftKey: composerDraftTargetKeyRef.current,
+    };
     if (composerBlurFrameRef.current !== null) {
       window.cancelAnimationFrame(composerBlurFrameRef.current);
       composerBlurFrameRef.current = null;
     }
     if (mobileComposerExpandFrameRef.current !== null) {
       window.cancelAnimationFrame(mobileComposerExpandFrameRef.current);
+      mobileComposerExpandFrameRef.current = null;
     }
     if (mobileComposerExpandReleaseFrameRef.current !== null) {
       window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
+      mobileComposerExpandReleaseFrameRef.current = null;
     }
     mobileComposerExpandInFlightRef.current = true;
     setIsComposerFocused(true);
-    mobileComposerExpandFrameRef.current = window.requestAnimationFrame(() => {
-      mobileComposerExpandFrameRef.current = null;
-      const active = document.activeElement;
-      const editor = composerSurfaceRef.current?.querySelector('[data-testid="composer-editor"]');
-      // Expansion commits before this frame. A new owner or draft cancels the
-      // old request; restoring focus unconditionally stole that owner's keyboard.
-      if (
-        composerDraftTargetKeyRef.current !== draftKey ||
-        isCommandPaletteOpen() ||
-        useFileManagerStore.getState().open ||
-        document.querySelector(
-          '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
-        ) ||
-        (active !== previousFocus && active !== document.body && !editor?.contains(active))
-      ) {
-        mobileComposerExpandInFlightRef.current = false;
-        cancelComposerNormalResume();
-        // A composer control keeps the body expanded so its focused node survives.
-        if (
-          !isInsideRestingComposerControlScope(active) &&
-          !composerSurfaceRef.current?.contains(active) &&
-          !composerFormRef.current?.contains(active)
-        ) {
-          setIsComposerFocused(false);
-        }
-        return;
-      }
-      if (cursor === undefined) composerEditorRef.current?.focusAtEnd();
-      else composerEditorRef.current?.focusAt(cursor);
-      mobileComposerExpandReleaseFrameRef.current = window.requestAnimationFrame(() => {
-        mobileComposerExpandReleaseFrameRef.current = null;
-        mobileComposerExpandInFlightRef.current = false;
-        // A real blur during expansion must still collapse after the focus frames.
-        scheduleComposerCollapseCheck();
-      });
-    });
+    if (isComposerCollapsedMobile) pendingExpandFocusRef.current = request;
+    else scheduleExpandFocus(request);
   });
   const expandMobileComposer = useStableCallback(() => expandMobileComposerAt());
   const focusComposerEditor = useStableCallback((cursor?: number) => {
