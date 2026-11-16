@@ -7,7 +7,8 @@ import * as editableFocus from "./lib/editableFocus";
 function setupFocus() {
   const editor = new EventTarget();
   const other = new EventTarget();
-  vi.stubGlobal("document", { activeElement: editor });
+  // Mesura: resolveShortcutCommand asks the page whether the file manager is open.
+  vi.stubGlobal("document", { activeElement: editor, querySelector: () => null });
   const focus = vi
     .spyOn(editableFocus, "isEditableFocused")
     .mockImplementation((target) => target === editor);
