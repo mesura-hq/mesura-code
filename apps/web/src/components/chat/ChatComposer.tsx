@@ -2506,6 +2506,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     settings.contextWindowMeterEnabled &&
     props.threadSyncPhase === "loading" &&
     activeThread !== undefined;
+  // Mesura: the collapsed phone row shows the meter too, not only the expanded footer.
+  const contextWindowMeterElement =
+    settings.contextWindowMeterEnabled && activeContextWindow ? (
+      <ContextWindowMeter
+        usage={activeContextWindow}
+        modelDisplayName={activeThreadModelDisplayName ?? null}
+        onCompact={onCompactContext}
+        compactDisabled={compactDisabled}
+        compactDisabledReason={resolvedCompactDisabledReason}
+      />
+    ) : reserveContextWindowMeter ? (
+      <ContextWindowMeterPlaceholder />
+    ) : null;
+  // Mesura: on a phone the expanded footer stacks two centered rows, the model above the actions.
+  const stackPhoneFooterRows = isMobileViewport && !composerControlsCollapsed;
   const composerControls = (
     <ComposerControlsBar
       environmentId={environmentId}
@@ -2532,6 +2547,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       restingHiddenBlockCount={restingHiddenBlockCount}
       iconOnlyBlockCount={iconOnlyBlockCount}
       showProviderUnavailable={showProviderUnavailable}
+      shortModelLabel={stackPhoneFooterRows}
       providerSetupInstanceId={providerSetupInstanceId}
       onOpenProviderSetup={onOpenProviderSetup}
       providerCatalogPending={providerCatalogPending}
@@ -3398,12 +3414,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onRemoveFile={removeComposerFileFromDraft}
       />
     ) : null;
-  const composerAttachButton = showComposerAttachAction ? (
-    <ComposerAttachButton
-      addComposerAttachments={addComposerAttachments}
-      focusComposer={focusComposer}
-    />
-  ) : null;
+  // A dictation pill in the compact footer takes the attach button's place.
+  const composerAttachButton =
+    showComposerAttachAction && !dictationTakesFooter ? (
+      <ComposerAttachButton
+        addComposerAttachments={addComposerAttachments}
+        focusComposer={focusComposer}
+      />
+    ) : null;
   return (
     <form
       ref={composerFormRef}
@@ -3552,8 +3570,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 </button>
                 {collapsedComposerImagePreviews}
                 {dictationStartControl ? (
-                  <span className="pointer-events-auto flex shrink-0 items-center">
+                  // Mesura: dictation starts from the collapsed phone row; a call needs the expanded composer.
+                  <span
+                    data-chat-composer-collapsed-controls="true"
+                    className="pointer-events-auto flex shrink-0 items-center"
+                  >
                     {dictationStartControl}
+                  </span>
+                ) : null}
+                {contextWindowMeterElement ? (
+                  // Focus here must not expand the composer, or the meter remounts and its popover closes.
+                  <span
+                    data-chat-composer-collapsed-controls="true"
+                    className="pointer-events-auto flex shrink-0 items-center"
+                  >
+                    {contextWindowMeterElement}
                   </span>
                 ) : null}
                 <CollapsedComposerStopAction
@@ -3798,46 +3829,47 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <div
                 data-chat-composer-footer="true"
                 className={cn(
-                  "flex min-w-0 flex-nowrap items-center overflow-visible px-2 pb-2",
+                  "flex min-w-0 flex-nowrap items-center gap-2 overflow-visible px-2 pb-2",
+                  stackPhoneFooterRows && "flex-col gap-1",
                   pendingUserInputs.length > 0 && "pt-2",
                   showMobilePendingAnswerActions &&
                     speechInput.state.phase === "idle" &&
                     "hidden sm:flex",
                 )}
               >
-                {composerAttachButton && !dictationTakesFooter ? (
-                  <div className="me-2">{composerAttachButton}</div>
-                ) : null}
+                <div
+                  ref={attachExpandedComposerControls}
+                  data-chat-composer-controls="footer"
+                  data-chat-composer-footer-controls="true"
+                  className={cn(
+                    "relative flex min-w-0 flex-1 items-center justify-end gap-0.5",
+                    // A narrow phone wraps this row rather than clipping it or truncating the model.
+                    stackPhoneFooterRows &&
+                      "w-full flex-none flex-wrap justify-center gap-y-1 [&_[data-chat-provider-model-picker]]:max-w-full [&_[data-chat-provider-model-picker]]:shrink-0",
+                    dictationTakesFooter && "hidden",
+                  )}
+                >
+                  {stackPhoneFooterRows && contextWindowMeterElement ? (
+                    // The controls measurement reserves this width before it fits the model picker.
+                    <span data-resting-controls-fixed="true" className="flex shrink-0">
+                      {contextWindowMeterElement}
+                    </span>
+                  ) : null}
+                  {composerControls}
+                </div>
                 <div
                   data-chat-composer-actions="right"
                   data-chat-composer-transition-actions="true"
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2"
+                  className={cn(
+                    "flex min-w-0 shrink-0 flex-nowrap items-center justify-end gap-2",
+                    stackPhoneFooterRows && "justify-center",
+                    dictationTakesFooter && "flex-1",
+                  )}
                 >
-                  <div
-                    ref={attachExpandedComposerControls}
-                    data-chat-composer-controls="footer"
-                    data-chat-composer-footer-controls="true"
-                    className={cn(
-                      "relative flex min-w-0 flex-1 items-center justify-end gap-0.5",
-                      dictationTakesFooter && "hidden",
-                    )}
-                  >
-                    {composerControls}
-                  </div>
-                  {settings.contextWindowMeterEnabled && activeContextWindow ? (
-                    <ContextWindowMeter
-                      usage={activeContextWindow}
-                      modelDisplayName={activeThreadModelDisplayName ?? null}
-                      onCompact={onCompactContext}
-                      compactDisabled={compactDisabled}
-                      compactDisabledReason={resolvedCompactDisabledReason}
-                    />
-                  ) : reserveContextWindowMeter ? (
-                    <ContextWindowMeterPlaceholder />
-                  ) : null}
+                  {stackPhoneFooterRows ? null : contextWindowMeterElement}
                   {/* Mesura: attach sits with the actions, read as context, attach, microphone, send. */}
                   {composerAttachButton}
                   {voiceConversationControl}

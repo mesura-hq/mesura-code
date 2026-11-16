@@ -733,6 +733,36 @@ describe("dictation phase 4 fence", () => {
     expect(startCalls()).toHaveLength(1);
   });
 
+  // Mesura: on Chrome Android a tap focuses the button before its click. Focus that
+  // expanded the composer unmounted the collapsed row under the tap, so dictation never started.
+  it("phone collapsed composer: a tap on the microphone starts dictation without expanding first", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const previous = { width: window.innerWidth, height: window.innerHeight };
+    await using _viewport = {
+      [Symbol.asyncDispose]: () => page.viewport(previous.width, previous.height),
+    };
+    await page.viewport(412, 915);
+
+    await mountApp();
+    await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+    const surface = () =>
+      document.querySelector<HTMLElement>('[data-chat-composer-surface="true"]');
+    await vi.waitFor(() =>
+      expect(surface()?.getAttribute("data-chat-composer-mobile-collapsed")).toBe("true"),
+    );
+
+    const microphone = requireButton("Start voice dictation");
+    expect(microphone.closest('[data-chat-composer-collapsed-controls="true"]')).not.toBeNull();
+    await act(async () => microphone.focus());
+    await settle();
+    expect(surface()?.getAttribute("data-chat-composer-mobile-collapsed")).toBe("true");
+    expect(microphone.isConnected).toBe(true);
+    await click(microphone);
+    expect(media.recorders).toHaveLength(1);
+    expect(media.recorders[0]!.calls).toContain("start");
+    await click(requireButton("Cancel dictation"));
+  });
+
   it("dictation phase 4 AC2: Alt+S, Alt+I and Alt+Enter select the mode while recording and while the last job transcribes", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 

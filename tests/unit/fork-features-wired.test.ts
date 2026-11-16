@@ -28,7 +28,7 @@ it("keeps the sidebar project scope on the store the keybinding writes", () => {
   const sidebar = read("apps/web/src/components/Sidebar.tsx");
   assert.include(
     sidebar,
-    "useProjectScopeStore((store) => store.projectScopeKey)",
+    "useProjectScopeStore((store) => store.projectScopeKeys)",
     "the sidebar reads a local project scope again, so projectScope.toggle writes a store nothing reads",
   );
   assert.notInclude(
@@ -157,7 +157,7 @@ it("handles the attach shortcut in the composer that owns the file input", () =>
   // chord are insufficient if either stops reaching the one real file input.
   assert.match(
     composer,
-    /const composerAttachButton = showComposerAttachAction \? \(\s*<ComposerAttachButton\s+addComposerAttachments=\{addComposerAttachments\}\s+focusComposer=\{focusComposer\}\s*\/>\s*\) : null;/,
+    /const composerAttachButton = showComposerAttachAction && !dictationTakesFooter \? \(\s*<ComposerAttachButton\s+addComposerAttachments=\{addComposerAttachments\}\s+focusComposer=\{focusComposer\}\s*\/>\s*\) : null;/,
     "the composer no longer mounts upstream's attach button with the shared attachment intake",
   );
   const buttonStart = attachButton.indexOf("export function ComposerAttachButton(");
@@ -317,15 +317,10 @@ it("renders the composer footer controls in one group, in order", () => {
     "export function ComposerModelPicker(",
   );
   assert.include(primary, "<ComposerPrimaryActions", "the extracted footer no longer renders send");
-  assert.include(
-    group,
-    "activeContextWindow={null}",
+  assert.notInclude(
+    primary,
+    "<ContextWindowMeter",
     "the extracted controls render a second context meter",
-  );
-  assert.include(
-    group,
-    "reserveContextWindowMeter={false}",
-    "the extracted controls reserve another context slot",
   );
   assert.include(
     group,

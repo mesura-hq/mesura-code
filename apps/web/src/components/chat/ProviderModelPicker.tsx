@@ -24,7 +24,12 @@ import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPick
 import { retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
-import { ModelEsque, getDisplayModelName, getTriggerDisplayModelName } from "./providerIconUtils";
+import {
+  ModelEsque,
+  getDisplayModelName,
+  getTriggerDisplayModelName,
+  getTriggerDisplayModelNameBesideIcon,
+} from "./providerIconUtils";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
 import { ComposerControl, type ComposerControlSize } from "./ComposerControl";
 import { takeOpenTarget, useComposerMenuProps } from "./composerEventScope";
@@ -109,6 +114,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   popupAlign?: "start" | "end";
   triggerClassName?: string;
   triggerLabel?: string;
+  /** Mesura: drop the provider word the icon already shows; the phone composer opts in. */
+  shortModelLabel?: boolean;
   triggerAriaLabel?: string;
   onOpenChange?: (open: boolean) => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
@@ -267,7 +274,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     .filter(Boolean)
     .join(" · ");
 
-  const triggerText = props.triggerLabel ?? multipleLabel ?? triggerTitle;
+  const visibleTriggerTitle =
+    props.shortModelLabel && selectedModel && activeEntry
+      ? getTriggerDisplayModelNameBesideIcon(selectedModel, activeEntry.driverKind)
+      : triggerTitle;
+  const triggerText = props.triggerLabel ?? multipleLabel ?? visibleTriggerTitle;
   const triggerTextProps = {
     className: cn(
       "min-w-0 flex-1 overflow-hidden truncate",

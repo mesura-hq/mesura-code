@@ -65,6 +65,8 @@ export function ComposerControlsBar(props: {
   restingHiddenBlockCount: number;
   iconOnlyBlockCount: number;
   showProviderUnavailable: boolean;
+  /** Mesura: the phone footer's model row shows the model without its provider word. */
+  shortModelLabel: boolean;
   providerSetupInstanceId: ProviderInstanceId | undefined;
   onOpenProviderSetup: ChatComposerProps["onOpenProviderSetup"];
   providerCatalogPending: boolean;
@@ -109,6 +111,7 @@ export function ComposerControlsBar(props: {
     restingHiddenBlockCount: measuredHiddenBlockCount,
     iconOnlyBlockCount,
     showProviderUnavailable,
+    shortModelLabel,
     providerSetupInstanceId,
     onOpenProviderSetup,
     providerCatalogPending,
@@ -187,6 +190,7 @@ export function ComposerControlsBar(props: {
       workspaceCwd={props.workspaceCwd}
       compact={false}
       isComposerOwned
+      shortModelLabel={shortModelLabel}
       // The trigger grows away from this edge when its model or effort label changes.
       popupAlign={composerControlsCollapsed ? "start" : "end"}
       disabled={providerCatalogPending || isSendBusy}

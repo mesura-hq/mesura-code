@@ -693,6 +693,33 @@ describe("combined picker in the composer: shortcuts", () => {
   });
 });
 
+// Mesura: the phone footer stacks the model row above the actions, both centered.
+it("phone composer footer stacks the model row above the actions and drops the provider word", async () => {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await using _viewport = {
+    [Symbol.asyncDispose]: () => page.viewport(previousViewport.width, previousViewport.height),
+  };
+  await using app = await mountApp();
+  await app.openPicker();
+  await chooseProvider("Claude");
+  await click(row("Claude Opus 5"));
+  await closePicker();
+
+  await page.viewport(412, 915);
+  const editor = app.container.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+  await act(async () => editor?.focus());
+  await vi.waitFor(() => {
+    const footer = app.container.querySelector<HTMLElement>('[data-chat-composer-footer="true"]');
+    expect(footer && getComputedStyle(footer).flexDirection).toBe("column");
+    const controls = footer!.querySelector<HTMLElement>('[data-chat-composer-controls="footer"]');
+    const actions = footer!.querySelector<HTMLElement>('[data-chat-composer-actions="right"]');
+    expect(controls!.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      actions!.getBoundingClientRect().top + 1,
+    );
+    expect(modelTriggerLabel()).toBe("Opus 5");
+  });
+});
+
 it("keeps the phone footer and stacked picker controls usable within the viewport", async () => {
   const previousViewport = { width: window.innerWidth, height: window.innerHeight };
   await using _viewport = {
@@ -723,7 +750,7 @@ it("keeps the phone footer and stacked picker controls usable within the viewpor
   await vi.waitFor(() => {
     const footer = app.container.querySelector<HTMLElement>('[data-chat-composer-footer="true"]');
     expect(footer).toBeTruthy();
-    expect(getComputedStyle(footer!).flexDirection).toBe("row");
+    expect(getComputedStyle(footer!).flexDirection).toBe("column");
     const trigger = app.modelTrigger().getBoundingClientRect();
     expect(trigger.width).toBeGreaterThan(0);
     expect(trigger.left).toBeGreaterThanOrEqual(0);
