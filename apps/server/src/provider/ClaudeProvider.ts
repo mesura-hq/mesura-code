@@ -51,7 +51,10 @@ import {
   type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import { accountIdentityFromEmail } from "./accountIdentity.ts";
-import { withProviderProbeMarker } from "./providerProbeMarker.ts";
+import {
+  PROVIDER_PROBE_MARKER_ENVIRONMENT,
+  withProviderProbeMarker,
+} from "./providerProbeMarker.ts";
 import { resolveClaudeSdkExecutablePath } from "./Drivers/ClaudeExecutable.ts";
 import {
   claudeSignedOutMessage,
@@ -301,6 +304,7 @@ export function buildClaudeCapabilitiesProbeQueryOptions(input: {
     ...(input.managedMcpConfig ? {} : { strictMcpConfig: true }),
     env: {
       ...providerProbeEnvironment(input.environment),
+      ...PROVIDER_PROBE_MARKER_ENVIRONMENT,
       // Disable claude.ai MCP separately; it is discovered outside filesystem config.
       ENABLE_CLAUDEAI_MCP_SERVERS: "false",
       // Skipping this avoids a Windows tasklist | findstr process tree on every refresh.
