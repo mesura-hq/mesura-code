@@ -973,7 +973,8 @@ describe("OpenCodeAdapterV2", () => {
         );
         // The thread's context window reads tokenUsage: the last step's context fill.
         if (ending === "completed") {
-          assert.equal(completed?.providerTurn.tokenUsage?.usedTokens, 22);
+          // Mesura: the context fill counts the step's reasoning too (makeOpenCodeContextTokenUsage).
+          assert.equal(completed?.providerTurn.tokenUsage?.usedTokens, 24);
           assert.equal(completed?.providerTurn.tokenUsage?.maxTokens, 200_000);
         }
       }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
@@ -1994,7 +1995,13 @@ describe("OpenCodeAdapterV2", () => {
           const starting = yield* harness
             .startTurn("", undefined, undefined, false, "catalog", {})
             .pipe(Effect.exit, Effect.forkScoped);
-          if (end === "catalog-live") yield* Fiber.join(starting);
+          if (end === "catalog-live") {
+            // Mesura: the live context report reads the catalog at the step and holds the
+            // session's events until its 3-second lookup timeout.
+            yield* Effect.promise(() => routeStarted.promise);
+            yield* TestClock.adjust("3 seconds");
+            yield* Fiber.join(starting);
+          }
           const idle =
             end === "catalog-live" ? yield* push(status("idle")).pipe(Effect.forkScoped) : null;
           yield* Effect.promise(() => routeStarted.promise);

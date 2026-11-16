@@ -269,18 +269,13 @@ function openCodeContextUsage(
   completedAt: DateTime.Utc,
 ): Pick<OrchestrationV2ProviderTurn, "tokenUsage"> {
   if (lastStep === null) return {};
-  const { tokens } = lastStep;
-  const inputTokens = tokens.input + tokens.cache.read + tokens.cache.write;
+  // Mesura: one measure for the live step reports and the settled turn.
   return {
-    tokenUsage: {
-      usedTokens: inputTokens + tokens.output,
-      maxTokens: contextWindow ?? null,
-      inputTokens,
-      cachedInputTokens: tokens.cache.read,
-      outputTokens: tokens.output,
-      reasoningOutputTokens: tokens.reasoning,
-      updatedAt: DateTime.formatIso(completedAt),
-    },
+    tokenUsage: makeOpenCodeContextTokenUsage(
+      lastStep,
+      contextWindow,
+      DateTime.formatIso(completedAt),
+    ),
   };
 }
 
@@ -2310,15 +2305,10 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 }
               }
               // Prompts read the catalog only for variants; a completed turn needs its context window.
-              const parsedModel = OpenCodeRuntime.parseOpenCodeModelSlug(turn.modelSelection.model);
-              if (status === "completed" && turn.usage.lastStep !== null && parsedModel !== null) {
+              // Mesura: through the live step report's lookup, which already read it or failed.
+              if (status === "completed" && turn.usage.lastStep !== null) {
                 yield* restore(
-                  OpenCodeRuntime.readOpenCodeCatalogModel(
-                    client,
-                    parsedModel,
-                    undefined,
-                    variantCache,
-                  ),
+                  resolveOpenCodeContextWindow(contextReportFor(state), turn.modelSelection.model),
                 ).pipe(Effect.exit);
               }
               yield* emitProviderTurn(state, turn, status, completedAt);
@@ -2731,7 +2721,19 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           }
         });
 
-        /** Mesura: the model's context window, from a per-thread cache of `provider.list`. */
+        const contextReportFor = (state: OpenCodeThreadState): OpenCodeContextReportState => {
+          const report = contextReports.get(state) ?? {
+            contextWindowByModelSlug: new Map(),
+            reportedStepIds: new Set(),
+          };
+          contextReports.set(state, report);
+          return report;
+        };
+
+        /**
+         * Mesura: the model's context window, from the catalog read upstream's turn completion
+         * shares (`variantCache`). The per-thread map also remembers a miss or a failed read.
+         */
         const resolveOpenCodeContextWindow = Effect.fnUntraced(function* (
           report: OpenCodeContextReportState,
           modelSlug: string,
@@ -2743,18 +2745,14 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           const contextWindow =
             parsedModel === null
               ? undefined
-              : yield* OpenCodeRuntime.runOpenCodeSdk("provider.list", (signal) =>
-                  client.provider.list(undefined, { signal }),
+              : yield* OpenCodeRuntime.readOpenCodeCatalogModel(
+                  client,
+                  parsedModel,
+                  undefined,
+                  variantCache,
                 ).pipe(
                   Effect.timeout(OPENCODE_CONTEXT_WINDOW_LOOKUP_TIMEOUT),
-                  Effect.map((response) => {
-                    const limit = response.data?.all.find(
-                      (provider) => provider.id === parsedModel.providerID,
-                    )?.models[parsedModel.modelID]?.limit.context;
-                    return limit !== undefined && Number.isInteger(limit) && limit > 0
-                      ? limit
-                      : undefined;
-                  }),
+                  Effect.map((entry) => entry?.contextWindow),
                   Effect.catch((error) =>
                     Effect.logWarning(
                       "OpenCode could not read the model's context window; reporting usage without it.",
@@ -2776,11 +2774,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           turn: ActiveOpenCodeTurn,
           step: OpenCodeStepUsage,
         ) {
-          const report = contextReports.get(state) ?? {
-            contextWindowByModelSlug: new Map(),
-            reportedStepIds: new Set(),
-          };
-          contextReports.set(state, report);
+          const report = contextReportFor(state);
           if (report.reportedStepIds.has(step.id)) return;
           report.reportedStepIds.add(step.id);
           // A step with no tokens (an aborted one) says nothing about the context.
