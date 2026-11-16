@@ -4062,7 +4062,7 @@ export default function ChatView(props: ChatViewProps) {
                                 activePendingApproval={activePendingApproval}
                                 pendingApprovals={pendingApprovals}
                                 onHeldRequestIdsChange={onHeldRequestIdsChange}
-                                pendingUserInputs={[...pendingUserInputs]}
+                                pendingUserInputs={[]}
                                 activePendingProgress={activePendingProgress}
                                 activePendingResolvedAnswers={activePendingResolvedAnswers}
                                 activePendingIsResponding={activePendingIsResponding}

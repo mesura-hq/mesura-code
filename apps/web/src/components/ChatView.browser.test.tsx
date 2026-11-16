@@ -52,8 +52,7 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
 
 it("a machine chip stashed in one thread restores with its machine in another", async () => {
   const other = threadWithHistory("thread-stash-restore", 1);
-  const asking = threadWithQuestion("thread-stash-question", "Which file should change?");
-  using _environment = installFakeEnvironment([other, asking]);
+  using _environment = installFakeEnvironment([other]);
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
@@ -83,16 +82,6 @@ it("a machine chip stashed in one thread restores with its machine in another", 
   await pressStashShortcut();
   await vi.waitFor(() => expect(usePromptStashStore.getState().entries).toHaveLength(1));
 
-  // An answer carries no machines, so an open question refuses the restore and keeps the entry.
-  await router.navigate({ to: `/${ENVIRONMENT_ID}/${asking.id}` });
-  await expect.element(page.getByText("Which file should change?")).toBeVisible();
-  await userEvent.click(page.getByRole("button", { name: /^Stashed prompts/ }));
-  await userEvent.click(page.getByRole("button", { name: /^Restore stashed prompt/ }));
-  await vi.waitFor(() =>
-    expect(document.body.textContent).toContain("Stashed machines can't go in an answer"),
-  );
-  expect(usePromptStashStore.getState().entries).toHaveLength(1);
-
   await router.navigate({ to: `/${ENVIRONMENT_ID}/${other.id}` });
   await expect.element(page.getByText("Answer 0 for thread-stash-restore.")).toBeVisible();
   await pressStashShortcut();
@@ -107,7 +96,7 @@ it("a machine chip stashed in one thread restores with its machine in another", 
   ).toEqual([]);
 });
 
-it("a question that opens while a stashed file is checked keeps a machine stash", async () => {
+it("a question that opens while a stashed file is checked restores the machine stash", async () => {
   const thread = threadWithHistory("thread-stash-late-question", 1);
   const asking = threadWithQuestion("thread-stash-late-question", "Which file should change?");
   const [request] = asking.runtimeRequests ?? [];
@@ -155,11 +144,12 @@ it("a question that opens while a stashed file is checked keeps a machine stash"
   await expect.element(page.getByText("Which file should change?")).toBeVisible();
   await answerAssetUrls();
 
-  await vi.waitFor(() =>
-    expect(document.body.textContent).toContain("Stashed machines can't go in an answer"),
-  );
-  expect(usePromptStashStore.getState().entries).toHaveLength(1);
-  usePromptStashStore.getState().takeEntry("stash-late-question");
+  // Mesura: the question is answered on its own card, so the composer keeps the machine.
+  await vi.waitFor(() => expect(usePromptStashStore.getState().entries).toHaveLength(0));
+  expect(
+    useComposerDraftStore.getState().getComposerDraft(scopeThreadRef(ENVIRONMENT_ID, thread.id))
+      ?.environmentContexts,
+  ).toEqual([environmentContextRecord(EnvironmentId.make("environment-build"), "Build box")]);
 });
 
 it("a new draft does not load its reserved thread before the server lists it", async () => {
