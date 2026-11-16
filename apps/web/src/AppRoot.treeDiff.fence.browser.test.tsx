@@ -261,7 +261,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 import { reviewEnvironment } from "./state/review";
 
-import { useFileTreeShortcut } from "./components/files/mesuraTree/useFileTreeShortcut";
+import { MesuraChatRouteLayer } from "./components/MesuraChatRouteLayer";
 import { useFileTreeStore } from "./components/files/mesuraTree/fileTreeStore";
 import { openCommandPalette } from "./commandPaletteBus";
 
@@ -397,11 +397,11 @@ async function setupBrowserFixture0() {
   };
 }
 
-/** The chat route's shell around ChatView: the `fileTree.toggle` listener `_chat.tsx` mounts. */
+/** The chat route's shell around ChatView: the `fileTree.toggle` layer `_chat.tsx` mounts. */
 function ThreadRoute() {
-  useFileTreeShortcut(threadRef);
   return (
     <SidebarProvider>
+      <MesuraChatRouteLayer />
       <ChatView environmentId={environmentId} threadId={threadId} routeKind="server" />
     </SidebarProvider>
   );
