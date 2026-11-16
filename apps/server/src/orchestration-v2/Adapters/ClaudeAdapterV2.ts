@@ -24,6 +24,10 @@ import {
   mergeClaudeWorkflowProgress,
   parseClaudeWorkflowRunHandles,
 } from "./claudeWorkflowProgress.ts";
+import {
+  claudeReportedAutoCompactThreshold,
+  withClaudeReportedAutoCompactThreshold,
+} from "./claudeReportedAutoCompactThreshold.ts";
 
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import {
@@ -700,6 +704,8 @@ export interface ClaudeAgentSdkQuerySession {
   >;
   readonly interrupt: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly close: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
+  // Mesura: optional so test sessions without it keep the settings-derived threshold.
+  readonly autoCompactThreshold?: Effect.Effect<number | null, ClaudeAgentSdkQueryRunnerError>;
 }
 
 type ClaudeQueryStreamExit = Exit.Exit<void, ClaudeAgentSdkQueryRunnerError>;
@@ -1856,6 +1862,10 @@ export const layerQueryRunner: Layer.Layer<
                 }),
               ),
             ),
+            autoCompactThreshold: Effect.tryPromise({
+              try: () => queryRuntime.getContextUsage({ detail: "summary" }),
+              catch: (cause) => queryRunnerError(cause, "getContextUsage"),
+            }).pipe(Effect.map(claudeReportedAutoCompactThreshold)),
             // A job started since the last poll is recorded before the CLI is told to exit.
             close: Effect.suspend(() => (processExited ? Effect.void : refreshDescendants)).pipe(
               Effect.andThen(Queue.shutdown(promptQueue)),
@@ -5035,6 +5045,9 @@ interface ClaudeLiveQueryContext {
   // Per process, not per session: a relative temp dir follows the cwd this CLI
   // was launched in, and a later turn's cwd can differ.
   readonly taskOutputRoot: string | undefined;
+  // Mesura: the current threshold request and its answer, absent until Claude answers it.
+  autoCompactThresholdRequest?: object;
+  autoCompactThreshold?: number | null;
 }
 
 interface ActiveClaudeToolCall {
@@ -6201,7 +6214,19 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           };
         };
 
+        // Mesura: what a late compaction-threshold answer corrects; see refreshAutoCompactThreshold.
+        let latestRunningUsageEvent: Extract<
+          ProviderAdapter.ProviderAdapterV2Event,
+          { type: "provider_turn.updated" }
+        > | null = null;
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) => {
+          if (
+            event.type === "provider_turn.updated" &&
+            event.providerTurn.status === "running" &&
+            event.providerTurn.tokenUsage !== undefined
+          ) {
+            latestRunningUsageEvent = event;
+          }
           if (event.type === "provider_thread.updated") {
             const nativeThreadId = event.providerThread.nativeThreadRef?.nativeId ?? "";
             event = {
@@ -6244,6 +6269,52 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           });
         });
 
+        // Mesura: Claude's own threshold covers managed settings and automatic windows that the
+        // settings-derived fallback cannot see. A new request supersedes the last; frames never
+        // wait, and a mid-turn answer republishes the turn's latest running usage under the SDK
+        // message lock. A settled turn waits for the next one.
+        const refreshAutoCompactThreshold = Effect.fnUntraced(function* (
+          live: ClaudeLiveQueryContext,
+        ) {
+          const request = live.query.autoCompactThreshold;
+          if (request === undefined) return;
+          const token = {};
+          live.autoCompactThresholdRequest = token;
+          delete live.autoCompactThreshold;
+          yield* request.pipe(
+            Effect.timeout("15 seconds"),
+            Effect.flatMap((threshold) =>
+              sdkMessageLock.withPermits(1)(
+                Effect.gen(function* () {
+                  if (live.autoCompactThresholdRequest !== token) return;
+                  live.autoCompactThreshold = threshold;
+                  const active = yield* Ref.get(activeTurn);
+                  const published = latestRunningUsageEvent;
+                  if (
+                    active === null ||
+                    published?.providerTurn.id !== active.providerTurnId ||
+                    published.providerTurn.tokenUsage === undefined ||
+                    (yield* Ref.get(queryContext)) !== live
+                  )
+                    return;
+                  yield* emitProviderEvent({
+                    ...published,
+                    providerTurn: {
+                      ...published.providerTurn,
+                      tokenUsage: withClaudeReportedAutoCompactThreshold(
+                        published.providerTurn.tokenUsage,
+                        threshold,
+                      ),
+                    },
+                  });
+                }),
+              ),
+            ),
+            Effect.ignore,
+            Effect.forkIn(sessionScope),
+          );
+        });
+
         // Usage without input is a placeholder, not a context measurement.
         const emitContextUsage = Effect.fnUntraced(function* (
           context: ActiveClaudeTurnContext,
@@ -6255,7 +6326,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           // arrives after generation, so it leaves the cache expiry unknown.
           if (requestStarted && context.streamUsage !== null) context.streamUsage.requestedAt = now;
           const maxTokens = claudeContextWindow(context.input.modelSelection);
-          const tokenUsage =
+          const tokenUsage = withClaudeReportedAutoCompactThreshold(
             typeof usage === "number"
               ? {
                   usedTokens: usage,
@@ -6269,7 +6340,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   DateTime.formatIso(now),
                   context.autoCompactWindow,
                   context.streamUsage?.requestedAt,
-                );
+                ),
+            (yield* Ref.get(queryContext))?.autoCompactThreshold,
+          );
           if (typeof usage !== "number") {
             if (claudeMessageInputTokens(usage) <= 0) return;
             context.compactionTokens = undefined;
@@ -12527,6 +12600,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ),
           );
           live.selection = selection;
+          yield* refreshAutoCompactThreshold(live);
         });
 
         const openQuery = Effect.fnUntraced(function* (
@@ -12826,6 +12900,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             }
             return context;
           });
+          yield* refreshAutoCompactThreshold(context);
           yield* querySession.messages.pipe(
             Stream.runForEach((message) =>
               sdkMessageLock.withPermits(1)(
