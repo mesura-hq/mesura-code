@@ -10,6 +10,7 @@ import {
   VoiceConversationError,
 } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "@effect/vitest";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as Layer from "effect/Layer";
@@ -31,7 +32,9 @@ const THREAD_ID = "thread-under-test";
 const API_KEY = `sk-${"test-key-".repeat(4)}`;
 const SESSION_ID = "client-session-0001";
 
-class VoiceTestApi extends HttpApi.make("environment").add(EnvironmentHttpApi.groups.voice) {}
+class VoiceTestApi extends HttpApi.make("environment").add(
+  EnvironmentHttpApi.groups.voiceConversation,
+) {}
 
 const scopesByToken: Readonly<Record<string, ReadonlyArray<AuthEnvironmentScope>>> = {
   read: [AuthOrchestrationReadScope],
@@ -126,6 +129,7 @@ const acceptingVoiceHistory: VoiceHistoryShape = {
 };
 
 interface HarnessOptions {
+  readonly env?: Record<string, string>;
   readonly history?: Partial<VoiceHistoryShape>;
   readonly initialApiKey?: string;
   readonly threadState?: () => ThreadState;
@@ -163,7 +167,8 @@ const withHandler = <A>(
             ? null
             : ({ id: THREAD_ID, title: "Voice test thread", status: "idle" } as never),
         ),
-      getTimelinePage: () => Effect.succeed({ items: [], totalItems: 0, hasMore: false }),
+      getTimelinePage: () =>
+        Effect.succeed({ items: [], totalItems: 0, hasMore: false, hasEarlier: false }),
     }),
   );
   const routesLayer = HttpApiBuilder.layer(VoiceTestApi).pipe(
@@ -180,19 +185,19 @@ const withHandler = <A>(
       ),
     ),
     Layer.provide(NodeServices.layer),
+    Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: options.env ?? {} }))),
   );
 
   vi.stubGlobal("fetch", options.fetch ?? fetch);
   const handler = HttpRouter.toWebHandler(routesLayer, { disableLogger: true });
   return Effect.acquireUseRelease(
     Effect.succeed(handler),
-    (environment) => Effect.tryPromise(() => run(environment)),
+    (environment) => Effect.promise(() => run(environment)),
     (environment) =>
       Effect.promise(() => environment.dispose()).pipe(
         Effect.ensuring(
           Effect.sync(() => {
             vi.unstubAllGlobals();
-            vi.unstubAllEnvs();
           }),
         ),
       ),
@@ -242,8 +247,7 @@ describe("voice conversation HTTP routes", () => {
   );
 
   it.effect("uses the environment key as a fallback without exposing it", () =>
-    withHandler({}, async (environment) => {
-      vi.stubEnv("OPENAI_API_KEY", API_KEY);
+    withHandler({ env: { OPENAI_API_KEY: API_KEY } }, async (environment) => {
       const response = await call(environment, get("/api/voice/settings", "read"));
       expect(response.status).toBe(200);
       expect(response.headers.get("cache-control")).toBe("no-store");

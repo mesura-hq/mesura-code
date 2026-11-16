@@ -7,13 +7,28 @@ publisher, no consumer, no storage.
 
 ## Fork-owned, and it stays that way
 
-This package belongs to the Symmetria fork. Nothing under `packages/contracts`
-or anywhere else upstream may be edited to serve it, because a change inside an
-upstream file is a merge conflict at every weekly upstream synchronization. The
-projection borrows upstream vocabulary instead: where upstream exports a schema
-value it is composed directly, and where upstream exports only a type,
-`src/upstreamLock.ts` binds a local copy to that type so the typecheck fails the
-moment the two diverge.
+This package belongs to the Symmetria fork. Do not restore retired runtime types
+in `packages/contracts` to serve the broker. The current upstream implementation
+remains authoritative. The projection composes available upstream schema values
+directly, including identifiers, token usage, and `IsoDateTime`.
+
+Upstream removed its v1 provider runtime exports in `67661cfbb5`. The broker
+preserves their last literals in `src/retiredUpstreamVocabulary.ts` to keep its
+protocol compatible. These types describe broker vocabulary, not the current
+server runtime. `src/upstreamLock.ts` locks the public literal tuples against
+these frozen types in both assignability directions. `BORROWED_RUNTIME_VOCABULARIES`
+keeps its public name and keys for existing consumers. The thread summary also
+preserves its session and latest-turn states as broker-owned schemas.
+
+A change to current upstream state does not change these frozen vocabularies.
+Change them only through an explicit broker protocol decision and a producer
+mapping review. Reusing an upstream type with the same name is not sufficient:
+its meaning and compatibility must also match.
+
+Compiler guards use `effect-tsgo tsc --checkers 1` under
+`flock /tmp/mesura-typecheck.lock env GOMEMLIMIT=1536MiB timeout -k 30 900`.
+The lock covers each compiler process. Do not hold it around a test suite:
+nested compiler guards must acquire it themselves.
 
 ## `schema/` is generated
 

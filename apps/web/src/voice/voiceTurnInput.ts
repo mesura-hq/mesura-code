@@ -2,7 +2,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type { StartThreadTurnInput } from "@t3tools/client-runtime/state/threads";
+import type { StartThreadTurnInput } from "@t3tools/client-runtime/operations";
 import type { VoiceAgentRequest } from "@t3tools/client-runtime/voice-conversation/controller";
 import {
   CommandId,

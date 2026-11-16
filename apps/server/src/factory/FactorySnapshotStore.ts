@@ -1,6 +1,7 @@
 import { FactoryReadSnapshotError, isFactorySnapshotDigest } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
@@ -42,17 +43,18 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
+  const digests = yield* Digest.Digest;
   const directory = config.factorySnapshotsDir;
 
   const put = Effect.fn("FactorySnapshotStore.put")(
     function* (bytes: Uint8Array) {
-      const digest = yield* crypto.digest("SHA-256", bytes).pipe(Effect.map(Hex.encode));
+      const digest = yield* digests.digest(Digest.sha256, bytes).pipe(Effect.map(Hex.encode));
       const target = path.join(directory, digest);
       if (yield* fileSystem.exists(target)) return digest;
       // Created on first use: a server that never sees a plan keeps no empty directory.
       yield* fileSystem.makeDirectory(directory, { recursive: true });
-      const uuid = yield* crypto.randomUUIDv4();
+      const uuid = yield* crypto.uuidV4();
       const temporary = path.join(directory, `.${digest}.${uuid}.tmp`);
       // Written aside, then published with a hard link: a reader never sees a partial file,
       // and a link never replaces a target another call published first. A rename would.

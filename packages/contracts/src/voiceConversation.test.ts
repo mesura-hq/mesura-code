@@ -112,7 +112,7 @@ describe("voice history contracts phase 2 fence", () => {
   });
 
   it("VH-C5 exposes transcript append and paginated history reads in the voice group", () => {
-    const endpoints = Object.keys(EnvironmentHttpApi.groups.voice.endpoints);
+    const endpoints = Object.keys(EnvironmentHttpApi.groups.voiceConversation.endpoints);
     expect(endpoints).toEqual(
       expect.arrayContaining(["appendTranscript", "listCalls", "listFragments"]),
     );

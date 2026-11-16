@@ -86,6 +86,8 @@ const makeEnvironment = (options: {
   const remote = RemoteEnvironmentAuthorization.of({
     authorizeBearer: () => Effect.die("unused"),
     authorizeDpop: () => Effect.die("unused"),
+    rememberCheckedDescriptor: () => Effect.void,
+    renewDpopBeforeExpiry: () => Effect.die("HTTP requests must not renew a socket's token."),
     authorizeDpopHttp: (input) =>
       Effect.sync(() => {
         authorizations.push(input.rejectedAccessToken);

@@ -23,7 +23,7 @@ import {
 import { createFeed, parseFeedPush } from "./threadFeed.ts";
 import { threadSocketPath } from "./threadSocketFiles.ts";
 import { createThreadStreamServer, type ThreadStreamServer } from "./threadStream.ts";
-import { closeServer, listenOnPath } from "./unixSocket.ts";
+import { closeServer, listenOnPathEffect } from "./unixSocket.ts";
 
 const { logInfo, logWarning } = makeComponentLogger("symmetria-thread-publisher");
 
@@ -62,13 +62,11 @@ export const make = Effect.gen(function* () {
       runSync(logWarning("thread socket server error", { message: error.message }));
     });
 
-    yield* Effect.acquireRelease(
-      Effect.tryPromise(() => listenOnPath(server, socketPath)),
-      () =>
-        Effect.promise(() => closeServer(server)).pipe(
-          Effect.andThen(removeSocketPath(socketPath)),
-          Effect.orDie,
-        ),
+    yield* Effect.acquireRelease(listenOnPathEffect(server, socketPath), () =>
+      Effect.promise(() => closeServer(server)).pipe(
+        Effect.andThen(removeSocketPath(socketPath)),
+        Effect.orDie,
+      ),
     );
 
     yield* restrictSocketPath(socketPath);

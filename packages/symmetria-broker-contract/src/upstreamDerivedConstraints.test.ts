@@ -3,6 +3,7 @@
 // exemption, and same reason, as `jsonSchema.test.ts`.
 import * as NodeFS from "node:fs";
 
+import { IsoDateTime } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -96,12 +97,13 @@ const emittedSchemaRefuses = (node: JsonObject, candidate: string): boolean => {
 // Hoisted per the repository's `no-inline-schema-compile` rule: the compiled
 // decoder is rebuilt on every call when it is constructed inline.
 const decodeThreadSummary = Schema.decodeUnknownExit(SymmetriaThreadSummary);
+const decodeIsoDateTime = Schema.decodeUnknownExit(IsoDateTime);
 
-const decoderRefuses = (title: string): boolean => {
+const decoderRefuses = (property: string, value: string): boolean => {
   const candidate = {
     threadId: "thr_1",
     projectId: "prj_1",
-    title,
+    title: "A thread",
     branch: null,
     worktreePath: null,
     latestTurn: null,
@@ -114,6 +116,7 @@ const decoderRefuses = (title: string): boolean => {
     snoozedUntil: null,
     pinnedAt: null,
     deletedAt: null,
+    [property]: value,
   };
   const result = decodeThreadSummary(candidate);
   return result._tag === "Failure";
@@ -150,17 +153,20 @@ describe("upstream-derived free-text fields carry their constraint into the arti
     },
   );
 
-  it("the artifact and the decoder refuse the same titles", () => {
-    for (const candidate of ["", "   ", "\t\n"]) {
-      expect(emittedSchemaRefuses(stringSchemaFor("title"), candidate)).toBe(
-        decoderRefuses(candidate),
-      );
-    }
-  });
+  it.each(FREE_TEXT_PROPERTIES)(
+    "the artifact and the decoder refuse the same %s values",
+    (property) => {
+      for (const candidate of ["", "   ", "\t\n"]) {
+        expect(emittedSchemaRefuses(stringSchemaFor(property), candidate)).toBe(
+          decoderRefuses(property, candidate),
+        );
+      }
+    },
+  );
 
   it("accepts a title that merely has padding, because the wire is not trimmed", () => {
     expect(emittedSchemaRefuses(stringSchemaFor("title"), " a ")).toBe(false);
-    expect(decoderRefuses(" a ")).toBe(false);
+    expect(decoderRefuses("title", " a ")).toBe(false);
   });
 
   it("pins the committed artifact to what the sources emit, for these fields", () => {
@@ -178,9 +184,17 @@ describe("projected timestamps stay as loose as the model they project", () => {
   // to restore, and a constraint would refuse timestamps the fork itself accepts.
   it.each(TIMESTAMP_PROPERTIES)("%s emits no string constraint", (property) => {
     expect(stringConstraints(stringSchemaFor(property))).toEqual({});
+    expect(stringSchemaFor(property)).not.toHaveProperty("format");
   });
 
-  it("the decoder accepts a timestamp the emitted document accepts", () => {
-    expect(decoderRefuses("2026-08-22T00:00:00.000Z")).toBe(false);
-  });
+  it.each(TIMESTAMP_PROPERTIES)(
+    "%s accepts the same strings as upstream IsoDateTime",
+    (property) => {
+      for (const candidate of ["", "not-a-timestamp", "2026-08-22T00:00:00.000Z"]) {
+        const upstreamRefuses = decodeIsoDateTime(candidate)._tag === "Failure";
+        expect(decoderRefuses(property, candidate)).toBe(upstreamRefuses);
+        expect(emittedSchemaRefuses(stringSchemaFor(property), candidate)).toBe(upstreamRefuses);
+      }
+    },
+  );
 });

@@ -1,5 +1,8 @@
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import type { PluggableList } from "unified";
+import { parseGitRemoteRepository } from "@t3tools/shared/git";
+import { remarkPullRequestAutolinks } from "../pullRequest/pullRequestMarkdown.logic";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { IssueState, IssueSummary } from "@t3tools/contracts";
 import {
@@ -183,7 +186,7 @@ export function IssuesPage({
   const query = typedQuery.source === querySource ? typedQuery.value : search.q;
   const setQuery = (value: string) => setTypedQuery({ source: querySource, value });
   const searchInputRef = useRef<HTMLInputElement>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- debounces the typed query into the URL; the timer dies with the draft
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- debounces the typed query into the URL; the timer dies with the draft
   useEffect(() => {
     if (query === search.q) return;
     const timeout = window.setTimeout(() => onSearchChange({ q: query, limit: 100 }, true), 350);
@@ -209,7 +212,7 @@ export function IssuesPage({
   // The issue whose detail was just closed: its row takes focus back once the list is visible
   // again, so keyboard and screen-reader users land where they left the list.
   const returnFocusToIssueRef = useRef<number | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- focus needs the list rows mounted, which happens after the commit that closes the detail
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- focus needs the list rows mounted, which happens after the commit that closes the detail
   useEffect(() => {
     const number = returnFocusToIssueRef.current;
     if (search.issue !== undefined || number === null) return;
@@ -532,12 +535,19 @@ function IssueDetailPane({
   const issue = detail.data ?? summary;
   const markdownContext = useMemo(() => {
     const findAutolinks = sourceControlClients.get("github").referenceAutolinks;
+    const autolinks =
+      repositoryUrl !== null && findAutolinks !== undefined
+        ? (text: string) => findAutolinks(text, repositoryUrl)
+        : null;
+    const remarkPlugins: PluggableList = autolinks
+      ? [[remarkPullRequestAutolinks, { autolinks }]]
+      : [];
     return {
-      autolinks:
-        repositoryUrl !== null && findAutolinks !== undefined
-          ? (text: string) => findAutolinks(text, repositoryUrl)
-          : null,
+      remarkPlugins,
+      lineBreaks: sourceControlClients.get("github").hardLineBreaks ?? false,
       threadRef: null,
+      repository:
+        repositoryUrl === null ? null : (parseGitRemoteRepository(repositoryUrl)?.path ?? null),
     };
   }, [repositoryUrl]);
   // A detail opens because the reader chose an issue, so it takes focus: on a narrow pane the

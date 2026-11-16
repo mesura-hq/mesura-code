@@ -1,8 +1,8 @@
 /**
- * Upstream exports only the types of these vocabularies, so each keeps a local literal tuple
- * locked to its type: an upstream literal change fails this package's typecheck. Add one only
- * when no public schema alias exists (`RuntimeTurnState` has `ProviderRuntimeTurnStatus`).
- * No runtime imports: the module typechecks alone against a stand-in for the upstream types.
+ * The broker retains these retired upstream literals for protocol compatibility.
+ * Each tuple locks against the frozen broker-owned type, not the current server runtime.
+ * Compose live upstream schema values directly where they remain available.
+ * No runtime imports: compiler guards replace only the vocabulary module.
  */
 import type {
   ProviderRuntimeEvent,
@@ -10,12 +10,8 @@ import type {
   RuntimeSessionExitKind,
   RuntimeSessionState,
   RuntimeThreadState,
-} from "@t3tools/contracts";
+} from "./retiredUpstreamVocabulary.ts";
 
-/**
- * Mesura: upstream stopped exporting the event-type vocabulary as its own type.
- * The union's `type` field is the same set of literals.
- */
 type ProviderRuntimeEventType = ProviderRuntimeEvent["type"];
 
 /**
@@ -139,10 +135,8 @@ export const providerRuntimeEventTypeLock: MutuallyAssignable<
 > = true;
 
 /**
- * Every borrowed vocabulary, keyed by the upstream type it locks against. Kept
- * so a test can walk the whole set rather than naming each tuple by hand, which
- * also means adding or removing one here changes what those tests cover without
- * any second table needing an edit.
+ * Keep the public name and keys for broker consumers. These vocabularies now lock
+ * against retiredUpstreamVocabulary.ts; they no longer track live upstream exports.
  */
 export const BORROWED_RUNTIME_VOCABULARIES = {
   RuntimeSessionState: RUNTIME_SESSION_STATES,

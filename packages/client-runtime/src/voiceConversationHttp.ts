@@ -4,7 +4,7 @@ import {
   type VoiceTranscriptAppendInput,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import { RemoteEnvironmentAuthorization } from "./authorization/service.ts";
 import type { PreparedConnection } from "./connection/model.ts";
 import { ManagedRelayDpopSigner } from "./relay/managedRelay.ts";
@@ -22,10 +22,10 @@ import {
 } from "./state/environmentHttpAuth.ts";
 
 type VoiceHttpClient = Effect.Success<
-  ReturnType<typeof makeEnvironmentHttpApiGroupClient<"voice">>
+  ReturnType<typeof makeEnvironmentHttpApiGroupClient<"voiceConversation">>
 >;
 /** The voice group's contract URL builder. It encodes params like the client, so DPoP proofs match. */
-type VoiceHttpUrls = ReturnType<typeof makeEnvironmentHttpApiUrlBuilder>["voice"];
+type VoiceHttpUrls = ReturnType<typeof makeEnvironmentHttpApiUrlBuilder>["voiceConversation"];
 
 const REQUEST_TIMEOUT_MS = 40_000;
 const OWNER_CHANGED_MESSAGE =
@@ -49,7 +49,7 @@ const request = Effect.fn("clientRuntime.voice.request")(function* <A, E>(
     prepared,
     signer,
     remoteAuthorization,
-    group: "voice",
+    group: "voiceConversation",
     method,
     url,
     timeoutMs: REQUEST_TIMEOUT_MS,
@@ -59,9 +59,10 @@ const request = Effect.fn("clientRuntime.voice.request")(function* <A, E>(
 });
 
 /** History text was not sent: the connection no longer proves the owner it was saved under. */
-export class VoiceHistoryOwnerChangedError extends Data.TaggedError(
+export class VoiceHistoryOwnerChangedError extends Schema.TaggedError<VoiceHistoryOwnerChangedError>()(
   "VoiceHistoryOwnerChangedError",
-)<{ readonly message: string }> {}
+  { message: Schema.String },
+) {}
 
 /** A refused owner is a request that could not be authorized; its cause says why. */
 const ownerRefused = (message: string) =>
@@ -89,7 +90,9 @@ export const createVoiceHistoryOwnerGuard = (input: {
     Effect.gen(function* () {
       if (!input.isCurrent()) return yield* ownerRefused(CONNECTION_GONE_MESSAGE);
       if (attempt.credentialKey !== null && attempt.credentialKey === confirmedCredential) return;
-      const url = makeEnvironmentHttpApiUrlBuilder(attempt.httpBaseUrl).voice.settings();
+      const url = makeEnvironmentHttpApiUrlBuilder(
+        attempt.httpBaseUrl,
+      ).voiceConversation.settings();
       const headers = yield* attempt.headersFor("GET", url);
       const settings = yield* executeEnvironmentHttpRequest(
         url,

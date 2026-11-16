@@ -1,3 +1,4 @@
+import * as NodePath from "@effect/platform-node/NodePath";
 /**
  * Drives `ThreadPullRequestServiceV2` as the server does: one startup backfill, then one
  * sweep per minute of `TestClock` time, plus the domain events that queue one thread.
@@ -21,7 +22,7 @@ import {
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -239,7 +240,7 @@ export const makeSweepHarness = (input: {
     const dependencies = Layer.mergeAll(
       Layer.mock(Orchestrator.OrchestratorV2)({
         streamDomainEvents: Stream.fromPubSub(events),
-        getShellSnapshot: (options) =>
+        getPullRequestSnapshot: (options) =>
           Queue.offer(reads, "snapshot").pipe(
             Effect.as({
               schemaVersion: 2 as const,
@@ -247,6 +248,7 @@ export const makeSweepHarness = (input: {
               threads: threads.filter(
                 (thread) =>
                   thread.archivedAt === null &&
+                  (options?.threadId === undefined || thread.id === options.threadId) &&
                   !(
                     options?.unsettledOnly &&
                     (thread.settledOverride === "settled" || thread.settledAt !== null)
@@ -273,7 +275,9 @@ export const makeSweepHarness = (input: {
       Layer.mock(GitManager.GitManager)({
         branchPullRequest: input.git.branchPullRequest,
       }),
-      Layer.mock(PullRequestService.PullRequestService)({}),
+      Layer.mock(PullRequestService.PullRequestService)({
+        notifyLinkedThreadsChanged: Effect.void,
+      }),
       // A client is present, so the periodic sweep runs.
       Layer.mock(BackgroundPolicy.BackgroundPolicy)({
         shouldRunOpportunisticWork: Effect.succeed(true),
@@ -284,13 +288,11 @@ export const makeSweepHarness = (input: {
       ),
       Layer.succeed(ServerActivation.ServerActivation, Deferred.await(activation)),
       Layer.succeed(
-        Crypto.Crypto,
-        Crypto.make({
-          randomBytes: (size) => new Uint8Array(size).fill(1),
-          digest: (_algorithm, data) => Effect.succeed(data),
-        }),
+        SecureRandom.SecureRandom,
+        SecureRandom.make((size) => new Uint8Array(size).fill(1)),
       ),
       FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
+      NodePath.layer,
       Logger.layer([logger], { mergeWithExisting: false }),
     );
     // The worker fiber starts inside `make`, so the logger must already be in place there.

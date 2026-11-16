@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { assert, it } from "@effect/vitest";
+import { vi } from "vite-plus/test";
 
 import { PUBLISH_THREADS_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopIpc from "../ipc/DesktopIpc.ts";
@@ -56,19 +57,20 @@ const readFirstLine = (socketPath: string): Promise<string> =>
 it.effect("ThreadPublisher still binds the Symmetria thread socket and its push channel", () =>
   Effect.gen(function* () {
     const runtimeDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mesura-threads-"));
-    const previousRuntimeDir = process.env["XDG_RUNTIME_DIR"];
-    process.env["XDG_RUNTIME_DIR"] = runtimeDir;
+    vi.stubEnv("XDG_RUNTIME_DIR", runtimeDir);
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
-        if (previousRuntimeDir === undefined) delete process.env["XDG_RUNTIME_DIR"];
-        else process.env["XDG_RUNTIME_DIR"] = previousRuntimeDir;
+        vi.unstubAllEnvs();
         NodeFS.rmSync(runtimeDir, { recursive: true, force: true });
       }),
     );
 
     const { ipcMain, handledChannels } = makeRecordingIpcMain();
     const publisher = yield* ThreadPublisher.make.pipe(
-      Effect.provideService(DesktopIpc.DesktopIpc, DesktopIpc.make(ipcMain)),
+      Effect.provideService(
+        DesktopIpc.DesktopIpc,
+        DesktopIpc.make(ipcMain, () => Effect.succeed(true)),
+      ),
     );
 
     const expectedPath = NodePath.join(runtimeDir, `symmetria-mesura-threads-${process.pid}.sock`);

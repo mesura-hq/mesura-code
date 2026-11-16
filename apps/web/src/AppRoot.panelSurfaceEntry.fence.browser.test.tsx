@@ -173,9 +173,6 @@ vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSett
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/Sidebar", async () => (await fenceMocks()).mockSidebar());
-vi.mock("./components/LegacySidebar", async () =>
-  (await fenceMocks()).mockRendersNothing("default"),
-);
 vi.mock("./components/preview/PreviewAutomationHosts", async () =>
   (await fenceMocks()).mockRendersNothing("PreviewAutomationHosts"),
 );

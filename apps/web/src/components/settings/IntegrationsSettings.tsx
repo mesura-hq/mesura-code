@@ -1,3 +1,4 @@
+import { VoiceSettings } from "~/voice/VoiceSettings";
 import { DeviceHostUpdates } from "../device/DeviceHostUpdates";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
 import {
@@ -7,8 +8,7 @@ import {
 } from "./useScopedSettings";
 import { useAtomValue } from "@effect/atom-react";
 import { ScopedSwitch } from "./ScopedSwitch";
-import { DeviceHostsSettings } from "./DeviceHostsSettings";
-import { EasDeviceHostsSettings } from "./EasDeviceHostsSettings";
+import { DeviceSourcesSettings } from "./DeviceSourcesSettings";
 /**
  * Preferences for surfaces Mesura Code embeds rather than owns. Browser holds the defaults a
  * preview tab opens at, for hand-opened tabs and agent `preview_open` calls that state no size.
@@ -43,14 +43,16 @@ import {
   type BrowserImportSource,
   type PreviewAppearancePreference,
   type PreviewViewportSetting,
+  managedCapabilityDenial,
 } from "@t3tools/contracts";
+import { usePrimaryManagedPolicy } from "~/state/managedPolicy";
 import { isValidSearchUrlTemplate } from "@t3tools/shared/preview";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
 import { MoreVertical, Plus as PlusIcon } from "lucide-react";
+import * as Schema from "effect/Schema";
 import { useRef, useState } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
-import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { resolveEnvironmentOptionLabel } from "~/components/BranchToolbar.logic";
 import { previewBridge } from "~/components/preview/previewBridge";
 import { cn, randomUUID } from "~/lib/utils";
@@ -66,11 +68,6 @@ import {
   AgentDeviceSetupStatus,
   DeviceHubSetupStatus,
   deviceHubReadiness,
-  PlatformStatus,
-  platformSetupStatus,
-  deviceHubDescription,
-  agentDeviceDescription,
-  DeviceHostDiagnostics,
 } from "~/components/device/DeviceSetup";
 import { isElectron } from "../../env";
 
@@ -127,20 +124,22 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { AdvancedSettings } from "./AdvancedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { VoiceSettings } from "~/voice/VoiceSettings";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import {
+  blockedImportOutcome,
   formatPaymentDomainsText,
   importFailureReason,
   importIntoServerProfile,
+  importPolicyRefusal,
   paymentDomainsPatch,
   serverImportTargetNotice,
   serverImportTargetProfiles,
   type ImportOutcome,
 } from "./browserImportWizard.logic";
 
-export { importFailureReason };
+export { importFailureReason, importPolicyRefusal };
 
 const FILL_VALUE = "fill";
 const RESPONSIVE_VALUE = "responsive";
@@ -196,12 +195,18 @@ const APPEARANCE_LABELS: Readonly<Record<PreviewAppearancePreference, string>> =
 
 const zoomLabel = (zoomFactor: number) => `${Math.round(zoomFactor * 100)}%`;
 
-class ProfileLimitReachedError extends Error {
-  constructor() {
-    super("Browser profile limit reached.");
-    this.name = "ProfileLimitReachedError";
+/** IPC carries reason tokens inside messages; treat unknown tokens as read failures without exposing raw
+ * text. */
+class ProfileLimitReachedError extends Schema.TaggedError<ProfileLimitReachedError>()(
+  "ProfileLimitReachedError",
+  {},
+) {
+  override get message(): string {
+    return "Browser profile limit reached.";
   }
 }
+
+const isProfileLimitReachedError = Schema.is(ProfileLimitReachedError);
 
 async function importBrowserCookiesIntoTarget(
   bridge: NonNullable<typeof previewBridge>,
@@ -259,8 +264,9 @@ async function importBrowserCookiesIntoTarget(
           await clearBrowserProfileData(bridge, [environmentId], input.target.profileId).catch(
             () => undefined,
           );
-          const reason =
-            cause instanceof ProfileLimitReachedError ? "profileLimitReached" : "profileNotSaved";
+          const reason = isProfileLimitReachedError(cause)
+            ? "profileLimitReached"
+            : "profileNotSaved";
           throw new Error(`Importing cookies from ${source.id} failed: ${reason}.`, { cause });
         }
       } else {
@@ -277,7 +283,7 @@ async function importBrowserCookiesIntoTarget(
       targetName,
     };
   } catch (cause) {
-    return { kind: "blocked", reason: importFailureReason(cause) };
+    return blockedImportOutcome(cause);
   }
 }
 
@@ -315,7 +321,7 @@ const rotateViewport = (
 
 function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
   const viewport = useClientSettings((settings) => settings.browserDefaultViewport);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   const sized = viewport._tag === "fill" ? null : viewport;
   const presentedSize = {
@@ -362,6 +368,7 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
   return (
     <SettingsRow
       {...searchableSetting("browser-default-viewport")}
+      devicePreference
       description="Tab size for you and agents. Fill fits the panel; other sizes show the device toolbar."
       resetAction={
         !disabled && viewport._tag !== DEFAULT_BROWSER_VIEWPORT._tag ? (
@@ -465,11 +472,12 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
 
 function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
   const zoomFactor = useClientSettings((settings) => settings.browserDefaultZoomFactor);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-default-zoom")}
+      devicePreference
       description="Page zoom applied to new browser tabs."
       resetAction={
         !disabled && zoomFactor !== DEFAULT_PREVIEW_ZOOM_FACTOR ? (
@@ -508,11 +516,12 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
 
 function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) {
   const appearance = useClientSettings((settings) => settings.browserDefaultAppearance);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-default-appearance")}
+      devicePreference
       description="The color scheme pages are told to prefer. System follows your OS setting."
       resetAction={
         !disabled && appearance !== DEFAULT_PREVIEW_APPEARANCE ? (
@@ -555,11 +564,12 @@ function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) 
 function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolean }) {
   const showKeys = useClientSettings((settings) => settings.browserRecordingShowKeyPresses);
   const showMouse = useClientSettings((settings) => settings.browserRecordingShowMousePresses);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
   return (
     <>
       <SettingsRow
         {...searchableSetting("browser-recording-key-presses")}
+        devicePreference
         description="Show pressed keys and shortcuts in new recordings. Password fields are excluded."
         control={
           <Switch
@@ -574,6 +584,7 @@ function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolea
       />
       <SettingsRow
         {...searchableSetting("browser-recording-mouse-presses")}
+        devicePreference
         description="Highlight mouse presses and held buttons in new recordings."
         control={
           <Switch
@@ -592,11 +603,12 @@ function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolea
 
 function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boolean }) {
   const frameRate = useClientSettings((settings) => settings.browserRecordingFrameRate);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-recording-frame-rate")}
+      devicePreference
       description="Maximum recording rate. 30 fps saves CPU and storage; 60 fps is smoother."
       resetAction={
         !disabled && frameRate !== DEFAULT_BROWSER_RECORDING_FRAME_RATE ? (
@@ -646,11 +658,12 @@ const LINK_TARGET_LABELS: Readonly<Record<BrowserLinkTarget, string>> = {
 
 function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) {
   const linkTarget = useClientSettings((settings) => settings.browserLinkTarget);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-link-target")}
+      devicePreference
       description="Where links in the chat and terminal open. Hold ⌘ or Ctrl while clicking a link to open it in your default browser either way."
       resetAction={
         !disabled && linkTarget !== DEFAULT_BROWSER_LINK_TARGET ? (
@@ -699,12 +712,13 @@ const SEARCH_ENGINE_LABELS: Readonly<Record<BrowserSearchEngine, string>> = {
 function BrowserSearchEngineSetting() {
   const engine = useClientSettings((settings) => settings.browserSearchEngine);
   const customUrl = useClientSettings((settings) => settings.browserCustomSearchUrl);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <>
       <SettingsRow
         {...searchableSetting("browser-search-engine")}
+        devicePreference
         description="What the address bar searches when you type something that isn't a URL."
         resetAction={
           engine !== DEFAULT_BROWSER_SEARCH_ENGINE || customUrl !== "" ? (
@@ -745,6 +759,7 @@ function BrowserSearchEngineSetting() {
       {engine === "custom" ? (
         <SettingsRow
           title="Custom search URL"
+          devicePreference
           description="Use %s where the search terms go."
           status={
             isValidSearchUrlTemplate(customUrl)
@@ -771,7 +786,7 @@ function BrowserSearchEngineSetting() {
   );
 }
 
-function PullRequestLinksOpenInAppSetting() {
+export function PullRequestLinksOpenInAppSetting() {
   const openInApp = useClientSettings((settings) => settings.pullRequestLinksOpenInApp);
   const updateSettings = useUpdatePrimarySettings();
 
@@ -806,15 +821,23 @@ function DeviceIntegrationSettings() {
   const connected = selected?.connection.phase === "connected" && selected.serverConfig !== null;
   const environmentId = connected ? selected.environmentId : null;
 
+  const { state } = useDeviceState(environmentId);
+
   return (
-    <SettingsSection id="devices" title="Devices">
-      <DeviceIntegrationControls
-        key={`${environmentId}:${JSON.stringify(search)}`}
-        environmentId={environmentId}
-        enabled={settings.enableDeviceSupport}
-        agentAccessEnabled={settings.enableAgentDeviceAccess}
+    <>
+      <SettingsSection id="devices" title="Devices">
+        <DeviceIntegrationControls
+          key={`${environmentId}:${JSON.stringify(search)}`}
+          environmentId={environmentId}
+          enabled={settings.enableDeviceSupport}
+          agentAccessEnabled={settings.enableAgentDeviceAccess}
+        />
+      </SettingsSection>
+      <DeviceSourcesSettings
+        supportsEas={state.supportsEasHosts === true}
+        supportsSimlock={state.supportsSimlockHosts === true}
       />
-    </SettingsSection>
+    </>
   );
 }
 
@@ -840,20 +863,7 @@ function DeviceIntegrationControls({
   const [pending, setPending] = useState<
     "hub" | "check" | "agent" | "update-hub" | "update-agent" | null
   >(null);
-  const { ready: hubReady, busy } = deviceHubReadiness(state);
-  const localPlatformsUnavailable = state.hosts.some(
-    (host) => host.kind === "local" && !host.platforms.some((platform) => platform.available),
-  );
-  const [platformsRevealed, setPlatformsRevealed] = useState(false);
-  if (platformsRevealed && !enabled) setPlatformsRevealed(false);
-  if (
-    enabled &&
-    !platformsRevealed &&
-    (hubReady || localPlatformsUnavailable) &&
-    pending !== "hub"
-  ) {
-    setPlatformsRevealed(true);
-  }
+  const { busy } = deviceHubReadiness(state);
 
   const update = async (
     kind: NonNullable<typeof pending>,
@@ -915,7 +925,7 @@ function DeviceIntegrationControls({
                   .finally(() => setPending(null));
               }}
             >
-              {pending === `update-${tool}` ? "Updating…" : `Update to v${version.requiredVersion}`}
+              {pending === `update-${tool}` ? "Updating…" : "Update"}
             </Button>
           ) : null}
           {state.supportsToolInspection ? (
@@ -950,14 +960,18 @@ function DeviceIntegrationControls({
         {...searchableSetting("device-hub")}
         serverScoped
         settingKeys={["enableDeviceSupport"]}
-        description={deviceHubDescription}
-        control={
+        description={
           <>
+            Open simulators and emulators in the Device panel. Hub:{" "}
             <DeviceToolVersions
               action={versionActions("hub")}
               kind="hub"
               tools={state.hosts.find((host) => host.kind === "local")?.tools}
             />
+          </>
+        }
+        control={
+          <>
             {pending === "hub" ? <DeviceHubSetupStatus state={state} pending compact /> : null}
             <ScopedSwitch
               settingKeys={["enableDeviceSupport"]}
@@ -981,65 +995,22 @@ function DeviceIntegrationControls({
           </>
         }
       />
-      <AnimatedHeight>
-        {platformsRevealed ? (
-          <SettingsRow
-            {...searchableSetting("device-platform-support")}
-            description={
-              connectedEnvironments.length > 1
-                ? `Status for ${connectedEnvironments.find((environment) => environment.environmentId === environmentId)?.label}. Select an environment to inspect its simulator support.`
-                : undefined
-            }
-            status={
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-x-5 gap-y-2">
-                  <PlatformStatus
-                    compact
-                    platform="iOS"
-                    status={platformSetupStatus(state, "ios")}
-                  />
-                  <PlatformStatus
-                    compact
-                    platform="Android"
-                    status={platformSetupStatus(state, "android")}
-                  />
-                </div>
-                {/* Remote hosts report their own warnings in the device host list below. */}
-                <DeviceHostDiagnostics
-                  hosts={state.hosts.filter((host) => host.kind === "local")}
-                  hostStatuses={state.hostStatuses}
-                />
-              </div>
-            }
-            control={
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!environmentId || !enabled || busy || pending !== null}
-                onClick={() => {
-                  if (!environmentId) return;
-                  setPending("check");
-                  void list({ environmentId, input: {} }).finally(() => setPending(null));
-                }}
-              >
-                {pending === "check" ? "Checking…" : "Refresh"}
-              </Button>
-            }
-          />
-        ) : null}
-      </AnimatedHeight>
       <SettingsRow
         {...searchableSetting("agent-device-access")}
         serverScoped
         settingKeys={["enableAgentDeviceAccess"]}
-        description={agentDeviceDescription}
-        control={
+        description={
           <>
+            New agent sessions can open and drive these devices. agent-device:{" "}
             <DeviceToolVersions
               action={versionActions("agent")}
               kind="agent"
               tools={state.hosts.find((host) => host.kind === "local")?.tools}
             />
+          </>
+        }
+        control={
+          <>
             {pending === "agent" ? <AgentDeviceSetupStatus state={state} pending compact /> : null}
             <ScopedSwitch
               settingKeys={["enableAgentDeviceAccess"]}
@@ -1066,8 +1037,6 @@ function DeviceIntegrationControls({
           environmentId={environmentId}
         />
       ) : null}
-      <DeviceHostsSettings environmentId={environmentId} />
-      {state.supportsEasHosts ? <EasDeviceHostsSettings environmentId={environmentId} /> : null}
     </>
   );
 }
@@ -1167,11 +1136,12 @@ function BrowserPaymentDomainsSetting() {
 
 function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled: boolean }) {
   const autoShow = useClientSettings((settings) => settings.browserAutoShowFloatingPreview);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-auto-show-floating-preview")}
+      devicePreference
       description="Show the floating preview when an agent opens a browser or device unless the agent says otherwise."
       resetAction={
         !disabled && autoShow !== DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW ? (
@@ -1203,9 +1173,19 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
   const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
   const settingsHydrated = useClientSettingsHydrated();
+  // Profile edits pair with profile data on disk, so they save for this device in every scope.
   const updateSettings = useUpdatePrimarySettings();
+  const updateDefaultProfile = useUpdateScopedSettings();
+  const { scope } = useSettingsScope();
+  // The default profile is a device preference, which a project cannot override.
+  const defaultProfileReadOnly = scope.kind === "project" || scope.kind === "checkout";
   const { environments, isReady: environmentsReady } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
+  // Cookie import runs on this desktop, whose policy the primary environment reports.
+  const cookieImportDenial = managedCapabilityDenial(
+    usePrimaryManagedPolicy(),
+    "browserCookieImport",
+  );
   const [sources, setSources] = useState<ReadonlyArray<BrowserImportSource> | null>(null);
   const [importSession, setImportSession] = useState<{
     readonly source: BrowserImportSource;
@@ -1438,7 +1418,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
             <MenuSeparator />
             <MenuGroup>
               <MenuGroupLabel>Import from</MenuGroupLabel>
-              {sources === null ? (
+              {cookieImportDenial !== undefined ? (
+                <MenuItem disabled>{cookieImportDenial}</MenuItem>
+              ) : sources === null ? (
                 <MenuItem disabled>Looking for browsers…</MenuItem>
               ) : importableSources.length === 0 ? (
                 <MenuItem disabled>No supported browsers found</MenuItem>
@@ -1529,10 +1511,10 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 </MenuTrigger>
                 <MenuPopup align="end">
                   <MenuItem
-                    disabled={!settingsHydrated || isDefault}
+                    disabled={!settingsHydrated || isDefault || defaultProfileReadOnly}
                     onClick={() => {
                       if (settingsHydrated) {
-                        updateSettings({ browserDefaultProfileId: profile.id });
+                        updateDefaultProfile({ browserDefaultProfileId: profile.id });
                       }
                     }}
                   >
@@ -1672,8 +1654,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           }
           onRefreshSource={() => refreshImportSource(importSession.source.id)}
           onCheckFullDiskAccess={
-            window.desktopBridge?.checkSystemPermission
-              ? () => window.desktopBridge!.checkSystemPermission!("full-disk-access")
+            window.desktopBridge
+              ? () => window.desktopBridge!.checkSystemPermission("full-disk-access")
               : undefined
           }
           onOpenFullDiskAccessSettings={async () => {
@@ -1694,39 +1676,52 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   );
 }
 
-export function IntegrationsSettingsPanel() {
-  const previewDefaultsDisabled = !isElectron;
-  const previewDefaults = (
-    <>
-      <BrowserProfilesSetting disabled={previewDefaultsDisabled} />
-      <BrowserViewportSetting disabled={previewDefaultsDisabled} />
-      <BrowserZoomSetting disabled={previewDefaultsDisabled} />
-      <BrowserAppearanceSetting disabled={previewDefaultsDisabled} />
-      <BrowserRecordingFrameRateSetting disabled={previewDefaultsDisabled} />
-      <BrowserRecordingInputSettings disabled={previewDefaultsDisabled} />
-      <BrowserLinkTargetSetting disabled={previewDefaultsDisabled} />
-      <BrowserAutoShowFloatingPreviewSetting disabled={previewDefaultsDisabled} />
-    </>
-  );
+export function BrowserSettingsPanel() {
+  const desktopOnly = !isElectron;
+  const desktopOnlyMessage = desktopOnly ? "Only available in the desktop app." : undefined;
 
   return (
     <SettingsPageContainer>
-      <SettingsSection id="browser" title="Browser">
+      <SettingsSection id="browser-agent-access" title="Agent access">
         <AgentBrowserAccessSetting />
         <BrowserPaymentDomainsSetting />
-        {previewDefaultsDisabled ? (
-          <SettingsUnavailableGroup message="Only available in the desktop app.">
-            {previewDefaults}
-          </SettingsUnavailableGroup>
-        ) : (
-          previewDefaults
-        )}
+      </SettingsSection>
+      <SettingsSection id="browser" title="Browsing">
+        <SettingsUnavailableGroup message={desktopOnlyMessage}>
+          <BrowserProfilesSetting disabled={desktopOnly} />
+          <BrowserLinkTargetSetting disabled={desktopOnly} />
+          <BrowserAutoShowFloatingPreviewSetting disabled={desktopOnly} />
+        </SettingsUnavailableGroup>
         {/* Not desktop-only: web clients search from server-run browser tabs too. */}
         <BrowserSearchEngineSetting />
-        <PullRequestLinksOpenInAppSetting />
+        <AdvancedSettings
+          targetIds={[
+            searchableSetting("browser-default-viewport").id,
+            searchableSetting("browser-default-zoom").id,
+            searchableSetting("browser-default-appearance").id,
+          ]}
+        >
+          <SettingsUnavailableGroup message={desktopOnlyMessage}>
+            <BrowserViewportSetting disabled={desktopOnly} />
+            <BrowserZoomSetting disabled={desktopOnly} />
+            <BrowserAppearanceSetting disabled={desktopOnly} />
+          </SettingsUnavailableGroup>
+        </AdvancedSettings>
       </SettingsSection>
+      <SettingsSection id="browser-recordings" title="Recordings">
+        <SettingsUnavailableGroup message={desktopOnlyMessage}>
+          <BrowserRecordingFrameRateSetting disabled={desktopOnly} />
+          <BrowserRecordingInputSettings disabled={desktopOnly} />
+        </SettingsUnavailableGroup>
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function DevicesSettingsPanel() {
+  return (
+    <SettingsPageContainer>
       <DeviceIntegrationSettings />
-      {/* Mesura: voice call preferences and the environment's voice key. */}
       <VoiceSettings />
     </SettingsPageContainer>
   );

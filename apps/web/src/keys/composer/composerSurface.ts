@@ -4,6 +4,7 @@ import type { Transaction } from "@tiptap/pm/state";
 import { TextSelection } from "@tiptap/pm/state";
 
 import { collapseExpandedComposerCursor, expandCollapsedComposerCursor } from "~/composer-logic";
+import { setComposerMarkdownSourceEnabled } from "~/composer-markdown-source";
 import {
   flatToMarkdown,
   flatToPm,
@@ -262,6 +263,7 @@ function enterInsert(): void {
 function enterNormal(at?: number): void {
   const editor = activeEditor();
   if (!adapter || !editor) return;
+  watchEditor(editor);
   const snapshot = snapshotComposerDoc(editor.state.doc);
   session = { editor, snapshot, buffer: new ComposerTextBuffer(snapshot.text) };
   let offset: number;
@@ -277,7 +279,6 @@ function enterNormal(at?: number): void {
   recordUndoState(promptOf(snapshot), insertStartOffset ?? collapsedCursorOf(snapshot, offset));
   insertStartOffset = null;
   mode = "normal";
-  watchEditor(editor);
   markComposerVimMode("normal");
   paint();
 }
@@ -288,13 +289,13 @@ function currentSession(): Session | null {
   if (!editor) return null;
   if (session === null || session.editor !== editor || session.snapshot.doc !== editor.state.doc) {
     const offset = currentOffset();
+    watchEditor(editor);
     const snapshot = snapshotComposerDoc(editor.state.doc);
     session = { editor, snapshot, buffer: new ComposerTextBuffer(snapshot.text) };
     context = {
       ...context,
       cursor: positionOf(snapshot.text, Math.min(offset, snapshot.text.length)),
     };
-    watchEditor(editor);
   }
   return session;
 }
@@ -330,8 +331,15 @@ function onEditorTransaction({ transaction }: { transaction: Transaction }): voi
 
 function watchEditor(editor: Editor | null): void {
   if (watchedEditor === editor) return;
-  watchedEditor?.off("transaction", onEditorTransaction);
+  const previous = watchedEditor;
+  previous?.off("transaction", onEditorTransaction);
   watchedEditor = editor;
+  if (previous && !previous.isDestroyed) {
+    previous.commands.command(setComposerMarkdownSourceEnabled(true));
+  }
+  // Shown Markdown changes document positions on caret moves. Vim needs the parsed document
+  // for its whole normal session, including controlled undo writes and structural edits.
+  editor?.commands.command(setComposerMarkdownSourceEnabled(false));
   watchedEditor?.on("transaction", onEditorTransaction);
 }
 
@@ -552,7 +560,6 @@ function handleNormalKey(token: string): boolean {
 
   if (context.mode === "insert") {
     mode = "insert";
-    watchEditor(null);
     paintBlockCursor("mesura-composer-cursor", null, null);
     paintHighlight("mesura-composer-visual", []);
     markComposerVimMode(null);
@@ -560,6 +567,7 @@ function handleNormalKey(token: string): boolean {
     placeCaret(editor, pmPositionAt(snapshot, offset));
     if (!changed) insertStartOffset = collapsedCursorOf(snapshot, offset);
     session = null;
+    watchEditor(null);
     return true;
   }
   markComposerVimMode(isVisual() ? "visual" : "normal");

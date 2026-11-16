@@ -10,6 +10,9 @@ import { createModelSelection } from "@t3tools/shared/model";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as TextGeneration from "./TextGeneration.ts";
+import * as TextGenerators from "./TextGenerators.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as ProviderInstallationGate from "../provider/ProviderInstallationGate.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as Layer from "effect/Layer";
 
@@ -23,6 +26,7 @@ const makeStubTextGeneration = (
     generateBranchName: () => Effect.die("generateBranchName stub not configured for this test"),
     generateThreadTitle: () => Effect.die("generateThreadTitle stub not configured for this test"),
     generateReviewGuide: () => Effect.die("generateReviewGuide is not configured"),
+    generateTranscriptionPostProcessing: () => Effect.die("Unexpected transcription generation"),
     generateThreadSearchStep: () =>
       Effect.die("generateThreadSearchStep stub not configured for this test"),
     ...overrides,
@@ -63,9 +67,14 @@ const makeStubRegistry = (
   };
 };
 
-const noLinkLookupLayer = Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
-  resolveLink: () => Effect.die("No link lookup expected"),
-});
+const layerThreadSearchDependencies = Layer.mergeAll(
+  Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
+    resolveLink: () => Effect.die("No link lookup expected"),
+  }),
+  ServerSettings.layerTest({}),
+  ProviderInstallationGate.layer,
+  Layer.mock(TextGenerators.TextGenerators)({}),
+);
 
 const threadSearchRequest = {
   description: "the thread where the cache used the wrong clock",
@@ -105,7 +114,7 @@ describe("TextGeneration.make", () => {
           ProviderInstanceRegistry.ProviderInstanceRegistry,
           makeStubRegistry([defaultInstance, smallInstance]),
         ),
-        Effect.provide(noLinkLookupLayer),
+        Effect.provide(layerThreadSearchDependencies),
       );
 
       const modelSelection = createModelSelection(smallId, "openai/gpt-5-mini");
@@ -126,7 +135,7 @@ describe("TextGeneration.make", () => {
           ProviderInstanceRegistry.ProviderInstanceRegistry,
           makeStubRegistry([]),
         ),
-        Effect.provide(noLinkLookupLayer),
+        Effect.provide(layerThreadSearchDependencies),
       );
 
       const error = yield* generation

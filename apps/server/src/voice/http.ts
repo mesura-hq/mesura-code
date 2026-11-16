@@ -1,3 +1,4 @@
+import * as Config from "effect/Config";
 import {
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
@@ -66,7 +67,7 @@ const requireVoiceReader = Effect.gen(function* () {
 
 export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
-  "voice",
+  "voiceConversation",
   Effect.fnUntraced(function* (handlers) {
     const secrets = yield* ServerSecretStore;
     const voiceCalls = yield* ProjectionVoiceCallRepository;
@@ -91,11 +92,13 @@ export const voiceConversationHttpApiLayer = HttpApiBuilder.group(
     });
     yield* Effect.addFinalizer(() => Effect.promise(() => sessions.close()));
 
+    const fallbackApiKey = (yield* Config.String("OPENAI_API_KEY").pipe(
+      Config.withDefault(""),
+      Effect.orDie,
+    )).trim();
     const readKey = Effect.gen(function* () {
       const saved = yield* secrets.get(SECRET_NAME).pipe(Effect.mapError(() => safeError(null)));
-      return Option.isSome(saved)
-        ? new TextDecoder().decode(saved.value)
-        : (process.env.OPENAI_API_KEY?.trim() ?? "");
+      return Option.isSome(saved) ? new TextDecoder().decode(saved.value) : fallbackApiKey;
     });
     const settings = Effect.gen(function* () {
       const principal = yield* EnvironmentAuthenticatedPrincipal;

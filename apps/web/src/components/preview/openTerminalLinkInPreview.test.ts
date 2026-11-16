@@ -55,8 +55,6 @@ const browserDefaultsMocks = vi.hoisted(() => ({
 
 vi.mock("~/browser/browserDefaults", () => ({
   resolveBrowserDefaults: browserDefaultsMocks.resolve,
-  browserDefaultOpenViewport: (defaults: { viewport: unknown }) => defaults.viewport,
-  browserDefaultOpenProfileId: (defaults: { profileId: string }) => defaults.profileId,
 }));
 
 const linkTargetMocks = vi.hoisted(() => ({
@@ -75,6 +73,8 @@ const savedTarget = vi.hoisted(() => ({ value: "app" as "app" | "system" }));
 const hydratedDefaults = {
   viewport: { _tag: "freeform", width: 1280, height: 720 } as const,
   profileId: "work",
+  zoomFactor: 0.8,
+  appearance: "dark",
 };
 
 const threadRef = {

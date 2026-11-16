@@ -217,11 +217,23 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
       const [task] = projection.subagents;
       assert.equal(task?.childThreadId, null);
       assert.deepEqual(task?.remoteChild, remoteChild);
+      assert.deepEqual(task?.modelSelection, modelSelection);
       assert.equal(task?.status, "running");
       const item = projection.turnItems.find((candidate) => candidate.type === "subagent");
       assert.deepEqual(item?.type === "subagent" ? item.remoteChild : undefined, remoteChild);
       // No thread was created here for the child.
       assert.equal(yield* orchestrator.getThreadShell(remoteChild.threadId), null);
+      const other = yield* seedLiveParent("records-no-task");
+      const index = yield* (yield* ProjectionStore.ProjectionStoreV2).listActiveShellIndex();
+      assert.isTrue(index.find((entry) => entry.id === parent.threadId)?.hasRemoteTasks);
+      assert.isFalse(index.find((entry) => entry.id === other.threadId)?.hasRemoteTasks);
+      // Nothing here can cancel the task there, so it must not block archiving.
+      yield* orchestrator.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.make("command:archive:records"),
+        threadId: parent.threadId,
+      });
+      assert.isNotNull((yield* orchestrator.getThreadShell(parent.threadId))?.archivedAt);
     }),
   );
 
@@ -292,6 +304,56 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
     }),
   );
 
+  it.effect("owes a stop there for a Stop here that loses the race to its result", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const parent = yield* seedLiveParent("stop-after-result");
+      yield* orchestrator.dispatch({
+        type: "delegated_task.remote.request",
+        commandId: CommandId.make("command:remote-delegate:stop-after-result"),
+        parentThreadId: parent.threadId,
+        parentRunId: parent.runId,
+        parentNodeId: parent.rootNodeId,
+        task: "Run a check.",
+        driver: ProviderDriverKind.make("remote"),
+        modelSelection,
+        remoteChild,
+      });
+      const task = (yield* orchestrator.getThreadProjection(parent.threadId)).subagents[0]!;
+      const complete = {
+        type: "delegated_task.remote.complete" as const,
+        parentThreadId: parent.threadId,
+        taskId: task.id,
+      };
+      yield* orchestrator.dispatch({
+        ...complete,
+        commandId: CommandId.make("command:result:stop-after-result"),
+        status: "completed",
+        result: "Done there.",
+        stoppedThere: "ran-out",
+      });
+      // The parent's Stop read the task before its result landed.
+      yield* orchestrator.dispatch({
+        ...complete,
+        commandId: CommandId.make("command:parent-stop:stop-after-result"),
+        status: "interrupted",
+        result: "Stopped with its parent.",
+      });
+
+      const stopped = (yield* orchestrator.getThreadProjection(parent.threadId)).subagents[0]!;
+      assert.equal(stopped.status, "completed");
+      assert.equal(stopped.result, "Done there.");
+      assert.equal(stopped.remoteChild?.stoppedThere, false);
+      assert.equal(stopped.remoteChild?.stopCount, 1);
+      const open = yield* projections.getOpenRemoteDelegatedTasks;
+      assert.deepEqual(
+        open.filter((entry) => entry.parentThreadId === parent.threadId),
+        [{ parentThreadId: parent.threadId, taskId: task.id }],
+      );
+    }),
+  );
+
   it.effect("wakes its parent with the result when it completes there", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -330,6 +392,7 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
           taskId: taskId!,
           status: "completed",
           result,
+          stoppedThere: "ran-out",
         });
       yield* complete("All 412 tests pass on the box.");
       // A second report is refused, so the first result stands.

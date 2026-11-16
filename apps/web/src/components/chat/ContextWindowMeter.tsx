@@ -10,10 +10,7 @@ import {
   formatContextWindowUsedPercentage,
 } from "~/lib/contextWindow";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import {
-  formatContextWindowCompactionMessage,
-  formatContextWindowCost,
-} from "./ContextWindowMeter.logic";
+import { formatContextWindowCompactionMessage } from "./compaction.logic";
 import { Minimize2Icon } from "lucide-react";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import { ContextWindowRequestBreakdown } from "./ContextWindowRequestBreakdown";
@@ -111,7 +108,9 @@ export function ContextWindowMeter(props: {
       >
         <div className="flex flex-col gap-2 p-(--floating-content-inset)">
           <div className="flex items-center justify-between gap-3">
-            <div className="font-medium text-muted-foreground text-xs">Context Window</div>
+            <div className="font-medium text-muted-foreground text-xs">
+              {modelDisplayName ?? "Context Window"}
+            </div>
             {limitTokens !== null && usedPercentage ? (
               <div className="text-secondary-label text-2xs tabular-nums">
                 <span>{usedPercentage}</span>
@@ -166,13 +165,13 @@ export function ContextWindowMeter(props: {
             <div className="flex items-center justify-between gap-3 text-2xs leading-4">
               <span className="text-secondary-label">Cost</span>
               <span className="font-medium tabular-nums text-secondary-label">
-                {formatContextWindowCost(usage.cost)}
+                {`${usage.cost.currency} ${usage.cost.amount.toFixed(Math.abs(usage.cost.amount) > 0 && Math.abs(usage.cost.amount) < 0.01 ? 4 : 2)}`}
               </span>
             </div>
           ) : null}
           {usage.compactsAutomatically ? (
             <div className="mt-1 text-pretty text-secondary-label text-2xs font-medium">
-              {formatContextWindowCompactionMessage(modelDisplayName, usage.autoCompactThreshold)}
+              {formatContextWindowCompactionMessage(usage.autoCompactThreshold)}
             </div>
           ) : null}
           {onCompact ? (

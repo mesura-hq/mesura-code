@@ -1,11 +1,15 @@
 import { joinPath } from "@symmetria/fm-core/pane";
-import { DownloadIcon, CopyIcon, CheckIcon } from "lucide-react";
+import { useAtomMount, useAtomValue } from "@effect/atom-react";
+import { DownloadIcon, CopyIcon, CheckIcon, Code2Icon, EyeIcon, Table2Icon } from "lucide-react";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { Spinner } from "~/components/ui/spinner";
 import { useFileSurfacePending } from "./fileSurfacePendingStore";
 import {
   AuthPreviewOperateScope,
+  type EditorId,
   type EnvironmentId,
+  type ProjectId,
+  type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { filePreviewDelimiter } from "@t3tools/shared/delimitedPreview";
@@ -18,6 +22,7 @@ import {
   officePreviewKind,
   binaryPreviewKind,
 } from "@t3tools/shared/filePreview";
+import { Atom } from "effect/reactivity";
 import { VirtualizedFile } from "@pierre/diffs";
 import { type FileOptions } from "@pierre/diffs/react";
 import { useFilesystemReadAccess } from "~/state/filesystem";
@@ -27,31 +32,43 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 import { FolderTree, Globe2, WrapTextIcon } from "lucide-react";
-import { Code2, Eye, Table2 } from "lucide";
 import * as Schema from "effect/Schema";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
+import { OpenInPicker } from "~/components/chat/OpenInPicker";
 import { MediaVideoPlayer } from "~/components/media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "~/components/media/MediaActions";
-import { MorphIcon } from "~/components/MorphIcon";
-import { useClientSettings, updateClientSettings } from "~/hooks/useSettings";
+import { useRemoteOpenState } from "~/remoteOpen";
+import { useClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
-import { useLocalStorage } from "~/hooks/useLocalStorage";
-import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
 import { previewFocusTargetRef } from "~/lib/panelSurfaceFocus";
-import { cn } from "~/lib/utils";
+
+import { useLocalStorage } from "~/hooks/useLocalStorage";
+
+import { cn, isMacPlatform } from "~/lib/utils";
+
 import type { ChatFileAttachment } from "~/types";
 import { isHostPath } from "@t3tools/shared/path";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { type DraftId } from "~/composerDraftStore";
+
 import { assetEnvironment } from "~/state/assets";
 import { usePreviewAvailable } from "~/browser/previewRuntime";
-import { useEnvironmentHttpBaseUrl } from "~/state/environments";
+import { useEnvironmentHttpBaseUrl, usePrimaryEnvironmentId } from "~/state/environments";
+import { hostEnvironmentIdAtom } from "~/state/primaryEnvironment";
 import { previewEnvironment } from "~/state/preview";
+import { serverEnvironment } from "~/state/server";
 import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
@@ -63,9 +80,11 @@ import { AudioPreview } from "./AudioPreview";
 import { BrowserDocumentFrame, isPdfPreviewFile } from "./BrowserDocumentFrame";
 import { DelimitedTablePreview } from "./DelimitedTablePreview";
 import { PreviewImage } from "./PreviewImage";
+import { FileExplorerPane } from "./FileExplorerPane";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
 import { breadcrumbPathOf, retainedBreadcrumbTrail, trailChildOf } from "./filePath";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
+
 import {
   FILE_LINK_REVEAL_ATTRIBUTE,
   FILE_SURFACE_SUBHEADER_CLASS,
@@ -83,25 +102,38 @@ import {
   filePreviewReadErrorMessage,
   isMarkdownPreviewFile,
   resolveFilePreviewPath,
-  setMarkdownTaskChecked,
   shouldShowFileExplorer,
   workspaceAssetResource,
 } from "./filePreviewMode";
-import { useFileSaveCoordinator, type FileSaveCoordinatorInput } from "./useFileSaveCoordinator";
+import {
+  changeFileSaveSession,
+  useFileSaveSession,
+  type FilePendingListener,
+  type FileSaveTarget,
+} from "./fileSaveSessions";
+import { setMarkdownTaskChecked } from "@t3tools/shared/markdownTaskList";
+import { revisionedQuery } from "~/state/revisionedQuery";
 import {
   getOptimisticProjectFileQueryData,
+  getProjectFileQueryAtom,
   setProjectFileQueryData,
   useProjectFileQuery,
 } from "./projectFilesQueryState";
+
+const NO_FILE_REVISION_ATOM = Atom.make(null);
 
 interface FilePreviewPanelProps {
   environmentId: EnvironmentId;
   cwd: string;
   projectName: string;
+  projectId?: ProjectId | undefined;
   relativePath: string | null;
   attachment?: ChatFileAttachment;
   threadRef: ScopedThreadRef;
   composerDraftTarget: ScopedThreadRef | DraftId;
+  keybindings: ResolvedKeybindingsConfig;
+  availableEditors: ReadonlyArray<EditorId>;
+  openInShortcutEnabled: boolean;
   revealLine: number | null;
   revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
@@ -191,7 +223,7 @@ function WorkspaceImagePreview(props: {
   );
 }
 
-function WorkspaceBrowserPreview(props: {
+export function WorkspaceBrowserPreview(props: {
   readonly environmentId: EnvironmentId;
   readonly threadRef: ScopedThreadRef;
   readonly draft: boolean;
@@ -200,18 +232,32 @@ function WorkspaceBrowserPreview(props: {
   readonly title: string;
   readonly workspaceMutationId: string | null;
 }) {
+  const pdf = isPdfPreviewFile(props.absolutePath);
   const resource = workspaceAssetResource({
-    kind: "workspace-file",
+    kind: pdf ? "media-file" : "workspace-file",
     threadRef: props.threadRef,
     draft: props.draft,
     workspaceRoot: props.workspaceRoot,
     absolutePath: props.absolutePath,
   });
-  const assetUrl = useAssetUrlState(props.environmentId, resource);
+  // Each workspace mutation re-mints the URL: a file outside the workspace is signed by its
+  // inode, which an atomic replace changes.
+  const assetUrl = useAssetUrlState(props.environmentId, resource, props.workspaceMutationId);
+  // The HTML frame keeps its first URL per key, so the key moves only once the re-minted URL arrives.
+  const [settledMutationId, setSettledMutationId] = useState(props.workspaceMutationId);
+  if (
+    assetUrl._tag === "Success" &&
+    !assetUrl.waiting &&
+    settledMutationId !== props.workspaceMutationId
+  ) {
+    setSettledMutationId(props.workspaceMutationId);
+  }
+  const fileRevision = pdf && assetUrl._tag === "Success" ? assetUrl.fileRevision : undefined;
+  const revision = fileRevision ?? (pdf ? props.workspaceMutationId : settledMutationId);
   const revisionSuffix =
-    props.workspaceMutationId === null
+    revision === null
       ? ""
-      : `${assetUrl._tag === "Success" && assetUrl.url.includes("?") ? "&" : "?"}workspace-revision=${encodeURIComponent(props.workspaceMutationId)}`;
+      : `${assetUrl._tag === "Success" && assetUrl.url.includes("?") ? "&" : "?"}${fileRevision !== undefined ? "file" : "workspace"}-revision=${encodeURIComponent(revision)}`;
 
   if (assetUrl._tag === "Failure") {
     return (
@@ -220,7 +266,10 @@ function WorkspaceBrowserPreview(props: {
       </div>
     );
   }
-  if (assetUrl._tag !== "Success") {
+  if (
+    assetUrl._tag !== "Success" ||
+    (pdf && assetUrl.fileRevision === undefined && assetUrl.waiting)
+  ) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
         <Spinner size="lg" />
@@ -230,9 +279,10 @@ function WorkspaceBrowserPreview(props: {
   return (
     <BrowserDocumentFrame
       src={`${assetUrl.url}${revisionSuffix}`}
-      documentKey={`${props.environmentId}:${resource._tag}:${props.threadRef.threadId}:${props.absolutePath}:${props.workspaceMutationId}`}
+      documentKey={`${props.environmentId}:${resource._tag}:${props.threadRef.threadId}:${props.absolutePath}:${revision}`}
+      documentId={`${props.environmentId}:${resource._tag}:${props.threadRef.threadId}:${props.absolutePath}`}
       title={props.title}
-      pdf={isPdfPreviewFile(props.absolutePath)}
+      pdf={pdf}
     />
   );
 }
@@ -253,15 +303,13 @@ function WorkspaceVideoPreview(props: {
     workspaceRoot: props.workspaceRoot,
     absolutePath: props.absolutePath,
   });
-  const assetUrl = useAssetUrlState(props.environmentId, resource);
+  // Each workspace mutation re-mints the URL, so an edited file loads its new bytes.
+  const assetUrl = useAssetUrlState(
+    props.environmentId,
+    resource,
+    props.workspaceMutationId ?? undefined,
+  );
   const refreshAssetUrl = useAssetUrlRefresh(props.environmentId, resource);
-  useWorkspaceMutationRefresh({
-    mutationId: props.workspaceMutationId,
-    resourceKey: JSON.stringify([props.environmentId, resource]),
-    refresh: () => {
-      void refreshAssetUrl().catch(() => undefined);
-    },
-  });
   // Servers that report the file's revision let an unchanged file stay loaded; older ones
   // only offer the workspace mutation, which changes after every command. The revision also
   // goes in the URL, since two mints in the same millisecond sign identical URLs.
@@ -282,6 +330,7 @@ function WorkspaceVideoPreview(props: {
         revision={revision}
         preload="metadata"
         className="flex h-full min-h-0 w-full max-w-5xl items-center justify-center"
+        videoClassName="aspect-auto max-h-full w-auto max-w-full"
         onRetry={refreshAssetUrl}
         actionsSource={{
           kind: "video",
@@ -311,16 +360,13 @@ function WorkspaceAudioPreview(props: {
     workspaceRoot: props.workspaceRoot,
     absolutePath: props.absolutePath,
   });
-  const assetUrl = useAssetUrlState(props.environmentId, resource);
+  const assetUrl = useAssetUrlState(
+    props.environmentId,
+    resource,
+    props.workspaceMutationId ?? undefined,
+  );
   const refreshAssetUrl = useAssetUrlRefresh(props.environmentId, resource);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  useWorkspaceMutationRefresh({
-    mutationId: props.workspaceMutationId,
-    resourceKey: JSON.stringify([props.environmentId, resource]),
-    refresh: () => {
-      void refreshAssetUrl().catch(() => undefined);
-    },
-  });
   const fileRevision = assetUrl._tag === "Success" ? assetUrl.fileRevision : undefined;
   const revision = fileRevision ?? props.workspaceMutationId;
   const revisionSuffix =
@@ -346,6 +392,64 @@ function WorkspaceAudioPreview(props: {
       name={props.name}
       revision={revision}
       onError={() => setFailedUrl(url)}
+    />
+  );
+}
+
+function WorkspaceDocumentPreview(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadRef: ScopedThreadRef;
+  readonly draft: boolean;
+  readonly document: boolean;
+  readonly absolutePath: string;
+  readonly workspaceRoot: string;
+  readonly name: string;
+  readonly workspaceMutationId: string | null;
+  readonly refreshRevision: number;
+}) {
+  const resource =
+    props.draft && props.document
+      ? {
+          _tag: "draft-workspace-file" as const,
+          cwd: props.workspaceRoot,
+          path: props.absolutePath,
+        }
+      : {
+          _tag: "media-file" as const,
+          threadId: props.threadRef.threadId,
+          path: props.absolutePath,
+          ...(props.document ? {} : { disposition: "attachment" as const }),
+        };
+  // Drafts keep reloading on every workspace mutation, as before.
+  const revisioned = resource._tag === "media-file";
+  const assetUrl = useAssetUrlState(
+    props.environmentId,
+    revisioned ? resource : null,
+    props.workspaceMutationId ?? undefined,
+  );
+  const resolved =
+    assetUrl._tag === "Success" ? (assetUrl.fileRevision ?? props.workspaceMutationId) : undefined;
+  // A reconnect reports Loading and keeps the last revision, so the open file stays loaded;
+  // a failure (say the file was deleted) remounts so the preview shows its error.
+  const [shown, setShown] = useState(resolved);
+  if (resolved !== undefined && resolved !== shown) setShown(resolved);
+  const revision = !revisioned
+    ? props.workspaceMutationId
+    : assetUrl._tag === "Failure"
+      ? `failure:${props.workspaceMutationId}`
+      : (resolved ?? shown);
+  // Waiting on the first revision keeps the preview from mounting twice when it opens.
+  if (revisioned && revision === undefined && assetUrl._tag === "Loading") {
+    return <FileSurfaceLoading />;
+  }
+  return (
+    <AttachmentFilePreview
+      key={`${revision}:${props.refreshRevision}`}
+      name={props.name}
+      mimeType="application/octet-stream"
+      sizeBytes={0}
+      asset={{ environmentId: props.environmentId, resource }}
+      origin="File"
     />
   );
 }
@@ -554,6 +658,25 @@ function useFileLineReveal(
   };
 }
 
+function selectRenderedContentOnSelectAll(event: ReactKeyboardEvent<HTMLElement>) {
+  const mac = isMacPlatform(navigator.platform);
+  const selectAll =
+    event.key.toLowerCase() === "a" &&
+    (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
+    !event.shiftKey &&
+    !event.altKey;
+  // React bubbles keys from portaled children (the image dialog) through this surface.
+  if (
+    !selectAll ||
+    !(event.target instanceof Node) ||
+    !event.currentTarget.contains(event.target)
+  ) {
+    return;
+  }
+  event.preventDefault();
+  window.getSelection()?.selectAllChildren(event.currentTarget);
+}
+
 function RenderedMarkdownSurface({
   environmentId,
   cwd,
@@ -563,21 +686,23 @@ function RenderedMarkdownSurface({
   workspaceMutationId,
   readOnly,
   onPendingChange,
-}: FileSaveCoordinatorInput & {
+}: FileSaveTarget & {
+  onPendingChange: FilePendingListener;
   contents: string;
   threadRef: ScopedThreadRef;
   readOnly: boolean;
   workspaceMutationId: string | null;
 }) {
-  const saveCoordinator = useFileSaveCoordinator({
-    environmentId,
-    cwd,
-    relativePath,
-    onPendingChange,
-  });
+  const saveTarget = { environmentId, cwd, relativePath };
+  useFileSaveSession(saveTarget, onPendingChange);
 
   return (
-    <ScrollArea className="min-h-0 flex-1" data-pane-entry="2" ref={previewFocusTargetRef}>
+    <ScrollArea
+      className="min-h-0 flex-1"
+      onKeyDown={selectRenderedContentOnSelectAll}
+      data-pane-entry="2"
+      ref={previewFocusTargetRef}
+    >
       <FileMarkdownPreview
         text={contents}
         cwd={cwd}
@@ -594,7 +719,7 @@ function RenderedMarkdownSurface({
                 const nextContents = setMarkdownTaskChecked(currentContents, markerOffset, checked);
                 if (nextContents === currentContents) return;
                 setProjectFileQueryData(environmentId, cwd, relativePath, nextContents);
-                saveCoordinator.change(nextContents);
+                changeFileSaveSession(saveTarget, nextContents);
               }
         }
       />
@@ -620,6 +745,9 @@ export default function FilePreviewPanel({
   attachment,
   threadRef,
   composerDraftTarget,
+  keybindings,
+  availableEditors,
+  openInShortcutEnabled,
   revealLine,
   revealRequestId,
   onOpenFile,
@@ -642,13 +770,20 @@ export default function FilePreviewPanel({
   // A draft's composer target is its draft id; a thread the server knows is a ref.
   const draft = typeof composerDraftTarget === "string";
   const { resolvedTheme } = useTheme();
-  const wordWrap = useClientSettings((settings) => settings.wordWrap);
+  const defaultWordWrap = useClientSettings((settings) => settings.wordWrap);
+  const openInExternalEditor = useClientSettings((settings) => settings.openInExternalEditor);
+  const [wordWrapOverride, setWordWrapOverride] = useState<boolean | null>(null);
+  const wordWrap = wordWrapOverride ?? defaultWordWrap;
   const canOperatePreview = useEnvironmentScope(environmentId, AuthPreviewOperateScope);
   const modalEditing = useClientSettings((settings) => settings.modalEditing);
   // The editor's models live in a registry outside React: the undo stack lives in the Monaco
   // model, and this panel unmounts on route changes (opening Settings, switching to a thread
   // in another project), which no component survives.
   const { models, retention } = useProjectEditorModels(environmentId, cwd);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const hostEnvironmentId = useAtomValue(hostEnvironmentIdAtom);
+  const remoteOpenState = useRemoteOpenState(environmentId);
+  const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
   const previewAvailable = usePreviewAvailable(environmentId);
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
@@ -693,6 +828,12 @@ export default function FilePreviewPanel({
     attachment === undefined &&
     (file.isNotFile || (folderTrail !== undefined && file.data === null && file.error === null));
   const hostFolderPath = isFolder && isHostFile ? relativePath : null;
+  // A chat-linked folder reads as a file until its read settles, and revealing a
+  // folder selects it in its parent instead of opening it, so reveal waits.
+  const revealsInFileManager =
+    !isFolder &&
+    (file.data !== null || file.error !== null) &&
+    serverConfig?.shellRevealInFileManager === true;
   // Everything preview-related keys off previewPath; a folder has no preview.
   const previewPath = isFolder ? null : relativePath;
   // The explorer's open state stays in the file tree store rather than in local
@@ -836,17 +977,20 @@ export default function FilePreviewPanel({
         ? resolvePathLinkTarget(relativePath, cwd)
         : null;
   const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
-  useWorkspaceMutationRefresh({
-    enabled:
+  // Mounting the file read under the workspace mutation id refetches it after each mutation.
+  useAtomMount(
+    canReadFiles &&
       attachment === undefined &&
       relativePath !== null &&
       // Skip mutation reads for media and documents; folders still detect conversion to files.
       (isFolder || (!isMedia && !isPdf && !isDocument)) &&
-      !selectedFilePending,
-    mutationId: workspaceMutationId,
-    refresh: file.refresh,
-    resourceKey: `file:${environmentId}:${cwd}:${relativePath ?? ""}`,
-  });
+      !selectedFilePending
+      ? revisionedQuery(
+          getProjectFileQueryAtom(environmentId, cwd, relativePath),
+          workspaceMutationId,
+        )
+      : NO_FILE_REVISION_ATOM,
+  );
   // Watches the open file on disk, beside the mutation heuristic above (which also refreshes
   // the tree). Our own save's event arrives while `selectedFilePending` is true and refreshes
   // once the write confirms: one extra read per save, which also shows another writer's
@@ -859,6 +1003,7 @@ export default function FilePreviewPanel({
     refresh: file.refresh,
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- scrolls the breadcrumb DOM so the deepest and current crumbs are in view after commit
   useEffect(() => {
     const crumbs = breadcrumbRef.current?.querySelectorAll<HTMLElement>("[data-file-crumb]");
     // Show the deepest crumb when it fits, but never at the cost of the current one.
@@ -935,6 +1080,22 @@ export default function FilePreviewPanel({
               />
             </div>
           </ScrollArea>
+          {openInExternalEditor &&
+          absolutePath &&
+          (environmentId === primaryEnvironmentId ||
+            environmentId === hostEnvironmentId ||
+            remoteOpenState.mode !== "local-exec") ? (
+            <OpenInPicker
+              environmentId={environmentId}
+              keybindings={keybindings}
+              availableEditors={availableEditors}
+              enableShortcut={openInShortcutEnabled}
+              openInCwd={absolutePath}
+              openInCwdIsFile={file.isFile}
+              compact
+              revealFileManager={revealsInFileManager}
+            />
+          ) : null}
           {canToggleRendered && renderedMode ? (
             <FileSurfaceAction
               label={renderedToggleLabel(renderedMode, rendered)}
@@ -949,17 +1110,20 @@ export default function FilePreviewPanel({
                 );
               }}
             >
-              <MorphIcon
-                className="size-3.5"
-                icon={rendered ? Code2 : renderedMode === "table" ? Table2 : Eye}
-              />
+              {rendered ? (
+                <Code2Icon className="size-3.5" />
+              ) : renderedMode === "table" ? (
+                <Table2Icon className="size-3.5" />
+              ) : (
+                <EyeIcon className="size-3.5" />
+              )}
             </FileSurfaceAction>
           ) : null}
           {showsRawText ? (
             <FileSurfaceAction
               label={wordWrap ? "Disable word wrap" : "Enable word wrap"}
               pressed={wordWrap}
-              onPress={() => updateClientSettings({ wordWrap: !wordWrap })}
+              onPress={() => setWordWrapOverride(!wordWrap)}
             >
               <WrapTextIcon className="size-3.5" />
             </FileSurfaceAction>
@@ -1084,28 +1248,22 @@ export default function FilePreviewPanel({
               workspaceMutationId={workspaceMutationId}
               revealLine={revealLine}
               revealRequestId={revealRequestId}
+              wordWrap={wordWrap}
             />
           ) : relativePath &&
             absolutePath &&
             (isDocument || file.readError?.failure === "binary_file") ? (
-            <AttachmentFilePreview
-              key={`${environmentId}:${absolutePath}:${workspaceMutationId}:${fileRefreshRevision}`}
+            <WorkspaceDocumentPreview
+              key={`${environmentId}:${absolutePath}`}
+              environmentId={environmentId}
+              threadRef={threadRef}
+              draft={draft}
+              document={isDocument}
+              absolutePath={absolutePath}
+              workspaceRoot={cwd}
               name={relativePath.split(/[\\/]/).at(-1) || relativePath}
-              mimeType="application/octet-stream"
-              sizeBytes={0}
-              asset={{
-                environmentId,
-                resource:
-                  draft && isDocument
-                    ? { _tag: "draft-workspace-file", cwd, path: absolutePath }
-                    : {
-                        _tag: "media-file",
-                        threadId: threadRef.threadId,
-                        path: absolutePath,
-                        ...(isDocument ? {} : { disposition: "attachment" as const }),
-                      },
-              }}
-              origin="File"
+              workspaceMutationId={workspaceMutationId}
+              refreshRevision={fileRefreshRevision}
             />
           ) : relativePath && file.error && file.data === null ? (
             <div
@@ -1153,7 +1311,7 @@ export default function FilePreviewPanel({
                 threadRef={threadRef}
                 contents={file.data.contents}
                 workspaceMutationId={workspaceMutationId}
-                readOnly={isHostFile || !canWriteFiles}
+                readOnly={file.data.truncated || isHostFile || !canWriteFiles}
                 onPendingChange={onPendingChange}
               />
             ) : file.data && tableDelimiter && renderTable ? (
@@ -1169,6 +1327,7 @@ export default function FilePreviewPanel({
                 text={file.data.contents}
                 cacheKey={projectFileCacheKey(cwd, relativePath, file.data.contents)}
                 onPostRender={onFilePostRender}
+                wordWrap={wordWrap}
               />
             ) : editorFile ? (
               <>
@@ -1176,7 +1335,7 @@ export default function FilePreviewPanel({
                  * No key, deliberately: any key remounts the surface, which rebuilds Monaco and
                  * loses the undo stack (`tests/unit/monaco-file-surface-wired.test.ts`). Monaco
                  * owns this slot over upstream's Pierre `EditableFileSurface` because modal
-                 * editing and the Neovim config need it; its inline review comments are not carried.
+                 * editing and the Neovim config need it. Monaco keeps its own inline review comments.
                  */}
                 <MonacoFileSurface
                   environmentId={environmentId}
@@ -1214,14 +1373,7 @@ export default function FilePreviewPanel({
           ) : null}
         </div>
         {showExplorer ? (
-          <aside
-            className={cn(
-              "flex min-h-0 shrink-0 bg-background",
-              previewPath
-                ? "w-[min(22rem,46%)] min-w-64 border-l border-border/60"
-                : "min-w-0 flex-1",
-            )}
-          >
+          <FileExplorerPane resizable={Boolean(previewPath)}>
             <MesuraFileTree
               key={`${environmentId}:${hostFolderPath ?? cwd}`}
               environmentId={environmentId}
@@ -1246,7 +1398,7 @@ export default function FilePreviewPanel({
                   }
                 : {})}
             />
-          </aside>
+          </FileExplorerPane>
         ) : null}
       </div>
     </div>
@@ -1263,6 +1415,7 @@ export function WorkspaceLargeTextPreview(props: {
   workspaceMutationId: string | null;
   revealLine: number | null;
   revealRequestId: number;
+  wordWrap: boolean;
 }) {
   const resource = {
     _tag: "media-file",
@@ -1281,15 +1434,13 @@ export function WorkspaceLargeTextPreview(props: {
       description: cause instanceof Error ? cause.message : "Try again.",
     });
   };
-  const assetUrl = useAssetUrlState(props.environmentId, resource);
+  // Each workspace mutation re-mints the URL, so an edited file loads its new bytes.
+  const assetUrl = useAssetUrlState(
+    props.environmentId,
+    resource,
+    props.workspaceMutationId ?? undefined,
+  );
   const refreshAssetUrl = useAssetUrlRefresh(props.environmentId, resource);
-  useWorkspaceMutationRefresh({
-    mutationId: props.workspaceMutationId,
-    resourceKey: JSON.stringify([props.environmentId, resource]),
-    refresh: () => {
-      void refreshAssetUrl().catch(() => undefined);
-    },
-  });
   const contentRevision = JSON.stringify([
     props.environmentId,
     resource,
@@ -1367,6 +1518,7 @@ export function WorkspaceLargeTextPreview(props: {
           delimiter={props.delimiter}
           revealLine={props.revealLine}
           revealRequestId={props.revealRequestId}
+          wordWrap={props.wordWrap}
         />
       </Suspense>
     </>

@@ -12,7 +12,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -47,7 +47,7 @@ export class ThreadSearchBroker extends Context.Service<
 export const layer = Layer.effect(
   ThreadSearchBroker,
   Effect.gen(function* () {
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     const connections = new Map<string, Connection>();
     const pending = new Map<string, Pending>();
     const disconnected = new ThreadSearchToolError({
@@ -55,7 +55,7 @@ export const layer = Layer.effect(
         "The search client disconnected. Open the search chat in a connected client and retry.",
     });
     const connect = Effect.fn("ThreadSearchBroker.connect")(function* (sessionId: string) {
-      const id = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+      const id = yield* crypto.uuidV4().pipe(Effect.orDie);
       const queue = yield* Queue.unbounded<ThreadSearchToolEvent>();
       const connection = { id, sessionId, queue };
       connections.set(id, connection);
@@ -95,7 +95,7 @@ export const layer = Layer.effect(
       threadId: ThreadId,
       description: string,
     ) {
-      const requestId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+      const requestId = yield* crypto.uuidV4().pipe(Effect.orDie);
       const deferred = yield* Deferred.make<ThreadSearchToolResult, ThreadSearchToolError>();
       // One client performs the federated reads. Broadcasting would duplicate API
       // charges and let independent browser results race to answer one tool call.

@@ -5,7 +5,9 @@ import {
 } from "@t3tools/client-runtime/state/models";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import type { AnyRouter } from "@tanstack/react-router";
+import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entities";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
+import { monitorHoldsWakeCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import * as Option from "effect/Option";
 import type { AtomRegistry } from "effect/reactivity";
@@ -39,11 +41,13 @@ import {
   refreshPushRegistration,
   watchPushRegistration,
 } from "../pushNotifications/pushRegistration";
+import { resolveBackgroundThreadRequest } from "./backgroundThreadAnnouncement";
 import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "./Sidebar.logic";
 import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-inbox";
 import { resolveSidebarThreadAttention } from "./sidebarThreadAttention";
 import {
   createThreadNotificationGate,
+  isSnoozedForNotification,
   type ThreadNotificationKind,
   type ThreadNotificationObservation,
 } from "./ThreadNotificationCoordinator.logic";
@@ -62,9 +66,12 @@ interface NotificationState extends ThreadNotificationObservation {
   readonly loudKind: LoudKind | null;
 }
 
+type ToastId = ReturnType<typeof toastManager.add>;
+
 interface WatchedEnvironment {
   unsubscribe: () => void;
   previous: Map<ThreadId, NotificationState>;
+  reconnecting: boolean;
   readonly gate: ReturnType<typeof createThreadNotificationGate<ThreadId>>;
 }
 
@@ -78,12 +85,18 @@ export function startThreadNotifications(
 ): () => void {
   const pending = new Map<
     string,
-    { environmentId: EnvironmentId; notification: Notification; persistent?: boolean }
+    {
+      environmentId: EnvironmentId;
+      threadId: ThreadId;
+      notification: Notification;
+      persistent?: boolean;
+    }
   >();
   const watched = new Map<EnvironmentId, WatchedEnvironment>();
 
   const trackNotification = (
     environmentId: EnvironmentId,
+    threadId: ThreadId,
     notification: Notification,
     persistent = false,
   ) => {
@@ -91,7 +104,7 @@ export function startThreadNotifications(
     // Mesura: Chrome gives worker notifications with one tag one ID, so closing the old
     // handle would close the replacement that is already on screen.
     if (!(persistent && previous?.persistent)) previous?.notification.close();
-    pending.set(notification.tag, { environmentId, notification, persistent });
+    pending.set(notification.tag, { environmentId, threadId, notification, persistent });
     setNotificationBadge(pending.size);
   };
   const navigateToThread = (environmentId: EnvironmentId, threadId: ThreadId) =>
@@ -99,26 +112,68 @@ export function startThreadNotifications(
       to: "/$environmentId/$threadId",
       params: { environmentId, threadId },
     });
+  // Toast ids by thread key, so hiding or opening a thread, or removing its environment, closes them.
+  const openToasts = new Map<string, Array<ToastId>>();
+  const forgetToast = (key: string, toastId: ToastId) => {
+    const remaining = (openToasts.get(key) ?? []).filter((id) => id !== toastId);
+    if (remaining.length === 0) openToasts.delete(key);
+    else openToasts.set(key, remaining);
+  };
+  const closeToasts = (shouldClose: (key: string) => boolean) => {
+    for (const [key, toastIds] of openToasts) {
+      if (!shouldClose(key)) continue;
+      for (const toastId of toastIds) toastManager.close(toastId);
+      openToasts.delete(key);
+    }
+  };
+  const activeThread = () =>
+    (router.state.matches.at(-1)?.params ?? {}) as {
+      environmentId?: EnvironmentId;
+      threadId?: ThreadId;
+    };
+  const closeOpenedThreadToasts = () => {
+    const { environmentId, threadId } = activeThread();
+    if (environmentId === undefined || threadId === undefined) return;
+    const opened = threadKey({ environmentId, threadId });
+    closeToasts((key) => key === opened);
+  };
+  // A notification shown before the tag filter turned on must not stay on screen. While hiding,
+  // one whose thread left the live list (archived) cannot be judged, so it closes too.
+  const closeHiddenPending = () => {
+    const hidden = registry.get(environmentThreadShells.hiddenThreadKeysAtom);
+    const live = registry.get(environmentThreadShells.anyEnvironmentHidingAtom)
+      ? new Set(registry.get(environmentThreadShells.threadRefsAtom).map(threadKey))
+      : null;
+    const shouldClose = (key: string) => hidden.has(key) || (live !== null && !live.has(key));
+    closeToasts(shouldClose);
+    const count = pending.size;
+    for (const [tag, entry] of pending) {
+      if (!shouldClose(threadKey(entry))) continue;
+      entry.notification.close();
+      pending.delete(tag);
+    }
+    if (count !== pending.size) setNotificationBadge(pending.size);
+  };
   const clearPending = () => {
     for (const { notification } of pending.values()) notification.close();
     pending.clear();
     setNotificationBadge(0);
   };
 
-  // Completions fire from a timer, so read settings, focus and route when presenting.
   const present = (
     environmentId: EnvironmentId,
     state: NotificationState,
     kind: ThreadNotificationKind,
   ) => {
     const { thread, loudKind } = state;
+    if (
+      registry
+        .get(environmentThreadShells.hiddenThreadKeysAtom)
+        .has(threadKey({ environmentId, threadId: thread.id }))
+    )
+      return;
     const { notificationMode: mode, inAppNotificationsEnabled } = getClientSettings();
-    const active = (router.state.matches.at(-1)?.params ?? {}) as {
-      environmentId?: string;
-      threadId?: string;
-    };
-    // Mesura: a finished agent search has its own title, its own in-app toast
-    // (AgentSearchHost) and opens in the search popup.
+    const active = activeThread();
     const agentSearch = isSearchThread(thread);
     const title =
       kind === "completion"
@@ -146,7 +201,9 @@ export function startThreadNotifications(
       !(agentSearch && kind === "completion") &&
       (active.environmentId !== environmentId || active.threadId !== thread.id)
     ) {
-      const toastId = toastManager.add({
+      const toastKey = threadKey({ environmentId, threadId: thread.id });
+      const toastId: ToastId = toastManager.add({
+        onRemove: (): void => forgetToast(toastKey, toastId),
         type: kind === "completion" ? "success" : loudKind === "failed" ? "error" : "warning",
         title,
         description: thread.title,
@@ -157,6 +214,8 @@ export function startThreadNotifications(
               <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />
             ) : loudKind === "approval" ? (
               <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />
+            ) : loudKind === "limited" ? (
+              <CircleAlertIcon aria-hidden className="size-4 text-warning-foreground" />
             ) : loudKind === "failed" ? (
               <CircleAlertIcon aria-hidden className="size-4 text-destructive-foreground" />
             ) : (
@@ -171,6 +230,7 @@ export function startThreadNotifications(
           },
         },
       });
+      openToasts.set(toastKey, [...(openToasts.get(toastKey) ?? []), toastId]);
       return;
     }
     if (
@@ -198,7 +258,7 @@ export function startThreadNotifications(
         .then(() => registration.getNotifications({ tag }))
         .then((shown) => {
           const notification = shown.at(-1);
-          if (notification) trackNotification(environmentId, notification, true);
+          if (notification) trackNotification(environmentId, thread.id, notification, true);
         })
         // A worker unregistered since the last lookup; the next notification uses what is left.
         .catch(() => void refreshPushRegistration());
@@ -212,11 +272,11 @@ export function startThreadNotifications(
         // Windows drops clicks after a toast moves into Notification Center.
         requireInteraction: kind === "completion" && isWindowsPlatform(navigator.platform),
       });
-      trackNotification(environmentId, notification);
+      trackNotification(environmentId, thread.id, notification);
       notification.addEventListener("click", () => {
         notification.close();
         window.focus();
-        void window.desktopBridge?.revealWindow?.().catch(() => undefined);
+        void window.desktopBridge?.revealWindow().catch(() => undefined);
         openNotificationTarget(target, navigateToThread);
       });
     } catch {
@@ -249,7 +309,11 @@ export function startThreadNotifications(
       }
       const prior = previous.get(rawThread.id);
       const subagentRequest = subagentRequests.get(rawThread.id) ?? null;
-      if (prior?.raw === rawThread && prior.subagentRequest === subagentRequest) {
+      if (
+        !entry.reconnecting &&
+        prior?.raw === rawThread &&
+        prior.subagentRequest === subagentRequest
+      ) {
         next.set(rawThread.id, prior);
         continue;
       }
@@ -278,11 +342,19 @@ export function startThreadNotifications(
             : null;
       const signalSetAt =
         thread.agentSignal?.kind === "needs_input" ? `:${thread.agentSignal.setAt}` : "";
-      const attention = loudKind
-        ? `${thread.latestRun?.runId ?? ""}:${loudKind}${signalSetAt}`
-        : null;
-      const completedAt = Date.parse(thread.latestRun?.completedAt ?? "");
-      const settled = status === "ready" && thread.latestRun?.status === "completed";
+      const needsAttention = loudKind !== null;
+      const requestId = needsAttention ? resolveBackgroundThreadRequest(thread).requestId : null;
+      // Queued messages become the latest run while a request stays pending, so a request
+      // with an id is keyed by that id alone and announces once.
+      const attention = !needsAttention
+        ? null
+        : requestId !== null
+          ? `${loudKind}:${requestId}`
+          : `${thread.latestRun?.runId ?? ""}:${loudKind}${signalSetAt}`;
+      const completed = status === "ready" && thread.latestRun?.status === "completed";
+      const settled = completed && !monitorHoldsWakeCompletion(rawThread);
+      const parsedCompletedAt = Date.parse(thread.latestRun?.completedAt ?? "");
+      const completedAt = Number.isFinite(parsedCompletedAt) ? parsedCompletedAt : null;
       const state = {
         raw: rawThread,
         subagentRequest,
@@ -290,20 +362,25 @@ export function startThreadNotifications(
         status,
         loudKind,
         attention,
+        requestId,
         settled,
-        completedAt: settled && Number.isFinite(completedAt) ? completedAt : null,
+        completedAt: settled ? completedAt : null,
+        backgroundWake: rawThread.latestRunBackgroundWake === true,
       };
       next.set(thread.id, state);
       changed.push([prior, state]);
     }
+    entry.reconnecting = false;
     entry.previous = next;
     entry.gate.retain(new Set(next.keys()));
+    const now = Date.now();
     for (const [prior, state] of changed) {
       entry.gate.observe(state.thread.id, prior, state, {
         archived: state.thread.archivedAt !== null,
         // Mesura: a completion while the thread still asks for input would replace that
         // notification (both carry the thread's tag), so it is recorded, not announced.
         quiet: state.raw.latestRunStopRequested === true || state.loudKind === "input",
+        snoozed: isSnoozedForNotification(state.thread, state.completedAt, now),
       });
     }
   };
@@ -311,44 +388,45 @@ export function startThreadNotifications(
   const watchEnvironment = (environmentId: EnvironmentId): WatchedEnvironment => {
     const entry: WatchedEnvironment = {
       previous: new Map(),
+      reconnecting: false,
       unsubscribe: () => {},
       gate: createThreadNotificationGate<ThreadId>((threadId, kind) => {
         const state = entry.previous.get(threadId);
         if (state) present(environmentId, state, kind);
       }),
     };
-    let latestThreads: ReadonlyArray<OrchestrationV2ThreadShell> | null = null;
+    let threads: ReadonlyArray<OrchestrationV2ThreadShell> | null = null;
     const unsubscribeShell = registry.subscribe(
       environmentShell.stateValueAtom(environmentId),
       (shell) => {
-        const threads =
+        threads =
           shell.status === "live" && Option.isSome(shell.snapshot)
             ? shell.snapshot.value.threads
             : null;
-        latestThreads = threads;
         if (threads !== null) {
           observeThreads(environmentId, entry, threads);
           return;
         }
-        entry.gate.clear();
-        entry.previous = new Map();
+        entry.reconnecting = true;
+        entry.gate.pause();
       },
       { immediate: true },
     );
-    // Mesura: tasks on linked environments change what a thread here asks and whether it lists.
     const reobserve = () => {
-      if (latestThreads !== null) observeThreads(environmentId, entry, latestThreads);
+      if (threads !== null) observeThreads(environmentId, entry, threads);
     };
-    const unsubscribeLinked = [
-      registry.subscribe(
-        environmentThreadShells.pendingSubagentRequestsAtom(environmentId),
-        reobserve,
-      ),
-      registry.subscribe(environmentThreadShells.delegatedUnderParentAtom, reobserve),
-    ];
+    const unsubscribeRequests = registry.subscribe(
+      environmentThreadShells.pendingSubagentRequestsAtom(environmentId),
+      reobserve,
+    );
+    const unsubscribeDelegated = registry.subscribe(
+      environmentThreadShells.delegatedUnderParentAtom,
+      reobserve,
+    );
     entry.unsubscribe = () => {
       unsubscribeShell();
-      for (const unsubscribe of unsubscribeLinked) unsubscribe();
+      unsubscribeRequests();
+      unsubscribeDelegated();
       entry.gate.clear();
     };
     return entry;
@@ -357,6 +435,7 @@ export function startThreadNotifications(
   const syncEnvironments = () => {
     const { notificationMode, inAppNotificationsEnabled } = getClientSettings();
     const enabled = notificationMode !== "off" || inAppNotificationsEnabled;
+    if (!enabled) closeToasts(() => true);
     const environmentIds = enabled ? registry.get(environmentSummaries.environmentIdsAtom) : [];
     const activeIds = new Set(environmentIds);
     for (const [environmentId, entry] of watched) {
@@ -371,6 +450,7 @@ export function startThreadNotifications(
 
   const pruneRemovedEnvironments = () => {
     const activeIds = new Set(registry.get(environmentSummaries.environmentIdsAtom));
+    closeToasts((key) => !activeIds.has(parseThreadKey(key).environmentId));
     const count = pending.size;
     for (const [tag, entry] of pending) {
       if (activeIds.has(entry.environmentId)) continue;
@@ -391,7 +471,7 @@ export function startThreadNotifications(
     clearPending();
     const stops: Array<() => void> = [];
     if (hasDesktopNotifications(nextMode)) {
-      const unsubscribeBadgeClear = window.desktopBridge?.onNotificationBadgeClear?.(clearPending);
+      const unsubscribeBadgeClear = window.desktopBridge?.onNotificationBadgeClear(clearPending);
       window.addEventListener("focus", clearPending);
       stops.push(() => {
         unsubscribeBadgeClear?.();
@@ -426,14 +506,23 @@ export function startThreadNotifications(
       syncEnvironments();
     },
   );
+  const unsubscribeHidden = [
+    registry.subscribe(environmentThreadShells.hiddenThreadKeysAtom, closeHiddenPending),
+    registry.subscribe(environmentThreadShells.anyEnvironmentHidingAtom, closeHiddenPending),
+    registry.subscribe(environmentThreadShells.threadRefsAtom, closeHiddenPending),
+  ];
+  const unsubscribeRoute = router.subscribe("onResolved", closeOpenedThreadToasts);
   onSettings();
 
   return () => {
     unsubscribeSettings();
     stopPushRegistration();
     unsubscribeEnvironmentIds();
+    for (const unsubscribe of unsubscribeHidden) unsubscribe();
+    unsubscribeRoute();
     for (const entry of watched.values()) entry.unsubscribe();
     watched.clear();
     stopModeListeners();
+    closeToasts(() => true);
   };
 }

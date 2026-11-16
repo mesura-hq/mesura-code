@@ -1,11 +1,22 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderInstanceId, type ProviderReplayTranscript } from "@t3tools/contracts";
+import * as NodeURL from "node:url";
+import {
+  ChatAttachmentId,
+  ChatImageAttachment,
+  ProviderInstanceId,
+  type ProviderReplayTranscript,
+} from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
 import { expect } from "vite-plus/test";
+import { TestClock } from "effect/testing";
 
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import * as OpenCode2AdapterV2Testkit from "../orchestration-v2/Adapters/OpenCode2AdapterV2.testkit.ts";
 import { OpenCodeReplayController } from "../orchestration-v2/Adapters/OpenCodeAdapterV2.testkit.ts";
@@ -47,8 +58,11 @@ function materializeTitleGenerationTranscript(
   };
 }
 
-const replayTitleGenerationServer = (transcript: ProviderReplayTranscript) =>
-  OpenCode2AdapterV2Testkit.replayServer(materializeTitleGenerationTranscript(transcript));
+const replayTitleGenerationServer = (
+  transcript: ProviderReplayTranscript,
+  options?: Parameters<typeof OpenCode2AdapterV2Testkit.replayServer>[1],
+) =>
+  OpenCode2AdapterV2Testkit.replayServer(materializeTitleGenerationTranscript(transcript), options);
 
 const recordedTitleGenerationTranscript: ProviderReplayTranscript = {
   provider: "opencode",
@@ -137,28 +151,58 @@ it("Mesura OpenCode2 title replay still rejects changed title model permissions 
 });
 
 it.layer(layer)("OpenCode2TextGeneration", (it) => {
-  it.effect("generates a title in a temporary session on the free tier and removes it", () =>
-    Effect.gen(function* () {
-      const server = yield* replayTitleGenerationServer({
-        provider: "opencode",
-        protocol: OpenCode2AdapterV2Testkit.OPENCODE2_HTTP_PROTOCOL,
-        version: "2.0.18",
-        scenario: "opencode2_title_generation",
-        entries: [...OPENCODE2_TITLE_GENERATION, { type: "runtime_exit", status: "success" }],
-      });
-      const textGeneration = yield* OpenCode2TextGeneration.make().pipe(
-        Effect.provideService(OpenCode2Server.OpenCode2Server, server),
-      );
-      const title = yield* textGeneration.generateThreadTitle({
-        cwd: process.cwd(),
-        message: "fix the login redirect loop after oauth",
-        modelSelection: {
-          instanceId: ProviderInstanceId.make("opencode"),
-          model: "opencode/big-pickle",
-        },
-      });
-      assert.equal(title.title, "Fix OAuth Login Redirect Loop");
-    }).pipe(Effect.scoped),
+  it.effect.each([false, true] as const)(
+    "generates a title in a temporary session on the free tier and removes it (external: %s)",
+    (external) =>
+      Effect.gen(function* () {
+        const host = yield* ProviderHost.ProviderHost;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const image = (id: string, name: string, mimeType: string) =>
+          ChatImageAttachment.make({
+            type: "image",
+            id: ChatAttachmentId.make(id),
+            name,
+            mimeType,
+            sizeBytes: 4,
+          });
+        const screenshot = image("oc2-title-screenshot", "screen.png", "image/png");
+        const missing = image("oc2-title-missing", "missing.png", "image/png");
+        const unsupported = image("oc2-title-diagram", "diagram.svg", "image/svg+xml");
+        const screenshotPath = host.resolveAttachmentPath(screenshot)!;
+        yield* fileSystem.writeFileString(screenshotPath, "data");
+        yield* fileSystem.writeFileString(host.resolveAttachmentPath(unsupported)!, "<svg/>");
+        const prompts: Array<unknown> = [];
+        const server = yield* replayTitleGenerationServer(
+          {
+            provider: "opencode",
+            protocol: OpenCode2AdapterV2Testkit.OPENCODE2_HTTP_PROTOCOL,
+            version: "2.0.18",
+            scenario: "opencode2_title_generation",
+            entries: [...OPENCODE2_TITLE_GENERATION, { type: "runtime_exit", status: "success" }],
+          },
+          { external, onPrompt: (input) => prompts.push(input) },
+        );
+        const textGeneration = yield* OpenCode2TextGeneration.make().pipe(
+          Effect.provideService(OpenCode2Server.OpenCode2Server, server),
+        );
+        const title = yield* textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: "fix the login redirect loop after oauth",
+          attachments: [screenshot, missing, unsupported],
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("opencode"),
+            model: "opencode/big-pickle",
+          },
+        });
+        assert.equal(title.title, "Fix OAuth Login Redirect Loop");
+        if (external) {
+          assert.notProperty(prompts[0], "files");
+        } else {
+          assert.deepInclude(prompts[0], {
+            files: [{ uri: NodeURL.pathToFileURL(screenshotPath).href, name: "screen.png" }],
+          });
+        }
+      }),
   );
 
   it.effect("fails at once when the event stream drops before the reply", () =>
@@ -305,7 +349,7 @@ it.layer(layer)("OpenCode2TextGeneration", (it) => {
         .pipe(Effect.flip);
       assert.equal(failure.detail, "OpenCode could not generate the text.");
       assert.deepEqual(failure.cause, refusal);
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("ends at once on an execution end this build cannot decode", () =>
@@ -383,5 +427,71 @@ it.layer(layer)("OpenCode2TextGeneration", (it) => {
         .pipe(Effect.flip, Effect.timeout("10 seconds"));
       assert.equal(failure._tag, "TextGenerationError");
     }).pipe(Effect.scoped),
+  );
+
+  it.effect("times out when the prompt request and its interrupt never answer", () =>
+    Effect.gen(function* () {
+      const [subscribe, connected, create, created] = OPENCODE2_TITLE_GENERATION;
+      const sessionId = "ses_f0ec85cf6ffebfalpvV2E9nocu";
+      const prompted = yield* Deferred.make<void>();
+      const server = yield* replayTitleGenerationServer(
+        {
+          provider: "opencode",
+          protocol: OpenCode2AdapterV2Testkit.OPENCODE2_HTTP_PROTOCOL,
+          version: "2.0.18",
+          scenario: "opencode2_title_generation_stalled",
+          entries: [
+            subscribe!,
+            connected!,
+            create!,
+            created!,
+            {
+              type: "expect_outbound",
+              frame: { type: "session.prompt", input: { sessionID: sessionId, text: "<any>" } },
+            },
+            {
+              type: "emit_inbound",
+              frame: { type: "sdk.response", operation: "session.prompt", data: "<hang>" },
+            },
+            {
+              type: "expect_outbound",
+              frame: { type: "session.interrupt", input: { sessionID: sessionId } },
+            },
+            {
+              type: "emit_inbound",
+              frame: { type: "sdk.response", operation: "session.interrupt", data: "<hang>" },
+            },
+            {
+              type: "expect_outbound",
+              frame: { type: "session.remove", input: { sessionID: sessionId } },
+            },
+            {
+              type: "emit_inbound",
+              frame: { type: "sdk.response", operation: "session.remove", data: null },
+            },
+            { type: "runtime_exit", status: "success" },
+          ],
+        },
+        { onPrompt: () => Deferred.doneUnsafe(prompted, Effect.void) },
+      );
+      const textGeneration = yield* OpenCode2TextGeneration.make().pipe(
+        Effect.provideService(OpenCode2Server.OpenCode2Server, server),
+      );
+      const generation = yield* textGeneration
+        .generateThreadTitle({
+          cwd: process.cwd(),
+          message: "fix the login redirect loop after oauth",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("opencode"),
+            model: "opencode/big-pickle",
+          },
+        })
+        .pipe(Effect.flip, Effect.forkScoped);
+      yield* Deferred.await(prompted);
+      yield* TestClock.adjust("3 minutes");
+      yield* TestClock.adjust("5 seconds");
+      const failure = yield* Fiber.join(generation);
+      assert.equal(failure.detail, "OpenCode did not finish generating in time.");
+    }),
   );
 });

@@ -74,6 +74,9 @@ export function serveSidebarFocusRequest(): boolean {
   const { target } = useSidebarFocusRequestStore.getState();
   if (target === null) return false;
   if (mountedTarget === null) return true;
+  // The phone drawer stays mounted while closed. Keep the request until it leaves inert state.
+  if (mountedTarget.searchInput()?.closest('[inert], [data-mobile="true"][data-closed]'))
+    return true;
   useSidebarFocusRequestStore.setState({ target: null });
   mountedTarget.serve(target);
   return true;
@@ -213,7 +216,7 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
       useSidebarFocusRequestStore.setState({ target: FOCUS_TARGET_BY_COMMAND[command] });
     if (isCommandPaletteOpen()) window.dispatchEvent(new Event(CLOSE_PALETTE_EVENT));
     // The modal keeps the sidebar inert until its route is gone, so the request waits for that.
-    if (props.surface === "settings") void closeAppModal().then(request);
+    if (props.surface === "settings") void Promise.resolve(closeAppModal()).then(request);
     else request();
     if (sidebarHidden) (isMobile ? setOpenMobile : setOpen)(true);
   };
@@ -225,7 +228,7 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
     "sidebar.toggleWorking": () => run("sidebar.toggleWorking"),
   });
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: window keydown and focusout listeners for the sidebar commands and the Search way back, re-bound each render to read the latest run
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: window keydown and focusout listeners for the sidebar commands and the Search way back, re-bound each render to read the latest run
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -281,13 +284,13 @@ export function useSidebarCommandTarget(input: {
   const { searchInputRef, openProjectFilter, projectScopeItems } = input;
   const target = useSidebarFocusRequestStore((store) => store.target);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: publishes the mounted sidebar's project names to the module map the toast reads
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: publishes the mounted sidebar's project names to the module map the toast reads
   useEffect(() => {
     projectScopeLabels.clear();
     for (const item of projectScopeItems) projectScopeLabels.set(item.value, item.label);
   }, [projectScopeItems]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers this mounted sidebar as the module-level focus server, removed on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: registers this mounted sidebar as the module-level focus server, removed on unmount
   useEffect(() => {
     const target = {
       serve: (focusTarget: SidebarFocusTarget) => {
@@ -302,7 +305,7 @@ export function useSidebarCommandTarget(input: {
     };
   });
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: serves a focus request from the external store once the sidebar can take focus
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: serves a focus request from the external store once the sidebar can take focus
   useEffect(() => {
     if (target !== null && !isCommandPaletteOpen()) serveSidebarFocusRequest();
   }, [target]);

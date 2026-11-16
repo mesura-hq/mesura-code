@@ -13,18 +13,17 @@ import {
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
   normalizeModelSlug,
+  withImplicitFastModeDefault,
 } from "@t3tools/shared/model";
 
 import { getProviderModelCapabilities } from "../../providerModels";
-import { withImplicitFastModeDefault } from "./composerProviderState";
 import {
   buildTraitsTriggerDisplay,
   replaceDescriptorCurrentValue,
-  ULTRATHINK_PROMPT_PREFIX,
 } from "@t3tools/client-runtime/model-traits";
 import { buildUnavailableModelOptionDescriptors } from "./TraitsPicker";
 
-export { ULTRATHINK_PROMPT_PREFIX } from "@t3tools/client-runtime/model-traits";
+export const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
 
 /**
  * Provider option rules for the combined model picker. The selection and prompt rules mirror
@@ -235,7 +234,6 @@ export function resolveCombinedPickerTriggerTraits(input: {
   });
   if (optionState.descriptors.length === 0) return undefined;
   const { label } = buildTraitsTriggerDisplay({
-    provider: input.provider,
     descriptors: optionState.descriptors,
     primarySelectDescriptorId: optionState.promptEffortDescriptor?.id ?? null,
     ultrathinkPromptControlled: optionState.ultrathinkPromptControlled,

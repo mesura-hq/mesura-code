@@ -144,7 +144,7 @@ function threadRow(variant: "card" | "slim", width = 280) {
         wokeAt={null}
         isActive
         isRouteThread
-        openPullRequestsInRightPanel={false}
+        readOpensPullRequestsInRightPanel={() => false}
         jumpLabel={null}
         currentEnvironmentId={environmentId}
         environmentLabel="Desktop"

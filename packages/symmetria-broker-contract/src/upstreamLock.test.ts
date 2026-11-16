@@ -1,15 +1,12 @@
+import { describe, expect, it } from "vite-plus/test";
+
 import type {
   ProviderRuntimeEvent,
   RuntimeErrorClass,
   RuntimeSessionExitKind,
   RuntimeSessionState,
   RuntimeThreadState,
-} from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
-
-// Mesura: upstream no longer exports the vocabulary as its own type.
-type ProviderRuntimeEventType = ProviderRuntimeEvent["type"];
-
+} from "./retiredUpstreamVocabulary.ts";
 import {
   BORROWED_RUNTIME_VOCABULARIES,
   providerRuntimeEventTypeLock,
@@ -25,8 +22,10 @@ import {
   type RuntimeThreadStateLiteral,
 } from "./upstreamLock.ts";
 
+type ProviderRuntimeEventType = ProviderRuntimeEvent["type"];
+
 /**
- * Each pair drops one literal from a borrowed vocabulary (a stale copy) and asserts the lock
+ * Each pair drops one literal from a frozen vocabulary (a stale copy) and asserts the lock
  * refuses it. An unused `@ts-expect-error` is itself an error, so the typecheck stays green
  * only while each lock fires.
  */
@@ -72,8 +71,8 @@ const liveLocks = {
   ProviderRuntimeEventType: providerRuntimeEventTypeLock,
 };
 
-describe("borrowed runtime vocabularies", () => {
-  it("locks every vocabulary the projection borrows", () => {
+describe("frozen broker runtime vocabularies", () => {
+  it("locks every vocabulary the broker preserves", () => {
     expect(Object.keys(liveLocks).sort()).toEqual(
       Object.keys(BORROWED_RUNTIME_VOCABULARIES).sort(),
     );

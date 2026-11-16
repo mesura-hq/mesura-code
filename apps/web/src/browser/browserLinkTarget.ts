@@ -5,6 +5,10 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { environmentServerConfigsAtom } from "~/state/server";
 import { previewEnvironment } from "~/state/preview";
 
+import { isWebUrl } from "./webUrl";
+
+export { isWebUrl };
+
 export interface ResolveLinkTargetInput {
   readonly url: string;
   readonly event: {
@@ -43,15 +47,6 @@ export function resolveLinkTarget(input: ResolveLinkTargetInput): BrowserLinkTar
   return "app";
 }
 
-export function isWebUrl(url: string): boolean {
-  try {
-    const { protocol } = new URL(url);
-    return protocol === "http:" || protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 /** Before hydration, the default "system" would ignore a saved "app" link target. */
 export async function resolveBrowserLinkTargetPreference(): Promise<BrowserLinkTarget> {
   await ensureClientSettingsHydrated();
@@ -62,7 +57,7 @@ export function canOpenLinksInApp(threadRef: ScopedThreadRef | null | undefined)
   if (!threadRef || threadRef.threadId.length === 0) return false;
   const capabilities = appAtomRegistry
     .get(environmentServerConfigsAtom)
-    .get(threadRef.environmentId)?.environment.capabilities;
+    .get(threadRef.environmentId)?.environment?.capabilities;
   return (
     capabilities?.serverBrowser === true &&
     capabilities.threadLinkPreview === true &&

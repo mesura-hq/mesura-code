@@ -28,10 +28,41 @@ export function highlightedRow() {
   return rows().find((entry) => entry.hasAttribute("data-highlighted")) ?? null;
 }
 
-export function effortValue(name: string) {
-  return (
-    row(name).querySelector("[data-combined-picker-effort-value]")?.textContent?.trim() ?? null
+/** The upstream model list is a sibling of the fork's effort column and footer. */
+export function pickerPopup() {
+  const popup = pickerContent()?.closest<HTMLElement>('[data-slot="popover-popup"]');
+  expect(popup, "Expected the docked picker popup").toBeTruthy();
+  return popup!;
+}
+
+export function effortColumn() {
+  const column = pickerPopup().querySelector<HTMLElement>("[data-model-picker-effort]");
+  expect(column, "Expected the docked reasoning column").toBeTruthy();
+  return column!;
+}
+
+export function effortLevel(label: string) {
+  const level = [...effortColumn().querySelectorAll<HTMLButtonElement>("[data-effort-level]")].find(
+    (button) => button.firstElementChild?.textContent?.trim() === label,
   );
+  expect(level, `Expected reasoning level ${label}`).toBeTruthy();
+  return level!;
+}
+
+export function selectedEffort() {
+  return (
+    effortColumn()
+      .querySelector('[data-effort-level][aria-checked="true"]')
+      ?.firstElementChild?.textContent?.trim() ?? null
+  );
+}
+
+export function permissionsTrigger() {
+  const trigger = pickerPopup().querySelector<HTMLButtonElement>(
+    "[data-composer-permissions-trigger]",
+  );
+  expect(trigger, "Expected the picker's permissions trigger").toBeTruthy();
+  return trigger!;
 }
 
 export function buttonByLabel(label: string | RegExp, scope: ParentNode = document) {
@@ -41,19 +72,6 @@ export function buttonByLabel(label: string | RegExp, scope: ParentNode = docume
       return typeof label === "string" ? name.trim() === label : label.test(name.trim());
     }) ?? null
   );
-}
-
-export function moreOptionsToggle() {
-  return buttonByLabel(/^(More options|Back to models)/, pickerContent() ?? document);
-}
-
-export function extrasRegion() {
-  const controls = moreOptionsToggle()?.getAttribute("aria-controls");
-  return controls ? document.getElementById(controls) : null;
-}
-
-export function accessSummary() {
-  return moreOptionsToggle()?.textContent ?? "";
 }
 
 export async function press(
@@ -70,11 +88,4 @@ export async function press(
 
 export async function click(element: HTMLElement) {
   await act(async () => element.click());
-}
-
-export async function openMoreOptions() {
-  const toggle = moreOptionsToggle();
-  expect(toggle, "Expected one More options disclosure in the picker").toBeTruthy();
-  if (toggle!.getAttribute("aria-expanded") !== "true") await click(toggle!);
-  expect(toggle!.getAttribute("aria-expanded")).toBe("true");
 }

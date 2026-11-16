@@ -44,14 +44,17 @@ describe("preview IPC methods", () => {
     Effect.scoped(
       Effect.gen(function* () {
         let listener: DesktopIpc.DesktopIpcHandleListener | undefined;
-        const ipc = DesktopIpc.make({
-          removeHandler: vi.fn(),
-          handle: (_channel, registered) => {
-            listener = registered;
+        const ipc = DesktopIpc.make(
+          {
+            removeHandler: vi.fn(),
+            handle: (_channel, registered) => {
+              listener = registered;
+            },
+            removeAllListeners: vi.fn(),
+            on: vi.fn(),
           },
-          removeAllListeners: vi.fn(),
-          on: vi.fn(),
-        });
+          () => Effect.succeed(true),
+        );
         yield* ipc.handle(method);
         return yield* Effect.promise(async () =>
           structuredClone(await listener!({ sender: { id: 7 } }, { tabId: "capture-tab" })),
@@ -166,14 +169,17 @@ describe("preview cookie read and import IPC", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const registered = new Map<string, DesktopIpc.DesktopIpcHandleListener>();
-        const ipc = DesktopIpc.make({
-          removeHandler: vi.fn(),
-          handle: (channel, listener) => {
-            registered.set(channel, listener);
+        const ipc = DesktopIpc.make(
+          {
+            removeHandler: vi.fn(),
+            handle: (channel, listener) => {
+              registered.set(channel, listener);
+            },
+            removeAllListeners: vi.fn(),
+            on: vi.fn(),
           },
-          removeAllListeners: vi.fn(),
-          on: vi.fn(),
-        });
+          () => Effect.succeed(true),
+        );
         yield* ipc.handle(method);
         const [entry] = [...registered.entries()];
         if (entry === undefined) throw new Error("the method registered no IPC channel");

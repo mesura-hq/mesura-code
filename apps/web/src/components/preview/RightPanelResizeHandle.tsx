@@ -1,30 +1,42 @@
+import type { ComponentProps } from "react";
 import type { ResizableWidthHandlers } from "~/hooks/useResizableWidth";
 import type { usePaneEdge } from "~/lib/paneEdges";
 import { cn } from "~/lib/utils";
 
-interface Props {
+interface Props extends Pick<
+  ComponentProps<"div">,
+  "tabIndex" | "onKeyDown" | "aria-valuenow" | "aria-valuemin" | "aria-valuemax"
+> {
   handlers: ResizableWidthHandlers;
   /** Fork: focus and arrow keys for the handle (lib/paneEdges.ts). */
   separatorProps?: ReturnType<typeof usePaneEdge>;
   className?: string;
+  label?: string;
 }
 
-export function RightPanelResizeHandle({ handlers, separatorProps, className }: Props) {
+export function RightPanelResizeHandle({
+  handlers,
+  separatorProps: paneEdgeProps,
+  className,
+  label,
+  ...separatorProps
+}: Props) {
   return (
     <div
       role="separator"
+      aria-label={label}
       aria-orientation="vertical"
-      aria-label="Resize panel"
+      {...separatorProps}
       className={cn(
-        "group absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize select-none outline-none",
+        "group absolute inset-y-0 left-0 z-40 w-1 cursor-col-resize touch-none select-none outline-none any-pointer-coarse:-left-2 any-pointer-coarse:w-4",
         className,
       )}
-      {...separatorProps}
+      {...paneEdgeProps}
       {...handlers}
     >
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors duration-150 group-hover:bg-border group-focus-visible:bg-primary/60 group-active:bg-primary/60"
+        className="pointer-events-none absolute inset-y-0 left-0 w-px -translate-x-1/2 bg-transparent transition-colors duration-150 group-hover:bg-border group-focus-visible:bg-primary/60 group-active:bg-primary/60 any-pointer-coarse:left-2"
       />
     </div>
   );

@@ -149,6 +149,7 @@ export function mountThreadLinkStream(
     },
     history: () => {},
     reload: () => {},
+    stopLoading: () => {},
     viewport: () => {},
     canvas: () => null,
   };

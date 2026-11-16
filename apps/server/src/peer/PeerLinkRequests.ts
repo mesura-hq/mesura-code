@@ -1,8 +1,8 @@
 /**
- * Links an agent asks the user to make. The pairing code goes straight to `PeerLinks.link`
- * and is never recorded, so it never reaches the transcript, projections or agent context.
- * Asking never waits: provider CLIs abandon a tool call within minutes, so the answer
- * reaches the agent later as a notification in its thread.
+ * Links an agent asks the user to make. The user picks the machine and access in a card, and
+ * their client answers with its addresses and a pairing code that goes straight to
+ * `PeerLinks.link`, never into the transcript or the agent's context. Asking does not wait
+ * (provider CLIs abandon a long tool call): the answer reaches the agent as a notification.
  */
 import {
   CommandId,
@@ -23,7 +23,7 @@ import {
   TurnItemId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -39,7 +39,7 @@ type LinkRequestItem = Extract<OrchestrationV2TurnItem, { readonly type: "link_r
 /** The request as it was asked, which every update of its card repeats. */
 type LinkRequestAsk = Pick<
   LinkRequestItem,
-  "id" | "threadId" | "url" | "reason" | "environmentId" | "label" | "hint" | "requestedAccess"
+  "id" | "threadId" | "url" | "reason" | "environmentId" | "hint" | "requestedAccess"
 > & { readonly runId: RunId; readonly nodeId: NodeId };
 
 /** The notification that tells the agent how its card ended. */
@@ -63,7 +63,8 @@ export class PeerLinkRequests extends Context.Service<
   {
     /**
      * Shows a link card in the calling thread and returns at once. A retry
-     * with the same clientRequestId returns the card's current outcome.
+     * with the same clientRequestId and MCP credential returns the card's
+     * current outcome.
      */
     readonly request: (
       scope: McpInvocationContext.McpInvocationScope,
@@ -83,7 +84,7 @@ export class PeerLinkRequests extends Context.Service<
 const make = Effect.gen(function* () {
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
   const peerLinks = yield* PeerLinks.PeerLinks;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
 
   const readCard = (threadId: ThreadId, turnItemId: TurnItemId) =>
     threadManagement
@@ -117,6 +118,7 @@ const make = Effect.gen(function* () {
     outcome: LinkRequestOutcome,
     commandId: CommandId,
     wake?: LinkRequestWake,
+    answeringTurnItemIds?: ReadonlyArray<TurnItemId>,
   ) =>
     threadManagement.dispatch({
       type: "link_request.record",
@@ -128,12 +130,58 @@ const make = Effect.gen(function* () {
       ...(card.url === undefined ? {} : { url: card.url }),
       reason: card.reason,
       ...(card.environmentId === undefined ? {} : { environmentId: card.environmentId }),
-      ...(card.label === undefined ? {} : { label: card.label }),
       ...(card.hint === undefined ? {} : { hint: card.hint }),
       ...(card.requestedAccess === undefined ? {} : { requestedAccess: card.requestedAccess }),
       ...outcome,
       ...(wake === undefined ? {} : { wake }),
+      ...(answeringTurnItemIds === undefined ? {} : { answeringTurnItemIds }),
     });
+
+  const linkedOutcome = (linked: PeerLink): LinkRequestOutcome => ({
+    linkStatus: "linked",
+    linkedEnvironmentId: linked.environmentId,
+    linkedLabel: linked.label,
+    linkedAccess: linked.access,
+  });
+
+  // One answer per card at a time: two answers racing on one card must not
+  // both link. Other cards go on while a slow peer holds one.
+  const answerLocks = yield* KeyedLock.make<TurnItemId>();
+  // Per thread, held only to read a card before answering and to record the
+  // answer, never while linking. A link ends older cards for the same
+  // machine, but not one already being answered (its key is in answerLocks);
+  // an answer that starts after that reads the ended card and links nothing.
+  const lifecycleLocks = yield* KeyedLock.make<ThreadId>();
+
+  /**
+   * Closes a card still waiting when its agent retries naming a machine linked
+   * meanwhile. Nothing wakes the agent: the retry itself returns the link.
+   */
+  const closeAsLinked = (threadId: ThreadId, turnItemId: TurnItemId, linked: PeerLink) =>
+    answerLocks.withLock(
+      turnItemId,
+      lifecycleLocks.withLock(
+        threadId,
+        Effect.gen(function* () {
+          const card = yield* readCard(threadId, turnItemId);
+          if (
+            card === undefined ||
+            card.linkStatus !== "pending" ||
+            card.runId === null ||
+            card.nodeId === null
+          ) {
+            return;
+          }
+          yield* record(
+            { ...card, runId: card.runId, nodeId: card.nodeId },
+            linkedOutcome(linked),
+            CommandId.make(`link-request:${card.id}:linked-on-retry`),
+            undefined,
+            yield* answerLocks.activeKeys,
+          );
+        }),
+      ),
+    );
 
   const request: PeerLinkRequests["Service"]["request"] = Effect.fn("PeerLinkRequests.request")(
     function* (scope, input) {
@@ -143,6 +191,12 @@ const make = Effect.gen(function* () {
         "t3_environment_link",
       );
       const threadId = threadScope.thread.threadId;
+      if (!(yield* peerLinks.enabled)) {
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: PeerLinks.LINKED_ENVIRONMENTS_OFF,
+        });
+      }
       const unreadable = (error: unknown) =>
         new OrchestratorMcpFailure({
           code: "orchestration_error",
@@ -164,6 +218,21 @@ const make = Effect.gen(function* () {
           ),
         );
         if (Option.isSome(linked)) {
+          if (input.clientRequestId !== undefined) {
+            yield* closeAsLinked(
+              threadId,
+              cardId(threadId, scope.requestNamespace, input.clientRequestId),
+              linked.value,
+            ).pipe(
+              Effect.mapError(
+                (error) =>
+                  new OrchestratorMcpFailure({
+                    code: "orchestration_error",
+                    message: `Could not close the link request: ${errorMessage(error)}`,
+                  }),
+              ),
+            );
+          }
           return {
             status: "linked",
             environmentId: linked.value.environmentId,
@@ -172,13 +241,9 @@ const make = Effect.gen(function* () {
           } as const;
         }
       }
-      const key = input.clientRequestId ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
-      // Turn item ids are global; scope the key to this thread and provider
-      // session, since a later session may reuse it. A retry with the same
-      // clientRequestId finds this card and records nothing.
-      const turnItemId = TurnItemId.make(
-        `turn-item:link-request:${encodeURIComponent(threadId)}:${encodeURIComponent(scope.requestNamespace)}:${encodeURIComponent(key)}`,
-      );
+      const key = input.clientRequestId ?? (yield* random.uuidV4());
+      // A retry with the same clientRequestId finds this card and records nothing.
+      const turnItemId = cardId(threadId, scope.requestNamespace, key);
       if (input.clientRequestId !== undefined) {
         const existing = yield* readCard(threadId, turnItemId).pipe(Effect.mapError(unreadable));
         if (existing !== undefined) return resultOf(existing);
@@ -198,9 +263,8 @@ const make = Effect.gen(function* () {
             "Asking to link an environment requires an active run owned by this MCP provider session.",
         });
       }
-      // Best effort: the card names the machine at an address the agent was
-      // given, and the client finds it by id.
-      const peer = input.url === undefined ? Option.none() : yield* peerLinks.describe(input.url);
+      // Anything can answer at an address as any machine, so a card for an
+      // address names none. The client names it from addresses it already has.
       yield* record(
         {
           id: turnItemId,
@@ -209,11 +273,7 @@ const make = Effect.gen(function* () {
           nodeId: run.rootNodeId,
           ...(input.url === undefined ? {} : { url: input.url }),
           reason: input.reason ?? "",
-          ...(Option.isSome(peer)
-            ? { environmentId: peer.value.environmentId, label: peer.value.label }
-            : input.environmentId === undefined
-              ? {}
-              : { environmentId: input.environmentId }),
+          ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
           ...(input.hint === undefined ? {} : { hint: input.hint }),
           ...(input.requestedAccess === undefined
             ? {}
@@ -236,13 +296,6 @@ const make = Effect.gen(function* () {
     },
     Effect.withSpan("PeerLinkRequests.request"),
   );
-
-  const linkedOutcome = (linked: PeerLink): LinkRequestOutcome => ({
-    linkStatus: "linked",
-    linkedEnvironmentId: linked.environmentId,
-    linkedLabel: linked.label,
-    linkedAccess: linked.access,
-  });
 
   /** Links the machine the user picked, or finds the link they chose to keep. */
   const answerOutcome = (
@@ -293,39 +346,59 @@ const make = Effect.gen(function* () {
     }
   };
 
-  // One answer per card at a time: two answers racing on one card must not
-  // both link. Other cards go on while a slow peer holds one.
-  const answerLocks = yield* KeyedLock.make<TurnItemId>();
   const answer: PeerLinkRequests["Service"]["answer"] = Effect.fn("PeerLinkRequests.answer")(
     function* (input) {
       yield* Effect.annotateCurrentSpan({
         "orchestration_v2.thread_id": input.threadId,
         "link_request.answer": input.answer.type,
       });
-      const card = yield* readCard(input.threadId, input.turnItemId).pipe(
-        Effect.mapError((cause) => new PeerLinkRequestError({ reason: "load_failed", cause })),
+      const card = yield* lifecycleLocks.withLock(
+        input.threadId,
+        Effect.gen(function* () {
+          const card = yield* readCard(input.threadId, input.turnItemId).pipe(
+            Effect.mapError((cause) => new PeerLinkRequestError({ reason: "load_failed", cause })),
+          );
+          if (card === undefined || card.runId === null || card.nodeId === null) {
+            return yield* new PeerLinkRequestError({ reason: "not_found" });
+          }
+          // Any time while the card is open: the agent hears the answer as a
+          // notification, whether or not its run is still going.
+          if (card.linkStatus !== "pending") {
+            return yield* new PeerLinkRequestError({ reason: "already_answered" });
+          }
+          return { ...card, runId: card.runId, nodeId: card.nodeId };
+        }),
       );
-      if (card === undefined || card.runId === null || card.nodeId === null) {
-        return yield* new PeerLinkRequestError({ reason: "not_found" });
-      }
-      // Any time while the card is open: the agent hears the answer as a
-      // notification, whether or not its run is still going.
-      if (card.linkStatus !== "pending") {
-        return yield* new PeerLinkRequestError({ reason: "already_answered" });
-      }
-      const outcome = yield* answerOutcome(input.answer);
+      // An id beside an address is what answered there, recorded by an older
+      // server. Linking that machine could send its pairing code to the address.
+      const outcome: LinkRequestOutcome =
+        card.url !== undefined &&
+        card.environmentId !== undefined &&
+        input.answer.type === "link" &&
+        input.answer.environmentId !== undefined
+          ? {
+              linkStatus: "failed",
+              failure: "This request is from before an update. Ask for the link again.",
+            }
+          : yield* answerOutcome(input.answer);
       // If Stop closed the card while linking, the card keeps that; the link
       // itself stands and Settings lists it.
-      yield* record(
-        { ...card, runId: card.runId, nodeId: card.nodeId },
-        outcome,
-        CommandId.make(`link-request:${card.id}:${outcome.linkStatus}`),
-        {
-          messageId: MessageId.make(`message:link-request:${card.id}`),
-          ...outcomeNotice(card, outcome),
-        },
-      ).pipe(
-        Effect.mapError((cause) => new PeerLinkRequestError({ reason: "record_failed", cause })),
+      yield* lifecycleLocks.withLock(
+        input.threadId,
+        Effect.flatMap(answerLocks.activeKeys, (answering) =>
+          record(
+            card,
+            outcome,
+            CommandId.make(`link-request:${card.id}:${outcome.linkStatus}`),
+            {
+              messageId: MessageId.make(`message:link-request:${card.id}`),
+              ...outcomeNotice(card, outcome),
+            },
+            answering,
+          ),
+        ).pipe(
+          Effect.mapError((cause) => new PeerLinkRequestError({ reason: "record_failed", cause })),
+        ),
       );
     },
     (effect, input) =>
@@ -337,6 +410,15 @@ const make = Effect.gen(function* () {
 
   return PeerLinkRequests.of({ request, answer });
 });
+
+/**
+ * Turn item ids are global; scope the key to this thread and provider session,
+ * since a later session may reuse it.
+ */
+const cardId = (threadId: ThreadId, requestNamespace: string, key: string) =>
+  TurnItemId.make(
+    `turn-item:link-request:${encodeURIComponent(threadId)}:${encodeURIComponent(requestNamespace)}:${encodeURIComponent(key)}`,
+  );
 
 const pendingResult = (turnItemId: TurnItemId): OrchestratorMcpEnvironmentLinkResult => ({
   status: "pending",
@@ -363,16 +445,16 @@ const resultOf = (card: LinkRequestItem): OrchestratorMcpEnvironmentLinkResult =
   }
 };
 
-/** What the agent's words call the target: its name, its address, or the user's pick. */
-const linkTarget = (card: Pick<LinkRequestItem, "url" | "label" | "environmentId">) =>
-  card.label ?? card.url ?? card.environmentId ?? "a machine";
+/** What the agent's words call the target: its address, its id, or the user's pick. */
+const linkTarget = (card: Pick<LinkRequestItem, "url" | "environmentId">) =>
+  card.url ?? card.environmentId ?? "a machine";
 
 /**
  * The notification an answer sends the agent: what the card says, and what
  * to do next. It carries the outcome only, never the pairing code.
  */
 const outcomeNotice = (
-  card: Pick<LinkRequestItem, "url" | "label" | "environmentId">,
+  card: Pick<LinkRequestItem, "url" | "environmentId">,
   outcome: LinkRequestOutcome,
 ): Omit<LinkRequestWake, "messageId"> => {
   const target = linkTarget(card);
@@ -380,7 +462,7 @@ const outcomeNotice = (
     case "linked": {
       const label = outcome.linkedLabel ?? target;
       return {
-        text: `The user linked ${label} with ${outcome.linkedAccess} access. Pass environmentId ${outcome.linkedEnvironmentId} to act there; t3_environment_links lists it.`,
+        text: `The user linked ${label} with ${outcome.linkedAccess} access. Pass environmentId ${outcome.linkedEnvironmentId} to act there.`,
         notification: {
           source: { kind: "background_task" },
           outcome: "completed",

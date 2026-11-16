@@ -190,6 +190,8 @@ function locateRepository(cwd: string): RepositoryLocation | null {
         commonPointer === undefined || commonPointer.length === 0
           ? gitDir
           : NodePath.resolve(gitDir, commonPointer);
+      // An empty .git directory is not a repository. Disable the memo for malformed metadata.
+      if (readTextOrNull(NodePath.join(gitDir, "HEAD")) === null) return null;
       return { dotGit, gitDir, commonDir };
     }
     const parent = NodePath.dirname(directory);
@@ -205,16 +207,6 @@ function configKeys(location: RepositoryLocation): Array<string> | null {
   const visited = new Set<string>();
   for (const root of roots) if (!configSourceKeys(root, keys, visited, 0)) return null;
   return keys;
-}
-
-/**
- * The fingerprint of every config file git reads for `cwd`'s repository; null
- * outside a repository or when a source cannot be placed. Remotes live here.
- */
-export function repositoryConfigFingerprint(cwd: string): string | null {
-  const location = locateRepository(cwd);
-  if (location === null) return null;
-  return configKeys(location)?.join("|") ?? null;
 }
 
 /** The fingerprint of `cwd`'s repository's config and refs; null when unknown. */
@@ -233,14 +225,14 @@ export function repositoryFingerprint(cwd: string): string | null {
 }
 
 /**
- * Reports, per checkout, whether its config changed since the previous call.
+ * Reports, per checkout, whether its config or refs changed since the previous call.
  * The first call for a checkout reports no change.
  */
-export function makeRepositoryConfigWatch(): (cwd: string) => boolean {
+export function makeRepositoryStateWatch(): (cwd: string) => boolean {
   const seen = new Map<string, string | null>();
   return (cwd) => {
-    const fingerprint = repositoryConfigFingerprint(cwd);
-    const changed = seen.has(cwd) && (fingerprint === null || seen.get(cwd) !== fingerprint);
+    const fingerprint = repositoryFingerprint(cwd);
+    const changed = seen.has(cwd) && seen.get(cwd) !== fingerprint;
     seen.delete(cwd);
     if (seen.size >= MAX_CHECKOUTS) {
       const oldest = seen.keys().next().value;

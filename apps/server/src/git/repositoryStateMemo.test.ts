@@ -36,6 +36,13 @@ describe("repository fingerprint", () => {
     expect(repositoryFingerprint(root)).toBeNull();
   });
 
+  it("repository fingerprint: ignores a .git directory without a HEAD", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-fingerprint-invalid-"));
+    roots.push(root);
+    NodeFS.mkdirSync(NodePath.join(root, ".git"));
+    expect(repositoryFingerprint(root)).toBeNull();
+  });
+
   it("repository fingerprint: a repository without remotes is stable until a remote is added", () => {
     const repo = makeRepository();
     const before = repositoryFingerprint(repo);

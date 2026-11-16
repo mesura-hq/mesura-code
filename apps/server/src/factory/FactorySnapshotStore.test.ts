@@ -1,3 +1,4 @@
+import * as EffectNodeCrypto from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics-next-line nodeBuiltinImport:off - hashes fixtures synchronously to compare digests.
 import * as NodeCrypto from "node:crypto";
 
@@ -28,7 +29,7 @@ const makeTestLayer = () =>
     Layer.provideMerge(
       ServerConfig.layerTest(process.cwd(), { prefix: "t3-factory-snapshot-store-test-" }),
     ),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer)),
   );
 
 /**
@@ -48,7 +49,7 @@ const makeRacingTestLayer = () =>
     Layer.provideMerge(
       ServerConfig.layerTest(process.cwd(), { prefix: "t3-factory-snapshot-store-race-test-" }),
     ),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer)),
   );
 
 /** Every entry of the snapshots directory with its inode and modification time. */

@@ -2,6 +2,8 @@
 // structure, so Vim moves over and edits only the text the editor shows.
 import { describe, expect, it } from "vite-plus/test";
 
+import { act } from "../../../test/render";
+
 import { mountVimComposer } from "~/test/vimComposerFixture";
 
 import { composerSurface } from "./composerSurface";
@@ -18,6 +20,15 @@ function vimText(fixture: Awaited<ReturnType<typeof mountVimComposer>>): string 
 function caretCharacter(fixture: Awaited<ReturnType<typeof mountVimComposer>>): string {
   const { doc, selection } = fixture.editor().state;
   return doc.textBetween(selection.from, Math.min(selection.from + 1, doc.content.size), "\n");
+}
+
+function textRuns(fixture: Awaited<ReturnType<typeof mountVimComposer>>) {
+  const runs: Array<{ text: string; marks: string[] }> = [];
+  fixture.editor().state.doc.descendants((node) => {
+    if (node.isText)
+      runs.push({ text: node.text!, marks: node.marks.map((mark) => mark.type.name) });
+  });
+  return runs;
 }
 
 describe("composer Vim over rich text", () => {
@@ -144,8 +155,85 @@ describe("composer Vim over rich text", () => {
 
   it("x deletes the character under the cursor, not an equal one beside it", async () => {
     await using fixture = await mountVimComposer("**a**a");
-    await fixture.keys("<Esc>", "0", "x");
+    await fixture.keys("<Esc>", "0");
+    expect(vimText(fixture)).toBe("aa");
+    expect(caretCharacter(fixture)).toBe("a");
+    await fixture.keys("x");
     expect(fixture.prompt()).toBe("a");
+    expect(textRuns(fixture)).toEqual([{ text: "a", marks: [] }]);
+
+    await fixture.keys("u");
+    expect(fixture.prompt()).toBe("**a**a");
+    expect(vimText(fixture)).toBe("aa");
+    expect(textRuns(fixture)).toEqual([
+      { text: "a", marks: ["bold"] },
+      { text: "a", marks: [] },
+    ]);
+    expect(caretCharacter(fixture)).toBe("a");
+
+    await fixture.keys("<C-r>");
+    expect(fixture.prompt()).toBe("a");
+    expect(vimText(fixture)).toBe("a");
+    expect(caretCharacter(fixture)).toBe("a");
+  });
+
+  it("x keeps the adjacent marked character when the equal plain character comes first", async () => {
+    await using fixture = await mountVimComposer("a**a**");
+    await fixture.keys("<Esc>", "0", "x");
+    expect(fixture.prompt()).toBe("**a**");
+    expect(vimText(fixture)).toBe("a");
+    expect(textRuns(fixture)).toEqual([{ text: "a", marks: ["bold"] }]);
+  });
+
+  it("moves across styled text without revealing markers and restores source editing in insert", async () => {
+    await using fixture = await mountVimComposer("**ab**cd");
+    await fixture.keys("<Esc>", "0", "l");
+    expect(vimText(fixture)).toBe("abcd");
+    expect(caretCharacter(fixture)).toBe("b");
+    await fixture.keys("l");
+    expect(caretCharacter(fixture)).toBe("c");
+    await fixture.keys("h", "i");
+    expect(composerSurface.mode()).toBe("insert");
+    expect(vimText(fixture)).toBe("**ab**cd");
+    expect(caretCharacter(fixture)).toBe("b");
+    await fixture.keys("<Esc>");
+    expect(vimText(fixture)).toBe("abcd");
+    expect(caretCharacter(fixture)).toBe("a");
+  });
+
+  it("keeps a list and its chip when x removes a styled character before the chip", async () => {
+    await using fixture = await mountVimComposer("a @README.md now");
+    const chips = () => {
+      const nodes: string[] = [];
+      fixture.editor().state.doc.descendants((node) => {
+        if (node.type.name === "composer-mention") nodes.push(node.attrs.path);
+      });
+      return nodes;
+    };
+    const before = chips();
+    expect(before).toHaveLength(1);
+    await act(() => {
+      fixture
+        .editor()
+        .chain()
+        .toggleBulletList()
+        .setTextSelection({ from: 3, to: 4 })
+        .setBold()
+        .run();
+    });
+    await fixture.keys("<Esc>", "g", "g", "0", "x");
+    expect(fixture.prompt()).toBe("-  @README.md now");
+    expect(fixture.blocks()).toEqual(["bulletList"]);
+    expect(chips()).toEqual(before);
+  });
+
+  it("restores source editing when Vim resets while the cursor is inside styled text", async () => {
+    await using fixture = await mountVimComposer("**ab**cd");
+    await fixture.keys("<Esc>", "0", "l");
+    await act(() => composerSurface.reset());
+    expect(composerSurface.mode()).toBe("insert");
+    expect(vimText(fixture)).toBe("**ab**cd");
+    expect(caretCharacter(fixture)).toBe("b");
   });
 
   it("a yank survives an empty insert session", async () => {

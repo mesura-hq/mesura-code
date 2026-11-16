@@ -6,6 +6,9 @@
  */
 export const REMOVED_NATIVE_MOBILE_PREFIXES = [
   "apps/mobile/",
+  ".github/scripts/mirror-play-apk.cjs",
+  "scripts/scenarios/t3-mobile.ts",
+  "scripts/scenarios/mobile-opens-a-seeded-thread.e2e.ts",
   ".agents/skills/test-t3-mobile/",
   ".agents/skills/ios-debugger-agent/",
   ".agents/skills/ios-simulator-browser/",
@@ -77,6 +80,7 @@ export const REMOVED_NATIVE_MOBILE_PATCHED_PACKAGES = [
   "react-native-pdf-jsi",
   "react-native-reanimated",
   "react-native-screens",
+  "react-native-svg",
   "react-native-shiki-engine",
   "react-native-webview",
   "uniwind",

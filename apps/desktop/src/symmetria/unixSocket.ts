@@ -4,6 +4,8 @@
  * exists for sockets.
  */
 import * as NodeNet from "node:net";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 /**
  * Rejects with the bind error instead of leaving it to the server's `error` handler. The handler
@@ -29,3 +31,14 @@ export function closeServer(server: NodeNet.Server): Promise<void> {
     server.close(() => resolve());
   });
 }
+
+export class SocketListenError extends Schema.TaggedError<SocketListenError>()(
+  "SocketListenError",
+  { socketPath: Schema.String, cause: Schema.Defect() },
+) {}
+
+export const listenOnPathEffect = (server: NodeNet.Server, socketPath: string) =>
+  Effect.tryPromise({
+    try: () => listenOnPath(server, socketPath),
+    catch: (cause) => new SocketListenError({ socketPath, cause }),
+  });

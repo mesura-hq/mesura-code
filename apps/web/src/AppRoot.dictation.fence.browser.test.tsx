@@ -195,7 +195,6 @@ vi.mock("./hooks/useSettings", async (importOriginal) => {
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/Sidebar", () => ({ default: () => null }));
-vi.mock("./components/LegacySidebar", () => ({ default: () => null }));
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
@@ -204,6 +203,7 @@ vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }))
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => {},
   LegendList: ({
     data,
     renderItem,
@@ -1182,6 +1182,7 @@ interface StartedTurn {
     readonly commandId?: string;
     readonly message: {
       readonly text: string;
+      readonly context?: import("@t3tools/contracts").OrchestrationMessageContext;
       readonly attachments: ReadonlyArray<Record<string, unknown>>;
     };
   };
@@ -2088,9 +2089,17 @@ describe("dictation phase 5 rework regressions", () => {
 
     await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
     const text = onlyTurnText();
-    // A server without inline context gets the record serialized: the raw link is replaced.
-    expect(text).not.toContain("t3-context://");
+    // Upstream carries context records separately from the reference in the prompt.
     expect(text).toContain("notes.txt");
+    expect(turnStarts()[0]!.input.message.context).toMatchObject({
+      records: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "file",
+          name: "notes.txt",
+          attachmentId: "uploaded-notes",
+        }),
+      ]),
+    });
   });
 });
 

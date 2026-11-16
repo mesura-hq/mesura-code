@@ -10,7 +10,7 @@ import {
   OrchestratorMcpThreadWaitResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
@@ -25,14 +25,9 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as PeerLinks from "./PeerLinks.ts";
 import * as PeerMcpClient from "./PeerMcpClient.ts";
 
-/**
- * A peer's `/mcp` holds a wait open for its whole timeout without sending
- * anything, and T3 Connect's edge drops a request idle for about 100 s, so a
- * forwarded wait goes out in pieces no longer than this.
- */
-export const FORWARDED_WAIT_CHUNK_MS = 50_000;
-const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
-const MAX_WAIT_TIMEOUT_MS = 60 * 60 * 1_000;
+// Match local waits: return before MCP client timeouts and T3 Connect's ~100 s idle drop.
+const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+const MAX_WAIT_TIMEOUT_MS = 45_000;
 
 type Scope = McpInvocationContext.McpInvocationScope;
 
@@ -67,7 +62,7 @@ export class PeerForwarding extends Context.Service<
       environmentId: EnvironmentId,
       input: OrchestratorMcpThreadInterruptInput,
     ) => Effect.Effect<OrchestratorMcpThreadInterruptResult, OrchestratorMcpFailure>;
-    /** `t3_thread_wait` there, in pieces short enough to survive any route. */
+    /** `t3_thread_wait` there, bounded like a local wait. */
     readonly waitForThread: (
       scope: Scope,
       environmentId: EnvironmentId,
@@ -80,6 +75,13 @@ export class PeerForwarding extends Context.Service<
   }
 >()("t3/peer/PeerForwarding") {}
 
+/** What an agent hears when it names another machine while the beta is off here. */
+export const linkedEnvironmentsOff = new OrchestratorMcpFailure({
+  code: "capability_denied",
+  message:
+    "Linked environments is off on this machine, so no tool can act on another machine. Leave out environmentId to work here; the user can turn it on in Settings → Labs.",
+});
+
 /** The linked environment a call names, or nothing when it names this one. */
 export const remoteTarget = (scope: Scope, environmentId: EnvironmentId | undefined) =>
   environmentId === scope.environmentId ? undefined : environmentId;
@@ -87,19 +89,18 @@ export const remoteTarget = (scope: Scope, environmentId: EnvironmentId | undefi
 const make = Effect.gen(function* () {
   const peers = yield* PeerMcpClient.PeerMcpClient;
   const links = yield* PeerLinks.PeerLinks;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* Digest.Digest;
   const threads = yield* ThreadManagement.ThreadManagementService;
 
   /**
-   * The caller's own limits travel with every forwarded call: the peer sees only the
-   * link's credential, so this side refuses what the caller may not control here.
-   * Linked work never uses this environment's links: the peer would see this session,
-   * not the link the work came from, so its fence could not hold.
+   * The caller's own limits and thread, which travel with every forwarded call: the peer sees only the
+   * link's credential, so a caller that may not control threads here is refused here. Work a
+   * link started never uses this environment's links, since the peer would see this
+   * environment's session instead of that link, and its fence could not hold.
    */
-  const callerLimits = (scope: Scope) =>
+  const forwardingCaller = (scope: Scope) =>
     readCaller().pipe(
       Effect.tap((caller) => assertNotLinked(caller, "use this environment's links")),
-      Effect.map((caller) => caller.limits),
       Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
       Effect.provideService(ThreadManagement.ThreadManagementService, threads),
     );
@@ -110,7 +111,7 @@ const make = Effect.gen(function* () {
    * key never collide there, and one agent retrying gets its first result.
    */
   const scopedRequestId = (namespace: string, clientRequestId: string) =>
-    crypto.digest("SHA-256", new TextEncoder().encode(`${namespace}\n${clientRequestId}`)).pipe(
+    crypto.digest(Digest.sha256, new TextEncoder().encode(`${namespace}\n${clientRequestId}`)).pipe(
       Effect.map((digest) => `fwd:${Hex.encode(digest)}`),
       Effect.orDie,
     );
@@ -124,7 +125,7 @@ const make = Effect.gen(function* () {
     environmentId: EnvironmentId,
     params: unknown,
   ) {
-    const limits = yield* callerLimits(scope);
+    const { caller, limits } = yield* forwardingCaller(scope);
     const encoded = (yield* Schema.encodeUnknownEffect(parameters as Schema.Encoder<unknown>)(
       params,
     ).pipe(Effect.mapError(unavailable))) as Record<string, unknown>;
@@ -139,11 +140,21 @@ const make = Effect.gen(function* () {
     if (typeof args.clientRequestId === "string") {
       args.clientRequestId = yield* scopedRequestId(scope.requestNamespace, args.clientRequestId);
     }
+    // So a message sent there names the thread that sent it, even to a client that cannot reach here.
+    const sender =
+      caller === undefined
+        ? undefined
+        : {
+            environmentId: scope.environmentId,
+            threadId: caller.id,
+            title: caller.title,
+          };
     return yield* peers.call({
       environmentId,
       tool: toolName,
       arguments: args,
       limits,
+      ...(sender === undefined ? {} : { sender }),
       success: success as Schema.Decoder<A>,
     });
   });
@@ -172,57 +183,53 @@ const make = Effect.gen(function* () {
       input,
     );
 
-  const waitForThread: PeerForwarding["Service"]["waitForThread"] = Effect.fn(
-    "PeerForwarding.waitForThread",
-  )(function* (scope, environmentId, input) {
-    let remaining = Math.min(
-      MAX_WAIT_TIMEOUT_MS,
-      Math.max(1, input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
+  const waitForThread: PeerForwarding["Service"]["waitForThread"] = (scope, environmentId, input) =>
+    forward<OrchestratorMcpThreadWaitResult>(
+      scope,
+      "t3_thread_wait",
+      OrchestratorMcpThreadWaitInput,
+      OrchestratorMcpThreadWaitResult,
+      environmentId,
+      {
+        ...input,
+        timeoutMs: Math.min(
+          MAX_WAIT_TIMEOUT_MS,
+          Math.max(1, input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
+        ),
+      },
     );
-    let runId = input.runId;
-    while (true) {
-      const chunk = Math.min(remaining, FORWARDED_WAIT_CHUNK_MS);
-      const result = yield* forward<OrchestratorMcpThreadWaitResult>(
-        scope,
-        "t3_thread_wait",
-        OrchestratorMcpThreadWaitInput,
-        OrchestratorMcpThreadWaitResult,
-        environmentId,
-        {
-          threadId: input.threadId,
-          ...(runId === undefined ? {} : { runId }),
-          timeoutMs: chunk,
-          ...(input.untilDelegatedWorkSettled === undefined
-            ? {}
-            : { untilDelegatedWorkSettled: input.untilDelegatedWorkSettled }),
-        },
-      );
-      remaining -= chunk;
-      if (!result.timedOut || remaining <= 0) return result;
-      // Later pieces wait for the run the first one picked, not a newer one.
-      runId = result.runId ?? undefined;
-    }
-  });
 
-  const call: PeerForwarding["Service"]["call"] = (scope, tool, environmentId, params) =>
-    tool.name === "t3_thread_wait"
+  // While the beta is off, agents start nothing over links. Tasks already running there keep
+  // following through readThread, waitForThread and interruptThread, so they still finish.
+  const requireEnabled = links.enabled.pipe(
+    Effect.flatMap((enabled) => (enabled ? Effect.void : Effect.fail(linkedEnvironmentsOff))),
+  );
+
+  const call: PeerForwarding["Service"]["call"] = (scope, tool, environmentId, params) => {
+    const forwarded: Effect.Effect<
+      Tool.Success<typeof tool>,
+      OrchestratorMcpFailure
+    > = tool.name === "t3_thread_wait"
       ? (waitForThread(
           scope,
           environmentId,
           params as OrchestratorMcpThreadWaitInput,
         ) as Effect.Effect<Tool.Success<typeof tool>, OrchestratorMcpFailure>)
       : forward(scope, tool.name, tool.parametersSchema, tool.successSchema, environmentId, params);
+    return Effect.andThen(requireEnabled, forwarded);
+  };
 
   /**
    * The next step for an agent whose machine is not linked: without it, an
    * empty list reads as a dead end and agents go looking elsewhere.
    */
   const NOT_LISTED =
-    "A machine the user means that is not listed here is not linked yet: call t3_environment_link with a hint from their words (or the environmentId of a machine they mentioned), and the user picks it and its access in a card.";
+    "Not listed: not linked yet. Call t3_environment_link with a hint from the user's words.";
 
   const listLinks: PeerForwarding["Service"]["links"] = Effect.fn("PeerForwarding.listLinks")(
     function* (scope) {
-      yield* callerLimits(scope);
+      yield* forwardingCaller(scope);
+      yield* requireEnabled;
       const listed = yield* links.list.pipe(
         Effect.mapError(
           (error) =>

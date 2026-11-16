@@ -1,3 +1,4 @@
+import * as PlatformError from "effect/PlatformError";
 // @effect-diagnostics nodeBuiltinImport:off
 /**
  * Mesura: while it runs, each Linux server writes `<registry dir>/<pid>.json` with its base dir, so
@@ -108,7 +109,17 @@ function componentProblem(
 }
 
 const lstatOrNull = (path: string) =>
-  Effect.tryPromise(() => NodeFSP.lstat(path)).pipe(Effect.orElseSucceed(() => null));
+  Effect.tryPromise({
+    try: () => NodeFSP.lstat(path),
+    catch: (cause) =>
+      PlatformError.systemError({
+        _tag: "Unknown",
+        module: "FileSystem",
+        method: "lstat",
+        pathOrDescriptor: path,
+        cause,
+      }),
+  }).pipe(Effect.orElseSucceed(() => null));
 
 /**
  * Walks `directory` from `/` and returns why it cannot be trusted, or null.
@@ -128,12 +139,32 @@ const registryDirectoryProblem = Effect.fn(function* (
     current = NodePath.posix.join(current, name);
     let link = yield* lstatOrNull(current);
     if (link === null && options.create) {
-      yield* Effect.tryPromise(() => NodeFSP.mkdir(current, { mode: 0o700 })).pipe(Effect.ignore);
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdir(current, { mode: 0o700 }),
+        catch: (cause) =>
+          PlatformError.systemError({
+            _tag: "Unknown",
+            module: "FileSystem",
+            method: "mkdir",
+            pathOrDescriptor: current,
+            cause,
+          }),
+      }).pipe(Effect.ignore);
       link = yield* lstatOrNull(current);
     }
     if (link === null) return `${current} is missing`;
     const target = link.isSymbolicLink()
-      ? yield* Effect.tryPromise(() => NodeFSP.stat(current)).pipe(Effect.orElseSucceed(() => null))
+      ? yield* Effect.tryPromise({
+          try: () => NodeFSP.stat(current),
+          catch: (cause) =>
+            PlatformError.systemError({
+              _tag: "Unknown",
+              module: "FileSystem",
+              method: "stat",
+              pathOrDescriptor: current,
+              cause,
+            }),
+        }).pipe(Effect.orElseSucceed(() => null))
       : link;
     if (target === null) return `${current} is a dangling symlink`;
     const problem = componentProblem(link, target, uid, index === names.length);

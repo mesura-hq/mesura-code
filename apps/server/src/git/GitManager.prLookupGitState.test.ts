@@ -86,7 +86,8 @@ describe("branch PR lookup freshness with the sweep memo", () => {
           .pipe(Effect.provideService(UseRepositoryStateMemo, true));
 
         expect(pullRequest).toMatchObject({ state, url: PULL_REQUEST_URL });
-        expect(branchReads(spawned)).toHaveLength(2);
+        // Upstream also reads the settled-result fingerprint before the fresh confirmation.
+        expect(branchReads(spawned)).toHaveLength(3);
         expect(providerCalls).toHaveLength(1);
       }),
   );

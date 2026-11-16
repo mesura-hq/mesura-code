@@ -1,7 +1,7 @@
 import * as NodeModule from "node:module";
 
 import * as Cause from "effect/Cause";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
@@ -42,10 +42,10 @@ const EXTENSION_KINDS: ReadonlyArray<NvimHandleKind> = [
   NVIM_HANDLE_KINDS.tabpage,
 ];
 
-export class NvimRpcError extends Data.TaggedError("NvimRpcError")<{
-  readonly method: string;
-  readonly message: string;
-}> {}
+export class NvimRpcError extends Schema.TaggedError<NvimRpcError>()("NvimRpcError", {
+  method: Schema.String,
+  message: Schema.String,
+}) {}
 
 export interface NvimNotification {
   readonly method: string;

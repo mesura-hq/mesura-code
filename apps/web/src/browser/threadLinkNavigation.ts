@@ -1,4 +1,5 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { previewRuntimeTabId } from "./previewRuntimeTabId";
 
 export interface ThreadLinkTarget {
@@ -15,8 +16,23 @@ export interface ThreadLinkTransport {
   readonly observe: (listener: (status: NavigationObservation) => void) => () => void;
 }
 
-export class ThreadLinkCancelled extends Error {}
-export class ThreadLinkNavigationError extends Error {}
+export class ThreadLinkCancelled extends Schema.TaggedError<ThreadLinkCancelled>()(
+  "ThreadLinkCancelled",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+export class ThreadLinkNavigationError extends Schema.TaggedError<ThreadLinkNavigationError>()(
+  "ThreadLinkNavigationError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export const isThreadLinkCancelled = Schema.is(ThreadLinkCancelled);
+export const isThreadLinkNavigationError = Schema.is(ThreadLinkNavigationError);
 
 // These are mounted transport leases, not client-side tab allocation or URL queues.
 const transports = new Map<string, ThreadLinkTransport>();
@@ -82,26 +98,29 @@ export function navigateThreadLink(
       if (error) reject(error);
       else resolve();
     };
-    const cancel = () => finish(new ThreadLinkCancelled("The link action was cancelled."));
+    const cancel = () =>
+      finish(new ThreadLinkCancelled({ message: "The link action was cancelled." }));
     const check = () => {
       if (signal.aborted) return cancel();
       const current = transports.get(keyFor(target));
       if (selected && current !== selected)
-        return finish(new ThreadLinkCancelled("The mounted browser changed."));
+        return finish(new ThreadLinkCancelled({ message: "The mounted browser changed." }));
       if (!current) return;
       if (selected && current.connectionGeneration?.() !== connectionGeneration)
-        return finish(new ThreadLinkCancelled("The browser disconnected."));
+        return finish(new ThreadLinkCancelled({ message: "The browser disconnected." }));
       if (!selected) connectionGeneration = current.connectionGeneration?.();
       selected = current;
       const readiness = current.readiness();
       if (readiness === "refused")
         return finish(
           submitted
-            ? new ThreadLinkCancelled("Browser control changed.")
-            : new ThreadLinkNavigationError("This viewer does not control the browser."),
+            ? new ThreadLinkCancelled({ message: "Browser control changed." })
+            : new ThreadLinkNavigationError({
+                message: "This viewer does not control the browser.",
+              }),
         );
       if (readiness !== "ready") {
-        if (submitted) finish(new ThreadLinkCancelled("The browser disconnected."));
+        if (submitted) finish(new ThreadLinkCancelled({ message: "The browser disconnected." }));
         return;
       }
       if (submitted) return;
@@ -112,7 +131,9 @@ export function navigateThreadLink(
         if (current.connectionGeneration?.() !== connectionGeneration) return cancel();
         if (current.readiness() !== "ready") return cancel();
         if (status === "failed")
-          return finish(new ThreadLinkNavigationError("The browser rejected navigation."));
+          return finish(
+            new ThreadLinkNavigationError({ message: "The browser rejected navigation." }),
+          );
         loadingObserved = true;
         if (submissionAccepted) finish();
       });
@@ -121,21 +142,29 @@ export function navigateThreadLink(
       try {
         Promise.resolve(current.navigate(url)).then(
           (accepted) => {
-            if (!accepted) return finish(new ThreadLinkNavigationError("Navigation was refused."));
+            if (!accepted)
+              return finish(new ThreadLinkNavigationError({ message: "Navigation was refused." }));
             submissionAccepted = true;
             if (loadingObserved) finish();
           },
           (error: unknown) =>
-            finish(new ThreadLinkNavigationError("Browser navigation failed.", { cause: error })),
+            finish(
+              new ThreadLinkNavigationError({
+                message: "Browser navigation failed.",
+                cause: error,
+              }),
+            ),
         );
       } catch (error) {
-        finish(new ThreadLinkNavigationError("Browser navigation failed.", { cause: error }));
+        finish(
+          new ThreadLinkNavigationError({ message: "Browser navigation failed.", cause: error }),
+        );
       }
     };
     // Same bound as the existing preview-tab waiter. An off-route target waits
     // for its own viewer without changing routes or using an unrelated viewer.
     const timer = setTimeout(
-      () => finish(new ThreadLinkNavigationError("The browser did not become ready.")),
+      () => finish(new ThreadLinkNavigationError({ message: "The browser did not become ready." })),
       5_000,
     );
     signal.addEventListener("abort", cancel, { once: true });

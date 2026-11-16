@@ -5,7 +5,7 @@ import {
   type OrchestrationV2ThreadShell,
   type ProjectIconEffectiveSource,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -33,7 +33,7 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
   const resolver = yield* ProjectFaviconResolver;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const fileSystem = yield* FileSystem.FileSystem;
 
   /** Only an attachment recorded on one of this thread's own user messages may be imported. */
@@ -110,7 +110,7 @@ const make = Effect.gen(function* () {
       input.imagePath === null
         ? { faviconPath: null, imported: false }
         : yield* prepareImage(thread, project.value, input.imagePath);
-    const uuid = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+    const uuid = yield* crypto.uuidV4().pipe(Effect.orDie);
     yield* projects
       .update({
         commandId: CommandId.make(`server:project-icon:${uuid}`),

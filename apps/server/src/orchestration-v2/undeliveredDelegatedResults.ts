@@ -60,7 +60,8 @@ export function withUndeliveredDelegatedResults(input: {
       return {
         taskId: task.id,
         kind: "subagent" as const,
-        providerInstanceId: task.providerInstanceId,
+        // A finished result holds attention only. Provider ownership here would authorize
+        // stale MCP callers through isLiveCallerShell after their parent run ended.
         ...(description.length === 0 ? {} : { description }),
         ...(task.childThreadId === null ? {} : { childThreadId: task.childThreadId }),
       };

@@ -73,7 +73,12 @@ interface ImportCounts {
 
 export type ImportOutcome =
   | ({ readonly kind: "imported" } & ImportCounts)
-  | { readonly kind: "blocked"; readonly reason: BrowserImportFailureReason };
+  | {
+      readonly kind: "blocked";
+      readonly reason: BrowserImportFailureReason;
+      /** Shown instead of the reason's copy, such as a managed policy's refusal. */
+      readonly message?: string;
+    };
 
 export type WizardStep =
   | { readonly step: "quit" }
@@ -86,7 +91,11 @@ export type WizardStep =
   | { readonly step: "checking"; readonly check: "browser" | "fullDiskAccess" }
   | { readonly step: "importing" }
   | ({ readonly step: "done" } & ImportCounts)
-  | { readonly step: "blocked"; readonly reason: BrowserImportFailureReason };
+  | {
+      readonly step: "blocked";
+      readonly reason: BrowserImportFailureReason;
+      readonly message?: string;
+    };
 
 export function canCloseWizard(step: WizardStep): boolean {
   return step.step !== "importing";
@@ -118,7 +127,9 @@ export function outcomeToStep(outcome: ImportOutcome): WizardStep {
   if (outcome.reason === "needsFullDiskAccess") {
     return { step: "fullDiskAccess", resume: "import", checked: true };
   }
-  return { step: "blocked", reason: outcome.reason };
+  return outcome.message === undefined
+    ? { step: "blocked", reason: outcome.reason }
+    : { step: "blocked", reason: outcome.reason, message: outcome.message };
 }
 
 export function refreshedSourceStep(source: BrowserImportSource | undefined): WizardStep {
@@ -172,6 +183,26 @@ export const importFailureReason = (cause: unknown): BrowserImportFailureReason 
   );
 };
 
+/**
+ * The desktop's refusal when the machine's managed policy forbids cookie import. IPC wraps the
+ * message in its own prefixes, so the sentence is matched on the contract's wording.
+ */
+export const importPolicyRefusal = (cause: unknown): string | undefined => {
+  const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
+  return (
+    /The managed policy at .* importing browser cookies is not allowed\./u.exec(message)?.[0] ??
+    /(?:^|: )([^:]*'s policy does not allow importing browser cookies\.)/u.exec(message)?.[1]
+  );
+};
+
+/** A failed cookie read; a managed policy's refusal is shown in its own words. */
+export function blockedImportOutcome(cause: unknown): ImportOutcome {
+  const policyRefusal = importPolicyRefusal(cause);
+  return policyRefusal !== undefined
+    ? { kind: "blocked", reason: "readFailed", message: policyRefusal }
+    : { kind: "blocked", reason: importFailureReason(cause) };
+}
+
 export interface ServerProfileImportPorts {
   /** Checked before the read, so a connection without the grant never decrypts the cookies. */
   readonly canImport: () => boolean;
@@ -202,7 +233,7 @@ export async function importIntoServerProfile(
       sourceProfileDirectory: input.sourceProfileDirectory,
     });
   } catch (cause) {
-    return { kind: "blocked", reason: importFailureReason(cause) };
+    return blockedImportOutcome(cause);
   }
   // Cookies the desktop could not decrypt count as skipped, as they do in a desktop import.
   let imported = 0;

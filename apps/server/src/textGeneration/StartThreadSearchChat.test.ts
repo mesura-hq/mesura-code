@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // Mesura: starting a search conversation (ADR-010) via `makeStartThreadSearchChat`. Projects
 // are the real `ProjectService` over in-memory SQLite, so the hidden project, its receipt,
 // listing and deletion are production code. `ThreadManagementService.dispatch` is faked to
@@ -107,12 +108,12 @@ const makeHarness = Effect.fn("StartThreadSearchChatTest.makeHarness")(function*
           const path = yield* Path.Path;
           yield* Ref.update(initializedRepositories, (recorded) => [...recorded, cwd]);
           yield* fs.makeDirectory(path.join(cwd, ".git"), { recursive: true });
-        }).pipe(Effect.orDie, Effect.provide(NodeServices.layer)),
+        }).pipe(Effect.orDie, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
     }),
   ).pipe(
     Layer.provideMerge(SqlitePersistence.layerMemory),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "thread-search-chat-" })),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   const context = yield* Layer.build(layer);
   return { context, threadCreates, initializedRepositories };
@@ -224,7 +225,7 @@ it.effect(
       assert.include(instructions, "untrusted data");
       // Checkpoints need a repository rooted in the workspace, made only once.
       assert.deepEqual(yield* Ref.get(harness.initializedRepositories), [project.workspaceRoot]);
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect("start thread search chat spec: project listing leaves out the search project", () =>

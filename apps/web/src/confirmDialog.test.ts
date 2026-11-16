@@ -60,17 +60,22 @@ describe("confirm dialog coordinator", () => {
   it("opens on Confirm only when the request asks for it", () => {
     const unregister = mountHost();
     void requestConfirmDialog("Close terminal?", { initialFocus: "confirm" });
-    expect(readConfirmDialogState()).toMatchObject({ status: "confirming", focusConfirm: true });
+    expect(readConfirmDialogState()).toMatchObject({
+      status: "confirming",
+      initialFocus: "confirm",
+    });
     respondToConfirmDialog(false);
     completeConfirmDialogClose();
     void requestConfirmDialog("Delete thread?", { variant: "destructive" });
-    expect(readConfirmDialogState()).not.toHaveProperty("focusConfirm");
+    expect(readConfirmDialogState()).toHaveProperty("initialFocus", undefined);
     unregister();
   });
 
   it("serializes concurrent confirmations", async () => {
     const unregister = mountHost();
-    const first = requireConfirmation(requestConfirmDialog("Delete the project?"));
+    const first = requireConfirmation(
+      requestConfirmDialog("Delete the project?", { initialFocus: "confirm" }),
+    );
     const second = requireConfirmation(requestConfirmDialog("Delete the worktree too?"));
 
     respondToConfirmDialog(false);
@@ -79,6 +84,7 @@ describe("confirm dialog coordinator", () => {
       status: "closing",
       message: "Delete the project?",
       variant: "default",
+      initialFocus: "confirm",
     });
 
     completeConfirmDialogClose();

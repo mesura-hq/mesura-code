@@ -7,7 +7,7 @@ import type {
   AcpRegistryOperationError,
   AcpRegistrySetProviderInput,
   ProviderDriverKind,
-  ProviderInstanceEnvironment,
+  ResolvedProviderInstanceEnvironment,
   ProviderInstanceId,
   ServerProvider,
   ServerProviderWorkspaceSnapshot,
@@ -37,7 +37,12 @@ export interface ProviderDriverMetadata {
 }
 
 export type ProviderWorkspaceSnapshot = ServerProvider &
-  Pick<ServerProviderWorkspaceSnapshot, "slashCommandsPending" | "optionDescriptors">;
+  Pick<ServerProviderWorkspaceSnapshot, "slashCommandsPending" | "optionDescriptors"> & {
+    /** Set only when the directory's catalog differs from the machine snapshot's. */
+    readonly workspaceModels?: ServerProviderWorkspaceSnapshot["models"];
+    /** The directory's catalog could not be read, so keep the models found before. */
+    readonly workspaceModelsPending?: boolean;
+  };
 
 export interface ProviderInstance {
   readonly instanceId: ProviderInstanceId;
@@ -52,10 +57,11 @@ export interface ProviderInstance {
   ) => Effect.Effect<ProviderWorkspaceSnapshot, ProviderDriverError>;
   readonly refreshModels?: () => Effect.Effect<void, ProviderDriverError>;
   readonly invalidateCaches?: Effect.Effect<void>;
-  readonly consumeResetCredit?: () => Effect.Effect<
-    ProviderConsumeResetCreditOutcome,
-    ProviderDriverError
-  >;
+  /** Moves a long-lived service onto a newly updated binary before its version is read back. */
+  readonly afterUpdate?: Effect.Effect<void, ProviderDriverError>;
+  readonly consumeResetCredit?: (
+    creditId: string | undefined,
+  ) => Effect.Effect<ProviderConsumeResetCreditOutcome, ProviderDriverError>;
   readonly orchestrationAdapter: ProviderAdapter.ProviderAdapterV2["Service"];
   readonly textGeneration: ProviderTextGeneration;
   /**
@@ -132,7 +138,7 @@ export interface ProviderDriverCreateInput<Config> {
   readonly instanceId: ProviderInstanceId;
   readonly displayName: string | undefined;
   readonly accentColor?: string | undefined;
-  readonly environment: ProviderInstanceEnvironment;
+  readonly environment: ResolvedProviderInstanceEnvironment;
   readonly enabled: boolean;
   readonly config: Config;
 }

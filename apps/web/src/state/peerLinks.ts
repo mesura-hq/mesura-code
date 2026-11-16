@@ -1,11 +1,17 @@
 import { useAtomValue } from "@effect/atom-react";
-import { linkableMachines } from "@t3tools/client-runtime/link-request";
+import {
+  linkableMachines,
+  linkedEnvironmentNames,
+  offersLinkedEnvironments,
+} from "@t3tools/client-runtime/link-request";
 import { createPeerLinkEnvironmentAtoms } from "@t3tools/client-runtime/state/peerLinks";
 import { AuthAccessReadScope, type EnvironmentId } from "@t3tools/contracts";
+import { Atom } from "effect/reactivity";
 import { useEffect, useEffectEvent } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
-import { useEnvironments } from "./environments";
+import { useEnvironmentIdentities, useEnvironments } from "./environments";
+import { environmentPresentations } from "./presentation";
 import { relayEnvironmentDiscovery } from "./relay";
 import { useEnvironmentQuery } from "./query";
 import { useEnvironmentsWithScope } from "./session";
@@ -13,12 +19,44 @@ import { useAtomCommand } from "./use-atom-command";
 
 export const peerLinkEnvironment = createPeerLinkEnvironmentAtoms(connectionAtomRuntime);
 
+/** Whether `environmentId` offers links, so its threads may name another machine. */
+export const offersLinkedEnvironmentsAtom = Atom.family((environmentId: EnvironmentId) =>
+  Atom.make((get) =>
+    offersLinkedEnvironments(get(environmentPresentations.serverConfigsAtom).get(environmentId)),
+  ).pipe(Atom.withLabel(`peer-links:offered:${environmentId}`)),
+);
+
+const offersNoLinksAtom = Atom.make(false).pipe(Atom.withLabel("peer-links:offered:none"));
+
+/**
+ * The machines `environmentId` links to, by name, while it offers links, and none otherwise.
+ * Its agents can read threads there. Listing asks each linked machine whether it answers, so
+ * every caller shares one briefly cached list.
+ */
+export function useLinkedEnvironments(
+  environmentId: EnvironmentId | null,
+): ReadonlyMap<EnvironmentId, string> {
+  const offered = useAtomValue(
+    environmentId === null ? offersNoLinksAtom : offersLinkedEnvironmentsAtom(environmentId),
+  );
+  const identities = useEnvironmentIdentities();
+  const links = useEnvironmentQuery(
+    offered && environmentId !== null
+      ? peerLinkEnvironment.list({ environmentId, input: {} })
+      : null,
+  );
+  return linkedEnvironmentNames({
+    links: offered ? (links.data?.links ?? []) : [],
+    environments: identities,
+  });
+}
+
 export function usePeerLinkHosts() {
   const { environments } = useEnvironments();
   const supported = environments.filter(
     (environment) =>
       environment.connection.phase === "connected" &&
-      environment.serverConfig?.environment.capabilities.peerLinks === true,
+      offersLinkedEnvironments(environment.serverConfig),
   );
   const readable = useEnvironmentsWithScope(supported, AuthAccessReadScope);
   return supported.filter((environment) => readable.has(environment.environmentId));
@@ -40,7 +78,7 @@ export function useLinkableMachines(environmentId: EnvironmentId, enabled: boole
   const discoverIfUnasked = useEffectEvent(() => {
     if (discovery.environments.size === 0 && !discovery.refreshing) void refreshDiscovery();
   });
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: asks for T3 Connect hosts when the machine picker opens, from every caller of this hook
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- discovery follows the picker's visibility, which a card's mount or a dialog's open sets
   useEffect(() => {
     if (enabled) discoverIfUnasked();
   }, [enabled]);
@@ -50,7 +88,7 @@ export function useLinkableMachines(environmentId: EnvironmentId, enabled: boole
   return linkableMachines({
     environments,
     threadEnvironmentId: environmentId,
-    linkedIds: new Set(links.data?.links.map((link) => link.environmentId)),
+    links: links.data?.links ?? [],
     connect: discovery.environments,
   });
 }

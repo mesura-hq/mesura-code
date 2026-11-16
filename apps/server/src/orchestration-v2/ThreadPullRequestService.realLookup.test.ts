@@ -1,7 +1,7 @@
 /**
  * The sweep through the real GitManager, its lookup cache and identity resolver:
  * an event looks a backed-off group up at once even while GitManager caches the
- * failure, a transient failure reaches the provider on every sweep, and a
+ * failure, a transient failure reaches the provider on each eligible sweep, and a
  * repointed remote makes the next sweep apply the new repository's pull request.
  */
 import { describe, expect, it } from "@effect/vitest";
@@ -135,10 +135,10 @@ describe("PR sweep retry policy through the real GitManager", () => {
           const sweep = yield* makeRealLookupSweep({
             answer: () => Effect.fail(authenticationFailure()),
           });
-          // Attempts at minutes 0, 1, 3, 7 and 15; at 16 the group waits, and
-          // GitManager still holds the failure from minute 15 (its TTL is minutes).
+          // Upstream's no-PR scheduler waits 30 minutes after the startup lookup.
+          // A finished run must bypass both that wait and the cached failure.
           yield* sweep.harness.sweeps(16);
-          expect(sweep.providerMinutes.at(-1)).toBe(15);
+          expect(sweep.providerMinutes.at(-1)).toBe(0);
           const backedOff = sweep.providerMinutes.length;
 
           // The developer runs `gh auth login`; the next finished run asks again.
@@ -150,16 +150,16 @@ describe("PR sweep retry policy through the real GitManager", () => {
   );
 
   it.effect(
-    "PR sweep real lookup: a network failure reaches the provider again on every sweep",
+    "PR sweep real lookup: a network failure reaches the provider again on the next eligible sweep",
     () =>
       Effect.scoped(
         Effect.gen(function* () {
           const sweep = yield* makeRealLookupSweep({
             answer: () => Effect.fail(networkFailure()),
           });
-          yield* sweep.harness.sweeps(8);
+          yield* sweep.harness.sweeps(30);
           const minutes = new Set(sweep.providerMinutes);
-          expect([...minutes].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+          expect([...minutes].sort((a, b) => a - b)).toEqual([0, 30]);
         }),
       ),
   );

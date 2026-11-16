@@ -8,28 +8,46 @@ import { BORROWED_RUNTIME_VOCABULARIES } from "../src/upstreamLock.ts";
 
 const packageRoot = NodeURL.fileURLToPath(new URL("..", import.meta.url));
 const repositoryRoot = NodePath.join(packageRoot, "../..");
-const typecheckerPath = NodePath.join(repositoryRoot, "node_modules/.bin/tsc");
+const typecheckerPath = NodePath.join(repositoryRoot, "node_modules/.bin/effect-tsgo");
 const lockModulePath = NodePath.join(packageRoot, "src/upstreamLock.ts");
-const COMPILER_PROCESS_TIMEOUT_MS = 30_000;
+const COMPILER_PROCESS_TIMEOUT_MS = 900_000;
 type VocabularyName = keyof typeof BORROWED_RUNTIME_VOCABULARIES;
 
-/** Keep every compiler subprocess within the TypeScript 7 resource budget. */
+// Lock only compiler subprocesses. Holding this lock around a test suite deadlocks
+// when a nested suite starts another compiler guard.
 export const runTypechecker = (
   command: string,
   args: ReadonlyArray<string>,
   cwd = repositoryRoot,
   timeoutMilliseconds = COMPILER_PROCESS_TIMEOUT_MS,
 ) =>
-  NodeChildProcess.spawnSync(command, ["--checkers", "1", "--pretty", "false", ...args], {
-    cwd,
-    encoding: "utf8",
-    env: { ...process.env, GOMEMLIMIT: "1536MiB" },
-    maxBuffer: 8 * 1024 * 1024,
-    timeout: timeoutMilliseconds,
-    killSignal: "SIGKILL",
-  });
+  NodeChildProcess.spawnSync(
+    "flock",
+    [
+      "/tmp/mesura-typecheck.lock",
+      "env",
+      "GOMEMLIMIT=1536MiB",
+      "timeout",
+      "-k",
+      "30",
+      String(timeoutMilliseconds / 1000),
+      command,
+      "tsc",
+      "--checkers",
+      "1",
+      "--pretty",
+      "false",
+      ...args,
+    ],
+    {
+      cwd,
+      encoding: "utf8",
+      env: process.env,
+      maxBuffer: 8 * 1024 * 1024,
+    },
+  );
 
-/** Compile the real lock module against a matching or changed upstream vocabulary. */
+/** Compile the unchanged lock source against matching or changed frozen vocabularies. */
 export const compileVocabularyLock = (
   directory: string,
   replacement?: { readonly name: VocabularyName; readonly values: ReadonlyArray<string> },
@@ -39,25 +57,32 @@ export const compileVocabularyLock = (
       const members = replacement?.name === name ? replacement.values : literals;
       return `export type ${name} = ${members.map((value) => JSON.stringify(value)).join(" | ")};`;
     })
-    // upstreamLock derives the event vocabulary from the union's type field.
+    // The lock derives the event vocabulary from the discriminant field.
     .concat("export type ProviderRuntimeEvent = { readonly type: ProviderRuntimeEventType };")
     .join("\n");
-  const shimPath = NodePath.join(directory, "contracts-shim.ts");
+  const shimPath = NodePath.join(directory, "retiredUpstreamVocabulary.ts");
   NodeFS.writeFileSync(shimPath, `${shimSource}\n`);
+  // Copy the source unchanged so its relative import resolves to the replacement vocabulary.
+  const fixtureLockModulePath = NodePath.join(directory, "upstreamLock.ts");
+  NodeFS.copyFileSync(lockModulePath, fixtureLockModulePath);
+  NodeFS.writeFileSync(NodePath.join(directory, "package.json"), '{"type":"module"}\n');
   const configPath = NodePath.join(directory, "tsconfig.json");
   NodeFS.writeFileSync(
     configPath,
     `${JSON.stringify(
       {
         extends: NodePath.join(repositoryRoot, "tsconfig.base.json"),
-        compilerOptions: { noEmit: true, paths: { "@t3tools/contracts": [shimPath] } },
-        files: [lockModulePath],
+        compilerOptions: { noEmit: true },
+        files: [fixtureLockModulePath],
       },
       null,
       2,
     )}\n`,
   );
-  return runTypechecker(typecheckerPath, ["-p", configPath]);
+  return {
+    ...runTypechecker(typecheckerPath, ["-p", configPath]),
+    lockModulePath: fixtureLockModulePath,
+  };
 };
 
 /**
@@ -65,7 +90,7 @@ export const compileVocabularyLock = (
  * Infrastructure failures and unrelated diagnostics cannot prove that a lock fires.
  */
 export const expectVocabularyLockRejection = (
-  result: NodeChildProcess.SpawnSyncReturns<string>,
+  result: NodeChildProcess.SpawnSyncReturns<string> & { readonly lockModulePath?: string },
   vocabularyName: VocabularyName,
 ) => {
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
@@ -78,7 +103,7 @@ export const expectVocabularyLockRejection = (
   if (result.signal !== null) {
     fail(`compiler ended with signal ${String(result.signal)}`);
   }
-  // TypeScript 7 exits 1 on diagnostics with noEmit; tsc-rs exits 2 like TypeScript 6.
+  // Accept compiler diagnostic exits, but never timeout or wrapper execution failures.
   if (result.status !== 1 && result.status !== 2) {
     fail(`compiler exited with ${String(result.status)}, expected diagnostic exit status 1 or 2`);
   }
@@ -100,7 +125,8 @@ export const expectVocabularyLockRejection = (
     );
   if (
     diagnostic === null ||
-    NodePath.resolve(repositoryRoot, diagnostic[1]!) !== lockModulePath ||
+    NodePath.resolve(repositoryRoot, diagnostic[1]!) !==
+      (result.lockModulePath ?? lockModulePath) ||
     Number(diagnostic[2]) !== expectedLine ||
     Number(diagnostic[3]) !== expectedColumn
   ) {

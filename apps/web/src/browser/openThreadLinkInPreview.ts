@@ -8,6 +8,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { type AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/reactivity";
 import { environmentCatalog } from "~/connection/catalog";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
@@ -23,11 +24,7 @@ import {
 } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { recordVisitForThread } from "~/browserHistoryStore";
-import {
-  browserDefaultOpenProfileId,
-  browserDefaultOpenViewport,
-  resolveBrowserDefaults,
-} from "./browserDefaults";
+import { resolveBrowserDefaults } from "./browserDefaults";
 import {
   canOpenLinksInApp,
   readLinkClient,
@@ -37,9 +34,13 @@ import {
 import { BrowserSettingsReadError } from "./openFileInPreview";
 import {
   navigateThreadLink,
+  isThreadLinkCancelled,
+  isThreadLinkNavigationError,
   ThreadLinkCancelled,
   ThreadLinkNavigationError,
 } from "./threadLinkNavigation";
+
+const isBrowserSettingsReadError = Schema.is(BrowserSettingsReadError);
 
 export type AllocateThreadLink<E = unknown> = (input: {
   readonly environmentId: EnvironmentId;
@@ -49,7 +50,7 @@ export type AllocateThreadLink<E = unknown> = (input: {
 const actions = new Map<string, AbortController>();
 function whileCurrent<A>(pending: Promise<A>, signal: AbortSignal): Promise<A> {
   return new Promise((resolve, reject) => {
-    const cancel = () => reject(new ThreadLinkCancelled());
+    const cancel = () => reject(new ThreadLinkCancelled({ message: "" }));
     if (signal.aborted) {
       cancel();
       return;
@@ -64,7 +65,7 @@ async function readBrowserSettings<A>(read: () => Promise<A>, signal: AbortSigna
   try {
     return await whileCurrent(read(), signal);
   } catch (cause) {
-    if (cause instanceof ThreadLinkCancelled) throw cause;
+    if (isThreadLinkCancelled(cause)) throw cause;
     throw new BrowserSettingsReadError({ cause });
   }
 }
@@ -166,7 +167,7 @@ export async function openThreadLinkInPreview<E>(input: {
   stops.push(useRightPanelStore.subscribe(check));
   const assertCurrent = () => {
     check();
-    if (action.signal.aborted) throw new ThreadLinkCancelled();
+    if (action.signal.aborted) throw new ThreadLinkCancelled({ message: "" });
   };
   try {
     assertCurrent();
@@ -185,8 +186,8 @@ export async function openThreadLinkInPreview<E>(input: {
         environmentId: ref.environmentId,
         input: {
           threadId: ref.threadId,
-          profileId: browserDefaultOpenProfileId(defaults),
-          viewport: browserDefaultOpenViewport(defaults),
+          profileId: defaults.profileId,
+          viewport: defaults.viewport,
         },
       }),
       action.signal,
@@ -204,7 +205,9 @@ export async function openThreadLinkInPreview<E>(input: {
       selected.runtime !== "server" ||
       selected.automationOwner
     )
-      throw new ThreadLinkNavigationError("The server returned an invalid thread-link target.");
+      throw new ThreadLinkNavigationError({
+        message: "The server returned an invalid thread-link target.",
+      });
     // Reconciliation can ignore an older envelope. Read back the complete index;
     // never revive a selected ID that a newer list removed or a close suppressed.
     expectedEpoch = envelope.serverEpoch;
@@ -220,7 +223,7 @@ export async function openThreadLinkInPreview<E>(input: {
       target.runtime !== "server" ||
       target.automationOwner
     )
-      throw new ThreadLinkCancelled();
+      throw new ThreadLinkCancelled({ message: "" });
     selectedTabId = target.tabId;
     assertCurrent();
     ownPanelChange = true;
@@ -245,9 +248,9 @@ export async function openThreadLinkInPreview<E>(input: {
     recordVisitForThread(ref, input.url);
     return AsyncResult.success(undefined);
   } catch (error) {
-    if (action.signal.aborted || error instanceof ThreadLinkCancelled)
+    if (action.signal.aborted || isThreadLinkCancelled(error))
       return AsyncResult.failure(Cause.interrupt());
-    if (error instanceof BrowserSettingsReadError || error instanceof ThreadLinkNavigationError)
+    if (isBrowserSettingsReadError(error) || isThreadLinkNavigationError(error))
       return AsyncResult.failure(Cause.fail(error));
     // Unexpected programming/adapter errors retain their rejection semantics.
     throw error;

@@ -246,7 +246,7 @@ const layerFor = (provider: MockProvider) => {
     Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
     Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
     Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
-    Layer.provideMerge(McpServer.McpServer.layer),
+    Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
     Layer.provide(NodeCrypto.layer),
     Layer.provideMerge(ThreadManagementService.layer.pipe(Layer.provideMerge(layerOrchestration))),
     Layer.provide(Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer)),

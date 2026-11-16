@@ -327,7 +327,8 @@ describe("PR sweep backoff for lookups a retry cannot change", () => {
         yield* harness.start;
         yield* harness.sweeps(60);
 
-        expect(minutesOf(lookups.attempts, "feature/healthy")).toHaveLength(61);
+        // Upstream bounds undiscovered branches to one lookup per 30 minutes.
+        expect(minutesOf(lookups.attempts, "feature/healthy")).toEqual([0, 30, 60]);
         expect(minutesOf(lookups.attempts, "feature/failing").length).toBeLessThan(61 / 4);
       }),
     ),
@@ -386,7 +387,7 @@ describe("PR sweep backoff for lookups a retry cannot change", () => {
   );
 
   it.effect(
-    "PR sweep backoff: a group returns to every-sweep refresh once its lookup succeeds",
+    "PR sweep backoff: a group returns to upstream scheduled refresh once its lookup succeeds",
     () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -409,7 +410,9 @@ describe("PR sweep backoff for lookups a retry cannot change", () => {
           yield* harness.publish(sweepDomainEvent("run.completed", thread));
           const recovered = lookups.attempts.length;
           yield* harness.sweeps(5);
-          expect(lookups.attempts.length - recovered).toBe(5);
+          expect(lookups.attempts.length - recovered).toBe(0);
+          yield* harness.sweeps(25);
+          expect(lookups.attempts.length - recovered).toBe(1);
         }),
       ),
   );
@@ -440,8 +443,8 @@ describe("PR sweep warnings for lookups a retry cannot change", () => {
   );
 });
 
-describe("PR sweep refresh that must not change", () => {
-  it.effect("PR sweep guard: a group whose lookup succeeds is looked up on every sweep", () =>
+describe("PR sweep refresh with upstream bounded rechecks", () => {
+  it.effect("PR sweep guard: a group whose lookup succeeds follows upstream bounded rechecks", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const thread = sweepThreadShell("thread-succeeds", { branch: "feature/succeeds" });
@@ -455,15 +458,13 @@ describe("PR sweep refresh that must not change", () => {
         yield* harness.start;
         yield* harness.sweeps(45);
 
-        expect(minutesOf(lookups.attempts, "feature/succeeds")).toEqual(
-          Array.from({ length: 46 }, (_, index) => index),
-        );
+        expect(minutesOf(lookups.attempts, "feature/succeeds")).toEqual([0, 30]);
       }),
     ),
   );
 
   it.effect.each(TRANSIENT_FAILURES)(
-    "PR sweep guard: a group failing with %s is retried on the next sweep",
+    "PR sweep guard: a group failing with %s is retried on the next eligible sweep",
     ([, failure]) =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -478,9 +479,7 @@ describe("PR sweep refresh that must not change", () => {
           yield* harness.start;
           yield* harness.sweeps(45);
 
-          expect(minutesOf(lookups.attempts, "feature/transient")).toEqual(
-            Array.from({ length: 46 }, (_, index) => index),
-          );
+          expect(minutesOf(lookups.attempts, "feature/transient")).toEqual([0, 30]);
         }),
       ),
   );

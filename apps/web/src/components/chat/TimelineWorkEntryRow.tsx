@@ -1,3 +1,4 @@
+import { TimelinePendingApprovalRow } from "./TimelinePendingApprovalRow";
 import { WorkLogDetails, WorkLogRow } from "./WorkLog";
 import {
   getQuestionAnswerPreview,
@@ -15,6 +16,7 @@ import { Link } from "@tanstack/react-router";
 import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
 import {
   resolveViewedImageAsset,
+  toolGroupAction,
   workEntryViewedImagePath,
 } from "@t3tools/client-runtime/work-log/presentation";
 import {
@@ -30,6 +32,8 @@ import {
 } from "../../session-logic";
 import ChatMarkdown from "../ChatMarkdown";
 import { ChatMarkdownAssetImage } from "./ChatMarkdownMedia";
+import type { ExpandedImagePreview } from "./ExpandedImagePreview";
+import { workGroupImageGallery } from "./markdownImageGallery";
 import { ChevronRightIcon, CircleAlertIcon, XIcon, RotateCcwIcon } from "lucide-react";
 import { Button, InlineButton } from "../ui/button";
 import { useAssetUrls } from "../../assets/assetUrls";
@@ -38,7 +42,6 @@ import {
   threadReadLabelPrefix,
   threadReadTargetId,
   threadReadTargetTitle,
-  toolGroupAction,
   workEntryDisplayLabel,
   workEntryReadOutput,
 } from "./MessagesTimeline.logic";
@@ -50,6 +53,7 @@ import {
   TimelineRowCtx,
   TimelineRowActivityCtx,
   WorkGroupViewCtx,
+  type TimelineRow,
   type TimelineWorkEntry,
 } from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, TimelineRowTimestamp } from "./TimelineRowParts";
@@ -64,7 +68,9 @@ import {
   workEntryRawCommand,
   buildToolCallExpandedBody,
   workEntryIconName,
-  remarkThoughtPreview,
+  THINKING_PREVIEW_PLUGINS,
+  THOUGHT_PREVIEW_PLUGINS,
+  THOUGHT_PREVIEW_SOURCE_MAX_LENGTH,
 } from "./TimelineWorkEntryRow.logic";
 
 export function useThreadReadTarget(entry: TimelineWorkEntry, environmentId: EnvironmentId) {
@@ -146,6 +152,7 @@ type WorkEntryRowProps = {
   workspaceRoot: string | undefined;
   displayLabel?: string | undefined;
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
+  onContentReady?: (() => void) | undefined;
 };
 
 export const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: WorkEntryRowProps) {
@@ -160,6 +167,7 @@ export const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: WorkEn
     <SubagentNotificationLink
       parentRef={scopeThreadRef(ctx.activeThreadEnvironmentId, item.threadId)}
       childThreadId={childThreadId}
+      taskIds={item.source.kind === "delegated_task" ? item.source.taskIds : undefined}
       outcome={item.outcome}
       createdAt={props.workEntry.createdAt}
       timestampFormat={ctx.timestampFormat}
@@ -168,6 +176,37 @@ export const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: WorkEn
     />
   );
 });
+
+export function ViewedImagesTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "viewed-images" }>;
+}) {
+  const { threadRef, workspaceRoot, onImageExpand } = use(TimelineRowCtx);
+  if (!threadRef) return null;
+  return (
+    <div className="flex flex-wrap items-start gap-2 px-0.5" data-image-gallery>
+      {row.paths.map((path) => {
+        const image = resolveViewedImageAsset(path, {
+          threadId: threadRef.threadId,
+          workspaceRoot,
+        });
+        return image ? (
+          <ChatMarkdownAssetImage
+            key={path}
+            environmentId={threadRef.environmentId}
+            resource={image.resource}
+            alt={image.alt}
+            srcFragment={image.srcFragment}
+            workspaceRoot={workspaceRoot}
+            maxHeightRem={10}
+            onImageExpand={onImageExpand}
+          />
+        ) : null;
+      })}
+    </div>
+  );
+}
 
 function WorkEntryLogRow(props: WorkEntryRowProps) {
   const { workEntry, workspaceRoot, displayLabel } = props;
@@ -187,10 +226,14 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
   const [expanded, setExpanded] = useState(
     () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
   );
+  const onInitialOutputReady = () => {
+    if (groupView) groupView.onContentReady?.(workEntry.id);
+    else props.onContentReady?.();
+  };
   const toggleExpanded = () => {
     const next = !expanded;
     if (groupView) {
-      groupView.onToggleEntry(!next);
+      groupView.onToggleEntry(!next, workEntry.id);
       if (next) groupView.state.expandedEntries.add(workEntry.id);
       else groupView.state.expandedEntries.delete(workEntry.id);
     } else {
@@ -201,10 +244,20 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
   const failureItem = workEntry.projectedItem?.item;
   // Mesura: Codex capacity retries get their countdown, Retry now and schedule.
   if (isCapacityRetryWorkEntry(workEntry)) return <CapacityRetryWorkEntry workEntry={workEntry} />;
+  const pendingApproval =
+    failureItem?.type === "approval_request"
+      ? ctx.pendingApprovals.get(failureItem.requestId)
+      : undefined;
+  if (pendingApproval) return <TimelinePendingApprovalRow approval={pendingApproval} />;
   if (failureItem?.type === "error" && failureItem.status === "failed") {
     const warning = failureItem.failure.class === "usage_limit";
     const resetAt = failureItem.failure.resetAt;
-    const resetTime = resetAt ? formatUpcomingTimestamp(resetAt, timestampFormat) : null;
+    // The reset time is the viewer's local time; naming the zone keeps it
+    // unambiguous. Both read the zone now, since the device's can change.
+    const timeZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const resetTime = resetAt
+      ? `${formatUpcomingTimestamp(resetAt, timestampFormat, undefined, timeZone)} (${timeZone})`
+      : null;
     const label = warning
       ? `Usage limit reached.${resetTime ? ` Retry after ${resetTime}.` : ""}`
       : workEntry.label;
@@ -307,6 +360,13 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           workspaceRoot,
         })
       : null;
+  const groupViewedImages = groupView?.viewedImages;
+  // Images in this entry's expanded body page through the group's viewed images, like its strip.
+  const expandImage =
+    viewedImage && groupViewedImages
+      ? (preview: ExpandedImagePreview) =>
+          onImageExpand(workGroupImageGallery(groupViewedImages, viewedImagePath, preview))
+      : onImageExpand;
   const canExpand =
     previewText.trim().length > 0 ||
     (workEntry.itemType === "dynamic_tool" && workEntry.toolData !== undefined) ||
@@ -388,6 +448,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
 
   return (
     <WorkLogRow
+      data-work-entry-id={workEntry.id}
       data-v2-item-type={workEntry.projectedItem?.item.type}
       data-v2-item-visibility={workEntry.projectedItem?.visibility}
       {...rowToggleProps}
@@ -414,15 +475,17 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               {isReasoning && !expanded ? (
                 <ChatMarkdown
                   inline
-                  text={workEntry.detail ?? previewText}
+                  text={(workEntry.detail ?? previewText).slice(
+                    0,
+                    THOUGHT_PREVIEW_SOURCE_MAX_LENGTH,
+                  )}
                   cwd={ctx.markdownCwd}
                   parseRawHtml={false}
-                  extraRemarkPlugins={[
-                    [
-                      remarkThoughtPreview,
-                      workEntry.toolLifecycleStatus === "inProgress" ? "Thinking" : "Thought",
-                    ],
-                  ]}
+                  extraRemarkPlugins={
+                    workEntry.toolLifecycleStatus === "inProgress"
+                      ? THINKING_PREVIEW_PLUGINS
+                      : THOUGHT_PREVIEW_PLUGINS
+                  }
                 />
               ) : threadLabel ? (
                 <ThreadReadLabel
@@ -484,21 +547,17 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           !toolIconAcceptsTint(entryToolIcon) ? (
             <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
           ) : null}
+          {canExpandProjectedItem ? (
+            <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
+              <ChevronRightIcon
+                className={cn(
+                  "size-3 shrink-0 text-icon-muted opacity-70 transition-transform duration-200",
+                  expanded && "rotate-90",
+                )}
+              />
+            </span>
+          ) : null}
           <TimelineRowTimestamp createdAt={workEntry.createdAt} timestampFormat={timestampFormat} />
-          <span
-            className={cn(
-              "flex size-4 shrink-0 items-center justify-center",
-              !canExpandProjectedItem && "invisible",
-            )}
-            aria-hidden
-          >
-            <ChevronRightIcon
-              className={cn(
-                "size-3 shrink-0 text-icon-muted opacity-70 transition-transform duration-200",
-                expanded && "rotate-90",
-              )}
-            />
-          </span>
         </>
       }
     >
@@ -511,7 +570,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
             srcFragment={viewedImage.srcFragment}
             workspaceRoot={workspaceRoot}
             maxHeightRem={16}
-            onImageExpand={onImageExpand}
+            onImageExpand={expandImage}
           />
         </WorkLogDetails>
       ) : null}
@@ -529,14 +588,13 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
         <WorkLogDetails kind="panel">
           {workEntry.projectedItem && plainOutput === undefined ? (
             <V2ItemInspector
+              onInitialOutputReady={onInitialOutputReady}
               projectedItem={workEntry.projectedItem}
               environmentId={ctx.activeThreadEnvironmentId}
               cwd={ctx.markdownCwd}
               workspaceRoot={workspaceRoot}
-              onOpenThread={ctx.onOpenThread}
-              onOpenTurnDiff={ctx.onOpenTurnDiff}
-              onRollbackCheckpoint={ctx.onRollbackCheckpoint}
-              onImageExpand={ctx.onImageExpand}
+              onOpenToolDiff={ctx.onOpenToolDiff}
+              onImageExpand={expandImage}
               source={ctx.turnItemSource}
             />
           ) : (
@@ -546,9 +604,10 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               ) : null}
               {plainOutputFetches && workEntry.projectedItem ? (
                 <FetchedToolOutput
+                  onInitialOutputReady={onInitialOutputReady}
                   projectedItem={workEntry.projectedItem}
                   environmentId={ctx.activeThreadEnvironmentId}
-                  onImageExpand={onImageExpand}
+                  onImageExpand={expandImage}
                   source={ctx.turnItemSource}
                 />
               ) : null}

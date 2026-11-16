@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 /**
  * `subscribeHostStats` in `ws.ts` streams `HostStatsService.subscribe` unchanged, so the messages
  * asserted here are what a client receives; `server.test.ts` pins the WebSocket route itself.
@@ -290,244 +291,250 @@ const encodedBytes = (message: Message) => new TextEncoder().encode(toWireJson(m
 const survivesTheWire = (message: Message) =>
   assert.deepStrictEqual(decodeWireJson(toWireJson(message)), message);
 
-it.layer(NodeServices.layer)("HostStatsRpc phase 3 fence", (it) => {
-  it.effect("phase 3 AC6: subscribeHostStats sends a snapshot, then one update per sample", () =>
-    Effect.gen(function* () {
-      yield* TestClock.setTime(NOON);
-      // A gap where NOON - 10 minutes would be.
-      const history = [plainBucket(NOON - 3 * BUCKET), plainBucket(NOON - BUCKET)];
-      const harness = yield* startHostStats({ history });
-      const first = yield* subscribeInto(harness.service);
-
-      const snapshot = asSnapshot(first.snapshot);
-      assert.strictEqual(snapshot.contractVersion, HOST_STATS_CONTRACT_VERSION);
-      assert.strictEqual(snapshot.serverNow, NOON);
-      assert.strictEqual(snapshot.sampleIntervalMs, 60_000);
-      assert.strictEqual(snapshot.bucketMs, 300_000);
-      assert.strictEqual(snapshot.windowMs, 12 * 3_600_000);
-      assert.strictEqual(snapshot.host.hostname, HOST.hostname);
-      assert.strictEqual(snapshot.host.platform, HOST.platform);
-      assert.strictEqual(snapshot.host.arch, HOST.arch);
-      assert.isAtLeast(snapshot.host.cpuCount, 1);
-      // Boot time on the server's clock, so a client reads uptime as serverNow - bootedAt.
-      const uptimeMs = snapshot.serverNow - snapshot.host.bootedAt;
-      assert.isAtMost(Math.abs(uptimeMs - NodeOS.uptime() * 1000), MINUTE);
-      assert.isNull(snapshot.latest);
-      assert.deepStrictEqual(
-        Object.keys(snapshot.buckets.columns).toSorted(),
-        Object.keys(HostStatsBucket.fields)
-          .filter((field) => field !== "start")
-          .toSorted(),
-      );
-      assert.deepStrictEqual(snapshot.buckets.slots, [0, 2]);
-      assert.deepStrictEqual(rowsOf(snapshot.buckets), history);
-      survivesTheWire(snapshot);
-
-      yield* harness.activate;
-      for (let minute = 0; minute < 3; minute += 1) {
-        if (minute > 0) yield* TestClock.adjust("60 seconds");
-        const now = NOON + minute * MINUTE;
-        const update = yield* takeSample(first.received);
-        assert.strictEqual(update.serverNow, now);
-        assert.strictEqual(update.sample.sampledAt, now);
-        assert.strictEqual(update.bucket.start, NOON);
-        assert.strictEqual(update.bucket.sampleCount, minute + 1);
-        assert.deepStrictEqual(update.bucket, (yield* harness.service.buckets).at(-1));
-        survivesTheWire(update);
-      }
-      assert.strictEqual(yield* Queue.size(first.received), 0);
-      assert.strictEqual(yield* Ref.get(harness.readCount), 3);
-
-      const later = asSnapshot((yield* subscribeInto(harness.service)).snapshot);
-      assert.strictEqual(later.latest?.sampledAt, NOON + 2 * MINUTE);
-      assert.deepStrictEqual(later.buckets.slots, [0, 2, 3]);
-      assert.deepStrictEqual(rowsOf(later.buckets), yield* harness.service.buckets);
-    }),
-  );
-
-  it.effect(
-    "phase 3 AC6: snapshot bucket columns round percents and temperatures to 0.1, bytes and rates to integers",
-    () =>
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
+  "HostStatsRpc phase 3 fence",
+  (it) => {
+    it.effect("phase 3 AC6: subscribeHostStats sends a snapshot, then one update per sample", () =>
       Effect.gen(function* () {
         yield* TestClock.setTime(NOON);
-        const harness = yield* startHostStats({
-          history: [
-            plainBucket(NOON - BUCKET, {
-              cpuAvg: 37.26,
-              cpuMax: 41.04,
-              memUsedAvg: 4_000.6,
-              swapUsedAvg: 0.4,
-              diskUsedAvg: 100_000.7,
-              gpuBusyAvg: 12.34,
-              gpuBusyMax: 50.04,
-              cpuTempMax: 45.57,
-              netRxAvg: 1_234.4,
-              netTxAvg: 99.6,
-            }),
-          ],
-        });
-        const snapshot = asSnapshot((yield* subscribeInto(harness.service)).snapshot);
-        assert.deepStrictEqual(rowsOf(snapshot.buckets), [
-          plainBucket(NOON - BUCKET, {
-            cpuAvg: 37.3,
-            cpuMax: 41,
-            memUsedAvg: 4_001,
-            swapUsedAvg: 0,
-            diskUsedAvg: 100_001,
-            gpuBusyAvg: 12.3,
-            gpuBusyMax: 50,
-            cpuTempMax: 45.6,
-            netRxAvg: 1_234,
-            netTxAvg: 100,
-          }),
-        ]);
-      }),
-  );
-
-  it.effect(
-    "phase 3 budget: a snapshot of 144 worst-case buckets encodes under 25 KB and an update under 1 KB",
-    () =>
-      Effect.gen(function* () {
-        yield* TestClock.setTime(NOON);
-        const history = Array.from({ length: 144 }, (_, index) =>
-          worstCaseBucket(NOON - (143 - index) * BUCKET),
-        );
-        const harness = yield* startHostStats({
-          history,
-          sampleFor: worstCaseSample,
-          agentCounts: Effect.succeed({ agentsRunning: 12, agentSessionsOpen: 40 }),
-          mesuraServers: Effect.succeed({ installed: 2, dev: 12 }),
-        });
+        // A gap where NOON - 10 minutes would be.
+        const history = [plainBucket(NOON - 3 * BUCKET), plainBucket(NOON - BUCKET)];
+        const harness = yield* startHostStats({ history });
         const first = yield* subscribeInto(harness.service);
-        yield* harness.activate;
-        const update = yield* takeSample(first.received);
-        const snapshot = asSnapshot((yield* subscribeInto(harness.service)).snapshot);
 
-        assert.lengthOf(snapshot.buckets.slots, 144);
-        assert.isNotNull(snapshot.latest);
-        assert.isBelow(encodedBytes(snapshot), 25 * KB);
-        assert.isBelow(encodedBytes(update), KB);
-      }),
-  );
-
-  it.effect(
-    "phase 3 regression: an update rounds its sample and bucket as the snapshot rounds buckets",
-    () =>
-      Effect.gen(function* () {
-        yield* TestClock.setTime(NOON);
-        // No history: the update's bucket holds this one sample.
-        const harness = yield* startHostStats({ sampleFor: worstCaseSample });
-        const first = yield* subscribeInto(harness.service);
-        yield* harness.activate;
-        const update = yield* takeSample(first.received);
-
-        const { sample, bucket } = update;
-        assert.strictEqual(sample.cpuPercent, 37.3);
-        assert.strictEqual(sample.load1, 12.35);
+        const snapshot = asSnapshot(first.snapshot);
+        assert.strictEqual(snapshot.contractVersion, HOST_STATS_CONTRACT_VERSION);
+        assert.strictEqual(snapshot.serverNow, NOON);
+        assert.strictEqual(snapshot.sampleIntervalMs, 60_000);
+        assert.strictEqual(snapshot.bucketMs, 300_000);
+        assert.strictEqual(snapshot.windowMs, 12 * 3_600_000);
+        assert.strictEqual(snapshot.host.hostname, HOST.hostname);
+        assert.strictEqual(snapshot.host.platform, HOST.platform);
+        assert.strictEqual(snapshot.host.arch, HOST.arch);
+        assert.isAtLeast(snapshot.host.cpuCount, 1);
+        // Boot time on the server's clock, so a client reads uptime as serverNow - bootedAt.
+        const uptimeMs = snapshot.serverNow - snapshot.host.bootedAt;
+        assert.isAtMost(Math.abs(uptimeMs - NodeOS.uptime() * 1000), MINUTE);
+        assert.isNull(snapshot.latest);
         assert.deepStrictEqual(
-          sample.gpus?.map((gpu) => gpu.busyPercent),
-          [37.3, 99.9],
+          Object.keys(snapshot.buckets.columns).toSorted(),
+          Object.keys(HostStatsBucket.fields)
+            .filter((field) => field !== "start")
+            .toSorted(),
         );
-        assert.strictEqual(sample.cpuTemperatureC, 87.1);
-        assert.strictEqual(sample.netRxBytesPerSec, 123_456_789);
-        assert.strictEqual(sample.netTxBytesPerSec, 98_765_432);
-        assert.deepStrictEqual(
-          [bucket.cpuAvg, bucket.cpuMax, bucket.gpuBusyAvg, bucket.gpuBusyMax, bucket.cpuTempMax],
-          [37.3, 37.3, 99.9, 99.9, 87.1],
-        );
-        assert.deepStrictEqual([bucket.netRxAvg, bucket.netTxAvg], [123_456_789, 98_765_432]);
-        // The server keeps full precision; only what leaves it is rounded.
-        assert.strictEqual((yield* harness.service.latest)?.cpuPercent, 37.28374982374982);
-        assert.isBelow(encodedBytes(update), KB);
-      }),
-  );
-
-  it.effect(
-    "phase 3 AC1 AC2 AC4: every sample carries the agent counts and the Mesura server count",
-    () =>
-      Effect.gen(function* () {
-        yield* TestClock.setTime(NOON);
-        const harness = yield* startHostStats({
-          agentCounts: Effect.succeed({ agentsRunning: 2, agentSessionsOpen: 5 }),
-          mesuraServers: Effect.succeed({ installed: 1, dev: 2 }),
-        });
-        const first = yield* subscribeInto(harness.service);
-        yield* harness.activate;
-        const update = yield* takeSample(first.received);
-
-        assert.strictEqual(update.sample.agentsRunning, 2);
-        assert.strictEqual(update.sample.agentSessionsOpen, 5);
-        assert.deepStrictEqual(update.sample.mesuraServers, { installed: 1, dev: 2 });
-        assert.strictEqual(update.bucket.agentsRunningMax, 2);
-        assert.deepStrictEqual(yield* harness.service.latest, update.sample);
-      }),
-  );
-
-  it.effect(
-    "phase 3 AC5: a failed agent count or a host without discovery leaves only those fields null",
-    () =>
-      Effect.gen(function* () {
-        yield* TestClock.setTime(NOON);
-        const harness = yield* startHostStats({
-          agentCounts: Effect.fail(
-            new PersistenceSqlError({ operation: "hostStats.test", detail: "database is locked" }),
-          ),
-          mesuraServers: Effect.succeed(null),
-        });
-        const first = yield* subscribeInto(harness.service);
-        yield* harness.activate;
-        const update = yield* takeSample(first.received);
-
-        assert.isNull(update.sample.agentsRunning);
-        assert.isNull(update.sample.agentSessionsOpen);
-        assert.isNull(update.sample.mesuraServers);
-        assert.strictEqual(update.sample.cpuPercent, 25);
-        assert.isNull(update.bucket.agentsRunningMax);
-      }),
-  );
-
-  it.effect(
-    "phase 3 AC8: two concurrent subscribers receive the same samples from one read per minute",
-    () =>
-      Effect.gen(function* () {
-        yield* TestClock.setTime(NOON);
-        const harness = yield* startHostStats();
-        const first = yield* subscribeInto(harness.service);
-        const second = yield* subscribeInto(harness.service);
-        assert.strictEqual(yield* Ref.get(harness.readCount), 0);
+        assert.deepStrictEqual(snapshot.buckets.slots, [0, 2]);
+        assert.deepStrictEqual(rowsOf(snapshot.buckets), history);
+        survivesTheWire(snapshot);
 
         yield* harness.activate;
         for (let minute = 0; minute < 3; minute += 1) {
           if (minute > 0) yield* TestClock.adjust("60 seconds");
-          const fromFirst = yield* takeSample(first.received);
-          const fromSecond = yield* takeSample(second.received);
-          assert.strictEqual(fromFirst.sample.sampledAt, NOON + minute * MINUTE);
-          assert.deepStrictEqual(fromSecond, fromFirst);
+          const now = NOON + minute * MINUTE;
+          const update = yield* takeSample(first.received);
+          assert.strictEqual(update.serverNow, now);
+          assert.strictEqual(update.sample.sampledAt, now);
+          assert.strictEqual(update.bucket.start, NOON);
+          assert.strictEqual(update.bucket.sampleCount, minute + 1);
+          assert.deepStrictEqual(update.bucket, (yield* harness.service.buckets).at(-1));
+          survivesTheWire(update);
         }
+        assert.strictEqual(yield* Queue.size(first.received), 0);
         assert.strictEqual(yield* Ref.get(harness.readCount), 3);
-        assert.deepStrictEqual(asSnapshot(first.snapshot), asSnapshot(second.snapshot));
-      }),
-  );
 
-  it.effect("phase 3 AC7: the server advertises the hostStats capability", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "host-stats-capability-" });
-      const descriptor = yield* Effect.gen(function* () {
-        const environment = yield* ServerEnvironment.ServerEnvironment;
-        return yield* environment.getDescriptor;
-      }).pipe(
-        Effect.provide(
-          ServerEnvironment.layer.pipe(
-            Layer.provide(ServerSecretStore.layer),
-            Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
+        const later = asSnapshot((yield* subscribeInto(harness.service)).snapshot);
+        assert.strictEqual(later.latest?.sampledAt, NOON + 2 * MINUTE);
+        assert.deepStrictEqual(later.buckets.slots, [0, 2, 3]);
+        assert.deepStrictEqual(rowsOf(later.buckets), yield* harness.service.buckets);
+      }),
+    );
+
+    it.effect(
+      "phase 3 AC6: snapshot bucket columns round percents and temperatures to 0.1, bytes and rates to integers",
+      () =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(NOON);
+          const harness = yield* startHostStats({
+            history: [
+              plainBucket(NOON - BUCKET, {
+                cpuAvg: 37.26,
+                cpuMax: 41.04,
+                memUsedAvg: 4_000.6,
+                swapUsedAvg: 0.4,
+                diskUsedAvg: 100_000.7,
+                gpuBusyAvg: 12.34,
+                gpuBusyMax: 50.04,
+                cpuTempMax: 45.57,
+                netRxAvg: 1_234.4,
+                netTxAvg: 99.6,
+              }),
+            ],
+          });
+          const snapshot = asSnapshot((yield* subscribeInto(harness.service)).snapshot);
+          assert.deepStrictEqual(rowsOf(snapshot.buckets), [
+            plainBucket(NOON - BUCKET, {
+              cpuAvg: 37.3,
+              cpuMax: 41,
+              memUsedAvg: 4_001,
+              swapUsedAvg: 0,
+              diskUsedAvg: 100_001,
+              gpuBusyAvg: 12.3,
+              gpuBusyMax: 50,
+              cpuTempMax: 45.6,
+              netRxAvg: 1_234,
+              netTxAvg: 100,
+            }),
+          ]);
+        }),
+    );
+
+    it.effect(
+      "phase 3 budget: a snapshot of 144 worst-case buckets encodes under 25 KB and an update under 1 KB",
+      () =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(NOON);
+          const history = Array.from({ length: 144 }, (_, index) =>
+            worstCaseBucket(NOON - (143 - index) * BUCKET),
+          );
+          const harness = yield* startHostStats({
+            history,
+            sampleFor: worstCaseSample,
+            agentCounts: Effect.succeed({ agentsRunning: 12, agentSessionsOpen: 40 }),
+            mesuraServers: Effect.succeed({ installed: 2, dev: 12 }),
+          });
+          const first = yield* subscribeInto(harness.service);
+          yield* harness.activate;
+          const update = yield* takeSample(first.received);
+          const snapshot = asSnapshot((yield* subscribeInto(harness.service)).snapshot);
+
+          assert.lengthOf(snapshot.buckets.slots, 144);
+          assert.isNotNull(snapshot.latest);
+          assert.isBelow(encodedBytes(snapshot), 25 * KB);
+          assert.isBelow(encodedBytes(update), KB);
+        }),
+    );
+
+    it.effect(
+      "phase 3 regression: an update rounds its sample and bucket as the snapshot rounds buckets",
+      () =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(NOON);
+          // No history: the update's bucket holds this one sample.
+          const harness = yield* startHostStats({ sampleFor: worstCaseSample });
+          const first = yield* subscribeInto(harness.service);
+          yield* harness.activate;
+          const update = yield* takeSample(first.received);
+
+          const { sample, bucket } = update;
+          assert.strictEqual(sample.cpuPercent, 37.3);
+          assert.strictEqual(sample.load1, 12.35);
+          assert.deepStrictEqual(
+            sample.gpus?.map((gpu) => gpu.busyPercent),
+            [37.3, 99.9],
+          );
+          assert.strictEqual(sample.cpuTemperatureC, 87.1);
+          assert.strictEqual(sample.netRxBytesPerSec, 123_456_789);
+          assert.strictEqual(sample.netTxBytesPerSec, 98_765_432);
+          assert.deepStrictEqual(
+            [bucket.cpuAvg, bucket.cpuMax, bucket.gpuBusyAvg, bucket.gpuBusyMax, bucket.cpuTempMax],
+            [37.3, 37.3, 99.9, 99.9, 87.1],
+          );
+          assert.deepStrictEqual([bucket.netRxAvg, bucket.netTxAvg], [123_456_789, 98_765_432]);
+          // The server keeps full precision; only what leaves it is rounded.
+          assert.strictEqual((yield* harness.service.latest)?.cpuPercent, 37.28374982374982);
+          assert.isBelow(encodedBytes(update), KB);
+        }),
+    );
+
+    it.effect(
+      "phase 3 AC1 AC2 AC4: every sample carries the agent counts and the Mesura server count",
+      () =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(NOON);
+          const harness = yield* startHostStats({
+            agentCounts: Effect.succeed({ agentsRunning: 2, agentSessionsOpen: 5 }),
+            mesuraServers: Effect.succeed({ installed: 1, dev: 2 }),
+          });
+          const first = yield* subscribeInto(harness.service);
+          yield* harness.activate;
+          const update = yield* takeSample(first.received);
+
+          assert.strictEqual(update.sample.agentsRunning, 2);
+          assert.strictEqual(update.sample.agentSessionsOpen, 5);
+          assert.deepStrictEqual(update.sample.mesuraServers, { installed: 1, dev: 2 });
+          assert.strictEqual(update.bucket.agentsRunningMax, 2);
+          assert.deepStrictEqual(yield* harness.service.latest, update.sample);
+        }),
+    );
+
+    it.effect(
+      "phase 3 AC5: a failed agent count or a host without discovery leaves only those fields null",
+      () =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(NOON);
+          const harness = yield* startHostStats({
+            agentCounts: Effect.fail(
+              new PersistenceSqlError({
+                operation: "hostStats.test",
+                detail: "database is locked",
+              }),
+            ),
+            mesuraServers: Effect.succeed(null),
+          });
+          const first = yield* subscribeInto(harness.service);
+          yield* harness.activate;
+          const update = yield* takeSample(first.received);
+
+          assert.isNull(update.sample.agentsRunning);
+          assert.isNull(update.sample.agentSessionsOpen);
+          assert.isNull(update.sample.mesuraServers);
+          assert.strictEqual(update.sample.cpuPercent, 25);
+          assert.isNull(update.bucket.agentsRunningMax);
+        }),
+    );
+
+    it.effect(
+      "phase 3 AC8: two concurrent subscribers receive the same samples from one read per minute",
+      () =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(NOON);
+          const harness = yield* startHostStats();
+          const first = yield* subscribeInto(harness.service);
+          const second = yield* subscribeInto(harness.service);
+          assert.strictEqual(yield* Ref.get(harness.readCount), 0);
+
+          yield* harness.activate;
+          for (let minute = 0; minute < 3; minute += 1) {
+            if (minute > 0) yield* TestClock.adjust("60 seconds");
+            const fromFirst = yield* takeSample(first.received);
+            const fromSecond = yield* takeSample(second.received);
+            assert.strictEqual(fromFirst.sample.sampledAt, NOON + minute * MINUTE);
+            assert.deepStrictEqual(fromSecond, fromFirst);
+          }
+          assert.strictEqual(yield* Ref.get(harness.readCount), 3);
+          assert.deepStrictEqual(asSnapshot(first.snapshot), asSnapshot(second.snapshot));
+        }),
+    );
+
+    it.effect("phase 3 AC7: the server advertises the hostStats capability", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "host-stats-capability-" });
+        const descriptor = yield* Effect.gen(function* () {
+          const environment = yield* ServerEnvironment.ServerEnvironment;
+          return yield* environment.getDescriptor;
+        }).pipe(
+          Effect.provide(
+            ServerEnvironment.layer.pipe(
+              Layer.provide(ServerSecretStore.layer),
+              Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
+            ),
           ),
-        ),
-      );
-      assert.strictEqual(descriptor.capabilities.hostStats, true);
-    }),
-  );
-});
+        );
+        assert.strictEqual(descriptor.capabilities.hostStats, true);
+      }),
+    );
+  },
+);
 
 describe("HostStatsRpc phase 3 fence: contract and scope", () => {
   const decodeDescriptor = Schema.decodeUnknownSync(ExecutionEnvironmentDescriptor);

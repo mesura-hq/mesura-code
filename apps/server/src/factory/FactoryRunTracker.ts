@@ -29,7 +29,7 @@ import {
 } from "@t3tools/shared/factoryRun";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -186,7 +186,7 @@ const make = Effect.gen(function* () {
   const shellSummaries = yield* FactoryRunShellSummaries;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const trackerScope = yield* Effect.scope;
   const changes = yield* PubSub.unbounded<string>();
 
@@ -196,7 +196,7 @@ const make = Effect.gen(function* () {
   const attachLock = yield* Semaphore.make(1);
 
   const commandId = (threadId: ThreadId, kind: "factory-run" | "factory-report") =>
-    crypto.randomUUIDv4().pipe(
+    crypto.uuidV4().pipe(
       Effect.orDie,
       Effect.map((uuid) => CommandId.make(`server:${kind}:${threadId}:${uuid}`)),
     );

@@ -56,13 +56,3 @@ export const getSecureStorageUnavailableReason = DesktopIpc.makeIpcMethod({
     });
   }),
 });
-
-export const clearConnectionCatalog = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.CLEAR_CONNECTION_CATALOG_CHANNEL,
-  payload: Schema.Void,
-  result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.connectionCatalog.clear")(function* () {
-    const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-    yield* store.clear;
-  }),
-});

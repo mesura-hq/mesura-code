@@ -11,7 +11,7 @@ import {
   VoiceHistoryEvent,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -70,7 +70,7 @@ const makeVoiceHistoryEvents = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const calls = yield* ProjectionVoiceCallRepository;
   const notices = yield* VoiceHistoryNotices;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   // One projector at a time: an append and a deletion catch-up must not interleave.
   const projector = yield* Semaphore.make(1);
 
@@ -172,7 +172,7 @@ const makeVoiceHistoryEvents = Effect.gen(function* () {
               Effect.mapError(toPersistenceDecodeError("VoiceHistoryEvents.append:encode")),
             );
             const eventId = yield* crypto
-              .randomUUIDv4()
+              .uuidV4()
               .pipe(Effect.mapError(sqlError("append:eventId")));
             const threadId = event.payload.threadId;
             const rows = yield* sql<{ readonly sequence: number }>`

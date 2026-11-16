@@ -13,38 +13,42 @@ import {
 import { BORROWED_RUNTIME_VOCABULARIES } from "./upstreamLock.ts";
 
 /**
- * Proves every lock fires in both directions, including an upstream that gained a literal,
- * which `upstreamLock.test.ts` cannot cover. It typechecks `upstreamLock.ts` alone against a
- * stand-in for the upstream types, which works only while that module has no runtime import.
+ * Proves every lock fires in both directions against the broker's frozen vocabulary.
+ * The compiler checks an unchanged copy of upstreamLock.ts with only its imported types
+ * replaced, so the tests exercise the production declarations without runtime imports.
  */
 
 type VocabularyName = keyof typeof BORROWED_RUNTIME_VOCABULARIES;
+const vocabularies = Object.entries(BORROWED_RUNTIME_VOCABULARIES) as Array<
+  [VocabularyName, ReadonlyArray<string>]
+>;
 
-describe("upstream vocabulary locks", () => {
-  it("upstream vocabulary compiler guard rejects a missing compiler instead of accepting a lock failure", () => {
+describe("frozen broker vocabulary locks", () => {
+  it("rejects a missing compiler instead of accepting a lock failure", () => {
     const directory = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "symmetria-missing-compiler-"),
     );
     try {
       const result = runTypechecker(NodePath.join(directory, "missing-tsc"), ["--noEmit"]);
-      expect(result.error).toMatchObject({ code: "ENOENT" });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(127);
+      expect(result.stderr).toContain("missing-tsc");
       expect(() => expectVocabularyLockRejection(result, "RuntimeSessionState")).toThrow(
-        "compiler launch or execution failed",
+        "expected diagnostic exit status 1 or 2",
       );
     } finally {
       NodeFS.rmSync(directory, { force: true, recursive: true });
     }
   });
 
-  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound compiler guard launches real TypeScript subprocesses; this budget does not hide an asynchronous wait.
-  it("upstream vocabulary compiler guard rejects infrastructure errors and unrelated diagnostics even beside a real lock diagnostic", () => {
+  it("rejects infrastructure errors and unrelated diagnostics even beside a real lock diagnostic", () => {
     const directory = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "symmetria-lock-diagnostics-"),
     );
     try {
       const result = compileVocabularyLock(directory, {
         name: "RuntimeSessionState",
-        values: [...BORROWED_RUNTIME_VOCABULARIES.RuntimeSessionState, "future_upstream_literal"],
+        values: [...BORROWED_RUNTIME_VOCABULARIES.RuntimeSessionState, "future_broker_literal"],
       });
       expectVocabularyLockRejection(result, "RuntimeSessionState");
       const unrelatedDiagnostic = "unrelated.ts(1,1): error TS2307: Cannot find module 'missing'.";
@@ -58,7 +62,10 @@ describe("upstream vocabulary locks", () => {
         { ...result, signal: "SIGKILL" as const, status: null },
         { ...result, status: null },
         { ...result, status: 0 },
+        { ...result, status: 124 },
+        { ...result, status: 126 },
         { ...result, status: 127 },
+        { ...result, status: 137 },
         { ...result, stdout: "", stderr: "" },
         { ...result, stdout: result.stdout.replace("TS2322", "TS2307") },
         { ...result, stdout: result.stdout.replace("upstreamLock.ts", "unrelated.ts") },
@@ -73,10 +80,9 @@ describe("upstream vocabulary locks", () => {
     } finally {
       NodeFS.rmSync(directory, { force: true, recursive: true });
     }
-  }, 60_000);
+  });
 
-  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound compiler guard launches real TypeScript subprocesses; this budget does not hide an asynchronous wait.
-  it("compiles clean while every borrowed vocabulary matches upstream", () => {
+  it("compiles clean while every tuple matches its frozen broker vocabulary", () => {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "symmetria-lock-match-"));
     try {
       const result = compileVocabularyLock(directory);
@@ -87,26 +93,21 @@ describe("upstream vocabulary locks", () => {
     } finally {
       NodeFS.rmSync(directory, { force: true, recursive: true });
     }
-  }, 60_000);
+  });
 
-  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound compiler guard launches real TypeScript subprocesses; this budget does not hide an asynchronous wait.
-  it("fails when upstream adds or removes a literal in any borrowed vocabulary", () => {
+  it.each(vocabularies)("fails when %s adds or removes a frozen literal", (name, literals) => {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "symmetria-lock-drift-"));
     try {
-      for (const [name, literals] of Object.entries(BORROWED_RUNTIME_VOCABULARIES) as Array<
-        [VocabularyName, ReadonlyArray<string>]
-      >) {
-        const added = compileVocabularyLock(directory, {
-          name,
-          values: [...literals, "future_upstream_literal"],
-        });
-        expectVocabularyLockRejection(added, name);
+      const added = compileVocabularyLock(directory, {
+        name,
+        values: [...literals, "future_broker_literal"],
+      });
+      expectVocabularyLockRejection(added, name);
 
-        const removed = compileVocabularyLock(directory, { name, values: literals.slice(1) });
-        expectVocabularyLockRejection(removed, name);
-      }
+      const removed = compileVocabularyLock(directory, { name, values: literals.slice(1) });
+      expectVocabularyLockRejection(removed, name);
     } finally {
       NodeFS.rmSync(directory, { force: true, recursive: true });
     }
-  }, 120_000);
+  });
 });

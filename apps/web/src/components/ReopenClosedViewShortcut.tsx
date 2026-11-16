@@ -43,11 +43,18 @@ import {
 } from "../threadRoutes";
 import { toastManager } from "./ui/toast";
 
-const PREVIEW_FORWARDED_LAYOUT_COMMANDS = [
+const PREVIEW_FORWARDED_COMMANDS = [
+  "workspace.focusNext",
+  "workspace.focusPrevious",
   "sidebar.toggle",
   "rightPanel.toggle",
   "rightPanel.toggleMaximized",
   "rightPanel.close",
+  "preview.focusUrl",
+  "preview.zoomIn",
+  "preview.zoomOut",
+  "preview.resetZoom",
+  "preview.find",
 ] as const;
 
 const isGlobalPullRequests = (ref: ScopedThreadRef) =>
@@ -93,6 +100,7 @@ export function ReopenClosedViewShortcut() {
           environmentKnown: true,
           catalogReady: true,
           ownerExists: true,
+          sideChatExists: true,
           shellLive: true,
           panel,
         };
@@ -101,6 +109,10 @@ export function ReopenClosedViewShortcut() {
         environmentKnown: catalog.entries.has(ref.environmentId),
         catalogReady: catalog.isReady,
         ownerExists: readThreadShell(ref) !== null || drafts.getDraftThreadByRef(ref) !== null,
+        sideChatExists:
+          entry.kind !== "panel-tab" ||
+          entry.surface.kind !== "side-chat" ||
+          readThreadShell(scopeThreadRef(ref.environmentId, entry.surface.threadId)) !== null,
         shellLive:
           appAtomRegistry.get(environmentShell.stateValueAtom(ref.environmentId)).status === "live",
         panel,
@@ -148,6 +160,7 @@ export function ReopenClosedViewShortcut() {
       });
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to window keydown and the desktop menu action for the reopen closed view shortcut
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -182,9 +195,10 @@ export function ReopenClosedViewShortcut() {
     };
   }, [keybindings, previewOpen, terminalOpen]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers forwarded shortcut chords with the desktop preview bridge and clears them on cleanup
   useEffect(() => {
     const preview = window.desktopBridge?.preview;
-    if (!preview?.setForwardedShortcuts) return;
+    if (!preview) return;
     const options = {
       context: {
         previewFocus: true,
@@ -200,7 +214,7 @@ export function ReopenClosedViewShortcut() {
     // Guest browser processes miss app keydown listeners; desktop forwards the chords as menu actions.
     const commands = [
       ...(hasHistory ? (["view.reopenClosed"] as const) : []),
-      ...PREVIEW_FORWARDED_LAYOUT_COMMANDS.filter(
+      ...PREVIEW_FORWARDED_COMMANDS.filter(
         (command) => command !== "rightPanel.close" || canCloseRightPanel,
       ),
     ];
@@ -215,7 +229,7 @@ export function ReopenClosedViewShortcut() {
       )
       .catch(() => undefined);
     return () => {
-      void preview.setForwardedShortcuts?.([]).catch(() => undefined);
+      void preview.setForwardedShortcuts([]).catch(() => undefined);
     };
   }, [canCloseRightPanel, hasHistory, keybindings, terminalOpen]);
 

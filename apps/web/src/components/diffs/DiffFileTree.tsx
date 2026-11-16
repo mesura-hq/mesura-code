@@ -1,6 +1,6 @@
 import type { FileTreeRowDecoration, GitStatusEntry } from "@pierre/trees";
 import { FileTree, useFileTree, useFileTreeSelector } from "@pierre/trees/react";
-import { ChevronsDownUp, ChevronsUpDown } from "lucide";
+import { ChevronsDownUpIcon, ChevronsUpDownIcon } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { useStableCallback } from "~/hooks/useStableCallback";
@@ -10,7 +10,6 @@ import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
 import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "../files/fileTreeExpansion";
 import { Button } from "../ui/button";
-import { MorphIcon } from "~/components/MorphIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   buildDiffFileTreeUpdates,
@@ -141,10 +140,12 @@ export function DiffFileTree({
     areAllDirectoriesExpanded(currentModel, directoryPaths),
   );
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pushes the icon set into the imperative Pierre file tree model
   useEffect(() => {
     model.setIcons(icons);
   }, [icons, model]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- applies path updates, ordering and git status to the imperative Pierre file tree model
   useEffect(() => {
     ordering.update(positions);
     const mounted = mountedPresentationRef.current;
@@ -190,7 +191,7 @@ export function DiffFileTree({
     model.setGitStatus(gitStatus);
   }, [directoryPaths, gitStatus, model, modelPaths, ordering, positions, presented]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: re-renders mounted Pierre rows when the decoration renderer changes
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Mesura: re-renders mounted Pierre rows when the decoration renderer changes
   useEffect(() => {
     // Updating the renderer ref alone leaves counts stale when paths and Git statuses
     // stay unchanged. Pierre's public render API updates the mounted view without
@@ -200,6 +201,7 @@ export function DiffFileTree({
     if (fileTreeContainer !== undefined) model.render({ fileTreeContainer });
   }, [model, renderFileDecoration]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- expands ancestors, selects and scrolls to the requested file in the Pierre tree model
   useEffect(() => {
     if (selectedPath === null) {
       handledRevealRef.current = null;
@@ -265,10 +267,11 @@ export function DiffFileTree({
                   />
                 }
               >
-                <MorphIcon
-                  className="size-3.5"
-                  icon={allDirectoriesExpanded ? ChevronsDownUp : ChevronsUpDown}
-                />
+                {allDirectoriesExpanded ? (
+                  <ChevronsDownUpIcon className="size-3.5" />
+                ) : (
+                  <ChevronsUpDownIcon className="size-3.5" />
+                )}
               </TooltipTrigger>
               <TooltipPopup>
                 {allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}

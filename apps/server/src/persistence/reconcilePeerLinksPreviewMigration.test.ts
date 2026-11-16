@@ -6,7 +6,7 @@ import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
-import LegacyPeerLinks from "./Migrations/061_PeerLinks.ts";
+import LegacyPeerLinks from "./Migrations/070_PeerLinks.ts";
 import ReleasedPeerLinks from "./Migrations/070_PeerLinks.ts";
 import ReleasedPeerLinkFence from "./Migrations/071_PeerLinkFence.ts";
 import ReleasedWaitingLinkRequestIndex from "./Migrations/072_WaitingLinkRequestIndex.ts";

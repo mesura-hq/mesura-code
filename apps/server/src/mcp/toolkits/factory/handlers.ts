@@ -6,7 +6,8 @@ import {
   TurnItemId,
 } from "@t3tools/contracts";
 import { readFactoryPhases, splitFactoryDocument } from "@t3tools/shared/factoryDocument";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
@@ -45,10 +46,11 @@ const make = Effect.gen(function* () {
   const runTracker = yield* FactoryRunTracker.FactoryRunTracker;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
+  const digest = yield* Digest.Digest;
 
   const sha256Hex = (bytes: Uint8Array) =>
-    crypto.digest("SHA-256", bytes).pipe(Effect.map(Hex.encode), Effect.orDie);
+    digest.digest(Digest.sha256, bytes).pipe(Effect.map(Hex.encode), Effect.orDie);
 
   /** Reads an absolute path to a regular file of at most 1 MiB, or names why not. */
   const readDocument = Effect.fn("FactoryToolkit.readDocument")(function* (documentPath: string) {
@@ -145,7 +147,7 @@ const make = Effect.gen(function* () {
       headings,
       presentedAt: DateTime.formatIso(yield* DateTime.now),
     };
-    const uuid = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+    const uuid = yield* crypto.uuidV4().pipe(Effect.orDie);
     // The orchestrator anchors the card to the thread's active run and keeps
     // its place when the same plan file is presented again.
     yield* orchestrator

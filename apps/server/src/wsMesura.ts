@@ -12,7 +12,7 @@ import {
   WS_METHODS,
   WsRpcGroupMesura,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -78,7 +78,9 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
     const threadSearchBroker = yield* ThreadSearchBroker.ThreadSearchBroker;
     // This layer is built once per WebSocket. Every connection's RPC protocol
     // numbers its client 0, so the broker tells connections apart by this id.
-    const connectionIdentity = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+    const connectionIdentity = yield* (yield* SecureRandom.SecureRandom)
+      .uuidV4()
+      .pipe(Effect.orDie);
     const projectIconDiscovery = yield* ProjectIconDiscovery;
     const editorSessionManager = yield* EditorSessionManager.EditorSessionManager;
     const workspaceFileWatcher = yield* WorkspaceFileWatcher.WorkspaceFileWatcher;

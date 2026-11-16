@@ -14,7 +14,7 @@ import {
   TurnItemId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -60,7 +60,7 @@ const failure = (code: OrchestratorMcpFailure["code"], message: string) =>
 const make = Effect.gen(function* () {
   // Optional so every MCP host can carry the tool; only a server with a browser can answer it.
   const browser = yield* Effect.serviceOption(ServerBrowser.ServerBrowser);
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
 
@@ -106,7 +106,7 @@ const make = Effect.gen(function* () {
       })
       .pipe(Effect.mapError((error) => failure("invalid_request", error.message)));
     const turnItemId = TurnItemId.make(
-      `turn-item:browser-takeover:${threadId}:${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}`,
+      `turn-item:browser-takeover:${threadId}:${yield* crypto.uuidV4().pipe(Effect.orDie)}`,
     );
     const record = (takeoverStatus: OrchestrationV2BrowserTakeoverRequestStatus) =>
       threadManagement

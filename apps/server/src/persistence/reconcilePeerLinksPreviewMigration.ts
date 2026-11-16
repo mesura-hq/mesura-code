@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import LegacyPeerLinks from "./Migrations/061_PeerLinks.ts";
+import LegacyPeerLinks from "./Migrations/070_PeerLinks.ts";
 
 const PEER_LINK_SERIES = ["PeerLinks", "PeerLinkFence", "WaitingLinkRequestIndex"] as const;
 
