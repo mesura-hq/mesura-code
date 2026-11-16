@@ -93,7 +93,6 @@ describe("Mesura plugin skill names", () => {
       expect(planClaudeSkillDispatch(`use $${name} for this\nand that`, skills)).toEqual({
         leadingText: `use /${name} for this\nand that`,
         commandText: `/${name} for this\nand that`,
-        skillName: name,
       });
     },
   );

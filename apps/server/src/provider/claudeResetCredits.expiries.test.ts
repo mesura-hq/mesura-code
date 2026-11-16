@@ -36,6 +36,14 @@ describe("claudeResetCreditsToContract expiries", () => {
       availableCount: 2,
       nextCreditId: "a",
       expiries: [],
+      options: [
+        {
+          availableCount: 2,
+          creditId: "a",
+          description: "Refills your 5-hour and weekly limits.",
+          label: "Full reset",
+        },
+      ],
       readAt: "2026-09-22T12:00:00.000Z",
     });
   });
