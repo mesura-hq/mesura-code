@@ -9,7 +9,6 @@ const pickerCommand =
   };
 
 export const chatPickerCommands = {
-  "traitsPicker.toggle": pickerCommand("traits"),
   "workspacePicker.toggle": pickerCommand("workspace"),
   "branchPicker.toggle": pickerCommand("branch"),
   "composer.workspace": pickerCommand("workspace"),
