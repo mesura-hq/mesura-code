@@ -74,8 +74,10 @@ paths open, so keep none of them. Before the copy's first start:
 2. **Write `providerInstances` yourself, with stubs only.** One entry per built-in driver with a
    default instance — `codex`, `claudeAgent`, `cursor`, `grok`, `opencode`, `antigravity`, `pi`,
    `muse` — so the registry synthesizes no enabled default (`deriveProviderInstanceConfigMap`).
-   Each entry gets a `binaryPath` to an absolute stub and scratch `homePath`/`shadowHomePath` where
-   the driver has them, and nothing else: no `environment` (it can restore `CURSOR_API_KEY`), no
+   Each entry gets a `binaryPath` to an absolute stub and a scratch `homePath` where the driver has
+   one. Leave Codex's `shadowHomePath` empty or give it a second scratch directory: the server
+   refuses a shadow home equal to `homePath` (`CodexShadowHomePathConflictError`). Add nothing
+   else: no `environment` (it can restore `CURSOR_API_KEY`), no
    OpenCode `serverUrl`, no API key fields. Add no `acpRegistry` instance: it runs its own
    `commandPath` or a cached binary that no stub covers. `enabled: false` does not isolate an
    instance, because the session manager still calls a disabled instance's adapter.
