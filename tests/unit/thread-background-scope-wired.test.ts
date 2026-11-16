@@ -24,10 +24,11 @@ it("retains the thread scope from the web thread route", () => {
     "<ThreadRouteView target={shownTarget}",
     "the chat layout no longer mounts the view that retains the visible thread scope",
   );
+  // Upstream redirects a promoted draft to its server route, which then retains the thread.
   assert.include(
     view,
-    'target.kind === "server" ? target.threadRef : (draftSession?.promotedTo ?? inferredThreadRef)',
-    "the shared view no longer selects the server thread or a promoted draft thread",
+    'const serverThreadRef = target.kind === "server" ? target.threadRef : null;',
+    "the shared view no longer selects the server thread",
   );
   assert.include(
     view,
@@ -36,18 +37,8 @@ it("retains the thread scope from the web thread route", () => {
   );
   assert.match(
     view,
-    /useComposerDraftStore\(\(store\) =>\s*draftId === null \? null : store\.getDraftSession\(draftId\)/,
-    "the route no longer subscribes to the draft's promotion state",
-  );
-  assert.include(
-    view,
-    "const threadRefs = useThreadRefs();",
-    "the route no longer subscribes to known thread refs",
-  );
-  assert.match(
-    view,
-    /const inferredThreadRef = draftSession\s*\? \(threadRefs\.find\([\s\S]*?ref\.environmentId === draftSession\.environmentId &&\s*ref\.threadId === draftSession\.threadId,[\s\S]*?\) \?\? null\)\s*: null;/,
-    "draft inference must match both the environment and the thread, and leave an uncreated draft unretained",
+    /useComposerDraftStore\(\(store\) =>\s*draftId === null \? null : store\.getPromotedDraftRedirect\(draftId\)/,
+    "a promoted draft no longer redirects to the server route that retains its thread",
   );
   const entities = read("apps/web/src/state/entities.ts");
   assert.match(

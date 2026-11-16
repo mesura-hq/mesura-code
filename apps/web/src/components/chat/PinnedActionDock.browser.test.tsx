@@ -217,6 +217,7 @@ vi.mock("../BranchToolbar", () => ({ BranchToolbar: () => null }));
 // scrolling decides whether it is on screen. The real list brings its own scroll viewport; this
 // one bounds itself to half the screen so the page around it keeps the app's height.
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => {},
   LegendList: ({
     data,
     renderItem,

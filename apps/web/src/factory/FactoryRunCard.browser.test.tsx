@@ -243,6 +243,7 @@ vi.mock("../components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 
 // Keep timeline rows mounted so card assertions do not depend on list virtualization.
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => {},
   LegendList: ({
     data,
     renderItem,

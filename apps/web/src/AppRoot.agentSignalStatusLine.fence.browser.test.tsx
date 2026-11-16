@@ -71,6 +71,7 @@ vi.mock("./hooks/useHandleNewThread", async () => ({
   useNewThreadHandler: () => async () => ({ _tag: "Success", value: undefined }),
 }));
 vi.mock("./hooks/useThreadActions", () => ({
+  canTurnThreadIntoProject: () => false,
   useAcknowledgeThreadWoke: () => fixture.acknowledgeWoke,
   useThreadActions: () => ({
     settleThread: fixture.settleThread,
