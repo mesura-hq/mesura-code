@@ -118,6 +118,7 @@ describe("injectMcpAppThemeBootstrap", () => {
         document: {
           createElement: () => ({}),
           head: { append: (element: (typeof head)[number]) => head.push(element) },
+          hasFocus: () => false,
         },
       });
       return head.find((element) => element.name === "color-scheme")?.content ?? "normal";

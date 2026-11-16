@@ -305,9 +305,9 @@ describe("phase11 report view AC2 AC6 clock and cost", () => {
       elapsedMs: 17_340_000,
       machineMs: 15_840_000,
       waitingMs: 1_500_000,
-      elapsed: "4h 49m",
-      machine: "4h 24m",
-      waiting: "25m",
+      elapsed: "4h 49m 0s",
+      machine: "4h 24m 0s",
+      waiting: "25m 0s",
     });
   });
 
@@ -340,8 +340,8 @@ describe("phase11 report view AC2 AC6 clock and cost", () => {
       waitingMs: 2_100_000,
       machineMs: 5_100_000,
       elapsed: "2h",
-      waiting: "35m",
-      machine: "1h 25m",
+      waiting: "35m 0s",
+      machine: "1h 25m 0s",
     });
     expect(view.clock.machineMs + view.clock.waitingMs).toBe(view.clock.elapsedMs);
   });
@@ -369,7 +369,7 @@ describe("phase11 report view AC2 AC6 clock and cost", () => {
     const fromDegraded = reportView(boastful, degraded);
     const fromDone = reportView(boastful, done);
 
-    expect(fromDegraded.clock).toMatchObject({ elapsed: "4h 49m", waiting: "25m" });
+    expect(fromDegraded.clock).toMatchObject({ elapsed: "4h 49m 0s", waiting: "25m 0s" });
     expect(fromDegraded.coverage).toEqual({ passed: 4, total: 5 });
     expect(fromDegraded.degradedPhases).toBe(1);
     expect(fromDegraded.cost).toBe("$23.94 + 8,429,560 tokens");

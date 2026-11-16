@@ -4,6 +4,8 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeSqlite from "node:sqlite";
+
+import { DEFAULT_STATE_HOME_DIR_NAME, REMOTE_DEFAULT_STATE_HOME } from "@t3tools/shared/stateHome";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -86,7 +88,7 @@ export function runLauncher(
   const home = NodeFS.mkdtempSync(NodePath.join(root, "packages/ssh/.ssh-launcher-test-"));
   try {
     const bin = NodePath.join(home, "bin");
-    const runtime = NodePath.join(home, ".t3/runtime");
+    const runtime = NodePath.join(home, DEFAULT_STATE_HOME_DIR_NAME, "runtime");
     NodeFS.mkdirSync(bin);
     NodeFS.mkdirSync(runtime, { recursive: true });
     const markerPath = NodePath.join(runtime, "desktop-update-in-progress");
@@ -129,7 +131,7 @@ case "\${2:-}" in
     elif [ "$TEST_PUBLISH_AFTER_FIRST_READ" = 1 ]; then
       mkdir -p "\${2%/*}"
       printf '{}' > "$2"
-      rm -f "$HOME/.t3/runtime/desktop-update-in-progress"
+      rm -f "${REMOTE_DEFAULT_STATE_HOME}/runtime/desktop-update-in-progress"
       exit 1
     elif [ -n "$TEST_INITIAL_PORT" ]; then printf '%s %s' "$TEST_SERVER_PID" "$TEST_INITIAL_PORT"
     else exit 1; fi ;;
@@ -140,7 +142,7 @@ case "\${2:-}" in
   [0-9]*)
     NOW="$(cat "$HOME/clock")"
     printf 'probe %s %s\\n' "$2" "$NOW" >> "$HOME/events"
-    [ "$2" = 5999 ] || { [ "$2" = 4888 ] && { [ "$NOW" -ge "$TEST_READY_AT" ] || [ -e "$HOME/.t3/userdata/server-runtime.json" ]; }; } ;;
+    [ "$2" = 5999 ] || { [ "$2" = 4888 ] && { [ "$NOW" -ge "$TEST_READY_AT" ] || [ -e "${REMOTE_DEFAULT_STATE_HOME}/userdata/server-runtime.json" ]; }; } ;;
   */desktop-update-in-progress)
     printf 'marker %s\\n' "$(cat "$HOME/clock")" >> "$HOME/events"
     exec "$TEST_REAL_NODE" --require "$HOME/clock.cjs" "$@" ;;
@@ -152,7 +154,7 @@ esac`,
       `awk -v seconds="$1" '{ printf "%.0f", $1 + seconds * 1000 }' "$HOME/clock" > "$HOME/clock.next"
 mv "$HOME/clock.next" "$HOME/clock"
 if [ "$TEST_CLEAR_MARKER" = 1 ] && [ "$(cat "$HOME/clock")" -ge "$TEST_READY_AT" ]; then
-  rm -f "$HOME/.t3/runtime/desktop-update-in-progress"
+  rm -f "${REMOTE_DEFAULT_STATE_HOME}/runtime/desktop-update-in-progress"
 fi
 if [ -n "$TEST_CLOCK_JUMP" ] && [ ! -e "$HOME/jumped" ]; then
   printf '%s' "$TEST_CLOCK_JUMP" > "$HOME/clock"
@@ -164,13 +166,13 @@ fi`,
     executable(
       "ps",
       `if [ "$*" = "-ww -o args= -p $TEST_SERVER_PID" ]; then
-  printf '/bin/sh %s/.t3/ssh-launch/test-target/run-t3.sh serve --host 127.0.0.1 --port 5999\\n' "$HOME"
+  printf '/bin/sh %s/${DEFAULT_STATE_HOME_DIR_NAME}/ssh-launch/test-target/run-t3.sh serve --host 127.0.0.1 --port 5999\\n' "$HOME"
   exit 0
 fi
 PATH=/usr/bin:/bin exec ps "$@"`,
     );
     if (options.recordedKind) {
-      const state = NodePath.join(home, ".t3/ssh-launch/test-target");
+      const state = NodePath.join(home, DEFAULT_STATE_HOME_DIR_NAME, "ssh-launch/test-target");
       NodeFS.mkdirSync(state, { recursive: true });
       NodeFS.writeFileSync(NodePath.join(state, "pid"), String(process.pid));
       NodeFS.writeFileSync(NodePath.join(state, "port"), "5999");
@@ -181,7 +183,7 @@ PATH=/usr/bin:/bin exec ps "$@"`,
     }
     if (options.archive) {
       executable("node", 'printf "unexpected host node invocation\\n" >&2; exit 1');
-      const version = NodePath.join(home, ".t3/runtime/versions/1.2.3");
+      const version = NodePath.join(home, DEFAULT_STATE_HOME_DIR_NAME, "runtime/versions/1.2.3");
       NodeFS.mkdirSync(version, { recursive: true });
       NodeFS.writeFileSync(NodePath.join(version, ".install-complete"), "1.2.3");
       NodeFS.writeFileSync(

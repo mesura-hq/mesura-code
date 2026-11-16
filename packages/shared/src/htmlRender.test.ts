@@ -75,7 +75,7 @@ describe("injectHtmlRenderBootstrap", () => {
     const injected = injectHtmlRenderBootstrap(prefix + content);
     expect(injected.startsWith(`${prefix}${head}<meta charset="utf-8">`)).toBe(true);
     expect(injected.indexOf('<style id="t3-theme">')).toBeGreaterThan(prefix.length);
-    expect(injected).toContain("<script>");
+    expect(injected).toContain(`<script ${CURRENT_MARKER}>`);
     expect(injected.endsWith(content)).toBe(true);
   });
 
