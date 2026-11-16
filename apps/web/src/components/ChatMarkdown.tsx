@@ -124,12 +124,7 @@ import { Button } from "./ui/button";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
 import { contextMenuSourceOf } from "../contextMenuSource";
-import {
-  PreferredEditorEnvironmentRequiredError,
-  useOpenInPreferredEditor,
-  usePreferredEditor,
-} from "../editorPreferences";
-import { openInEditorMenuLabel } from "../editorLabels";
+import { PreferredEditorEnvironmentRequiredError } from "../editorPreferences";
 import { resolveDiffThemeName } from "../lib/diffRendering";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { useRenderedAppearance } from "../hooks/useTheme";
@@ -142,11 +137,7 @@ import {
   rewriteMarkdownFileUriHref,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
-import {
-  markdownFileCopyPaths,
-  markdownFileEditorTarget,
-  resolveMarkdownFileHostPath,
-} from "../markdownFileHostPath";
+import { markdownFileCopyPaths, resolveMarkdownFileHostPath } from "../markdownFileHostPath";
 import { isMarkdownFileLinkLabel } from "@t3tools/shared/markdownLinks";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
@@ -653,10 +644,6 @@ function useChatMarkdownState({
   // A cached config outlives a disconnect; only a connected server is asked to confirm a link.
   const environmentConnected = useEnvironment(environmentId)?.connection.phase === "connected";
   const projects = useProjects();
-  const [preferredEditor] = usePreferredEditor(availableEditors);
-  const preferredEditorMenuLabel = openInEditorMenuLabel(preferredEditor);
-  const openInExternalEditor = useClientSettings((settings) => settings.openInExternalEditor);
-  const openInPreferredEditor = useOpenInPreferredEditor(environmentId, availableEditors, cwd);
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
     reportFailure: false,
   });
@@ -934,12 +921,7 @@ function useChatMarkdownState({
                   environmentId,
                   input: { cwd: (await resolveHostPath()).absolutePath, editor: "file-manager" },
                 })
-            : canUseShellActions && openInExternalEditor
-              ? async () =>
-                  openInPreferredEditor(
-                    markdownFileEditorTarget(fileLinkMeta, await resolveHostPath()),
-                  )
-              : undefined
+            : undefined
         }
         resolveCopyPaths={async () =>
           markdownFileCopyPaths(fileLinkMeta, await resolveHostPath(), cwd)
@@ -950,7 +932,7 @@ function useChatMarkdownState({
             ? () => openMarkdownMedia(mediaPath, fileLinkMeta.filePath)
             : undefined
         }
-        openInEditorMenuLabel={canOpenApp ? "Open app" : preferredEditorMenuLabel}
+        openInEditorMenuLabel="Open app"
         onReveal={
           canUseShellActions && revealInFileManagerLabel !== undefined
             ? async () => revealFileInFileManager((await resolveHostPath()).absolutePath)

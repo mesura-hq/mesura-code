@@ -7,7 +7,7 @@ import type {
   ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { lazy, Suspense, type ComponentProps } from "react";
+import { lazy, Suspense } from "react";
 import SideChatPane from "./SideChatPane";
 import type { ComposerImageAttachment, DraftId } from "../../composerDraftStore";
 import type { ShortcutMatchContext } from "../../keybindings";
@@ -47,10 +47,7 @@ interface RightPanelPullRequestProps {
   readonly onBack: (() => void) | undefined;
 }
 
-interface RightPanelFileProps extends Pick<
-  ComponentProps<typeof FilePreviewPanel>,
-  "keybindings" | "availableEditors" | "openInShortcutEnabled"
-> {
+interface RightPanelFileProps {
   readonly projectId?: ProjectId | undefined;
   readonly projectName: string | null;
   readonly workspaceRoot: string | undefined;
@@ -211,9 +208,6 @@ export function RightPanelSurfaceContent(props: {
               attachment ? `attachment:${attachment.id}` : files.workspaceRoot
             }`}
             environmentId={props.environmentId}
-            keybindings={files.keybindings}
-            availableEditors={files.availableEditors}
-            openInShortcutEnabled={files.openInShortcutEnabled}
             cwd={files.workspaceRoot ?? ""}
             projectName={files.projectName ?? ""}
             projectId={files.projectId}

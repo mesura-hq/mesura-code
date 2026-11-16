@@ -178,9 +178,6 @@ function filePreview(
       relativePath={relativePath}
       threadRef={threadRef}
       composerDraftTarget={threadRef}
-      keybindings={[]}
-      availableEditors={[]}
-      openInShortcutEnabled={false}
       revealLine={null}
       revealRequestId={0}
       onOpenFile={onOpenFile}

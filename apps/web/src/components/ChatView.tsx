@@ -277,7 +277,6 @@ import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/
 import { useEnvironmentQueryRefresh } from "../state/query";
 import { useEnvironmentScope } from "~/state/session";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "../state/server";
-import { hostEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { threadEnvironment } from "../state/threads";
 import {
   resolveProviderSkillsForCwd,
@@ -326,12 +325,6 @@ import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
 import { useSideChat } from "./chat/useSideChat";
-import { useRemoteOpenState } from "~/remoteOpen";
-import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
-import {
-  OPEN_FAVORITE_EDITOR_ATTRIBUTE,
-  useOpenFavoriteEditorShortcut,
-} from "./chat/OpenInPickerShortcut";
 import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
@@ -1768,28 +1761,6 @@ export default function ChatView(props: ChatViewProps) {
   const scriptKeybindings =
     useAtomValue(serverEnvironment.configValueAtom(environmentId))?.keybindings ??
     DEFAULT_RESOLVED_KEYBINDINGS;
-  const openInEnvironmentId = activeThread?.environmentId ?? environmentId;
-  const availableEditors =
-    useAtomValue(serverEnvironment.configValueAtom(openInEnvironmentId))?.availableEditors ?? [];
-  const hostEnvironmentId = useAtomValue(hostEnvironmentIdAtom);
-  const remoteOpenState = useRemoteOpenState(openInEnvironmentId);
-  const openInExternalEditor = useClientSettings((settings) => settings.openInExternalEditor);
-  const showOpenInPicker =
-    openInExternalEditor &&
-    shouldShowOpenInPicker({
-      activeProjectName: activeProject?.title,
-      activeThreadEnvironmentId: openInEnvironmentId,
-      primaryEnvironmentId: primaryEnvironment?.environmentId ?? null,
-      hostEnvironmentId,
-      remoteOpenMode: remoteOpenState.mode,
-    });
-  useOpenFavoriteEditorShortcut({
-    enabled: showOpenInPicker && !backgroundThread,
-    environmentId: openInEnvironmentId,
-    keybindings,
-    availableEditors,
-    openInCwd: gitCwd,
-  });
   const manualCompactionProviderAvailable = hasAvailableCompactionProvider({
     providers: providerInstanceEntries,
     driverKind: selectedProvider,
@@ -2921,14 +2892,6 @@ export default function ChatView(props: ChatViewProps) {
     "runContext.toggleWorkspace": chatPickerCommands["runContext.toggleWorkspace"],
   };
   const openWorkspaceInFilePanel = () => {
-    if (openInExternalEditor) {
-      const button = Array.from(
-        document.querySelectorAll<HTMLButtonElement>(`[${OPEN_FAVORITE_EDITOR_ATTRIBUTE}]`),
-      ).at(-1);
-      if (!button || button.disabled) return false;
-      button.click();
-      return;
-    }
     if (activeThreadRef) useRightPanelStore.getState().openFile(activeThreadRef, ".");
   };
   useCommandHandlers({
@@ -3589,9 +3552,6 @@ export default function ChatView(props: ChatViewProps) {
         projectId: activeProject?.id,
         projectName: activeProject?.title ?? null,
         workspaceRoot: activeWorkspaceRoot,
-        keybindings,
-        availableEditors,
-        openInShortcutEnabled: rightPanelOpen,
         pendingSurfaceIds: pendingFileSurfaceIds,
         onOpenFile: openFileSurfaceStable,
         onPendingChange: handleFilePendingChangeStable,
@@ -4299,16 +4259,6 @@ export default function ChatView(props: ChatViewProps) {
                   activeProjectScripts={activeProject ? activeProjectScripts : undefined}
                   preferredScriptId={
                     activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-                  }
-                  keybindings={keybindings}
-                  availableEditors={availableEditors}
-                  showOpenInPicker={showOpenInPicker}
-                  openInShortcutEnabled={
-                    !(
-                      rightPanelOpen &&
-                      renderedRightPanelSurface?.kind === "file" &&
-                      renderedRightPanelSurface.attachment === undefined
-                    )
                   }
                   gitCwd={gitCwd}
                   workspaceMutationId={workspaceMutationId}

@@ -1,4 +1,3 @@
-import { OpenInPicker } from "./OpenInPicker";
 import type { EnvironmentId, ProjectId, ProjectScript, ThreadId } from "@t3tools/contracts";
 
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -44,10 +43,6 @@ interface ThreadDetailsPanelProps extends Pick<
   ComponentProps<typeof ThreadDetailsCard>,
   "anchor" | "handle"
 > {
-  keybindings: ComponentProps<typeof OpenInPicker>["keybindings"];
-  availableEditors: ComponentProps<typeof OpenInPicker>["availableEditors"];
-  showOpenInPicker: boolean;
-  openInShortcutEnabled: boolean;
   forceNewWorktree?: boolean;
   environmentId: EnvironmentId;
   threadId: ThreadId;
@@ -160,7 +155,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
         // Section flags follow the rows that will render, so no empty section steals the divider rule.
         const show = {
           environment: density === "full" && visible.environment,
-          openIn: density !== "essential" && visible.openIn && props.showOpenInPicker,
           scripts: visible.scripts && props.activeProjectScripts !== undefined,
           branch: offersGit && props.isGitRepo && visible.branch,
           // Without a branch selector, linked pull requests still need somewhere to show.
@@ -173,7 +167,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
         return (
           <>
             <div className="group/details-items">
-              {show.environment || show.openIn || show.scripts ? (
+              {show.environment || show.scripts ? (
                 <ThreadDetailsSection
                   headingId="thread-details-workspace-heading"
                   title="Workspace"
@@ -192,17 +186,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         autoEnvironmentLabel={props.autoEnvironmentLabel}
                         onAutoEnvironment={props.onAutoEnvironment}
                         {...branchToolbarProps}
-                      />
-                    ) : null}
-
-                    {show.openIn ? (
-                      <OpenInPicker
-                        keybindings={props.keybindings}
-                        environmentId={props.environmentId}
-                        availableEditors={props.availableEditors}
-                        openInCwd={props.gitCwd}
-                        enableShortcut={props.openInShortcutEnabled}
-                        displayMode="panel"
                       />
                     ) : null}
 

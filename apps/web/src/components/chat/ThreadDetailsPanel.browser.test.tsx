@@ -154,10 +154,6 @@ function Panel({ fixture }: { fixture: ReturnType<typeof setup> }) {
         activeProjectName={state.workspaceRoot === SCRATCH_ROOT ? "No project" : "plain"}
         activeProjectScripts={undefined}
         preferredScriptId={null}
-        keybindings={[]}
-        availableEditors={[]}
-        showOpenInPicker={false}
-        openInShortcutEnabled={false}
         gitCwd={state.folder}
         workspaceMutationId={null}
         isGitRepo={false}

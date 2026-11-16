@@ -80,9 +80,6 @@ export function MesuraRightPanelSurfaceContent(
         <FilePreviewPanel
           key={`${props.environmentId}:${attachment ? `attachment:${attachment.id}` : files.workspaceRoot}`}
           environmentId={props.environmentId}
-          keybindings={files.keybindings}
-          availableEditors={files.availableEditors}
-          openInShortcutEnabled={files.openInShortcutEnabled}
           cwd={files.workspaceRoot ?? ""}
           projectName={files.projectName ?? ""}
           projectId={files.projectId}
