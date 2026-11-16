@@ -56,6 +56,7 @@ const fixture = vi.hoisted(() => ({
       environmentId: "factory-approval-environment",
       label: "Factory approval environment",
       connection: { phase: "connected" },
+      entry: { enabled: true, target: { _tag: "PrimaryConnectionTarget" } },
       serverConfig: {
         environment: {
           capabilities: {

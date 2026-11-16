@@ -29,6 +29,7 @@ function Probe({
   return null;
 }
 
+// Mesura: composer.dictation is mod+alt+shift+d; mod+shift+d stays the diff toggle.
 const press = (repeat = false) =>
   window.dispatchEvent(
     new KeyboardEvent("keydown", {
@@ -36,6 +37,7 @@ const press = (repeat = false) =>
       code: "KeyD",
       ctrlKey: !/Mac/i.test(navigator.platform),
       metaKey: /Mac/i.test(navigator.platform),
+      altKey: true,
       shiftKey: true,
       cancelable: true,
       repeat,

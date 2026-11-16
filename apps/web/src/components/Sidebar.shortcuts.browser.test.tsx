@@ -39,7 +39,8 @@ vi.mock(import("~/state/server"), async (original) => {
   const { Atom } = await import("effect/reactivity");
   const { compileResolvedKeybindingsConfig } = await import("@t3tools/shared/keybindings");
   const keybindings = compileResolvedKeybindingsConfig([
-    { key: "mod+shift+]", command: "thread.next", when: "!previewFocus && !previewOpen" },
+    // Mesura: the fork's sidebar lists these two threads as b, a, so step backwards from a.
+    { key: "mod+shift+]", command: "thread.previous", when: "!previewFocus && !previewOpen" },
     { key: "mod+1", command: "thread.jump.1", when: "!previewFocus" },
   ]);
   return { ...actual, primaryServerKeybindingsAtom: Atom.make(keybindings) };

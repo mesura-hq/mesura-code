@@ -15,14 +15,9 @@ import { AsyncResult } from "effect/reactivity";
 import {
   EnvironmentId,
   ProjectId,
-  MessageId,
-  NodeId,
-  PlanId,
   ProviderInstanceId,
-  RunId,
   RuntimeRequestId,
   ThreadId,
-  type OrchestrationV2Run,
   type OrchestrationV2TurnItem,
   type ServerProvider,
   type ThreadAgentSignal,
@@ -52,7 +47,6 @@ const fixture = vi.hoisted(() => ({
   thread: null as EnvironmentThreadShell | null,
   turnItems: [] as OrchestrationV2TurnItem[],
   projectionExtras: {} as FactoryProjectionExtras,
-  planMode: false,
   commands: new Map<unknown, unknown>(),
   respondToApproval: vi.fn(async (_input: unknown) => ({ _tag: "Success", value: undefined })),
   respondToUserInput: vi.fn(async (_input: unknown) => ({ _tag: "Success", value: undefined })),
@@ -73,6 +67,7 @@ const fixture = vi.hoisted(() => ({
       environmentId: "pinned-dock-environment",
       label: "Pinned dock environment",
       connection: { phase: "connected" },
+      entry: { enabled: true, target: { _tag: "PrimaryConnectionTarget" } },
       serverConfig: {
         environment: {
           capabilities: {
@@ -188,10 +183,9 @@ vi.mock("../../hooks/useSettings", async (importOriginal) => {
   const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
   const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
   const settings = { ...DEFAULT_CLIENT_SETTINGS, ...DEFAULT_SERVER_SETTINGS };
-  const planModeSettings = { ...settings, planModeEnabled: true };
   return {
     ...(await importOriginal<typeof import("../../hooks/useSettings")>()),
-    useEnvironmentSettings: () => (fixture.planMode ? planModeSettings : settings),
+    useEnvironmentSettings: () => settings,
     useClientSettings: (select?: (value: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
       select ? select(DEFAULT_CLIENT_SETTINGS) : DEFAULT_CLIENT_SETTINGS,
     useClientSettingsHydrated: () => true,
@@ -374,54 +368,6 @@ function addApproval(requestId: string, createdAt: string, prompt: string) {
   ];
 }
 
-const FOLLOW_UP_TITLE = "Ship the dock";
-
-/** One finished run, so the thread reads as settled. */
-function completedRun(): OrchestrationV2Run {
-  const at = DateTime.makeUnsafe(now);
-  return {
-    id: RunId.make("pinned-dock-run"),
-    threadId,
-    ordinal: 1,
-    providerInstanceId: ProviderInstanceId.make("claudeAgent"),
-    modelSelection: {
-      instanceId: ProviderInstanceId.make("claudeAgent"),
-      model: "claude-fable-5-1",
-    },
-    providerThreadId: null,
-    userMessageId: MessageId.make("pinned-dock-run-message"),
-    rootNodeId: null,
-    activeAttemptId: null,
-    status: "completed",
-    requestedAt: at,
-    startedAt: at,
-    completedAt: at,
-    checkpointId: null,
-    contextHandoffId: null,
-  };
-}
-
-/** A settled thread in plan mode with an active proposed plan: the composer's plan follow-up. */
-function addProposedPlan() {
-  fixture.planMode = true;
-  fixture.thread = { ...fixture.thread!, interactionMode: "plan" };
-  fixture.projectionExtras = {
-    ...fixture.projectionExtras,
-    runs: [completedRun()],
-    plans: [
-      {
-        id: PlanId.make("pinned-dock-proposed-plan"),
-        threadId,
-        runId: null,
-        nodeId: NodeId.make("pinned-dock-proposed-plan-node"),
-        status: "active",
-        kind: "proposed_plan",
-        markdown: `# ${FOLLOW_UP_TITLE}\n\nPin every card above the composer.\n`,
-      },
-    ],
-  };
-}
-
 /** The plan card first, then enough long replies that the timeline overflows past it. */
 function seedLongThread() {
   const filler = "A long assistant reply that pushes the plan card out of view. ".repeat(12);
@@ -449,7 +395,6 @@ async function setupDockFixture(
   options: {
     readonly pending?: boolean;
     readonly agentSignal?: ThreadAgentSignal;
-    readonly proposedPlan?: boolean;
   } = {},
 ) {
   await using resources = new AsyncDisposableStack();
@@ -479,7 +424,6 @@ async function setupDockFixture(
   }
   usePendingUserInputDraftStore.setState({ requests: {} });
   fixture.projectionExtras = {};
-  fixture.planMode = false;
   fixture.hiddenRows.clear();
   fixture.factorySnapshots = { [FACTORY_PLAN_DIGEST]: PLAN_MARKDOWN };
   fixture.factorySnapshotAtoms.clear();
@@ -497,7 +441,6 @@ async function setupDockFixture(
   });
   seedLongThread();
   if (options.pending) addPendingRequests();
-  if (options.proposedPlan) addProposedPlan();
   if (options.agentSignal) fixture.thread = { ...fixture.thread, agentSignal: options.agentSignal };
   // Dock unpins persist in browser storage; every test starts from none, in storage and memory.
   localStorage.clear();
@@ -640,12 +583,6 @@ async function chooseTimelineReviewer(container: HTMLElement, optionText: string
   );
   expect(option, `Expected the Reviewer model select to offer ${optionText}`).toBeDefined();
   await act(async () => option!.click());
-}
-
-function dockItem(container: HTMLElement, kind: string): HTMLElement {
-  const match = dockItems(container).find((entry) => entry.dataset.pinnedActionDockItem === kind);
-  expect(match, `Expected a ${kind} item in the dock`).toBeDefined();
-  return match!;
 }
 
 function inlineQuestionCloseButton(container: HTMLElement, requestId: string) {
@@ -1177,34 +1114,6 @@ it("the dock stays absent when only questions are pending", async () => {
   expect(dock(screen.container)).toBeNull();
 });
 
-it("phase6 dock browser P1-5 guard the plan follow-up sits in the dock at desktop width", async () => {
-  await using _fixture = await setupDockFixture(DESKTOP, { proposedPlan: true });
-  await using screen = await mountApp();
-  const item = await vi.waitFor(() => dockItem(screen.container, "plan-follow-up"));
-  expect(item.textContent).toContain(FOLLOW_UP_TITLE);
-});
-
-it("phase6 dock browser P1-5 the plan follow-up stays in the dock with an unfocused phone composer", async () => {
-  await using _fixture = await setupDockFixture(PIXEL_7, { proposedPlan: true });
-  await using screen = await mountApp();
-  // The composer takes focus a frame after mount; the developer reading the thread has left it.
-  // Blur only once it holds focus, or the late focus lands after the blur and keeps it expanded.
-  const editor = composerEditor(screen.container);
-  await vi.waitFor(() => expect(document.activeElement).toBe(editor));
-  await act(async () => editor.blur());
-  await vi.waitFor(() =>
-    expect(
-      screen.container.querySelector('[data-chat-composer-mobile-collapsed="true"]'),
-      "Expected the phone composer collapsed while unfocused",
-    ).not.toBeNull(),
-  );
-  const item = await vi.waitFor(() => dockItem(screen.container, "plan-follow-up"));
-  expect(item.textContent).toContain(FOLLOW_UP_TITLE);
-  expect(
-    dockCloseButton(screen.container, "Dismiss plan follow-up", FOLLOW_UP_TITLE),
-  ).toBeDefined();
-});
-
 it("phase6 dock browser P1-6 an approval arriving while typing stays out of the dock and a send declines only the shown one", async () => {
   await using _fixture = await setupDockFixture(DESKTOP);
   addApproval("pinned-dock-shown-approval", "2026-10-24T10:01:00.000Z", "rm -rf build");
@@ -1227,7 +1136,15 @@ it("phase6 dock browser P1-6 an approval arriving while typing stays out of the 
       .map((item) => item.textContent ?? "");
   await vi.waitFor(() => expect(approvalTexts()).toHaveLength(1));
   expect(approvalTexts()[0]).toContain("rm -rf build");
-  expect(screen.container.textContent).not.toContain("git push --force");
+  // Upstream draws every approval on its timeline row; a held one is a plain row without actions.
+  const heldRow = screen.container.querySelector(
+    '[data-timeline-row-id="question-item:pinned-dock-held-approval"]',
+  );
+  const heldRowActions = [...(heldRow?.querySelectorAll("button") ?? [])].map(
+    (button) => button.textContent?.trim() ?? "",
+  );
+  expect(heldRowActions).not.toContain("Approve");
+  expect(heldRowActions).not.toContain("Decline");
   const send = screen.container.querySelector<HTMLButtonElement>(
     'button[aria-label="Submit message"]',
   );

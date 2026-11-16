@@ -17,6 +17,8 @@ import type { ChatComposerHandle } from "../chat/ChatComposer";
 import { useChatShortcuts } from "../chat/useChatShortcuts";
 import { useReviewGuideWriter } from "./guide/useReviewGuideWriter";
 import { PullRequestGuideTab } from "./PullRequestGuideTab";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import { __setClientSettingsForTests } from "~/hooks/useSettings";
 
 const reference: PullRequestRef = {
   projectId: ProjectId.make("project"),
@@ -138,6 +140,8 @@ function ChatBeside({
 }
 
 it("steps with J and K beside a chat, also after a stop button or while the chat is maximized away", async () => {
+  // Mesura: Vim mode, on by default here, keeps typed keys out of the composer.
+  __setClientSettingsForTests({ ...DEFAULT_CLIENT_SETTINGS, vimMode: false });
   vi.mocked(useReviewGuideWriter).mockReturnValue({
     query: { isPending: false, error: null } as never,
     data: { guide: threeStopGuide, run: null, currentHeadSha: "head" },

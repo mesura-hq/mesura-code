@@ -164,11 +164,14 @@ const NO_PROJECTION_EXTRAS: FactoryProjectionExtras = {};
 
 // Keep hooks at module scope. A nested hook factory lets React Compiler hoist
 // fixture reads outside their closure, which produced "fixture is not defined".
+// A null ref reads no thread, as the real hook does: the tab strip asks with null for non-chat tabs.
 function useFactoryFixtureThreadShell(
   fixture: FactoryThreadFixture,
   subscribe: FactoryFixtureSubscribe,
+  ref?: unknown,
 ) {
-  return useSyncExternalStore(subscribe, () => fixture.thread);
+  const thread = useSyncExternalStore(subscribe, () => fixture.thread);
+  return ref === null ? null : thread;
 }
 
 function useFactoryFixtureThreadProjection(
@@ -226,5 +229,6 @@ export function factoryThreadFixtureReads(fixture: FactoryThreadFixture) {
         : makeFactoryThreadProjection(fixture.thread, fixture.turnItems),
     useThreadStatus: () => "live",
     useThreadVisibleTurnItems,
+    useTimelineVisibleTurnItems: useThreadVisibleTurnItems,
   };
 }

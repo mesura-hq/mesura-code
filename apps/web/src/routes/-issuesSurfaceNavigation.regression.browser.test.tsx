@@ -41,7 +41,13 @@ vi.mock("~/state/entities", async (importOriginal) => ({
 }));
 vi.mock("~/state/pullRequests", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/state/pullRequests")>()),
-  usePullRequestList: () => ({ data: null, error: null, isPending: false, refresh: () => {} }),
+  usePullRequestList: () => ({
+    data: null,
+    error: null,
+    isPending: false,
+    observations: [],
+    refresh: () => {},
+  }),
   usePullRequestListStats: () => ({ stats: null, isPending: false, refresh: () => {} }),
   usePullRequestTurnRefreshes: () => [],
 }));

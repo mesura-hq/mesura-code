@@ -102,7 +102,10 @@ export const CLAUDE_PROVIDER = {
 };
 
 const decodeServerConfig = Schema.decodeUnknownSync(ServerConfig);
-const makeServerConfig = (providers: ReadonlyArray<unknown>): ServerConfig => ({
+const makeServerConfig = (
+  providers: ReadonlyArray<unknown>,
+  settings: Record<string, unknown> = {},
+): ServerConfig => ({
   ...decodeServerConfig({
     environment: descriptor,
     auth,
@@ -118,7 +121,7 @@ const makeServerConfig = (providers: ReadonlyArray<unknown>): ServerConfig => ({
       otlpTracesEnabled: false,
       otlpMetricsEnabled: false,
     },
-    settings: {},
+    settings,
     threadSnapshotPagination: true,
     threadResumeCompletionMarker: true,
     shellResumeCompletionMarker: true,
@@ -566,10 +569,12 @@ export function installFakeEnvironment(
     /** Commands left unanswered even when accepting, until `rejectPendingCommand`. */
     readonly holdCommand?: (command: OrchestrationV2Command) => boolean;
     readonly providers?: ReadonlyArray<unknown>;
+    /** Mesura: server settings the environment reports, such as `idleCompactionEnabled`. */
+    readonly settings?: Record<string, unknown>;
   },
 ): Disposable {
   threads = fixtures;
-  baseServerConfig = makeServerConfig(options?.providers ?? [CODEX_PROVIDER]);
+  baseServerConfig = makeServerConfig(options?.providers ?? [CODEX_PROVIDER], options?.settings);
   dispatched = [];
   acceptCommands = options?.acceptCommands === true;
   projects = [

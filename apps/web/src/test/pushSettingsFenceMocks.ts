@@ -162,9 +162,16 @@ export async function mockEnvironments(original: () => Promise<object>) {
   };
 }
 
+// Spreading the real module closes an import cycle with the mocked environments module.
 export async function mockPrimaryEnvironment() {
   const { Atom } = await import("effect/reactivity");
-  return { primaryEnvironmentIdAtom: Atom.make(PUSH_FENCE_PRIMARY_ENVIRONMENT_ID) };
+  const primaryEnvironmentIdAtom = Atom.make(PUSH_FENCE_PRIMARY_ENVIRONMENT_ID);
+  return {
+    primaryEnvironmentIdAtom,
+    hostEnvironmentIdAtom: Atom.make<string | null>(null),
+    themeEnvironmentIdAtom: primaryEnvironmentIdAtom,
+    startHostEnvironmentLookup: () => {},
+  };
 }
 
 function makeSubscription(): FakeSubscription {

@@ -126,6 +126,15 @@ vi.mock("../state/query", async (original) => ({
   ...(await original<typeof import("../state/query")>()),
   useEnvironmentQuery: () => ({ data: scopes.sourceControl, isLoading: false }),
 }));
+// Mesura: the atom mock above answers [] for every atom, which these dialog hosts read as open.
+vi.mock("./projects/ProjectIconDiscoveryDialog", async (original) => ({
+  ...(await original<typeof import("./projects/ProjectIconDiscoveryDialog")>()),
+  ProjectIconDiscoveryDialogHost: () => null,
+}));
+vi.mock("./dictation/TranscriptionsList", async (original) => ({
+  ...(await original<typeof import("./dictation/TranscriptionsList")>()),
+  TranscriptionsListHost: () => null,
+}));
 vi.mock("./settings/useAvailableSettingsSearchItems", () => ({
   useAvailableSettingsSearchItems: () => [],
 }));

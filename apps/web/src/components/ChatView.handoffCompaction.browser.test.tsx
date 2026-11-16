@@ -82,6 +82,8 @@ it("sends a Codex follow-up on a cold Claude thread without compacting first", a
   using _environment = installFakeEnvironment([thread], {
     acceptCommands: true,
     providers: [CLAUDE_PROVIDER, CODEX_PROVIDER],
+    // Mesura: the composer suggests compaction only once idle compaction is on.
+    settings: { idleCompactionEnabled: true },
   });
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,

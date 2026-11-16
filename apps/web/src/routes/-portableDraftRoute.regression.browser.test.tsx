@@ -243,9 +243,10 @@ vi.mock("@t3tools/client-runtime/state/runtime", async (original) => ({
     };
   },
 }));
-vi.mock("../components/ui/sidebar", async (original) => ({
-  ...(await original<typeof import("../components/ui/sidebar")>()),
+// Not spread from the real module: it imports itself back through the sidebar command host.
+vi.mock("../components/ui/sidebar", () => ({
   SidebarInset: ({ children }: PropsWithChildren) => <main>{children}</main>,
+  useMobileSidebarSheetMounted: () => false,
 }));
 vi.mock("../components/chat/ChatComposer", () => ({
   ChatComposer: () => <div data-testid="composer" />,
