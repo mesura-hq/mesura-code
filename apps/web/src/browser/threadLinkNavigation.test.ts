@@ -21,6 +21,7 @@ import {
   navigateThreadLink,
   notifyThreadLinkTransport,
   registerThreadLinkTransport,
+  isThreadLinkCancelled,
   ThreadLinkCancelled,
   ThreadLinkNavigationError,
 } from "./threadLinkNavigation";
@@ -113,6 +114,7 @@ function stream() {
     ),
     history: () => {},
     reload: () => {},
+    stopLoading: () => {},
     viewport: () => {},
     canvas: () => null,
   };
@@ -144,7 +146,7 @@ it("thread link transport guard: a disconnect before the first control grant can
   const owner = signal();
   let cancelled = false;
   const opening = navigateThreadLink(target, url, owner.signal).catch((error: unknown) => {
-    cancelled = error instanceof ThreadLinkCancelled;
+    cancelled = isThreadLinkCancelled(error);
   });
   try {
     socket.dispatchEvent(Object.assign(new Event("close"), { code: 1000, reason: "" }));
@@ -280,6 +282,7 @@ function native() {
         [target.tabId]: {
           hasWebContents: true,
           loading: false,
+          navStatus: { _tag: "Idle" },
           canGoBack: false,
           canGoForward: false,
           zoomFactor: 1,

@@ -139,9 +139,10 @@ const makeHarness = Effect.fn("BackgroundSyncTest.makeHarness")(function* () {
   const session: RpcSession = {
     client,
     initialConfig: Effect.succeed({ threadResumeCompletionMarker: true } as never),
-    subscribeServerConfig: (input) => client.subscribeServerConfig(input),
+    subscribeServerConfig: (input = {}) => client.subscribeServerConfig(input),
     ready: Effect.void,
     probe: Effect.void,
+    inboundFrames: Effect.succeed(0),
     closed: Effect.never,
   };
   const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
@@ -170,7 +171,7 @@ const makeHarness = Effect.fn("BackgroundSyncTest.makeHarness")(function* () {
     networkStatus: yield* SubscriptionRef.make<NetworkStatus>("online"),
     start: Effect.void,
     register: unexpected("environment registration"),
-    registerPlatform: unexpected("environment registration"),
+    assertKnownAddress: unexpected("address validation"),
     reconcilePlatform: unexpected("environment reconciliation"),
     remove: unexpected("environment removal"),
     removeRoute: unexpected("route removal"),

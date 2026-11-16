@@ -61,6 +61,7 @@ const fixture = vi.hoisted(() => ({
       environmentId: "factory-run-environment",
       label: "Factory run environment",
       connection: { phase: "connected" },
+      entry: { enabled: true, target: { _tag: "PrimaryConnectionTarget" } },
       serverConfig: {
         environment: {
           capabilities: {
@@ -243,6 +244,7 @@ vi.mock("../components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 
 // Keep timeline rows mounted so card assertions do not depend on list virtualization.
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => {},
   LegendList: ({
     data,
     renderItem,
@@ -725,8 +727,8 @@ it("phase9 web AC1 keeps the run opened maximized when a narrow window that open
   await mountApp();
   await openRunFromCard();
   expect(factoryTab("Run").getAttribute("aria-pressed")).toBe("true");
-  // As a sheet the pane covers the chat by itself; nothing is maximized away.
-  expect(document.querySelector('[data-chat-column-maximized-away="true"]')).toBeNull();
+  // Upstream keeps a maximized panel inline in a narrow window too, instead of a sheet.
+  expect(document.querySelector('[data-chat-column-maximized-away="true"]')).not.toBeNull();
 
   await resizeTo(1440);
 
@@ -1255,7 +1257,7 @@ it("report card opens a video capture in the app's media viewer", async () => {
   const play = row.querySelector('button[aria-label="Play The export downloading."]');
   expect(play).not.toBeNull();
   await click(play!);
-  expect(document.querySelector('[aria-label="Close video preview"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="Back, close video preview"]')).not.toBeNull();
 });
 
 it("opens the run card's trace from the keyboard and walks into its phase lanes", async () => {

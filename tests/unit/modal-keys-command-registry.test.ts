@@ -105,6 +105,15 @@ function registeredCommands(source: string): Set<string> {
       }
       return;
     }
+    // `Object.fromEntries(Object.entries(handlers).map(...))` bridges every entry of a named map.
+    if (
+      map.slice(0, 8).join(" ") === "Object . fromEntries ( Object . entries (" &&
+      map[9] === ")" &&
+      map.slice(10, 13).join(" ") === ". map ("
+    ) {
+      visitMap([map[8]!], visited);
+      return;
+    }
     if (map.slice(0, 5).join(" ") !== "Object . fromEntries ( [") return;
     const arrayEnd = closingToken(map, 4);
     if (map.slice(arrayEnd + 1, arrayEnd + 5).join(" ") !== ". map ( (") return;

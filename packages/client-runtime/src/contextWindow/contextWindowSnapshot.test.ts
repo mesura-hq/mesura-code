@@ -4,6 +4,7 @@
  * `formatContextWindowTokens` from the public subpath
  * `@t3tools/client-runtime/context-window`.
  */
+import { ProviderThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -17,6 +18,7 @@ const UPDATED_AT = DateTime.makeUnsafe("2026-10-04T00:00:00.000Z");
 describe("shared context-window snapshot", () => {
   it("carries the cache-creation pair from the provider thread's usage", () => {
     const snapshot = deriveLatestContextWindowSnapshot([], null, {
+      id: ProviderThreadId.make("active-provider-thread"),
       contextUsage: {
         usedTokens: 64_223,
         maxTokens: 200_000,
@@ -34,6 +36,7 @@ describe("shared context-window snapshot", () => {
 
   it("leaves the cache-creation pair null when the usage omits it", () => {
     const snapshot = deriveLatestContextWindowSnapshot([], null, {
+      id: ProviderThreadId.make("active-provider-thread"),
       contextUsage: { usedTokens: 14_000, maxTokens: 258_000 },
       updatedAt: UPDATED_AT,
     });
@@ -50,6 +53,7 @@ describe("shared context-window snapshot", () => {
       updatedAt: "2026-10-04T00:00:00.000Z",
     });
     const persisted = deriveLatestContextWindowSnapshot([], null, {
+      id: ProviderThreadId.make("active-provider-thread"),
       contextUsage: { usedTokens: 537_750, maxTokens: 1_000_000, autoCompactThreshold: 717_000 },
       updatedAt: UPDATED_AT,
     });

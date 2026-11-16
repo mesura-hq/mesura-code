@@ -69,3 +69,15 @@ export class ServerCliWebClientMissingError extends Schema.TaggedError<ServerCli
     return `Missing web client build: ${this.webClientPath}. Without it the server package serves 503 to every browser and mobile client. Run \`vp run --filter t3 build\`, which builds the web client first, or pass --allow-missing-client for a deliberate server-only bundle.`;
   }
 }
+
+export class ServerCliBootstrapTooLargeError extends Schema.TaggedError<ServerCliBootstrapTooLargeError>()(
+  "ServerCliBootstrapTooLargeError",
+  {
+    bootstrapPath: Schema.String,
+    bytes: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return `${this.bootstrapPath} is ${this.bytes} bytes. The CLI was bundled into the executable bootstrap; keep ./binMain.ts external.`;
+  }
+}

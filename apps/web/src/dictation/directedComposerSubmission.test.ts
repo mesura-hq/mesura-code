@@ -108,8 +108,7 @@ it("passes create-thread and prepare-worktree bootstrap for a reserved new chat"
   assert.equal(starts[0]?.input.threadId, threadId);
 });
 
-// Acceptance: the plan follow-up uses the same mode decision as the composer.
-it("submits current plan follow-up text in plan mode", async () => {
+it("sends dictation in the default interaction mode for an existing plan thread", async () => {
   const starts: Array<{ input: { interactionMode: string; message: { text: string } } }> = [];
   const executor = createDirectedComposerExecutor({
     startTurn: async (input) => {
@@ -117,18 +116,8 @@ it("submits current plan follow-up text in plan mode", async () => {
       return true;
     },
   });
-
-  await executor.submit(
-    normalSubmission({
-      pendingAction: {
-        kind: "plan-follow-up",
-        planId: "plan-a",
-        planMarkdown: "# Existing plan",
-      },
-    }),
-  );
-
-  assert.equal(starts[0]?.input.interactionMode, "plan");
+  await executor.submit(normalSubmission({ interactionMode: "plan" }));
+  assert.equal(starts[0]?.input.interactionMode, "default");
   assert.equal(starts[0]?.input.message.text, "typed context [voiced] dictated words");
 });
 

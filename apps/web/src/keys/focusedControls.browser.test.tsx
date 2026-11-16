@@ -125,6 +125,7 @@ it("gives the real minimap arrows, Home, End, Enter and Space without a leader",
       <ChatBufferFixture />
       <TimelineMinimap
         hasPersistentGutter
+        atEnd={false}
         hitStripWidth={40}
         currentIndex={0}
         items={items}

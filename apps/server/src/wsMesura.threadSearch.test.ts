@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // Mesura: search conversations over two WebSocket connections (ADR-010). `layerWsRpcMesura` is
 // built per connection on one server-scope context, as `ws.ts` does, and called through
 // `RpcTest` clients; each is client 0 on its own server, as every WebSocket has its own RPC
@@ -69,7 +70,7 @@ it.effect("ws search chat spec: two connections starting at once share one searc
     // One server-scope starter prepares the workspace and project once; a
     // starter per connection would prepare them once per connection.
     assert.equal(yield* Ref.get(serverScope.projectCreates), 1);
-  }).pipe(Effect.scoped),
+  }).pipe(Effect.scoped, Effect.provide(NodeCrypto.layer)),
 );
 
 it.effect(
@@ -107,5 +108,5 @@ it.effect(
 
       yield* owner[THREAD_SEARCH_WS_METHODS.threadSearchToolRespond](response);
       assert.deepEqual(yield* Fiber.join(caller), NO_MATCH);
-    }).pipe(Effect.scoped),
+    }).pipe(Effect.scoped, Effect.provide(NodeCrypto.layer)),
 );

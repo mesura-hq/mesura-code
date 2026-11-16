@@ -375,9 +375,9 @@ export function usePaneNavigation(
   keybindings: ResolvedKeybindingsConfig,
   activeThreadKey: string | null = null,
 ): void {
-  // oxlint-disable-next-line t3code/react-effect-budget -- registers the open thread's row in the module's pane-entry registry while it is active
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the open thread's row in the module's pane-entry registry while it is active
   useEffect(() => registerSidebarThreadEntry(activeThreadKey), [activeThreadKey]);
-  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes document focus listeners that mirror drawer focus onto <html>
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes document focus listeners that mirror drawer focus onto <html>
   useEffect(
     () =>
       registerDrawerFocusMark({
@@ -387,7 +387,7 @@ export function usePaneNavigation(
       }),
     [],
   );
-  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes capture-phase window and document listeners plus a MutationObserver
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes capture-phase window and document listeners plus a MutationObserver
   useEffect(
     () =>
       registerPaneNavigation({

@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics nodeBuiltinImport:off - the replay spec edits the closed SQLite file directly.
 // Phase 2 fence: persisted voice history, exercised through the real voice HTTP entry point
 // (`voiceConversationHttpApiLayer` served by `HttpApiBuilder.layer` + `HttpRouter.toWebHandler`)
@@ -57,7 +58,9 @@ const VOICE_EVENT_TYPES = new Set([
   "thread.voice-call-ended",
 ]);
 
-class VoiceTestApi extends HttpApi.make("environment").add(EnvironmentHttpApi.groups.voice) {}
+class VoiceTestApi extends HttpApi.make("environment").add(
+  EnvironmentHttpApi.groups.voiceConversation,
+) {}
 
 const cookiePrincipal = (
   sessionId: string,
@@ -130,7 +133,8 @@ const threadContextLayer = Layer.mock(ThreadManagementService.ThreadManagementSe
         ? ({ id: threadId, title: "Voice history thread", status: "idle" } as never)
         : null,
     ),
-  getTimelinePage: () => Effect.succeed({ items: [], totalItems: 0, hasMore: false }),
+  getTimelinePage: () =>
+    Effect.succeed({ items: [], totalItems: 0, hasMore: false, hasEarlier: false }),
 });
 
 const makeServerLayer = (databasePath: string) =>
@@ -138,7 +142,7 @@ const makeServerLayer = (databasePath: string) =>
     Layer.provideMerge(OrchestrationEventStore.layer),
     Layer.provideMerge(SqlitePersistence.layerFromPath(databasePath)),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-voice-history-test-" })),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
   );
 
 type ServerServices = OrchestrationEventStore.OrchestrationEventStore | SqlClient.SqlClient;
@@ -182,11 +186,11 @@ const startServer = Effect.fn("startServer")(function* (databasePath: string, cl
     Layer.provide(Layer.succeedContext(services)),
     Layer.provideMerge(
       HttpPlatform.layer.pipe(
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
         Layer.provideMerge(Etag.layerWeak),
       ),
     ),
-    Layer.provide(NodeServices.layer),
+    Layer.provide(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
   );
   const web = HttpRouter.toWebHandler(routesLayer, { disableLogger: true });
   // Finalizers run in reverse: the HTTP routes and their call manager close before the store.
@@ -556,7 +560,7 @@ const voiceProjectionCounts = (databasePath: string) => {
 const headSequence = (server: RunningServer) =>
   readEvents(server, 0).pipe(Effect.map((events) => events.at(-1)?.sequence ?? 0));
 
-it.layer(NodeServices.layer, { excludeTestServices: true })(
+it.layer(Layer.merge(NodeServices.layer, NodeCrypto.layer), { excludeTestServices: true })(
   "persisted voice history phase 2 fence",
   (it) => {
     it.effect(

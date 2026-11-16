@@ -1,4 +1,4 @@
-import { type ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -10,7 +10,8 @@ import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useThreadLinkOwner } from "./useThreadLinkOwner";
 import { openThreadLinkInPreview } from "./openThreadLinkInPreview";
-import { BrowserSettingsReadError } from "./openFileInPreview";
+
+import { isBrowserSettingsReadError } from "./openFileInPreview";
 
 const NO_MODIFIER = { metaKey: false, ctrlKey: false } as const;
 
@@ -43,7 +44,7 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
     if (result._tag !== "System") {
       if (isAtomCommandInterrupted(result) || result._tag === "Success") return;
       const failure = squashAtomCommandFailure(result);
-      if (failure instanceof BrowserSettingsReadError) throw failure;
+      if (isBrowserSettingsReadError(failure)) throw failure;
       if (options.reportPreviewFailure) options.reportPreviewFailure(result.cause);
       else console.error(result.cause);
       if (options.fallbackOnFailure === false) return;

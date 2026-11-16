@@ -104,7 +104,11 @@ vi.mock("./state/entities", async (original) => {
     }).pipe(Atom.setIdleTTL(0)),
   );
   // Keep the production quiet/live derivations in this render-cost fence.
-  const shells = createEnvironmentThreadShellAtoms({ catalogValueAtom, snapshotAtom });
+  const shells = createEnvironmentThreadShellAtoms({
+    catalogValueAtom,
+    snapshotAtom,
+    hiddenThreadTagsAtom: () => Atom.make(null),
+  });
   const emptyShell = Atom.make(null);
   return {
     ...(await mocks.mockEntities(original)),
@@ -134,6 +138,18 @@ vi.mock("./state/use-atom-command", async (original) => {
       command.label.startsWith("environment-data:editor-session:")
         ? actual.useAtomCommand(command as never, options as never)
         : fixtureCommand()) as typeof actual.useAtomCommand,
+  };
+});
+// File save sessions run outside React; editor session commands still reach the harness.
+vi.mock(import("@t3tools/client-runtime/state/runtime"), async (original) => {
+  const actual = await original();
+  const fixtureCommand = (await fenceMocks()).mockAtomCommand().useAtomCommand();
+  return {
+    ...actual,
+    runAtomCommand: ((...args: Parameters<typeof actual.runAtomCommand>) =>
+      args[1].label === "environment-data:projects:write-file"
+        ? fixtureCommand()
+        : actual.runAtomCommand(...args)) as typeof actual.runAtomCommand,
   };
 });
 vi.mock("./state/use-atom-query-runner", async () => (await fenceMocks()).mockAtomQueryRunner());
@@ -191,9 +207,6 @@ const fenceKeybindings = vi.hoisted(() => async () => {
 vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
-vi.mock("./components/LegacySidebar", async () =>
-  (await fenceMocks()).mockRendersNothing("default"),
-);
 vi.mock("./components/preview/PreviewAutomationHosts", async () =>
   (await fenceMocks()).mockRendersNothing("PreviewAutomationHosts"),
 );
@@ -639,7 +652,7 @@ describe("editor keys and the sidebar (phase 4, criterion 2)", () => {
     const firstJumpLabel = shortcutLabelForCommand(await fenceKeybindings(), "thread.jump.1");
     expect(firstJumpLabel, "precondition: thread.jump.1 has a binding").toBeTruthy();
     const jumpHintsShown = () =>
-      [...container.querySelectorAll("span[aria-hidden]")].some(
+      [...container.querySelectorAll("[data-jump-hint][aria-hidden]")].some(
         (element) => element.textContent === firstJumpLabel,
       );
     const control = { key: "Control", code: "ControlLeft", ctrlKey: true, keyCode: 17 };

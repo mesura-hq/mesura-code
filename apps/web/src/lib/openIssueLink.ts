@@ -151,7 +151,7 @@ export function useOpenIssueReference(
   });
   const owner = useRef({});
   const threadKey = threadRef === undefined ? null : scopedThreadKey(threadRef);
-  // oxlint-disable-next-line t3code/react-effect-budget -- cleanup only: an unmounting message drops the activation it still owns
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- cleanup only: an unmounting message drops the activation it still owns
   useEffect(
     () => () => {
       if (threadKey !== null && latestActivationByThread.get(threadKey)?.owner === owner.current) {

@@ -1,3 +1,4 @@
+import * as PlatformError from "effect/PlatformError";
 /**
  * Only the `projectIcons.discover` RPC starts a Luna icon search; no lifecycle event
  * or replay reaches the model. Each request is a durable job, run one model call at a
@@ -174,9 +175,17 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
             effectiveSource: existing.source,
           } as const;
         }
-        const candidates = yield* Effect.tryPromise(() =>
-          collectProjectIconCandidates(project.workspaceRoot),
-        );
+        const candidates = yield* Effect.tryPromise({
+          try: () => collectProjectIconCandidates(project.workspaceRoot),
+          catch: (cause) =>
+            PlatformError.systemError({
+              _tag: "Unknown",
+              module: "FileSystem",
+              method: "collectProjectIconCandidates",
+              pathOrDescriptor: project.workspaceRoot,
+              cause,
+            }),
+        });
         return candidates.length > 0
           ? ({ status: "ready", candidates } as const)
           : ({
@@ -272,9 +281,17 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
     // decider's generation check owns that.
     const valid =
       inspection.candidates.some((candidate) => candidate.path === selectedPath) &&
-      (yield* Effect.tryPromise(() =>
-        validateProjectIconCandidate(project.workspaceRoot, selectedPath),
-      ).pipe(Effect.orElseSucceed(() => false)));
+      (yield* Effect.tryPromise({
+        try: () => validateProjectIconCandidate(project.workspaceRoot, selectedPath),
+        catch: (cause) =>
+          PlatformError.systemError({
+            _tag: "Unknown",
+            module: "FileSystem",
+            method: "validateProjectIconCandidate",
+            pathOrDescriptor: selectedPath,
+            cause,
+          }),
+      }).pipe(Effect.orElseSucceed(() => false)));
     if (!valid) {
       return yield* finish(
         job,

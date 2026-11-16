@@ -27,6 +27,7 @@ type EarlyLinuxElectronOptionsInput = EarlyDesktopSettingsInput;
 
 export interface EarlyLinuxElectronOptions {
   readonly isDevelopment: boolean;
+  // Mesura: the window class matches the fork's own desktop entry (brand-assets.ts).
   readonly linuxWmClass: string;
   readonly linuxDesktopEntryName: string;
   readonly passwordStore: LinuxPasswordStoreSwitch | null;

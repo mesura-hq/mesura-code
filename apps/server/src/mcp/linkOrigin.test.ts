@@ -1,3 +1,4 @@
+import * as DocumentText from "../provider/DocumentText.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -15,6 +16,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { McpSchema, McpServer } from "effect/ai";
 
 import * as ServerConfig from "../config.ts";
@@ -30,8 +32,8 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as ProjectService from "../project/ProjectService.ts";
-import * as DocumentText from "../provider/DocumentText.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -117,7 +119,8 @@ const layerTools = Layer.mergeAll(
   McpHttpServer.layerThreadToolkit,
   McpHttpServer.layerProjectRegistration,
 ).pipe(
-  Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
+  Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
   Layer.provide(layerLaunches),
   Layer.provide(NodeCrypto.layer),
   Layer.provide(
@@ -129,10 +132,23 @@ const layerTools = Layer.mergeAll(
     }),
   ),
   Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
-  Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
   Layer.provide(
     Layer.mock(ProjectService.ProjectService)({
-      getById: () => Effect.succeedNone,
+      getById: (id) =>
+        Effect.succeed(
+          id === projectId
+            ? Option.some({
+                id,
+                title: "t3code",
+                workspaceRoot: "/p/t3code",
+                defaultModelSelection: null,
+                scripts: [],
+                createdAt: "2026-10-18T00:00:00.000Z",
+                updatedAt: "2026-10-18T00:00:00.000Z",
+                deletedAt: null,
+              })
+            : Option.none(),
+        ),
       create: (input) =>
         Effect.succeed({
           id: input.projectId,
@@ -157,6 +173,7 @@ const layerTools = Layer.mergeAll(
         }),
     }),
   ),
+  Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
   Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
   Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
   Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),

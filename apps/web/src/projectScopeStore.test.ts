@@ -96,3 +96,13 @@ describe("projectScopeStore toggleAllProjects", () => {
     expect(useProjectScopeStore.getInitialState().lastProjectScopeKey).toBe(null);
   });
 });
+
+it("restores every selected project after toggling to all projects", () => {
+  const store = useProjectScopeStore.getState();
+  store.setProjectScopeKeys(["project-a", "project-b", "project-a"]);
+  expect(useProjectScopeStore.getState().projectScopeKeys).toEqual(["project-a", "project-b"]);
+  store.toggleAllProjects();
+  expect(useProjectScopeStore.getState().projectScopeKeys).toEqual([]);
+  store.toggleAllProjects();
+  expect(useProjectScopeStore.getState().projectScopeKeys).toEqual(["project-a", "project-b"]);
+});

@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 /**
  * Covers the OpenAI key in the secret store, redacted by `redactServerSettingsForClient` (which
  * every settings payload in `ws.ts` passes through), and the RPC scopes that
@@ -19,6 +20,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import { requiredScopeForRpcMethod } from "../auth/RpcAuthorization.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -26,7 +28,7 @@ import * as ServerSettingsModule from "../serverSettings.ts";
 
 const makeSettingsLayer = () =>
   ServerSettingsModule.layer.pipe(
-    Layer.provide(ServerSecretStore.layer),
+    Layer.provide(Layer.merge(ServerSecretStore.layer, ManagedPolicy.layerTest())),
     Layer.provideMerge(Layer.fresh(SqlitePersistence.layerMemory)),
     Layer.provideMerge(
       Layer.fresh(ServerConfig.layerTest(process.cwd(), { prefix: "dictation-rpc-settings-" })),
@@ -39,7 +41,9 @@ const reloadSettings = Effect.gen(function* () {
   return yield* fresh.getSettings;
 }).pipe(
   Effect.provide(
-    Layer.fresh(ServerSettingsModule.layer).pipe(Layer.provide(ServerSecretStore.layer)),
+    Layer.fresh(ServerSettingsModule.layer).pipe(
+      Layer.provide(Layer.merge(ServerSecretStore.layer, ManagedPolicy.layerTest())),
+    ),
   ),
 );
 
@@ -54,127 +58,140 @@ const OPENAI_KEY = "sk-dictation-ac6-secret";
 const usageLimitRedactionMarker = Effect.gen(function* () {
   const service = yield* ServerSettingsModule.ServerSettingsService;
   const settings = yield* service.getSettings;
-  return ServerSettingsModule.redactServerSettingsForClient({
-    ...settings,
-    usageLimitSources: {
-      [HUB_ID]: {
-        kind: "cliproxy",
-        url: "http://hub.test:8317",
-        managementKey: "x",
-        enabled: true,
+  return ServerSettingsModule.redactServerSettingsForClient(
+    {
+      ...settings,
+      usageLimitSources: {
+        [HUB_ID]: {
+          kind: "cliproxy",
+          url: "http://hub.test:8317",
+          managementKey: "x",
+          enabled: true,
+        },
       },
     },
-  }).usageLimitSources[HUB_ID]!.managementKey;
+    { secretReferences: false },
+  ).usageLimitSources[HUB_ID]!.managementKey;
 });
 
-it.layer(NodeServices.layer)("DictationRpc phase 1 fence: settings", (it) => {
-  it.effect(
-    "dictation phase 1 guard: the usage-limit managementKey lives in the secret store and reaches clients as the marker",
-    () =>
-      Effect.gen(function* () {
-        const service = yield* ServerSettingsModule.ServerSettingsService;
-        const config = yield* ServerConfig.ServerConfig;
-        const fs = yield* FileSystem.FileSystem;
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
+  "DictationRpc phase 1 fence: settings",
+  (it) => {
+    it.effect(
+      "dictation phase 1 guard: the usage-limit managementKey lives in the secret store and reaches clients as the marker",
+      () =>
+        Effect.gen(function* () {
+          const service = yield* ServerSettingsModule.ServerSettingsService;
+          const config = yield* ServerConfig.ServerConfig;
+          const fs = yield* FileSystem.FileSystem;
 
-        yield* service.updateSettings({
-          usageLimitSources: {
-            [HUB_ID]: {
-              kind: "cliproxy",
-              url: "http://hub.test:8317",
-              managementKey: HUB_KEY,
-              enabled: true,
+          yield* service.updateSettings({
+            usageLimitSources: {
+              [HUB_ID]: {
+                kind: "cliproxy",
+                url: "http://hub.test:8317",
+                managementKey: HUB_KEY,
+                enabled: true,
+              },
             },
-          },
-        });
+          });
 
-        assert.notInclude(yield* fs.readFileString(config.settingsPath), HUB_KEY);
-        const settings = yield* service.getSettings;
-        assert.strictEqual(settings.usageLimitSources[HUB_ID]?.managementKey, HUB_KEY);
-        assert.strictEqual(
-          (yield* reloadSettings).usageLimitSources[HUB_ID]?.managementKey,
-          HUB_KEY,
-        );
+          assert.notInclude(yield* fs.readFileString(config.settingsPath), HUB_KEY);
+          const settings = yield* service.getSettings;
+          assert.strictEqual(settings.usageLimitSources[HUB_ID]?.managementKey, HUB_KEY);
+          assert.strictEqual(
+            (yield* reloadSettings).usageLimitSources[HUB_ID]?.managementKey,
+            HUB_KEY,
+          );
 
-        const redacted = ServerSettingsModule.redactServerSettingsForClient(settings);
-        const marker = redacted.usageLimitSources[HUB_ID]?.managementKey;
-        assert.strictEqual(marker, "•".repeat(6));
-        assert.notInclude(toClientJson(redacted), HUB_KEY);
+          const redacted = ServerSettingsModule.redactServerSettingsForClient(settings, {
+            secretReferences: false,
+          });
+          const marker = redacted.usageLimitSources[HUB_ID]?.managementKey;
+          assert.strictEqual(marker, "•".repeat(6));
+          assert.notInclude(toClientJson(redacted), HUB_KEY);
 
-        // Sending the marker back keeps the stored key.
-        yield* service.updateSettings({
-          usageLimitSources: {
-            [HUB_ID]: {
-              kind: "cliproxy",
-              url: "http://hub.test:8317",
-              managementKey: marker!,
-              enabled: true,
+          // Sending the marker back keeps the stored key.
+          yield* service.updateSettings({
+            usageLimitSources: {
+              [HUB_ID]: {
+                kind: "cliproxy",
+                url: "http://hub.test:8317",
+                managementKey: marker!,
+                enabled: true,
+              },
             },
-          },
-        });
-        assert.strictEqual(
-          (yield* service.getSettings).usageLimitSources[HUB_ID]?.managementKey,
-          HUB_KEY,
-        );
-      }).pipe(Effect.provide(makeSettingsLayer())),
-  );
+          });
+          assert.strictEqual(
+            (yield* service.getSettings).usageLimitSources[HUB_ID]?.managementKey,
+            HUB_KEY,
+          );
+        }).pipe(Effect.provide(makeSettingsLayer())),
+    );
 
-  it.effect(
-    "dictation phase 1 AC6: the OpenAI key is kept in the secret store and every client payload carries only the marker",
-    () =>
-      Effect.gen(function* () {
-        const service = yield* ServerSettingsModule.ServerSettingsService;
-        const config = yield* ServerConfig.ServerConfig;
-        const fs = yield* FileSystem.FileSystem;
-        const marker = yield* usageLimitRedactionMarker;
+    it.effect(
+      "dictation phase 1 AC6: the OpenAI key is kept in the secret store and every client payload carries only the marker",
+      () =>
+        Effect.gen(function* () {
+          const service = yield* ServerSettingsModule.ServerSettingsService;
+          const config = yield* ServerConfig.ServerConfig;
+          const fs = yield* FileSystem.FileSystem;
+          const marker = yield* usageLimitRedactionMarker;
+          assert(typeof marker === "string");
 
-        const updated = yield* service.updateSettings({
-          dictation: { openAiApiKey: OPENAI_KEY, vocabularyHints: ["Mesura", "Hyprland"] },
-        });
+          const updated = yield* service.updateSettings({
+            dictation: { openAiApiKey: OPENAI_KEY, vocabularyHints: ["Mesura", "Hyprland"] },
+          });
 
-        // Never in settings.json; the server itself still reads the real key.
-        assert.notInclude(yield* fs.readFileString(config.settingsPath), OPENAI_KEY);
-        const settings = yield* service.getSettings;
-        assert.strictEqual(settings.dictation.openAiApiKey, OPENAI_KEY);
-        assert.deepStrictEqual(settings.dictation.vocabularyHints, ["Mesura", "Hyprland"]);
-        assert.strictEqual((yield* reloadSettings).dictation.openAiApiKey, OPENAI_KEY);
+          // Never in settings.json; the server itself still reads the real key.
+          assert.notInclude(yield* fs.readFileString(config.settingsPath), OPENAI_KEY);
+          const settings = yield* service.getSettings;
+          assert.strictEqual(settings.dictation.openAiApiKey, OPENAI_KEY);
+          assert.deepStrictEqual(settings.dictation.vocabularyHints, ["Mesura", "Hyprland"]);
+          assert.strictEqual((yield* reloadSettings).dictation.openAiApiKey, OPENAI_KEY);
 
-        // What the get, update and stream handlers send.
-        for (const payload of [settings, updated]) {
-          const redacted = ServerSettingsModule.redactServerSettingsForClient(payload);
-          assert.strictEqual(redacted.dictation.openAiApiKey, marker);
-          assert.deepStrictEqual(redacted.dictation.vocabularyHints, ["Mesura", "Hyprland"]);
-          assert.notInclude(toClientJson(redacted), OPENAI_KEY);
-        }
-      }).pipe(Effect.provide(makeSettingsLayer())),
-  );
+          // What the get, update and stream handlers send.
+          for (const payload of [settings, updated]) {
+            const redacted = ServerSettingsModule.redactServerSettingsForClient(payload, {
+              secretReferences: false,
+            });
+            assert.strictEqual(redacted.dictation.openAiApiKey, marker);
+            assert.deepStrictEqual(redacted.dictation.vocabularyHints, ["Mesura", "Hyprland"]);
+            assert.notInclude(toClientJson(redacted), OPENAI_KEY);
+          }
+        }).pipe(Effect.provide(makeSettingsLayer())),
+    );
 
-  it.effect(
-    "dictation phase 1 AC6: a client that sends the marker back keeps the stored OpenAI key, and an empty key clears it",
-    () =>
-      Effect.gen(function* () {
-        const service = yield* ServerSettingsModule.ServerSettingsService;
-        const marker = yield* usageLimitRedactionMarker;
-        yield* service.updateSettings({ dictation: { openAiApiKey: OPENAI_KEY } });
+    it.effect(
+      "dictation phase 1 AC6: a client that sends the marker back keeps the stored OpenAI key, and an empty key clears it",
+      () =>
+        Effect.gen(function* () {
+          const service = yield* ServerSettingsModule.ServerSettingsService;
+          const marker = yield* usageLimitRedactionMarker;
+          assert(typeof marker === "string");
+          yield* service.updateSettings({ dictation: { openAiApiKey: OPENAI_KEY } });
 
-        yield* service.updateSettings({
-          dictation: { openAiApiKey: marker, vocabularyHints: ["Neovim"] },
-        });
-        const kept = yield* service.getSettings;
-        assert.strictEqual(kept.dictation.openAiApiKey, OPENAI_KEY);
-        assert.deepStrictEqual(kept.dictation.vocabularyHints, ["Neovim"]);
+          yield* service.updateSettings({
+            dictation: { openAiApiKey: marker, vocabularyHints: ["Neovim"] },
+          });
+          const kept = yield* service.getSettings;
+          assert.strictEqual(kept.dictation.openAiApiKey, OPENAI_KEY);
+          assert.deepStrictEqual(kept.dictation.vocabularyHints, ["Neovim"]);
 
-        yield* service.updateSettings({ dictation: { openAiApiKey: "" } });
-        const cleared = yield* service.getSettings;
-        assert.strictEqual(cleared.dictation.openAiApiKey, "");
-        assert.strictEqual((yield* reloadSettings).dictation.openAiApiKey, "");
-        // No key: the client sees no marker, so it can tell the key is missing.
-        assert.strictEqual(
-          ServerSettingsModule.redactServerSettingsForClient(cleared).dictation.openAiApiKey,
-          "",
-        );
-      }).pipe(Effect.provide(makeSettingsLayer())),
-  );
-});
+          yield* service.updateSettings({ dictation: { openAiApiKey: "" } });
+          const cleared = yield* service.getSettings;
+          assert.strictEqual(cleared.dictation.openAiApiKey, "");
+          assert.strictEqual((yield* reloadSettings).dictation.openAiApiKey, "");
+          // No key: the client sees no marker, so it can tell the key is missing.
+          assert.strictEqual(
+            ServerSettingsModule.redactServerSettingsForClient(cleared, { secretReferences: false })
+              .dictation.openAiApiKey,
+            "",
+          );
+        }).pipe(Effect.provide(makeSettingsLayer())),
+    );
+  },
+);
 
 describe("DictationRpc phase 1 fence: RPC scopes", () => {
   const operateMethods = [

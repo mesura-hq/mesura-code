@@ -464,7 +464,7 @@ describe("phase10 shared run view from phase9 AC7 totals", () => {
     expect(result.totals).toMatchObject({
       elapsedMs: 5_400_000,
       waitingMs: 0,
-      elapsed: "1h 30m",
+      elapsed: "1h 30m 0s",
     });
   });
 
@@ -476,8 +476,8 @@ describe("phase10 shared run view from phase9 AC7 totals", () => {
     expect(result.totals).toMatchObject({
       elapsedMs: 13_380_000,
       waitingMs: 600_000,
-      elapsed: "3h 43m",
-      waiting: "10m",
+      elapsed: "3h 43m 0s",
+      waiting: "10m 0s",
     });
   });
 
@@ -498,8 +498,8 @@ describe("phase10 shared run view from phase9 AC7 totals", () => {
     expect(degraded.totals).toMatchObject({
       elapsedMs: 17_340_000,
       waitingMs: 1_500_000,
-      elapsed: "4h 49m",
-      waiting: "25m",
+      elapsed: "4h 49m 0s",
+      waiting: "25m 0s",
     });
 
     const stopped = view(makeFactoryRunState(eventsJsonl, "stopped"), {

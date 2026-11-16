@@ -48,12 +48,12 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     expect(manifest.scripts?.test).toBe(
       "vp test run --config ../vite.config.ts --dir . --max-workers=1 --no-file-parallelism",
     );
-    expect(manifest.scripts?.typecheck).toBe("tsc --noEmit");
+    expect(manifest.scripts?.typecheck).toBe("effect-tsgo tsrs --noEmit");
     expect(workspaceSource).toMatch(/^\s*- tests\s*$/m);
     expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], acceptanceTestsRoot));
   });
 
-  it("keeps the fork-owned package typecheck green with tsc --noEmit", () => {
+  it("keeps the fork-owned package typecheck green with the repository compiler", () => {
     expect(NodeFS.existsSync(contractPackageRoot)).toBe(true);
     expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], contractPackageRoot));
   });
@@ -73,7 +73,7 @@ describe("Symmetria broker contract phase-one regression guards", () => {
       expectSuccessfulCommand(result);
       const output = commandOutput(result);
       expect(output).toContain("src/upstreamLockFiring.test.ts");
-      expect(output).toContain("fails when upstream adds or removes a literal");
+      expect(output).toContain("adds or removes a frozen literal");
       expect(output).toContain("src/primitives.test.ts");
       expect(output).toContain("refuses a fractional value");
     },
@@ -265,12 +265,10 @@ describe("Symmetria broker contract phase-one regression guards", () => {
       "    throw new Error(`${name} is not the upstream schema value`);",
       "  }",
       "}",
-      "if ('RuntimeTurnState' in BrokerContract.BORROWED_RUNTIME_VOCABULARIES) {",
-      '  throw new Error("RuntimeTurnState was copied instead of composed from ProviderRuntimeTurnStatus");',
-      "}",
-      "const turnStateSchema = Schema.toJsonSchemaDocument(UpstreamContract.ProviderRuntimeTurnStatus).schema;",
-      "if (!Array.isArray(turnStateSchema.enum) || turnStateSchema.enum.length === 0) {",
-      '  throw new Error("ProviderRuntimeTurnStatus is not usable as the upstream schema value");',
+      "const timestampSchema = Schema.toJsonSchemaDocument(UpstreamContract.IsoDateTime).schema;",
+      "if (timestampSchema === undefined) throw new Error('IsoDateTime is not an upstream schema value');",
+      "if (BrokerContract.RUNTIME_SESSION_STATES.join(',') !== 'starting,ready,running,waiting,stopped,error') {",
+      "  throw new Error('the frozen broker session vocabulary changed');",
       "}",
     ].join("\n");
     expectSuccessfulCommand(

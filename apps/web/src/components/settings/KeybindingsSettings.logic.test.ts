@@ -15,10 +15,12 @@ import { resolveShortcutCommand } from "../../keybindings";
 
 import {
   buildKeybindingRows,
+  buildWhenVariableOptions,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
   shortcutToKeybindingInput,
+  unknownWhenVariables,
   whenAstToExpression,
 } from "./KeybindingsSettings.logic";
 
@@ -58,7 +60,7 @@ describe("KeybindingsSettings.logic", () => {
       }),
     );
   });
-  it.each(["pu", "pull request", "copy link", "thread id"])(
+  it.each(["pu", "pull request", "copy link", "link or thread"])(
     "finds the copy link shortcut with %s",
     (query) => {
       const rows = filterKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS), query);
@@ -327,6 +329,10 @@ describe("KeybindingsSettings.logic", () => {
         },
       },
     });
+    const previewOpenDraft = parseWhenExpressionDraft("previewOpen && !previewFocus");
+    assert(previewOpenDraft.ok);
+    expect(unknownWhenVariables(previewOpenDraft.value)).toEqual([]);
+    expect(buildWhenVariableOptions()).toContain("previewOpen");
     expect(parseWhenExpressionDraft("editorFocus &&")).toEqual({
       ok: false,
       message: "Use variables with !, &&, ||, and parentheses.",
@@ -387,6 +393,40 @@ describe("KeybindingsSettings.logic", () => {
         when: "",
       }),
     ).toEqual(["Chat: New Local"]);
+  });
+
+  it.each([
+    { platform: "Linux x86_64", ctrl: ["Chat: New"], meta: [] },
+    { platform: "Win32", ctrl: ["Chat: New"], meta: [] },
+    { platform: "MacIntel", ctrl: [], meta: ["Chat: New"] },
+  ])("resolves mod to the $platform modifier when reporting conflicts", (expected) => {
+    const rows = buildKeybindingRows(
+      compileResolvedKeybindingsConfig([
+        { command: "chat.new", key: "mod+k" },
+        { command: "chat.newLocal", key: "ctrl+k" },
+        { command: "thread.copyReference", key: "meta+k" },
+      ]),
+      expected.platform,
+    );
+    const conflictsFor = (key: string) => rows.find((row) => row.key === key)?.conflicts;
+
+    expect(conflictsFor("ctrl+k")).toEqual(expected.ctrl);
+    expect(conflictsFor("meta+k")).toEqual(expected.meta);
+    expect(
+      keybindingConflictLabels(rows, { rowId: "new", key: "ctrl+k", when: "" }, expected.platform),
+    ).toEqual(["Chat: New Local", ...expected.ctrl].toSorted());
+  });
+
+  it("keeps mod and ctrl shortcuts apart when their when contexts differ", () => {
+    const rows = buildKeybindingRows(
+      compileResolvedKeybindingsConfig([
+        { command: "chat.new", key: "mod+k", when: "!terminalFocus" },
+        { command: "chat.newLocal", key: "ctrl+k", when: "terminalFocus" },
+      ]),
+      "Linux x86_64",
+    );
+
+    expect(rows.map((row) => row.conflicts)).toEqual([[], []]);
   });
 });
 

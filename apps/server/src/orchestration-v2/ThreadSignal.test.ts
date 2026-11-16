@@ -74,7 +74,7 @@ const layerTest = McpHttpServer.layerThreadToolkit.pipe(
   Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
   Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
   Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
-  Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
   Layer.provide(NodeCrypto.layer),
   Layer.provideMerge(layerThreadManagement),
 );
@@ -662,11 +662,24 @@ describe("thread signal guards", () => {
         pendingRuntimeRequest: {
           id: RuntimeRequestId.make("request:guard-pending"),
           kind: "user_input",
-          createdAt: yield* DateTime.now,
+          createdAt: DateTime.add(yield* DateTime.now, { milliseconds: 1 }),
         },
       };
       assert.isFalse(isAutoSettlementCandidate(blocked, nowMs));
       assert.isFalse(isSnoozed(blocked, nowMs));
+      // Upstream lets the user snooze a question that already exists. Only a newer one wakes it.
+      assert.isTrue(
+        isSnoozed(
+          {
+            ...blocked,
+            pendingRuntimeRequest: {
+              ...blocked.pendingRuntimeRequest!,
+              createdAt: blocked.snoozedAt!,
+            },
+          },
+          nowMs,
+        ),
+      );
     }).pipe(Effect.provide(layerTest)),
   );
 });

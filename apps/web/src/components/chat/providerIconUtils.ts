@@ -1,3 +1,5 @@
+import type { ProviderDriverKind } from "@t3tools/contracts";
+import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
 import { ClaudeAI, Icon, OpenAI, OpenCodeIcon, ZaiIcon } from "../Icons";
 
 /**
@@ -48,40 +50,30 @@ export function getDisplayModelName(
   return stripLeadingQualifier(name, model.subProvider);
 }
 
-export function getProviderRowLabel(
-  providerDisplayName: string,
-  subProvider: string | undefined,
+export function getTriggerDisplayModelName(
+  model: ModelEsque,
+  driverKind?: ProviderDriverKind | null,
 ): string {
-  const provider = providerDisplayName.trim();
-  const sub = subProvider?.trim();
-  if (!sub) {
-    return providerDisplayName;
-  }
-  if (provider && new RegExp(`^${escapeRegExp(provider)}\\s+\\S`, "i").test(sub)) {
-    return sub;
-  }
-  return `${providerDisplayName} · ${sub}`;
+  const shortName = resolveModelShortName(model, driverKind);
+  return getDisplayModelName({ ...model, shortName }, { preferShortName: true });
 }
 
-export function getTriggerDisplayModelName(model: ModelEsque): string {
-  return getDisplayModelName(model, { preferShortName: true });
-}
-
-// Mesura: model families named after the provider an icon already shows. Keyed by driver, never by
-// the editable instance name, so a Claude model under Cursor keeps its "Claude".
-const MODEL_FAMILY_PREFIX_BY_DRIVER: Readonly<Record<string, string>> = { claudeAgent: "Claude" };
-
-/** Mesura: beside its provider's icon a model needs no provider prefix ("Claude Opus 5.5" -> "Opus 5.5"). */
 export function getTriggerDisplayModelNameBesideIcon(
   model: ModelEsque,
-  driverKind: string,
+  driverKind: ProviderDriverKind,
 ): string {
   return stripLeadingQualifier(
-    getTriggerDisplayModelName(model),
-    MODEL_FAMILY_PREFIX_BY_DRIVER[driverKind],
+    // Another provider's icon does not identify the Claude model family.
+    driverKind !== "claudeAgent" && /^Claude\s/iu.test(model.name)
+      ? getDisplayModelName(model)
+      : getTriggerDisplayModelName(model, driverKind),
+    driverKind === "claudeAgent" ? "Claude" : undefined,
   );
 }
 
-export function getTriggerDisplayModelLabel(model: ModelEsque): string {
-  return getTriggerDisplayModelName(model);
+export function getTriggerDisplayModelLabel(
+  model: ModelEsque,
+  driverKind?: ProviderDriverKind,
+): string {
+  return getTriggerDisplayModelName(model, driverKind);
 }

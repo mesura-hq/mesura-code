@@ -1,4 +1,4 @@
-// Entry point: `IntegrationsSettingsPanel`, the Settings → Integrations page, with the desktop
+// Entry point: `BrowserSettingsPanel`, the Settings → Browser page, with the desktop
 // preview bridge, the environment and the `preview.importCookies` command stubbed at their modules.
 import { render } from "../../../test/render";
 import {
@@ -135,7 +135,7 @@ vi.mock(import("./settingsLayout"), async (original) => ({
   SettingsPageContainer: (({ children }: { children: ReactNode }) => children) as never,
 }));
 
-import { IntegrationsSettingsPanel } from "./IntegrationsSettings";
+import { BrowserSettingsPanel } from "./IntegrationsSettings";
 
 const zenCookies = (count: number): BrowserCookieReadResult["cookies"] =>
   Array.from({ length: count }, (_, index) => ({
@@ -184,8 +184,8 @@ describe("browser import into the server browser, rendered", () => {
       read: { cookies: zenCookies(5), undecryptable: 1, undecryptableHosts: ["locked.example"] },
       importResults: [{ imported: 3, skipped: 2, skippedDomains: ["paypal.com"] }],
     });
-    await using _screen = await render(<IntegrationsSettingsPanel />, {
-      router: "/settings/integrations",
+    await using _screen = await render(<BrowserSettingsPanel />, {
+      router: "/settings/browser",
     });
 
     await openZenImport();
@@ -220,8 +220,8 @@ describe("browser import into the server browser, rendered", () => {
         new Error("The environment could not import cookies into this browser profile."),
       ],
     });
-    await using _screen = await render(<IntegrationsSettingsPanel />, {
-      router: "/settings/integrations",
+    await using _screen = await render(<BrowserSettingsPanel />, {
+      router: "/settings/browser",
     });
 
     await openZenImport();
@@ -239,8 +239,8 @@ describe("browser import into the server browser, rendered", () => {
 
   it("hides the server target and explains why when the connection cannot import", async () => {
     setup({ canImport: false });
-    await using _screen = await render(<IntegrationsSettingsPanel />, {
-      router: "/settings/integrations",
+    await using _screen = await render(<BrowserSettingsPanel />, {
+      router: "/settings/browser",
     });
 
     await openZenImport();
@@ -260,8 +260,8 @@ describe("browser import into the server browser, rendered", () => {
 describe("payment sites setting, rendered", () => {
   it("lists the payment domains and saves an edit to the server setting", async () => {
     setup();
-    await using screen = await render(<IntegrationsSettingsPanel />, {
-      router: "/settings/integrations",
+    await using screen = await render(<BrowserSettingsPanel />, {
+      router: "/settings/browser",
     });
     const textarea = screen.getByRole("textbox", { name: "Payment sites" });
 
@@ -278,8 +278,8 @@ describe("payment sites setting, rendered", () => {
 
   it("disables payment-site editing in project scope and says to select an environment", async () => {
     setup({ scopeKind: "project" });
-    await using screen = await render(<IntegrationsSettingsPanel />, {
-      router: "/settings/integrations",
+    await using screen = await render(<BrowserSettingsPanel />, {
+      router: "/settings/browser",
     });
 
     await expect.element(screen.getByRole("textbox", { name: "Payment sites" })).toBeDisabled();

@@ -5,7 +5,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
-import { useParams, useRouter } from "@tanstack/react-router";
+import { type AnyRouter, useRouter } from "@tanstack/react-router";
 import {
   composerDraftHasUserContent,
   markPromotedDraftThreadByRef,
@@ -20,7 +20,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   getProjectOrderKey,
   selectProjectGroupingSettings,
-} from "../logicalProject";
+} from "@t3tools/client-runtime/state/project-grouping";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   readProject,
@@ -31,14 +31,34 @@ import {
 } from "../state/entities";
 import {
   applyImplicitDraftModelDefaults,
+  draftModelSelectionApplies,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
+  threadHasStarted,
 } from "../lib/chatThreadActions";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { readRepositoryDefaults } from "../lib/t3ProjectFileDefaults";
 import { environmentServerConfigsAtom, serverEnvironment } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
-import { useClientSettings } from "./useSettings";
+import { getClientSettings } from "./useSettings";
+import { getLocalStorageItem, useLocalStorage } from "./useLocalStorage";
+import * as Schema from "effect/Schema";
+import { useAtomValue } from "@effect/atom-react";
+import { defaultProjectFallbackReadyAtom } from "../state/projects";
+import { useThreadRouteTarget } from "./useThreadRouteTarget";
+import { resolveNewDraftDefaultModelSelection } from "../lib/newDraftDefaultModelSelection";
+
+export const LAST_USED_PROJECT_STORAGE_KEY = "t3code:last-used-project:v1";
+export const lastUsedProjectKeySchema = Schema.NullOr(Schema.String);
+
+export function readLastUsedProjectKey(): string | null {
+  try {
+    return getLocalStorageItem(LAST_USED_PROJECT_STORAGE_KEY, lastUsedProjectKeySchema);
+  } catch {
+    return null;
+  }
+}
 
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
@@ -61,8 +81,12 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
 }
 
 export function useNewThreadHandler() {
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const router = useRouter();
+  return createNewThreadHandler(useRouter());
+}
+
+export type NewThreadHandler = ReturnType<typeof createNewThreadHandler>;
+
+export function createNewThreadHandler(router: AnyRouter) {
   const getCurrentRouteTarget = () => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
     return resolveThreadRouteTarget(currentRouteParams);
@@ -76,12 +100,15 @@ export function useNewThreadHandler() {
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
       replace?: boolean;
+      /** Composer text for the draft, set before it shows. A draft with user text keeps it. */
+      prompt?: string;
     },
     // Which draft the thread ended up in, so a caller that has something to put in it — a
     // prepared checkout, a task to write — addresses that one rather than looking the project
     // up again and finding whichever draft it happens to hold.
   ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
     const projects = readProjects();
+    const projectGroupingSettings = selectProjectGroupingSettings(getClientSettings());
     // Read at call time; status pushes replace the config map and would recreate every sidebar handler.
     const environmentServerConfigs = appAtomRegistry.get(environmentServerConfigsAtom);
     const targetServerSettings =
@@ -93,7 +120,14 @@ export function useNewThreadHandler() {
       getDraftThread,
       setDraftThreadContext,
       setLogicalProjectDraftThreadId,
+      setPrompt,
     } = useComposerDraftStore.getState();
+    // Never over text the user wrote: a draft can gain some while this awaits.
+    const seedPrompt = (draftId: DraftId) => {
+      if (options?.prompt === undefined) return;
+      if (composerDraftHasUserContent(getComposerDraft(draftId))) return;
+      setPrompt(draftId, options.prompt);
+    };
     const requestingRouteHref = router.state.location.href;
     const routeChangedSinceRequest = () => router.state.location.href !== requestingRouteHref;
     const currentRouteTarget = getCurrentRouteTarget();
@@ -114,7 +148,12 @@ export function useNewThreadHandler() {
             : currentRouteTarget.draftId,
         )
       : null;
-    const composerActiveProvider = carrySourceComposer?.activeProvider ?? null;
+    const composerActiveProvider = draftModelSelectionApplies(
+      carrySourceComposer,
+      threadHasStarted(carrySourceShell),
+    )
+      ? (carrySourceComposer?.activeProvider ?? null)
+      : null;
     const composerModelSelection = composerActiveProvider
       ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
       : null;
@@ -142,7 +181,15 @@ export function useNewThreadHandler() {
     const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
     const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
       resolveNewThreadModelSelectionOverride({
-        projectDefaultSelection: projectSettings.settings.defaultModelSelection ?? null,
+        // Mesura: read at call time, because the repository defaults below replace projectSettings.
+        projectDefaultSelection: resolveNewDraftDefaultModelSelection({
+          configuredSelection: projectSettings.settings.defaultModelSelection ?? null,
+          providerDefaultAllowed:
+            !carryModelSelection && useComposerDraftStore.getState().stickyActiveProvider === null,
+          providers: environmentServerConfigs.get(projectRef.environmentId)?.providers ?? [],
+          settings: targetServerSettings,
+          projectId: projectRef.projectId,
+        }),
         carrySelection: projectSettings.modelDefaultWarning ? null : carryModelSelection,
         carrySourceDraftId:
           currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
@@ -203,6 +250,7 @@ export function useNewThreadHandler() {
       ) {
         setDraftThreadContext(currentRouteTarget.draftId, pickExplicitWorkspaceOptions(options));
       }
+      seedPrompt(currentRouteTarget.draftId);
       return { draftId: currentRouteTarget.draftId, threadId: latestActiveDraftThread.threadId };
     }
     const nextDraftId = emptyStoredDraftThread?.draftId ?? newDraftId();
@@ -313,6 +361,7 @@ export function useNewThreadHandler() {
           draftId: emptyStoredDraftThread.draftId,
           threadId: emptyStoredDraftThread.threadId,
         };
+        seedPrompt(emptyStoredDraftThread.draftId);
         // Re-read the route: the snapshot from before the await is stale
         // once a concurrent invocation's navigation lands, and navigating
         // again would push a duplicate history entry.
@@ -365,6 +414,7 @@ export function useNewThreadHandler() {
               : (racedDraft.envModeExplicit ?? true),
           ...pickExplicitWorkspaceOptions(options),
         });
+        seedPrompt(racedDraft.draftId);
         await router.navigate({
           to: "/draft/$draftId",
           params: { draftId: racedDraft.draftId },
@@ -399,6 +449,7 @@ export function useNewThreadHandler() {
           clearWhenAbsent: !!projectSettings.modelDefaultWarning,
         },
       );
+      seedPrompt(draftId);
       await router.navigate({
         to: "/draft/$draftId",
         params: { draftId },
@@ -409,12 +460,42 @@ export function useNewThreadHandler() {
   };
 }
 
+export function resolveDefaultProjectRef(
+  projects: ReadonlyArray<EnvironmentProject>,
+  projectOrder: readonly string[],
+  lastUsedProjectKey: string | null,
+  fallbackReady = true,
+): ScopedProjectRef | null {
+  const lastUsed = projects.find(
+    (project) =>
+      project.archivedAt == null &&
+      scopedProjectKey(scopeProjectRef(project.environmentId, project.id)) === lastUsedProjectKey,
+  );
+  if (lastUsed) return scopeProjectRef(lastUsed.environmentId, lastUsed.id);
+  if (!fallbackReady) return null;
+  const [defaultProject] = orderItemsByPreferredIds({
+    items: projects.filter((project) => project.archivedAt == null),
+    preferredIds: projectOrder,
+    getId: getProjectOrderKey,
+    getPreferenceIds: (project) => [
+      getProjectOrderKey(project),
+      legacyProjectCwdPreferenceKey(project.workspaceRoot),
+    ],
+  });
+  return defaultProject ? scopeProjectRef(defaultProject.environmentId, defaultProject.id) : null;
+}
+
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const routeTarget = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
-  });
+  const [lastUsedProjectKey] = useLocalStorage(
+    LAST_USED_PROJECT_STORAGE_KEY,
+    null,
+    lastUsedProjectKeySchema,
+  );
+  const defaultProjectFallbackReady = useAtomValue(
+    defaultProjectFallbackReadyAtom(lastUsedProjectKey),
+  );
+  const routeTarget = useThreadRouteTarget();
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const routeDraftId = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
   const activeThread = useQuietThreadShell(routeThreadRef);
@@ -427,25 +508,19 @@ export function useHandleNewThread() {
       : null,
   );
   const projects = useProjects();
-  const orderedProjects = (() => {
-    return orderItemsByPreferredIds({
-      items: projects,
-      preferredIds: projectOrder,
-      getId: getProjectOrderKey,
-      getPreferenceIds: (project) => [
-        getProjectOrderKey(project),
-        legacyProjectCwdPreferenceKey(project.workspaceRoot),
-      ],
-    });
-  })();
   const handleNewThread = useNewThreadHandler();
+  const defaultProjectRef = resolveDefaultProjectRef(
+    projects,
+    projectOrder,
+    lastUsedProjectKey,
+    defaultProjectFallbackReady,
+  );
 
   return {
     activeDraftThread,
     activeThread,
-    defaultProjectRef: orderedProjects[0]
-      ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
-      : null,
+    defaultProjectRef,
+    defaultProjectFallbackReady,
     handleNewThread,
     routeDraftId,
     routeThreadRef,

@@ -70,7 +70,6 @@ vi.mock("./hooks/useThreadActions", () => ({
   }),
 }));
 vi.mock("./components/Sidebar", () => ({ default: () => null }));
-vi.mock("./components/LegacySidebar", () => ({ default: () => null }));
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));

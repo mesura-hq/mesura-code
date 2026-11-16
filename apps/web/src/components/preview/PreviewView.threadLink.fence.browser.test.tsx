@@ -39,16 +39,28 @@ vi.mock("~/localApi", () => ({
   readLocalApi: () => ({ shell: { openExternal: boundary.external } }),
 }));
 vi.mock("~/hooks/useSettings", async () => {
+  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
   const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
   return {
     ensureClientSettingsHydrated: async () => {},
+    isClientSettingsHydrated: () => true,
     getClientSettings: () => DEFAULT_CLIENT_SETTINGS,
+    updateClientSettings: vi.fn(),
+    useClientSettingsHydrated: () => true,
+    useEnvironmentSettings: () => ({ ...DEFAULT_CLIENT_SETTINGS, ...DEFAULT_SERVER_SETTINGS }),
+    useClientSettings: (select?: (settings: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
+      select ? select(DEFAULT_CLIENT_SETTINGS) : DEFAULT_CLIENT_SETTINGS,
   };
 });
-vi.mock("~/state/server", async () => ({
-  environmentServerConfigsAtom: (await import("~/test/threadLinkFixture")).threadLinkFixture
-    .configs,
-}));
+vi.mock("~/state/server", async () => {
+  const { Atom } = await import("effect/reactivity");
+  const { compileResolvedKeybindingsConfig } = await import("@t3tools/shared/keybindings");
+  return {
+    environmentServerConfigsAtom: (await import("~/test/threadLinkFixture")).threadLinkFixture
+      .configs,
+    primaryServerKeybindingsAtom: Atom.make(compileResolvedKeybindingsConfig([])),
+  };
+});
 vi.mock("~/connection/catalog", async () => {
   const f = (await import("~/test/threadLinkFixture")).threadLinkFixture;
   return { environmentCatalog: { catalogValueAtom: f.catalog, stateAtom: f.connection } };
@@ -61,11 +73,14 @@ vi.mock("~/state/session", async () => {
     environmentSession: { preparedConnectionValueAtom: f.prepared },
     readPreparedConnection: (id: EnvironmentId) =>
       Option.getOrNull(appAtomRegistry.get(f.prepared(id))),
+    usePreparedConnection: (id: EnvironmentId | null) =>
+      id === null ? Option.none() : appAtomRegistry.get(f.prepared(id)),
     readEnvironmentScope: () => true,
     useEnvironmentScope: () => true,
   };
 });
 vi.mock("~/state/entities", () => ({ useEnvironmentSupportsServerBrowser: () => true }));
+vi.mock("./PreviewAnnotationSpeech", () => ({ PreviewAnnotationSpeech: () => null }));
 vi.mock("~/state/environments", () => ({
   useEnvironment: () => ({ label: "Fixture" }),
   useEnvironmentHttpBaseUrl: () => "https://fixture.invalid",
@@ -94,6 +109,7 @@ vi.mock("~/state/previewStream", () => ({
 }));
 vi.mock("~/browser/previewRuntime", () => ({
   useRendersServerTabNatively: () => boundary.native,
+  rendersServerTabNatively: () => boundary.native,
   alternatePreviewRuntime: () => null,
   isPreviewAvailableFor: () => true,
   previewRuntimeFor: () => "server",
@@ -111,8 +127,6 @@ vi.mock("~/browser/browserDefaults", () => ({
     profileId: DEFAULT_BROWSER_PROFILE_ID,
     viewport: FILL_PREVIEW_VIEWPORT,
   }),
-  browserDefaultOpenProfileId: () => DEFAULT_BROWSER_PROFILE_ID,
-  browserDefaultOpenViewport: () => FILL_PREVIEW_VIEWPORT,
   browserResponsiveViewportForToggle: vi.fn(),
 }));
 vi.mock("~/browserHistoryStore", () => ({
@@ -261,6 +275,7 @@ it("thread link PreviewView fence: mounted Idle waits for its native lease and a
   await act(() => {
     applyPreviewDesktopState(ref, target.tabId, {
       ...desktop,
+      navStatus: { _tag: "Loading", url, title: "" },
       hasWebContents: true,
       loading: true,
       favicon: null,
@@ -288,6 +303,7 @@ it("thread link PreviewView guard: unmount disposes an Idle attachment waiter wi
   await cancelled;
   applyPreviewDesktopState(ref, target.tabId, {
     ...desktop,
+    navStatus: { _tag: "Loading", url, title: "" },
     hasWebContents: true,
     loading: true,
     favicon: null,
@@ -365,6 +381,7 @@ it("thread link StrictMode regression: public first activation survives the actu
   await act(() =>
     applyPreviewDesktopState(ref, target.tabId, {
       ...desktop,
+      navStatus: { _tag: "Loading", url, title: "" },
       hasWebContents: true,
       loading: false,
       favicon: null,

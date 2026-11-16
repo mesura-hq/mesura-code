@@ -3,6 +3,7 @@ import "../mesura.css";
 
 import { render as renderBrowser, type Screen } from "../../test/render";
 import { focusTestWindow } from "./windowFocus";
+import { installCommandPaletteCommands } from "../shortcuts/commandPaletteCommands";
 
 import {
   createMemoryHistory,
@@ -212,6 +213,13 @@ export async function renderFenceApp(
     container,
     router: false,
   });
+  // Upstream moved palette registration from React into appInit. The fixture owns its lifetime.
+  const disposePaletteCommands = installCommandPaletteCommands(router);
+  const disposeRoot = root[Symbol.asyncDispose].bind(root);
+  root[Symbol.asyncDispose] = async () => {
+    disposePaletteCommands();
+    await disposeRoot();
+  };
   return { root, router };
 }
 

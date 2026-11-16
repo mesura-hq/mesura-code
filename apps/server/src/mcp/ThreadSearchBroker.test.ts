@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // Mesura: the broker that forwards a `find_threads` call to one connected
 // client (ADR-010), driven through `connect`, `invoke` and `respond`. Every
 // title carries "thread search broker" so a name-filtered re-run matches it.
@@ -26,7 +27,9 @@ const result: ThreadSearchToolResult = {
   engine: "jev",
 };
 const provideBroker = <A, E>(effect: Effect.Effect<A, E, ThreadSearchBroker>) =>
-  effect.pipe(Effect.provide(layer.pipe(Layer.provide(NodeServices.layer))));
+  effect.pipe(
+    Effect.provide(layer.pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)))),
+  );
 
 it.effect(
   "thread search broker routes one request to the newest client and accepts only its response",

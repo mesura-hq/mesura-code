@@ -31,13 +31,11 @@ it.layer(NodeServices.layer)("project icon candidates", (it) => {
       const outside = yield* fs.makeTempDirectoryScoped({ prefix: "mesura-outside-icon-" });
       yield* fs.writeFileString(`${outside}/logo.svg`, "<svg/>");
       yield* fs.symlink(outside, `${root}/linked-assets`);
-      const candidates = yield* Effect.tryPromise(() => collectProjectIconCandidates(root));
+      const candidates = yield* Effect.promise(() => collectProjectIconCandidates(root));
       expect(candidates.map((candidate) => candidate.path)).toEqual([icon]);
-      expect(yield* Effect.tryPromise(() => validateProjectIconCandidate(root, icon))).toBe(true);
+      expect(yield* Effect.promise(() => validateProjectIconCandidate(root, icon))).toBe(true);
       expect(
-        yield* Effect.tryPromise(() =>
-          validateProjectIconCandidate(root, "linked-assets/logo.svg"),
-        ),
+        yield* Effect.promise(() => validateProjectIconCandidate(root, "linked-assets/logo.svg")),
       ).toBe(false);
     }).pipe(Effect.scoped),
   );

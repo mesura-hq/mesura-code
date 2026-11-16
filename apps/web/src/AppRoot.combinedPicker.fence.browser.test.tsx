@@ -1,15 +1,17 @@
+import { freshTestId } from "./test/freshTestId";
 // The combined picker's behavior contract in the composer, through AppRoot and the real
-// ChatComposer, ProviderModelPicker and CombinedModelPickerContent. Keys are real `keydown` events,
-// and every write is read back from the real composer draft store. Boundaries: only
+// ChatComposer, ProviderModelPicker and ModelPickerContent, with docked effort and permissions.
+// Choices apply immediately and are read back from the real composer draft store. Boundaries: only
 // `test/appRootFenceMocks.tsx`.
 import { type ReactNode } from "react";
 import { act } from "../test/render";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import {
+  MessageId,
   ProjectId,
-  ProviderDriverKind,
   ProviderInstanceId,
+  RunId,
   ThreadId,
   type RuntimeMode,
 } from "@t3tools/contracts";
@@ -31,9 +33,6 @@ vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSett
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/Sidebar", async () => (await fenceMocks()).mockSidebar());
-vi.mock("./components/LegacySidebar", async () =>
-  (await fenceMocks()).mockRendersNothing("default"),
-);
 vi.mock("./components/preview/PreviewAutomationHosts", async () =>
   (await fenceMocks()).mockRendersNothing("PreviewAutomationHosts"),
 );
@@ -65,19 +64,19 @@ vi.mock("@t3tools/client-runtime/state/session", async (original) =>
 import { useComposerDraftStore } from "./composerDraftStore";
 import { installKeyEngine } from "./keys/keyEngine";
 import {
-  accessSummary,
   buttonByLabel,
   click,
-  effortValue,
-  extrasRegion,
+  effortColumn,
+  effortLevel,
   highlightedRow,
-  moreOptionsToggle,
-  openMoreOptions,
+  permissionsTrigger,
   pickerContent,
+  pickerPopup,
   press,
   row,
   rows,
   searchInput,
+  selectedEffort,
 } from "./test/combinedPickerDom";
 import {
   fenceEnvironmentId as environmentId,
@@ -186,11 +185,10 @@ const CATALOG = [
   ]),
 ];
 
-let nextFixtureId = 0;
-
 async function mountApp(
   runtimeMode: RuntimeMode = "approval-required",
   draftRuntimeMode?: RuntimeMode,
+  providerLocked = false,
 ) {
   await using stack = new AsyncDisposableStack();
   installKeyEngine();
@@ -199,26 +197,30 @@ async function mountApp(
   const serverConfig = fixture.environments[0]!.serverConfig as { providers: unknown[] };
   const originalProviders = serverConfig.providers;
   const originalVimMode = fixture.vimMode;
+  const originalClientSettings = fixture.clientSettings;
   const originalOpenThreadId = fixture.openThreadId;
   const originalDraftState = useComposerDraftStore.getState();
-  const threadId = ThreadId.make(`combined-picker-${++nextFixtureId}`);
+  const threadId = ThreadId.make(`combined-picker-${freshTestId("picker")}`);
   const threadRef = scopeThreadRef(environmentId, threadId);
   stack.defer(() => {
     fixture.threads.delete(threadId);
     fixture.threadStates.delete(threadId);
     fixture.openThreadId = originalOpenThreadId;
     fixture.vimMode = originalVimMode;
+    fixture.clientSettings = originalClientSettings;
     serverConfig.providers = originalProviders;
     useComposerDraftStore.setState(originalDraftState, true);
   });
   serverConfig.providers = CATALOG;
   fixture.vimMode = false;
+  fixture.clientSettings = { ...originalClientSettings, effortDisplay: "label" };
   // Each test starts without another test's remembered model choices.
   useComposerDraftStore.setState({
     stickyModelSelectionByProvider: {},
     stickyOptionsByModelByProvider: {},
     stickyActiveProvider: null,
   });
+  const previousRunId = RunId.make(`previous-${threadId}`);
   const shell = makeFenceThreadShell({
     environmentId,
     id: threadId,
@@ -226,8 +228,34 @@ async function mountApp(
     title: "Combined picker",
     runtimeMode,
     createdAt: NOW,
+    ...(providerLocked ? { overrides: { latestRunId: previousRunId, itemCount: 1 } } : {}),
   });
-  publishFenceThreadProjection(makeFenceThreadProjection(shell));
+  publishFenceThreadProjection(
+    makeFenceThreadProjection(shell, {
+      // A completed run without a portable provider thread cannot hand off to another provider.
+      runs: providerLocked
+        ? [
+            {
+              id: previousRunId,
+              threadId,
+              ordinal: 1,
+              providerInstanceId: CODEX,
+              modelSelection: shell.modelSelection,
+              providerThreadId: null,
+              userMessageId: MessageId.make(`previous-message-${threadId}`),
+              rootNodeId: null,
+              activeAttemptId: null,
+              status: "completed",
+              requestedAt: shell.source.createdAt,
+              startedAt: shell.source.createdAt,
+              completedAt: shell.source.updatedAt,
+              checkpointId: null,
+              contextHandoffId: null,
+            },
+          ]
+        : [],
+    }),
+  );
   useComposerDraftStore.getState().setPrompt(threadRef, "Keep this prompt");
   if (draftRuntimeMode !== undefined) {
     useComposerDraftStore.getState().setRuntimeMode(threadRef, draftRuntimeMode);
@@ -246,7 +274,7 @@ async function mountApp(
     return useComposerDraftStore.getState().getComposerDraft(threadRef);
   }
 
-  /** Everything an applied choice may write; a cancelled opening must leave it equal. */
+  /** Opening, browsing, and dismissing must not write a choice or alter sticky state. */
   function savedSnapshot() {
     const current = draft();
     return {
@@ -254,6 +282,12 @@ async function mountApp(
       activeProvider: current?.activeProvider ?? null,
       runtimeMode: current?.runtimeMode ?? null,
       prompt: current?.prompt ?? "",
+      modelSelectionExplicit: current?.modelSelectionExplicit ?? false,
+      stickyActiveProvider: useComposerDraftStore.getState().stickyActiveProvider,
+      stickyModelSelectionByProvider:
+        useComposerDraftStore.getState().stickyModelSelectionByProvider,
+      stickyOptionsByModelByProvider:
+        useComposerDraftStore.getState().stickyOptionsByModelByProvider,
     };
   }
 
@@ -331,415 +365,402 @@ async function highlight(name: string) {
   expect(highlightedRow()?.textContent, `Expected ${name} to be highlighted`).toContain(name);
 }
 
-/** Chooses an option of a native select inside the picker. */
-async function chooseOption(controlLabel: string, optionLabel: string) {
-  const control = pickerContent()?.querySelector<HTMLSelectElement>(
-    `select[aria-label="${controlLabel}"]`,
-  );
-  expect(control, `Expected the ${controlLabel} control`).toBeTruthy();
-  const option = [...control!.options].find((entry) => entry.textContent?.trim() === optionLabel);
-  expect(option, `Expected ${optionLabel} in ${controlLabel}`).toBeTruthy();
-  await act(async () => {
-    control!.value = option!.value;
-    control!.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-}
-
 function focusTarget(): EventTarget {
   return document.activeElement ?? document.body;
 }
 
-describe("combined picker in the composer: provider tabs", () => {
-  it("combined picker Tab and Shift+Tab cycle provider tabs and keep focus in search", async () => {
+async function closePicker() {
+  await press(focusTarget(), "Escape");
+  await vi.waitFor(() => expect(pickerContent()).toBeNull());
+}
+
+async function chooseProvider(label: string) {
+  const sidebar = pickerContent()!.querySelector<HTMLElement>("[data-model-picker-sidebar]")!;
+  const button = buttonByLabel(label, sidebar);
+  expect(button, `Expected provider ${label}`).toBeTruthy();
+  await click(button!);
+  await vi.waitFor(() => expect(selectedProviderTab()).toBe(label));
+}
+
+async function choosePermission(label: string) {
+  await click(permissionsTrigger());
+  await userEvent.click(page.getByRole("menuitemradio", { name: label, exact: true }));
+  await expect
+    .element(page.getByRole("menuitemradio", { name: label, exact: true }))
+    .not.toBeInTheDocument();
+}
+
+describe("combined picker in the composer: provider navigation", () => {
+  it("cycles providers with upstream shortcuts without applying a model", async () => {
     await using app = await mountApp();
+    const before = app.savedSnapshot();
     await app.openPicker();
     expect(selectedProviderTab()).toBe("Codex");
 
-    await press(searchInput(), "Tab");
-    expect(selectedProviderTab()).toBe("Claude");
+    await press(searchInput(), "ArrowDown", { ctrlKey: true, shiftKey: true });
+    await vi.waitFor(() => expect(selectedProviderTab()).toBe("Claude"));
     expect(document.activeElement).toBe(searchInput());
     expect(rows().map((entry) => entry.textContent)).toEqual([
       expect.stringContaining("Claude Opus 5"),
     ]);
+    // Browsing a provider leaves the column on the model actually selected in the composer.
+    expect(effortColumn().textContent).toContain("GPT-5.4");
+    expect(app.savedSnapshot()).toEqual(before);
 
-    await press(searchInput(), "Tab", { shiftKey: true });
-    expect(selectedProviderTab()).toBe("Codex");
+    await press(searchInput(), "ArrowUp", { ctrlKey: true, shiftKey: true });
+    await vi.waitFor(() => expect(selectedProviderTab()).toBe("Codex"));
   });
-});
 
-describe("combined picker in the composer: inline effort", () => {
-  it("combined picker Left and Right change only the highlighted row's pending effort", async () => {
+  it("keeps the upstream sidebar navigation instead of editing effort with Left", async () => {
     await using app = await mountApp();
     await app.openPicker();
     const before = app.savedSnapshot();
-    await highlight("GPT-5.4");
-    expect(effortValue("GPT-5.4")).toBe("Medium");
-    expect(effortValue("GPT-5.5")).toBe("High");
 
-    await press(searchInput(), "ArrowRight");
-    expect(effortValue("GPT-5.4")).toBe("High");
-    expect(effortValue("GPT-5.5")).toBe("High");
-    expect(highlightedRow()?.textContent).toContain("GPT-5.4");
-
-    for (let count = 0; count < 5; count += 1) await press(searchInput(), "ArrowLeft");
-    expect(effortValue("GPT-5.4")).toBe("Low");
-    expect(pickerContent()).toBeTruthy();
-    expect(app.savedSnapshot()).toEqual(before);
-  });
-
-  it("combined picker Left and Right never move focus to the provider sidebar", async () => {
-    await using app = await mountApp();
-    await app.openPicker();
-    expect(highlightedRow()).toBeNull();
-    expect(effortValue("GPT-5.4")).toBe("Medium");
-
-    // Without a highlighted row, the saved model's effort changes.
     await press(searchInput(), "ArrowLeft");
-    expect(document.activeElement).toBe(searchInput());
-    expect(effortValue("GPT-5.4")).toBe("Low");
-    expect(effortValue("GPT-5.5")).toBe("High");
-  });
-
-  it("combined picker Left and Right on a focused provider button change effort", async () => {
-    await using app = await mountApp();
-    await app.openPicker();
-    const providerButton = pickerContent()!.querySelector<HTMLButtonElement>(
+    const selectedProvider = pickerContent()!.querySelector(
       '[data-model-picker-sidebar] button[aria-pressed="true"]',
-    )!;
-    await act(async () => providerButton.focus());
-
-    await press(providerButton, "ArrowLeft");
+    );
+    expect(document.activeElement).toBe(selectedProvider);
+    await press(selectedProvider!, "ArrowRight");
     expect(document.activeElement).toBe(searchInput());
-    expect(effortValue("GPT-5.4")).toBe("Low");
-    expect(selectedProviderTab()).toBe("Codex");
+    expect(selectedEffort()).toBe("Medium");
+    expect(app.savedSnapshot()).toEqual(before);
   });
 
-  it("combined picker modified arrows keep their usual meaning", async () => {
-    await using app = await mountApp();
-    await app.openPicker();
-    await highlight("GPT-5.4");
-
-    await press(searchInput(), "ArrowRight", { shiftKey: true });
-    await press(searchInput(), "ArrowRight", { altKey: true });
-    await press(searchInput(), "ArrowLeft", { ctrlKey: true });
-    expect(effortValue("GPT-5.4")).toBe("Medium");
-  });
-
-  it("combined picker effort steppers change a row by pointer without choosing it", async () => {
-    await using app = await mountApp();
+  it("locks other providers when the thread cannot hand off its completed run", async () => {
+    await using app = await mountApp("approval-required", undefined, true);
     await app.openPicker();
     const before = app.savedSnapshot();
+    const claude = buttonByLabel(/^Claude is unavailable in this thread/, pickerContent()!);
+    expect(claude).toBeTruthy();
+    expect(claude!.disabled).toBe(true);
+    await click(claude!);
+    expect(selectedProviderTab()).toBe("Codex");
 
-    await click(buttonByLabel("Decrease effort for GPT-5.5", pickerContent()!)!);
-
-    expect(effortValue("GPT-5.5")).toBe("Medium");
-    expect(pickerContent()).toBeTruthy();
+    await typeSearch("Claude");
+    expect(rows()).toHaveLength(0);
     expect(app.savedSnapshot()).toEqual(before);
   });
 });
 
-describe("combined picker in the composer: apply", () => {
-  it("combined picker Enter applies the highlighted model with its pending effort", async () => {
+describe("combined picker in the composer: immediate selection", () => {
+  it("Enter applies a highlighted model and focuses its reasoning without closing", async () => {
     await using app = await mountApp();
     await app.openPicker();
     await highlight("GPT-5.5");
-    await press(searchInput(), "ArrowLeft");
-
     await press(searchInput(), "Enter");
-    await vi.waitFor(() => expect(pickerContent()).toBeNull());
-    expect(app.draft()?.modelSelectionByProvider[CODEX]).toEqual({
-      instanceId: CODEX,
-      model: "gpt-5.5",
-      options: [{ id: "reasoningEffort", value: "medium" }],
+
+    await vi.waitFor(() => {
+      expect(app.draft()?.modelSelectionByProvider[CODEX]).toEqual({
+        instanceId: CODEX,
+        model: "gpt-5.5",
+      });
+      expect(document.activeElement).toBe(effortLevel("High"));
     });
-    expect(
-      useComposerDraftStore.getState().stickyOptionsByModelByProvider[CODEX]?.["gpt-5.5"],
-    ).toEqual([{ id: "reasoningEffort", value: "medium" }]);
+    expect(pickerContent()).toBeTruthy();
+    expect(effortColumn().textContent).toContain("GPT-5.5");
+    expect(selectedEffort()).toBe("High");
     expect(app.draft()?.prompt).toBe("Keep this prompt");
-    // Applying a model alone writes no access change.
+    expect(app.draft()?.runtimeMode ?? null).toBeNull();
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX]?.model).toBe(
+      "gpt-5.5",
+    );
+
+    const applied = app.savedSnapshot();
+    await closePicker();
+    expect(app.savedSnapshot()).toEqual(applied);
+  });
+
+  it("row clicks switch provider immediately and preserve the draft prompt and permissions", async () => {
+    await using app = await mountApp();
+    await app.openPicker();
+    await chooseProvider("Claude");
+    await click(row("Claude Opus 5"));
+
+    await vi.waitFor(() => {
+      expect(app.draft()?.activeProvider).toBe(CLAUDE);
+      expect(app.draft()?.modelSelectionByProvider[CLAUDE]?.model).toBe("claude-opus-5");
+      expect(document.activeElement).toBe(effortLevel("Medium"));
+    });
+    expect(pickerContent()).toBeTruthy();
+    expect(modelTriggerLabel()).toBe("Opus 5");
+    expect(app.draft()?.prompt).toBe("Keep this prompt");
     expect(app.draft()?.runtimeMode ?? null).toBeNull();
   });
 
-  it("combined picker row click applies another provider's model with its effort", async () => {
-    const previousViewport = { width: window.innerWidth, height: window.innerHeight };
-    await using _viewport = {
-      [Symbol.asyncDispose]: () => page.viewport(previousViewport.width, previousViewport.height),
-    };
-    await page.viewport(1440, 900);
+  it("Right applies the highlighted model before entering its effort column", async () => {
     await using app = await mountApp();
     await app.openPicker();
-    await press(searchInput(), "Tab");
-    await highlight("Claude Opus 5");
+    await highlight("GPT-5.5");
     await press(searchInput(), "ArrowRight");
 
-    await click(row("Claude Opus 5"));
-    await vi.waitFor(() => expect(pickerContent()).toBeNull());
-    expect(app.draft()?.activeProvider).toBe(CLAUDE);
-    expect(app.draft()?.modelSelectionByProvider[CLAUDE]).toEqual({
-      instanceId: CLAUDE,
-      model: "claude-opus-5",
-      options: [{ id: "effort", value: "high" }],
-    });
-    // The desktop footer keeps the full model name.
-    await vi.waitFor(() => expect(modelTriggerLabel()).toBe("Claude Opus 5"));
-  });
-
-  it("phone composer footer stacks the model row above the actions and drops the provider word", async () => {
-    const previousViewport = { width: window.innerWidth, height: window.innerHeight };
-    await using _viewport = {
-      [Symbol.asyncDispose]: () => page.viewport(previousViewport.width, previousViewport.height),
-    };
-    await using app = await mountApp();
-    await app.openPicker();
-    await press(searchInput(), "Tab");
-    await click(row("Claude Opus 5"));
-    await vi.waitFor(() => expect(pickerContent()).toBeNull());
-
-    await page.viewport(412, 915);
-    const editor = app.container.querySelector<HTMLElement>('[data-testid="composer-editor"]');
-    await act(async () => editor?.focus());
     await vi.waitFor(() => {
-      const footer = app.container.querySelector<HTMLElement>('[data-chat-composer-footer="true"]');
-      expect(footer && getComputedStyle(footer).flexDirection).toBe("column");
-      expect(modelTriggerLabel()).toBe("Opus 5");
+      expect(app.draft()?.modelSelectionByProvider[CODEX]?.model).toBe("gpt-5.5");
+      expect(document.activeElement).toBe(effortLevel("High"));
     });
-  });
-
-  it("combined picker stages Ultrathink and prefixes the prompt current at apply time", async () => {
-    await using app = await mountApp();
-    await app.openPicker();
-    await press(searchInput(), "Tab");
-    await highlight("Claude Opus 5");
-    for (let count = 0; count < 3; count += 1) await press(searchInput(), "ArrowRight");
-    expect(effortValue("Claude Opus 5")).toBe("Ultrathink");
-
-    await act(async () => {
-      useComposerDraftStore.getState().setPrompt(app.threadRef, "Keep this prompt, then more");
-    });
-    await press(searchInput(), "Enter");
-    await vi.waitFor(() => expect(pickerContent()).toBeNull());
-
-    expect(app.draft()?.modelSelectionByProvider[CLAUDE]?.model).toBe("claude-opus-5");
-    expect(app.draft()?.prompt).toBe("Ultrathink:\nKeep this prompt, then more");
-  });
-
-  it("guard: an unedited new model shows in the composer with the effort its row showed", async () => {
-    await using app = await mountApp();
-    await act(async () => {
-      useComposerDraftStore
-        .getState()
-        .setProviderModelOptions(
-          app.threadRef,
-          ProviderDriverKind.make("codex"),
-          [{ id: "reasoningEffort", value: "low" }],
-          { instanceId: CODEX, model: "gpt-5.4" },
-        );
-    });
-    await app.openPicker();
-    expect(effortValue("GPT-5.4")).toBe("Low");
-    expect(effortValue("GPT-5.5")).toBe("High");
-
-    await click(row("GPT-5.5"));
-    await vi.waitFor(() => expect(pickerContent()).toBeNull());
-
-    expect(app.draft()?.modelSelectionByProvider[CODEX]?.options).toEqual([
-      { id: "reasoningEffort", value: "high" },
-    ]);
-  });
-});
-
-describe("combined picker in the composer: cancellation", () => {
-  it("combined picker Escape discards pending effort, options, and access", async () => {
-    await using app = await mountApp();
-    const before = app.savedSnapshot();
-    await app.openPicker();
-    await highlight("GPT-5.4");
-    await press(searchInput(), "ArrowRight");
-    await openMoreOptions();
-    await chooseOption("Service tier", "Fast");
-    await chooseOption("Access level", "Full access");
-    expect(accessSummary()).toContain("Full access");
-
-    await press(focusTarget(), "Escape");
-    await vi.waitFor(() => expect(pickerContent()).toBeNull());
-    expect(app.savedSnapshot()).toEqual(before);
-    await app.openPicker();
-    expect(effortValue("GPT-5.4")).toBe("Medium");
-    expect(moreOptionsToggle()?.getAttribute("aria-expanded")).toBe("false");
-    expect(accessSummary()).toContain("Supervised");
-  });
-
-  it("combined picker outside press discards pending changes", async () => {
-    await using app = await mountApp();
-    const before = app.savedSnapshot();
-    await app.openPicker();
-    await highlight("GPT-5.4");
-    await press(searchInput(), "ArrowRight");
-
-    await app.pressOutside();
-
-    expect(pickerContent()).toBeNull();
-    expect(app.savedSnapshot()).toEqual(before);
-    await app.openPicker();
-    expect(effortValue("GPT-5.4")).toBe("Medium");
-  });
-});
-
-describe("combined picker in the composer: More options", () => {
-  it("combined picker More options replaces search, and Back keeps the search and every pending edit", async () => {
-    await using app = await mountApp();
-    const before = app.savedSnapshot();
-    await app.openPicker();
-    await typeSearch("5.4");
-    await highlight("GPT-5.4");
-    await press(searchInput(), "ArrowRight");
-    await openMoreOptions();
-
-    expect(searchInput().closest("[inert]")).toBeTruthy();
-    expect(extrasRegion()?.textContent).toContain("GPT-5.4 · Codex");
-    expect(extrasRegion()?.contains(document.activeElement)).toBe(true);
-    await chooseOption("Service tier", "Fast");
-    await chooseOption("Access level", "Full access");
-
-    await click(moreOptionsToggle()!);
-    await vi.waitFor(() => expect(document.activeElement).toBe(searchInput()));
-    expect(searchInput().closest("[inert]")).toBeNull();
+    expect(selectedEffort()).toBe("High");
+    await press(focusTarget(), "ArrowLeft");
     expect(document.activeElement).toBe(searchInput());
-    expect(searchInput().value).toBe("5.4");
-    expect(effortValue("GPT-5.4")).toBe("High");
-    expect(app.savedSnapshot()).toEqual(before);
-
-    await openMoreOptions();
-    expect(
-      extrasRegion()?.querySelector<HTMLSelectElement>('[aria-label="Service tier"]')?.value,
-    ).toBe("priority");
-    expect(
-      extrasRegion()?.querySelector<HTMLSelectElement>('[aria-label="Access level"]')?.value,
-    ).toBe("full-access");
   });
+});
 
-  it("combined picker Use applies effort, provider options, and access together", async () => {
+describe("combined picker in the composer: docked effort and speed", () => {
+  it("pointer picks persist effort and speed immediately without replacing the model or prompt", async () => {
     await using app = await mountApp();
     await app.openPicker();
-    await highlight("GPT-5.4");
-    await press(searchInput(), "ArrowRight");
-    await openMoreOptions();
-    await chooseOption("Service tier", "Fast");
-    await chooseOption("Access level", "Full access");
+    await click(effortLevel("High"));
+    const fast = buttonByLabel("Fast", pickerPopup());
+    expect(fast).toBeTruthy();
+    await click(fast!);
 
-    await click(buttonByLabel("Use GPT-5.4", extrasRegion()!)!);
-    await vi.waitFor(() => expect(pickerContent()).toBeNull());
+    const options = [
+      { id: "reasoningEffort", value: "high" },
+      { id: "serviceTier", value: "priority" },
+    ];
+    expect(app.draft()?.modelSelectionByProvider[CODEX]).toEqual({
+      instanceId: CODEX,
+      model: "gpt-5.4",
+      options,
+    });
+    expect(
+      useComposerDraftStore.getState().stickyOptionsByModelByProvider[CODEX]?.["gpt-5.4"],
+    ).toEqual(options);
+    expect(selectedEffort()).toBe("High");
+    expect(app.draft()?.prompt).toBe("Keep this prompt");
+    expect(app.draft()?.runtimeMode ?? null).toBeNull();
+    const applied = app.savedSnapshot();
+    await closePicker();
+    expect(app.savedSnapshot()).toEqual(applied);
+    await app.openPicker();
+    expect(selectedEffort()).toBe("High");
+    expect(buttonByLabel("Fast", pickerPopup())?.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("Up and Down move focus without writes, and Enter applies the focused effort", async () => {
+    await using app = await mountApp();
+    await app.openPicker();
+    const before = app.savedSnapshot();
+    await act(async () => effortLevel("Medium").focus());
+    await userEvent.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(effortLevel("High"));
+    expect(selectedEffort()).toBe("Medium");
+    expect(app.savedSnapshot()).toEqual(before);
+
+    await userEvent.keyboard("{Enter}");
+    expect(selectedEffort()).toBe("High");
     expect(app.draft()?.modelSelectionByProvider[CODEX]?.options).toEqual(
-      expect.arrayContaining([
-        { id: "reasoningEffort", value: "high" },
-        { id: "serviceTier", value: "priority" },
-      ]),
+      expect.arrayContaining([{ id: "reasoningEffort", value: "high" }]),
     );
-    expect(app.draft()?.runtimeMode).toBe("full-access");
+    expect(pickerContent()).toBeTruthy();
+    await press(focusTarget(), "ArrowLeft");
+    expect(document.activeElement).toBe(searchInput());
+  });
+
+  it("restores each model's sticky effort instead of carrying the previous model's options", async () => {
+    await using app = await mountApp();
+    await app.openPicker();
+    await click(effortLevel("Low"));
+    await click(row("GPT-5.5"));
+    await vi.waitFor(() => expect(effortColumn().textContent).toContain("GPT-5.5"));
+    expect(selectedEffort()).toBe("High");
+    expect(app.draft()?.modelSelectionByProvider[CODEX]?.options).toBeUndefined();
+
+    await click(effortLevel("Medium"));
+    await click(row("GPT-5.4"));
+    expect(selectedEffort()).toBe("Low");
+    expect(app.draft()?.modelSelectionByProvider[CODEX]?.options).toEqual(
+      expect.arrayContaining([{ id: "reasoningEffort", value: "low" }]),
+    );
+    await click(row("GPT-5.5"));
+    expect(selectedEffort()).toBe("Medium");
+    expect(
+      useComposerDraftStore.getState().stickyOptionsByModelByProvider[CODEX]?.["gpt-5.5"],
+    ).toEqual([{ id: "reasoningEffort", value: "medium" }]);
+  });
+
+  it("offers Claude's real effort levels without injecting Ultrathink into the prompt", async () => {
+    await using app = await mountApp();
+    await app.openPicker();
+    await chooseProvider("Claude");
+    await click(row("Claude Opus 5"));
+    await vi.waitFor(() => expect(effortColumn().textContent).toContain("Opus 5"));
+    expect(effortColumn().textContent).not.toContain("Ultrathink");
+    await click(effortLevel("Max"));
+
+    expect(app.draft()?.modelSelectionByProvider[CLAUDE]?.options).toEqual([
+      { id: "effort", value: "max" },
+    ]);
+    expect(
+      useComposerDraftStore.getState().stickyOptionsByModelByProvider[CLAUDE]?.["claude-opus-5"],
+    ).toEqual([{ id: "effort", value: "max" }]);
     expect(app.draft()?.prompt).toBe("Keep this prompt");
   });
+});
 
-  it("combined picker More options targets the highlighted model, not the saved one", async () => {
+describe("combined picker in the composer: dismissal", () => {
+  it("Escape after search and highlighting writes no draft, sticky option, or permission", async () => {
     await using app = await mountApp();
+    const before = app.savedSnapshot();
     await app.openPicker();
+    await typeSearch("5.5");
     await highlight("GPT-5.5");
-    await openMoreOptions();
-
-    expect(extrasRegion()?.textContent).toContain("GPT-5.5 · Codex");
-    expect(extrasRegion()?.querySelector('[aria-label="Service tier"]')).toBeNull();
-    await click(buttonByLabel("Use GPT-5.5", extrasRegion()!)!);
-    await vi.waitFor(() => expect(pickerContent()).toBeNull());
-    expect(app.draft()?.modelSelectionByProvider[CODEX]?.model).toBe("gpt-5.5");
+    expect(selectedEffort()).toBe("Medium");
+    await closePicker();
+    expect(app.savedSnapshot()).toEqual(before);
+    await app.openPicker();
+    expect(searchInput().value).toBe("");
+    expect(selectedEffort()).toBe("Medium");
   });
 
-  it("combined picker More options never targets a model the current tab hides", async () => {
+  it("outside press closes without applying the highlighted model", async () => {
     await using app = await mountApp();
+    const before = app.savedSnapshot();
     await app.openPicker();
     await highlight("GPT-5.5");
-    await press(searchInput(), "Tab");
-    expect(highlightedRow()).toBeNull();
-
-    await openMoreOptions();
-    expect(extrasRegion()?.textContent).toContain("No model highlighted");
-    expect(buttonByLabel(/^Use /, extrasRegion()!)).toBeNull();
-
-    await click(moreOptionsToggle()!);
-    await vi.waitFor(() => expect(document.activeElement).toBe(searchInput()));
-    await press(searchInput(), "ArrowDown");
-    await openMoreOptions();
-    expect(extrasRegion()?.textContent).toContain("Claude Opus 5 · Claude");
-  });
-
-  it("combined picker keys inside More options neither cycle providers nor change effort", async () => {
-    await using app = await mountApp();
-    await app.openPicker();
-    await highlight("GPT-5.4");
-    await openMoreOptions();
-    const access = pickerContent()!.querySelector<HTMLElement>('[aria-label="Access level"]')!;
-
-    await press(access, "Tab");
-    await press(access, "ArrowRight");
-    await click(moreOptionsToggle()!);
-    await vi.waitFor(() => expect(document.activeElement).toBe(searchInput()));
-
-    expect(selectedProviderTab()).toBe("Codex");
-    expect(effortValue("GPT-5.4")).toBe("Medium");
+    await app.pressOutside();
+    expect(app.savedSnapshot()).toEqual(before);
   });
 });
 
-describe("combined picker in the composer: access", () => {
-  it("combined picker shows an existing thread's saved access", async () => {
-    await using app = await mountApp("approval-required");
+describe("combined picker in the composer: permissions", () => {
+  it.each([
+    ["approval-required", undefined, "Supervised"],
+    ["full-access", undefined, "Full access"],
+    ["approval-required", "auto", "Auto"],
+  ] as const)("shows thread mode %s and draft override %s as %s", async (mode, override, label) => {
+    await using app = await mountApp(mode, override);
     await app.openPicker();
-    expect(accessSummary()).toContain("Supervised");
+    expect(permissionsTrigger().getAttribute("aria-label")).toBe(`Permissions: ${label}`);
   });
 
-  it("combined picker shows Full access for a thread created with the default access", async () => {
-    await using app = await mountApp("full-access");
+  it("applies footer permissions immediately and keeps the model and prompt unchanged", async () => {
+    await using app = await mountApp();
     await app.openPicker();
-    expect(accessSummary()).toContain("Full access");
+    const before = app.savedSnapshot();
+    await choosePermission("Full access");
+    expect(app.draft()?.runtimeMode).toBe("full-access");
+    expect(permissionsTrigger().getAttribute("aria-label")).toBe("Permissions: Full access");
+    expect(app.savedSnapshot()).toEqual({ ...before, runtimeMode: "full-access" });
+    expect(pickerContent()).toBeTruthy();
+    await closePicker();
+    expect(app.draft()?.runtimeMode).toBe("full-access");
   });
 
-  it("combined picker prefers the composer's own access over the thread's", async () => {
-    await using app = await mountApp("approval-required", "auto");
+  it("Escape dismisses the permission menu without changing its checked mode", async () => {
+    await using app = await mountApp();
     await app.openPicker();
-    expect(accessSummary()).toContain("Auto");
+    const before = app.savedSnapshot();
+    await click(permissionsTrigger());
+    await expect
+      .element(page.getByRole("menuitemradio", { name: "Supervised", exact: true }))
+      .toHaveAttribute("aria-checked", "true");
+    await userEvent.keyboard("{Escape}");
+    await expect
+      .element(page.getByRole("menuitemradio", { name: "Supervised", exact: true }))
+      .not.toBeInTheDocument();
+    expect(app.savedSnapshot()).toEqual(before);
+    if (pickerContent()) await closePicker();
+    expect(app.savedSnapshot()).toEqual(before);
   });
 });
 
 describe("combined picker in the composer: shortcuts", () => {
-  it("combined picker effort shortcut opens on More options and toggles it while open", async () => {
-    await using _app = await mountApp();
-    await press(focusTarget(), "e", { altKey: true, code: "KeyE" });
-    await vi.waitFor(() => expect(moreOptionsToggle()?.getAttribute("aria-expanded")).toBe("true"));
-
-    expect(pickerContent()).toBeTruthy();
-    expect(moreOptionsToggle()?.getAttribute("aria-expanded")).toBe("true");
-    expect(extrasRegion()?.textContent).toContain("GPT-5.4 · Codex");
-
-    await press(focusTarget(), "e", { altKey: true, code: "KeyE" });
-    await vi.waitFor(() => expect(document.activeElement).toBe(searchInput()));
-    expect(moreOptionsToggle()?.getAttribute("aria-expanded")).toBe("false");
-    expect(document.activeElement).toBe(searchInput());
-  });
-
-  it("combined picker access shortcut opens the picker on model search", async () => {
-    await using _app = await mountApp();
-    await press(focusTarget(), "A", { ctrlKey: true, shiftKey: true, code: "KeyA" });
-    await vi.waitFor(() => expect(document.activeElement).toBe(searchInput()));
-
-    expect(pickerContent()).toBeTruthy();
-    expect(moreOptionsToggle()?.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  it("guard: the composer shows no separate effort or access control", async () => {
+  it("Alt+E opens on the selected effort and returns there while the picker stays open", async () => {
     await using app = await mountApp();
-    expect(app.container.querySelector('[aria-label="Runtime mode"]')).toBeNull();
-    expect(app.container.querySelector('[data-composer-shortcut~="composer.effort"]')).toBeNull();
-    // The trigger shows the saved effort after the model name.
-    expect(
-      app.modelTrigger().querySelector('[data-chat-provider-model-picker-traits="true"]')
-        ?.textContent,
-    ).toBe("Medium");
+    const before = app.savedSnapshot();
+    await press(focusTarget(), "e", { altKey: true, code: "KeyE" });
+    await vi.waitFor(() => expect(document.activeElement).toBe(effortLevel("Medium")));
+    const popup = pickerPopup();
+    await press(focusTarget(), "ArrowLeft");
+    expect(document.activeElement).toBe(searchInput());
+    await press(focusTarget(), "e", { altKey: true, code: "KeyE" });
+    await vi.waitFor(() => expect(document.activeElement).toBe(effortLevel("Medium")));
+    expect(pickerPopup()).toBe(popup);
+    expect(app.savedSnapshot()).toEqual(before);
   });
+
+  it("the permissions shortcut opens the default mode's menu without writing it", async () => {
+    await using app = await mountApp("full-access");
+    const before = app.savedSnapshot();
+    await press(focusTarget(), "A", { ctrlKey: true, shiftKey: true, code: "KeyA" });
+    await expect
+      .element(page.getByRole("menuitemradio", { name: "Full access", exact: true }))
+      .toHaveFocus();
+    expect(pickerContent()).toBeTruthy();
+    expect(app.savedSnapshot()).toEqual(before);
+    await userEvent.keyboard("{ArrowLeft}{Enter}");
+    expect(app.draft()?.runtimeMode).toBe("auto");
+  });
+});
+
+// Mesura: the phone footer stacks the model row above the actions, both centered.
+it("phone composer footer stacks the model row above the actions and drops the provider word", async () => {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await using _viewport = {
+    [Symbol.asyncDispose]: () => page.viewport(previousViewport.width, previousViewport.height),
+  };
+  await using app = await mountApp();
+  await app.openPicker();
+  await chooseProvider("Claude");
+  await click(row("Claude Opus 5"));
+  await closePicker();
+
+  await page.viewport(412, 915);
+  const editor = app.container.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+  await act(async () => editor?.focus());
+  await vi.waitFor(() => {
+    const footer = app.container.querySelector<HTMLElement>('[data-chat-composer-footer="true"]');
+    expect(footer && getComputedStyle(footer).flexDirection).toBe("column");
+    const controls = footer!.querySelector<HTMLElement>('[data-chat-composer-controls="footer"]');
+    const actions = footer!.querySelector<HTMLElement>('[data-chat-composer-actions="right"]');
+    expect(controls!.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      actions!.getBoundingClientRect().top + 1,
+    );
+    expect(modelTriggerLabel()).toBe("Opus 5");
+  });
+});
+
+it("keeps the phone footer and stacked picker controls usable within the viewport", async () => {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await using _viewport = {
+    [Symbol.asyncDispose]: () => page.viewport(previousViewport.width, previousViewport.height),
+  };
+  await page.viewport(412, 915);
+  await using app = await mountApp();
+  await app.openPicker();
+  await chooseProvider("Claude");
+  await click(row("Claude Opus 5"));
+  await vi.waitFor(() => expect(document.activeElement).toBe(effortLevel("Medium")));
+  await click(effortLevel("High"));
+  await choosePermission("Full access");
+
+  await vi.waitFor(() => {
+    const models = pickerContent()!.getBoundingClientRect();
+    const effort = effortColumn().getBoundingClientRect();
+    const permissions = permissionsTrigger().getBoundingClientRect();
+    expect(effort.top).toBeGreaterThanOrEqual(models.bottom - 1);
+    expect(permissions.top).toBeGreaterThanOrEqual(effort.bottom - 1);
+    expect(permissions.bottom).toBeLessThanOrEqual(window.innerHeight);
+    expect(effort.left).toBeGreaterThanOrEqual(0);
+    expect(effort.right).toBeLessThanOrEqual(window.innerWidth);
+  });
+  await closePicker();
+  const editor = app.container.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+  await act(async () => editor?.focus());
+  await vi.waitFor(() => {
+    const footer = app.container.querySelector<HTMLElement>('[data-chat-composer-footer="true"]');
+    expect(footer).toBeTruthy();
+    expect(getComputedStyle(footer!).flexDirection).toBe("column");
+    const trigger = app.modelTrigger().getBoundingClientRect();
+    expect(trigger.width).toBeGreaterThan(0);
+    expect(trigger.left).toBeGreaterThanOrEqual(0);
+    expect(trigger.right).toBeLessThanOrEqual(window.innerWidth);
+    expect(modelTriggerLabel()).toBe("Opus 5");
+    expect(app.modelTrigger().getAttribute("aria-label")).toContain("High");
+  });
+  expect(app.draft()?.modelSelectionByProvider[CLAUDE]?.options).toEqual([
+    { id: "effort", value: "high" },
+  ]);
+  expect(app.draft()?.runtimeMode).toBe("full-access");
+  expect(app.draft()?.prompt).toBe("Keep this prompt");
 });

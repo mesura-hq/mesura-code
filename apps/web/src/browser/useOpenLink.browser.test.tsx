@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema";
 // Mounts the useOpenLink public button entry and activates it through a DOM click.
 import { EnvironmentId, ThreadId, type BrowserLinkTarget } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
@@ -63,8 +64,6 @@ vi.mock("~/browserHistoryStore", () => ({ recordVisitForThread: state.visit }));
 vi.mock("~/assets/assetUrls", () => ({ resolveAssetUrl: vi.fn() }));
 vi.mock("./browserDefaults", () => ({
   resolveBrowserDefaults: state.defaults,
-  browserDefaultOpenProfileId: (defaults: { profileId: string }) => defaults.profileId,
-  browserDefaultOpenViewport: (defaults: { viewport: unknown }) => defaults.viewport,
 }));
 import {
   installThreadLinkEnvironment,
@@ -170,6 +169,8 @@ async function click(modifiers: MouseEventInit = {}) {
   });
 }
 
+const isBrowserSettingsReadError = Schema.is(BrowserSettingsReadError);
+
 it.each([
   [767, false],
   [1280, true],
@@ -243,7 +244,7 @@ it("open-link button policy: hydration failure opens neither destination", async
   await mount();
   const error = await click().catch((error: unknown) => error);
   expect(error).toBeInstanceOf(BrowserSettingsReadError);
-  if (!(error instanceof BrowserSettingsReadError)) throw error;
+  if (!isBrowserSettingsReadError(error)) throw error;
   expect(error.cause).toBe(failure);
   expect(state.external).not.toHaveBeenCalled();
   expect(state.allocate).not.toHaveBeenCalled();

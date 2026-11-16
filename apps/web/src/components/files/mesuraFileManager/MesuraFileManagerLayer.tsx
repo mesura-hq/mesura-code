@@ -66,7 +66,7 @@ export function MesuraFileManagerLayer({
     setLastTarget(currentTarget);
   }
   const target = currentTarget ?? lastTarget;
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: the route, not a handler, drops the thread; an open flag left behind would make the next chord invisible
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: the route, not a handler, drops the thread; an open flag left behind would make the next chord invisible
   useEffect(() => {
     if (open && routeThreadRef === null) closeFileManager();
   }, [open, routeThreadRef]);
@@ -92,7 +92,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
   const host = useEnvironmentQuery(fileManagerHost({ environmentId, input: {} }));
   const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
   const latest = useRef({ httpBaseUrl });
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref read by the long-lived bridge without rebuilding it
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref read by the long-lived bridge without rebuilding it
   useEffect(() => {
     latest.current = { httpBaseUrl };
   });
@@ -101,7 +101,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
   // its hooks call the bridge from their mount effects, which would run
   // before an effect of this component installed it.
   const [bridge, setBridge] = useState<WsBridge | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: owns the bridge's lifetime, a server session per environment
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: owns the bridge's lifetime, a server session per environment
   useEffect(() => {
     const created = createWsBridge(createFileManagerTransport(environmentId), {
       close: closeFileManager,
@@ -142,7 +142,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
     origin: Element | null;
     restoreComposer: ReturnType<typeof captureComposerFocusReturn>;
   } | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: dialog focus taken on mount and returned on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: dialog focus taken on mount and returned on unmount
   useEffect(() => {
     const owner = root.current;
     // StrictMode replays this effect while the dialog already owns focus.

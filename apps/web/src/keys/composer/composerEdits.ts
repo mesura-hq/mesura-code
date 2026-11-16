@@ -123,7 +123,7 @@ function splitLineAtSelection(editor: Editor): void {
     editor.view.dispatch(editor.state.tr.insertText("\n"));
     return;
   }
-  if (splitOrLiftListItem(editor)) return;
+  if (splitOrLiftListItem(editor, () => true)) return;
   editor.commands.splitBlock();
 }
 

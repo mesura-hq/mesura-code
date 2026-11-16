@@ -1,5 +1,5 @@
 import * as Config from "effect/Config";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
@@ -21,12 +21,10 @@ const ATTEMPT_TIMEOUT = "110 seconds";
 const RETRY_DELAY = "2 seconds";
 const RETRIES = 2;
 
-export class OpenAiTranscriptionError extends Data.TaggedError("OpenAiTranscriptionError")<{
-  /** Readable, shown to the user as the job's failure. */
-  readonly reason: string;
-  /** 5xx, network and timeout failures; everything else is final. */
-  readonly retryable: boolean;
-}> {}
+export class OpenAiTranscriptionError extends Schema.TaggedError<OpenAiTranscriptionError>()(
+  "OpenAiTranscriptionError",
+  { reason: Schema.String, retryable: Schema.Boolean },
+) {}
 
 export interface OpenAiTranscriptionRequest {
   readonly apiKey: string;

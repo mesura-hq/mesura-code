@@ -4,9 +4,9 @@ import { createRef, useSyncExternalStore } from "react";
 import { act, render } from "../../test/render";
 
 import {
-  ComposerPromptEditor,
+  ComposerPromptEditorTiptap,
   type ComposerPromptEditorHandle,
-} from "~/components/ComposerPromptEditor";
+} from "~/components/ComposerPromptEditorTiptap";
 import { collapseExpandedComposerCursor } from "~/composer-logic";
 import { serializeEditorDoc } from "~/composer-rich-text-doc";
 import { composerSurface } from "~/keys/composer/composerSurface";
@@ -46,7 +46,7 @@ export async function mountVimComposer(
     const { value, cursor } = useSyncExternalStore(subscribe, () => controlled);
     return (
       <div data-chat-composer-main-surface="true">
-        <ComposerPromptEditor
+        <ComposerPromptEditorTiptap
           editorRef={editorRef}
           value={value}
           cursor={cursor}

@@ -37,6 +37,7 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => {},
   LegendList: (props: {
     data: Array<{ id: string }>;
     keyExtractor: (item: { id: string }) => string;
@@ -62,7 +63,10 @@ vi.mock("~/state/entities", async (importOriginal) => {
     new Map(
       [...fixture.capabilitiesByEnvironment].map(([environmentId, capabilities]) => [
         environmentId,
-        { environment: { capabilities }, availableEditors: [] },
+        {
+          environment: { capabilities, platform: { os: "linux", machine: "server" } },
+          availableEditors: [],
+        },
       ]),
     );
   return {
@@ -96,7 +100,10 @@ vi.mock("~/state/environments", async (importOriginal) => {
             traceId: null,
           },
           serverConfig: {
-            environment: { capabilities: fixture.capabilitiesByEnvironment.get(environmentId) },
+            environment: {
+              capabilities: fixture.capabilitiesByEnvironment.get(environmentId),
+              platform: { os: "linux", machine: "server" },
+            },
           },
         };
   return {
@@ -126,7 +133,10 @@ vi.mock("~/state/server", async (importOriginal) => {
         new Map(
           [...fixture.capabilitiesByEnvironment].map(([id, capabilities]) => [
             id,
-            { environment: { capabilities }, availableEditors: [] },
+            {
+              environment: { capabilities, platform: { os: "linux", machine: "server" } },
+              availableEditors: [],
+            },
           ]),
         ),
     ),
@@ -142,7 +152,10 @@ vi.mock("~/state/server", async (importOriginal) => {
             Atom.make(
               capabilities === undefined
                 ? null
-                : { environment: { capabilities }, availableEditors: [] },
+                : {
+                    environment: { capabilities, platform: { os: "linux", machine: "server" } },
+                    availableEditors: [],
+                  },
             ),
           );
         }
@@ -269,7 +282,6 @@ function timelineProps(ref: typeof threadRef, entries: Array<ReturnType<typeof a
     isWorking: false,
     activeTurnStartedAt: null,
     listRef: createRef<never>(),
-    activeTurnInProgress: false,
     latestRun: null,
     runningRunId: null,
     emptyPlaceholderInset: 0,
@@ -279,7 +291,6 @@ function timelineProps(ref: typeof threadRef, entries: Array<ReturnType<typeof a
     onOpenTurnDiff: () => {},
     onOpenThread: () => {},
     onForkFromRun: async () => {},
-    onRollbackCheckpoint: () => {},
     supportsConversationRollback: false,
     onRevertToTurnCount: () => {},
     isRevertingCheckpoint: false,

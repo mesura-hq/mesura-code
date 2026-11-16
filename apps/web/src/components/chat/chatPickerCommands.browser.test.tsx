@@ -84,12 +84,12 @@ it("reaches all three run context actions through chords and the Vim command reg
 it("preserves held-key repeats for the existing picker shortcuts", async () => {
   // router: false because this probe drives shortcut dispatch without navigation.
   await using screen = await render(<ChatPickerHost />, { router: false });
-  const traits = vi.fn();
+  const branch = vi.fn();
   using subscriptions = new DisposableStack();
-  subscriptions.defer(subscribePickerAction("traits", traits));
+  subscriptions.defer(subscribePickerAction("branch", branch));
   await screen.getByRole("button", { name: "Chat focus" }).click();
-  window.dispatchEvent(new KeyboardEvent("keydown", { key: "e", altKey: true, repeat: true }));
-  expect(traits).toHaveBeenCalledTimes(1);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", altKey: true, repeat: true }));
+  expect(branch).toHaveBeenCalledTimes(1);
 });
 
 const hosts: EnvironmentOption[] = [

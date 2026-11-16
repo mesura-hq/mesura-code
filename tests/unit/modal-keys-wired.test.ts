@@ -462,11 +462,17 @@ it("modal keys seam guard: assistant text reading stays exported for the chat bu
 it("modal keys seam guard: the terminal drawer's top edge is a pane edge", () => {
   const file = "apps/web/src/components/ThreadTerminalDrawer.tsx";
   assertCallCarries(file, "usePaneEdge", ['id: "terminal-drawer"', "resizeTo:", "reset:"]);
-  // The drawer renders its handle in two branches; both must take the props.
+  // Both drawer layouts render one shared handle element, which must take the props.
+  const handle = region(read(file), "const resizeHandle =", "/>", file);
+  assert.include(
+    handle,
+    tokens("{...separatorProps}"),
+    "the terminal drawer handle no longer spreads separatorProps",
+  );
   assert.isAtLeast(
-    read(file).split(tokens("{...separatorProps}")).length - 1,
+    read(file).split(tokens("{resizeHandle}")).length - 1,
     2,
-    "a terminal drawer handle no longer spreads separatorProps",
+    "a terminal drawer layout no longer renders the shared handle",
   );
 });
 
@@ -515,10 +521,10 @@ it("modal keys seam guard: the sidebar rail is a pane edge", () => {
 // The command registry: each upstream owner's block.
 
 it("modal keys seam guard: the chat route registers new thread and preview", () => {
-  assertRegistersCommands("apps/web/src/routes/_chat.tsx", [
-    "chat.new",
-    "chat.newLocal",
-    "preview.toggle",
+  assertCallCarries("apps/web/src/shortcuts/chatRouteCommands.ts", "registerCommandHandlers", [
+    '"chat.new":',
+    '"chat.newLocal":',
+    '"preview.toggle":',
   ]);
 });
 
@@ -556,13 +562,12 @@ it("modal keys seam guard: the composer registers attach and stash", () => {
   ]);
 });
 
-it("modal keys seam guard: both sidebars register thread traversal", () => {
-  for (const file of [
-    "apps/web/src/components/Sidebar.tsx",
-    "apps/web/src/components/LegacySidebar.tsx",
-  ]) {
-    assertRegistersCommands(file, ["thread.next", "thread.previous"]);
-  }
+// Upstream deleted LegacySidebar; Sidebar is the only thread list.
+it("modal keys seam guard: the sidebar registers thread traversal", () => {
+  assertRegistersCommands("apps/web/src/components/Sidebar.tsx", [
+    "thread.next",
+    "thread.previous",
+  ]);
 });
 
 it("modal keys seam guard: the sidebar control registers sidebar.toggle", () => {
@@ -584,12 +589,12 @@ it("modal keys seam guard: the pull requests page registers its panel commands",
 });
 
 it("modal keys seam guard: the command palette registers its overlay toggles", () => {
-  assertCallCarries("apps/web/src/components/CommandPalette.tsx", "useCommandHandlers", [
-    '["commandPalette.toggle", "command"]',
-    '["filePicker.toggle", "files"]',
-    '["projectSearch.toggle", "content"]',
-    "toggleMode(mode as SearchOverlayMode)",
-  ]);
+  const file = "apps/web/src/shortcuts/commandPaletteCommands.ts";
+  assertCallCarries(file, "registerCommandHandlers", ["Object.entries(commandHandlers)"]);
+  const handlers = blockAfter(read(file), "const commandHandlers =", file);
+  for (const command of ["commandPalette.toggle", "filePicker.toggle", "projectSearch.toggle"]) {
+    assert.include(handlers, tokens(`"${command}":`), `the palette no longer registers ${command}`);
+  }
 });
 
 // The thread search and the project filter left the palette for the sidebar's
@@ -628,10 +633,15 @@ const countOf = (source: string, fragment: string) => source.split(tokens(fragme
 
 it("modal keys seam guard round 2: the sidebar numbers and jumps to the threads on screen", () => {
   const file = "apps/web/src/components/Sidebar.tsx";
-  // The show delay runs in the modifier leaf, so a quick chord re-renders only that leaf.
+  // The modifier leaf follows the delayed hold, so a quick chord re-renders only that leaf.
   assert.include(
     read("apps/web/src/components/sidebar/ThreadJumpHintModifierSync.tsx"),
-    tokens("const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);"),
+    tokens("const showJumpHints = useThreadJumpHintsVisible(keybindings, routeThreadRef);"),
+    "the jump hint leaf no longer follows the hint visibility",
+  );
+  assert.include(
+    read("apps/web/src/components/Sidebar.logic.ts"),
+    tokens("createModifierHoldStore(THREAD_JUMP_HINT_SHOW_DELAY_MS)"),
     "the jump hints no longer wait for their show delay",
   );
   assert.include(
@@ -654,17 +664,6 @@ it("modal keys seam guard round 2: the sidebar numbers and jumps to the threads 
     "the thread rows no longer show the jump hints",
   );
   assertCallCarries(file, "navigateToThreadKey", ["threadKeyForJump(command)"]);
-});
-
-it("modal keys seam guard round 2: the legacy sidebar hides the tenth jump label while the preview owns mod+0", () => {
-  const file = "apps/web/src/components/LegacySidebar.tsx";
-  assertCallCarries(file, "usePreviewFocusWhile", ["showThreadJumpHints"]);
-  assertCallCarries(file, "buildThreadJumpLabelMap", ["previewFocus"]);
-  assert.include(
-    read(file),
-    tokens("previewFocus: isPreviewFocused()"),
-    "the legacy sidebar's number keys no longer leave mod+0 to a focused preview",
-  );
 });
 
 it("modal keys seam guard round 2: Ctrl+D and Ctrl+U scroll the sidebar without opening a thread", () => {
@@ -1212,6 +1211,17 @@ it("modal keys seam guard round 2: the Linux desktop app leaves Ctrl+Q to the pa
   assert.notInclude(linuxQuit, tokens('role: "quit"'), "Linux Quit takes the role and its Ctrl+Q");
 });
 
+it("modal keys seam guard round 2: the sidebar hides the tenth jump label while the preview owns mod+0", () => {
+  const file = "apps/web/src/components/sidebar/threadJumpTargets.ts";
+  assertCallCarries(file, "usePreviewFocusWhile", ["active"]);
+  assertCallCarries(file, "resolveThreadJumpTargets", ["previewFocus"]);
+  assert.include(
+    read(file),
+    tokens("setPreviewFocus(isPreviewFocused())"),
+    "the sidebar's number keys no longer leave mod+0 to a focused preview",
+  );
+});
+
 it("modal keys seam guard round 2: a terminal close confirmation opens on Confirm", () => {
   assert.match(
     region(
@@ -1220,37 +1230,35 @@ it("modal keys seam guard round 2: a terminal close confirmation opens on Confir
       "}",
       "packages/contracts/src/ipc.ts",
     ),
-    /readonly initialFocus\?:"confirm";/,
+    /readonly initialFocus\?:"confirm"\|"cancel";/,
     "ConfirmDialogOptions lost initialFocus",
   );
+  const terminalClose = read("apps/web/src/lib/terminalCloseConfirm.ts");
   assert.include(
-    read("apps/web/src/lib/terminalCloseConfirm.ts"),
-    tokens('initialFocus: "confirm"'),
+    terminalClose,
+    tokens('{ initialFocus: "confirm" }'),
     "closing a terminal no longer asks for focus on Confirm",
+  );
+  // The host keeps a destructive confirmation on Cancel, whatever focus it asks for.
+  assert.notInclude(
+    terminalClose,
+    tokens('variant: "destructive"'),
+    "a destructive terminal close opens on Cancel, so Enter no longer closes the terminal",
   );
   const store = read("apps/web/src/confirmDialog.ts");
   assert.include(
     store,
-    tokens('focusConfirm: options?.initialFocus === "confirm"'),
+    tokens("initialFocus: options?.initialFocus,"),
     "the confirm dialog store drops the requested initial focus",
   );
   assert.include(
-    store,
-    tokens("...(pending.focusConfirm ? { focusConfirm: true } : {})"),
-    "the shown confirmation no longer carries focusConfirm",
+    region(store, "function confirmingState(", "}", "apps/web/src/confirmDialog.ts"),
+    tokens("initialFocus: pending.initialFocus,"),
+    "the shown confirmation no longer carries its initial focus",
   );
-  // Both places that show a confirmation build the state through confirmingState.
-  assert.equal(
-    countOf(store, "publish(confirmingState("),
-    2,
-    "a confirmation is shown without its focusConfirm",
-  );
-  for (const field of ["readonly focusConfirm?: boolean;", "readonly focusConfirm: boolean;"]) {
-    assert.include(store, tokens(field), `the confirm dialog store lost ${field}`);
-  }
   const host = read("apps/web/src/components/ConfirmDialogHost.tsx");
   for (const fragment of [
-    'state.status === "confirming" && state.focusConfirm === true',
+    'state.initialFocus === "confirm"',
     "{...(focusConfirm ? { initialFocus: confirmButtonRef } : {})}",
     "ref={confirmButtonRef}",
   ]) {

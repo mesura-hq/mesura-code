@@ -1,3 +1,7 @@
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as CloudLink from "../cloud/CloudLink.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 /**
  * Mesura: the refresh grant. Entry point: the MCP OAuth routes served with
  * `HttpRouter.serve` inside `it.effect`, so `TestClock` drives lifetimes; `/mcp`
@@ -13,7 +17,7 @@ import {
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -64,16 +68,34 @@ interface TokenReply {
 /** The MCP OAuth routes on a socket, with this environment's auth and database. */
 const serveOAuth = Effect.gen(function* () {
   const context = yield* EnvironmentAuth.layer.pipe(
+    Layer.provide(ManagedPolicy.layerTest()),
     Layer.provideMerge(Sqlite.layerMemory),
     Layer.provideMerge(ServerSecretStore.layer),
     Layer.provideMerge(ServerEnvironment.layerIdentity),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-refresh-test-" })),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     Layer.fresh,
     Layer.build,
   );
   const layerRoutes = HttpApiBuilder.layer(RefreshTestApi).pipe(
-    Layer.provide(McpOAuthHttp.layer.pipe(Layer.provide(McpOAuth.layer))),
+    Layer.provide(
+      McpOAuthHttp.layer.pipe(
+        Layer.provide(McpOAuth.layer),
+        Layer.provide(ServerSettings.layerTest({ linkedEnvironmentsEnabled: true })),
+        Layer.provide(
+          Layer.mock(CloudLink.CloudLink)({
+            linkState: () =>
+              Effect.succeed({
+                linked: false,
+                cloudUserId: null,
+                relayUrl: null,
+                relayIssuer: null,
+                publishAgentActivity: false,
+              }),
+          }),
+        ),
+      ),
+    ),
     Layer.provide(AuthHttp.layerAuthenticatedAuth),
     Layer.provide(Layer.succeedContext(context)),
   );
@@ -85,9 +107,9 @@ const serveOAuth = Effect.gen(function* () {
   const origin = `http://127.0.0.1:${address.port}`;
   const auth = Context.get(context, EnvironmentAuth.EnvironmentAuth);
   const sql = Context.get(context, SqlClient.SqlClient);
-  const crypto = Context.get(context, Crypto.Crypto);
+  const crypto = Context.get(context, Digest.Digest);
   const sha256 = (value: string) =>
-    crypto.digest("SHA-256", new TextEncoder().encode(value)).pipe(
+    crypto.digest(Digest.sha256, new TextEncoder().encode(value)).pipe(
       Effect.orDie,
       Effect.map((digest) => Buffer.from(digest)),
     );

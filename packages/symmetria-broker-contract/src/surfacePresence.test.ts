@@ -26,9 +26,8 @@ const lease = Schema.decodeSync(ClientActivityLease)({
   visible: true,
   focused: true,
   recentlyInteracted: false,
+  appState: "active",
   lowPowerMode: "false",
-  batteryState: "charging",
-  networkType: "wifi",
   scopes: [
     { type: "thread", threadId: "thr_9f3c1a7e" },
     { type: "vcs-status", cwd: "/home/dev/worktrees/symmetria-broker-contract" },

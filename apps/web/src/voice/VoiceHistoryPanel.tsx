@@ -214,7 +214,7 @@ export function VoiceHistoryPanel({
 
   // One serialized reader per selected call. Its responses carry the call's authoritative
   // summary, which also refreshes that call's entry in the list, wherever it was loaded from.
-  // oxlint-disable-next-line t3code/react-effect-budget -- owns the selected call's serialized transcript reader
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- owns the selected call's serialized transcript reader
   useEffect(() => {
     if (selectedId === null) return;
     const reader = createVoiceTranscriptReader({
@@ -247,7 +247,7 @@ export function VoiceHistoryPanel({
   }, [environmentId, threadId, selectedId, readQueue, applyCalls]);
 
   // ChatView keys this panel by thread, so this reads each thread's first page once.
-  // oxlint-disable-next-line t3code/react-effect-budget -- reads the thread's first page from the environment
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the thread's first page from the environment
   useEffect(() => {
     void readFirstPage();
   }, [readFirstPage]);
@@ -271,7 +271,7 @@ export function VoiceHistoryPanel({
     for (const callId of plan.summaryCallIds) void readSummary(callId);
     if (plan.readSelected) void readerRef.current?.request();
   });
-  // oxlint-disable-next-line t3code/react-effect-budget -- reacts to the environment's notice stream
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reacts to the environment's notice stream
   useEffect(() => {
     if (notices !== null) handleNotices(notices);
   }, [notices, handleNotices]);

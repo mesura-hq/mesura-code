@@ -25,7 +25,7 @@ import * as FactoryCardQuery from "./FactoryCardQuery.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
-import * as ProjectionMaintenance from "./ProjectionMaintenance.ts";
+import * as ProjectionReplay from "./testkit/ProjectionReplay.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import { fixtureRunPayload } from "./testkit/factoryCardFixtures.ts";
@@ -41,7 +41,7 @@ const stores = Layer.mergeAll(ProjectionStore.layer, EventStore.layer, FactoryCa
 );
 const testLayer = Layer.mergeAll(
   stores,
-  ProjectionMaintenance.layer.pipe(Layer.provide(stores)),
+  ProjectionReplay.layer.pipe(Layer.provide(stores)),
   LegacyV1ThreadImporter.layer.pipe(Layer.provideMerge(runtime), Layer.provide(database)),
 );
 const at = DateTime.makeUnsafe("2026-01-02T00:00:00.000Z");
@@ -150,7 +150,7 @@ it.layer(testLayer)("Mesura Factory lifecycle through the orchestrator", (it) =>
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const events = yield* EventStore.EventStoreV2;
         const cards = yield* FactoryCardQuery.FactoryCardQuery;
-        const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+        const maintenance = yield* ProjectionReplay.ProjectionReplay;
         yield* seedLegacyMessages(threadId);
         const runId = "reattached";
         const runCardId = TurnItemId.make(factoryRunActivityId(threadId, runId));
@@ -433,7 +433,7 @@ it.layer(testLayer)("Mesura Factory lifecycle through the orchestrator", (it) =>
           (yield* projections.getThreadProjection(threadId)).turnItems,
           imported.turnItems,
         );
-        yield* (yield* ProjectionMaintenance.ProjectionMaintenanceV2).rebuild;
+        yield* (yield* ProjectionReplay.ProjectionReplay).rebuild;
         yield* Effect.gen(function* () {
           const restarted = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
           yield* restarted.reconcileShells;
@@ -442,5 +442,23 @@ it.layer(testLayer)("Mesura Factory lifecycle through the orchestrator", (it) =>
         assert.deepStrictEqual(replayed.thread.updatedAt, noticeAt);
         assert.deepStrictEqual(replayed.turnItems, imported.turnItems);
       }),
+  );
+});
+
+it.layer(testLayer)("Mesura Factory import on a database upstream migrated", (it) => {
+  it.effect("imports v1 shells when upstream's migration 063 dropped the activity table", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make("thread:upstream-migrated-v1");
+      yield* seedLegacyMessages(threadId);
+      yield* sql`DROP TABLE projection_thread_activities`;
+
+      const result = yield* importer.reconcileShells;
+
+      assert.equal(result.importedThreadCount, 1);
+      assert.isDefined(yield* projections.getThreadShell(threadId));
+    }),
   );
 });

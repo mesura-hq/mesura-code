@@ -13,14 +13,8 @@ export const contractPackageRoot = NodePath.join(
 export const contractSourceRoot = NodePath.join(contractPackageRoot, "src");
 export const contractFixtureRoot = NodePath.join(contractPackageRoot, "test/fixtures");
 export const vitePlusPath = NodePath.join(repositoryRoot, "node_modules/.bin/vp");
-/**
- * The repository's typechecker.
- *
- * v0.0.42 dropped `@typescript/native-preview`, which is what provided `tsgo`;
- * every package went back to `tsc`. These guards spawn the binary directly, so
- * they need the path rather than the package script.
- */
-export const typecheckerPath = NodePath.join(repositoryRoot, "node_modules/.bin/tsc");
+/** The shared compiler guard supplies the tsc subcommand and the host-wide resource limits. */
+export const typecheckerPath = NodePath.join(repositoryRoot, "node_modules/.bin/effect-tsgo");
 
 /**
  * Room for a `git grep --only-matching` over the whole tracked tree, which

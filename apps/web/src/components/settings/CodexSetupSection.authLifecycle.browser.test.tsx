@@ -22,6 +22,12 @@ import { CodexSetupSection } from "./CodexSetupSection";
 type HandoffTarget = { environmentId: EnvironmentId; input: ChatGptHandoffInput };
 type Query = { kind: "auth" | "install" | "handoff" };
 const fixture = vi.hoisted(() => ({
+  /** The primary and any local environment are loopback; a remote one is not. */
+  httpBaseUrl(id: EnvironmentId | null) {
+    return id === fixture.primary || !fixture.remote
+      ? "http://127.0.0.1:4100"
+      : "https://fixture.invalid";
+  },
   auth: null as ProviderAuthState | null,
   install: null as ProviderInstallState | null,
   handoff: null as ChatGptHandoffState | null,
@@ -29,6 +35,10 @@ const fixture = vi.hoisted(() => ({
   remote: false,
   primary: null as EnvironmentId | null,
   handoffQuery: vi.fn<(target: HandoffTarget) => Query>(),
+  // Real atoms behind the auth and handoff queries, for code that subscribes through the registry.
+  authQuery: null as unknown as Query,
+  handoffAtom: null as unknown as Query,
+  publishQueries: () => {},
   commands: {
     startProviderAuth: vi.fn(),
     refreshProviders: vi.fn(),
@@ -43,14 +53,42 @@ const fixture = vi.hoisted(() => ({
   openExternal: vi.fn<(url: string) => Promise<void>>(),
   consumed: vi.fn(),
 }));
-vi.mock("../../state/server", () => ({
-  serverEnvironment: {
-    providerAuthState: () => ({ kind: "auth" }),
-    providerInstallState: () => ({ kind: "install" }),
-    chatGptHandoffState: fixture.handoffQuery,
-    ...fixture.commands,
-  },
-}));
+vi.mock("../../state/server", async () => {
+  const { Atom, AsyncResult } = await import("effect/reactivity");
+  const Cause = await import("effect/Cause");
+  const { appAtomRegistry } = await import("../../rpc/atomRegistry");
+  const authState = Atom.make(AsyncResult.success<unknown>(null)).pipe(Atom.keepAlive);
+  const handoffState = Atom.make<AsyncResult.AsyncResult<unknown, Error>>(
+    AsyncResult.success(null),
+  ).pipe(Atom.keepAlive);
+  fixture.authQuery = Object.assign(
+    Atom.make((get) => get(authState)),
+    { kind: "auth" } as const,
+  ) as unknown as Query;
+  fixture.handoffAtom = Object.assign(
+    Atom.make((get) => get(handoffState)),
+    { kind: "handoff" } as const,
+  ) as unknown as Query;
+  fixture.publishQueries = () => {
+    appAtomRegistry.set(authState, AsyncResult.success(fixture.auth));
+    appAtomRegistry.set(
+      handoffState,
+      fixture.handoffError
+        ? AsyncResult.failure(Cause.fail(fixture.handoffError))
+        : AsyncResult.success(fixture.handoff),
+    );
+  };
+  return {
+    environmentServerConfigsAtom: Atom.make(new Map()),
+    serverEnvironment: {
+      providerAuthState: () => fixture.authQuery,
+      providerInstallState: () => ({ kind: "install" }),
+      chatGptHandoffState: fixture.handoffQuery,
+      ...fixture.commands,
+      removeProviderAuthMethod: { permissionAtom: () => Atom.make(false) },
+    },
+  };
+});
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: (command: unknown) => command }));
 vi.mock("../../state/query", () => ({
   useEnvironmentQuery: (query: Query | null) => ({
@@ -66,12 +104,31 @@ vi.mock("../../state/query", () => ({
   }),
 }));
 vi.mock("../../state/environments", () => ({
-  useEnvironmentHttpBaseUrl: (id: EnvironmentId | null) =>
-    id === fixture.primary || !fixture.remote ? "http://127.0.0.1:4100" : "https://fixture.invalid",
+  useEnvironmentHttpBaseUrl: (id: EnvironmentId | null) => fixture.httpBaseUrl(id),
   usePrimaryEnvironmentId: () => fixture.primary,
   useEnvironment: () => ({ connection: { phase: "connected" } }),
 }));
-vi.mock("../../state/session", () => ({ useEnvironmentScope: () => true }));
+// Sign-in routing reads the primary environment and its connection from the atom registry.
+vi.mock("../../state/primaryEnvironment", async () => {
+  const { Atom } = await import("effect/reactivity");
+  return { primaryEnvironmentIdAtom: Atom.make(() => fixture.primary) };
+});
+vi.mock("../../state/presentation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../state/presentation")>();
+  const { Atom } = await import("effect/reactivity");
+  const connected = Atom.make({ connection: { phase: "connected" } });
+  return {
+    ...actual,
+    environmentPresentations: {
+      ...actual.environmentPresentations,
+      presentationAtom: () => connected,
+    },
+  };
+});
+vi.mock("../../state/session", () => ({
+  readPreparedConnection: (id: EnvironmentId) => ({ httpBaseUrl: fixture.httpBaseUrl(id) }),
+  useEnvironmentScope: () => true,
+}));
 vi.mock("../../localApi", () => ({
   ensureLocalApi: () => ({ shell: { openExternal: fixture.openExternal } }),
 }));
@@ -139,6 +196,7 @@ let authenticated: boolean;
 let autoStart: boolean;
 let strict: boolean;
 async function render() {
+  fixture.publishQueries();
   await act(async () => {
     const content = (
       <CodexSetupSection
@@ -206,7 +264,7 @@ async function setupBrowserFixture0() {
   fixture.handoffError = null;
   fixture.remote = false;
   fixture.primary = null;
-  fixture.handoffQuery.mockReturnValue({ kind: "handoff" });
+  fixture.handoffQuery.mockReturnValue(fixture.handoffAtom);
   fixture.openExternal.mockResolvedValue(undefined);
   fixture.commands.refreshProviders.mockResolvedValue(AsyncResult.success(undefined));
   authenticated = false;
@@ -364,7 +422,8 @@ describe("phase3 Codex auth lifecycle", () => {
   it("reports effect-only browser opening failures and retains the explicit retry callback", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
-    fixture.commands.startProviderAuth.mockResolvedValue(AsyncResult.success(undefined));
+    // Start answers with its flow, whose page the client opens once the server reports it.
+    fixture.commands.startProviderAuth.mockResolvedValue(AsyncResult.success(receipt("starting")));
     fixture.openExternal.mockRejectedValueOnce(new Error("Controlled shell rejection"));
     await render();
     await click("Continue with ChatGPT");
@@ -394,7 +453,8 @@ describe("phase3 Codex auth lifecycle", () => {
       receiveProviderAuthCallback: receive,
       cancelProviderAuthCallback: cancel,
     });
-    fixture.commands.startProviderAuth.mockResolvedValue(AsyncResult.success(undefined));
+    // Start answers with its flow, whose page the client opens once the server reports it.
+    fixture.commands.startProviderAuth.mockResolvedValue(AsyncResult.success(receipt("starting")));
     fixture.commands.completeProviderAuth.mockResolvedValue(AsyncResult.success(undefined));
     await render();
     await click("Continue with ChatGPT");

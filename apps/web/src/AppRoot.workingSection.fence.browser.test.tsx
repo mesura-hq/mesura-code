@@ -26,8 +26,6 @@ const sidebarLists = vi.hoisted(() => ({
   messageHits:
     [] as import("@t3tools/client-runtime/state/thread-search").EnvironmentThreadSearchMatch[],
   listeners: new Set<() => void>(),
-  /** What `useLegacySidebarEnabled` answers. */
-  legacySidebar: false,
   /** Every active reorder the sidebar asked for. */
   activeReorders: [] as unknown[],
 }));
@@ -77,11 +75,16 @@ vi.mock("./state/entities", async (original) => {
       return read();
     }).pipe(Atom.setIdleTTL(0)),
   );
-  const shells = createEnvironmentThreadShellAtoms({ catalogValueAtom, snapshotAtom });
+  const shells = createEnvironmentThreadShellAtoms({
+    catalogValueAtom,
+    snapshotAtom,
+    hiddenThreadTagsAtom: () => Atom.make(null),
+  });
   const emptyShell = Atom.make(null);
   return {
     ...(await mocks.mockEntities(original)),
     useThreadShells: () => useAtomValue(shells.threadShellsAtom),
+    useVisibleThreadShells: () => useAtomValue(shells.visibleThreadShellsAtom),
     useQuietThreadShells: () => useAtomValue(shells.quietThreadShellsAtom),
     useThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) =>
       useAtomValue(ref === null ? emptyShell : shells.threadShellAtom(ref)),
@@ -91,9 +94,16 @@ vi.mock("./state/entities", async (original) => {
     useProjects: () => sidebarLists.projects,
   };
 });
-vi.mock("./state/environments", async (original) =>
-  (await fenceMocks()).mockEnvironments(original),
-);
+vi.mock("./state/environments", async (original) => {
+  const mocks = await fenceMocks();
+  return {
+    ...(await mocks.mockEnvironments(original)),
+    useConnectedEnvironmentIds: () =>
+      mocks.appRootFence.environments
+        .filter((environment) => environment.connection.phase === "connected")
+        .map((environment) => environment.environmentId),
+  };
+});
 vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/queries", async (original) => ({
   ...(await (await fenceMocks()).mockQueries(original)),
@@ -135,7 +145,6 @@ vi.mock("./state/server", async (original) => {
 });
 vi.mock("./hooks/useSettings", async (original) => ({
   ...(await (await fenceMocks()).mockSettings(original)),
-  useLegacySidebarEnabled: () => sidebarLists.legacySidebar,
 }));
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => {
@@ -151,9 +160,6 @@ vi.mock("./hooks/useThreadActions", async () => {
     }),
   };
 });
-vi.mock("./components/LegacySidebar", async () =>
-  (await fenceMocks()).mockRendersNothing("default"),
-);
 vi.mock("./components/preview/PreviewAutomationHosts", async () =>
   (await fenceMocks()).mockRendersNothing("PreviewAutomationHosts"),
 );
@@ -225,7 +231,6 @@ async function setupBrowserFixture0() {
       sidebarLists.threads = [];
       sidebarLists.projects = [];
       sidebarLists.messageHits = [];
-      sidebarLists.legacySidebar = false;
       sidebarLists.activeReorders = [];
       useProjectScopeStore.setState(useProjectScopeStore.getInitialState(), true);
       window.localStorage.clear();
@@ -409,6 +414,57 @@ function rowCard(id: string): HTMLElement {
   const found = document.querySelector<HTMLElement>(`[data-mesura-thread-key="${threadKey(id)}"]`);
   expect(found, `the row of ${id}`).not.toBeNull();
   return found!;
+}
+
+type PointerPoint = { readonly x: number; readonly y: number };
+
+async function dispatchDragPointer(
+  type: "pointerdown" | "pointermove" | "pointerup" | "pointercancel",
+  point: PointerPoint,
+  target: EventTarget = document,
+): Promise<void> {
+  await act(async () => {
+    target.dispatchEvent(
+      new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+        button: 0,
+        buttons: type === "pointerup" || type === "pointercancel" ? 0 : 1,
+        clientX: point.x,
+        clientY: point.y,
+      }),
+    );
+  });
+}
+
+async function startThreadDrag(source: HTMLElement) {
+  source.scrollIntoView({ block: "nearest" });
+  const bounds = source.getBoundingClientRect();
+  let point = { x: bounds.left + 16, y: bounds.top + bounds.height / 2 };
+  const gesture = {
+    async moveTo(next: PointerPoint) {
+      point = next;
+      await dispatchDragPointer("pointermove", point);
+    },
+    async release() {
+      await dispatchDragPointer("pointerup", point);
+    },
+    async [Symbol.asyncDispose]() {
+      await dispatchDragPointer("pointercancel", point);
+    },
+  };
+  try {
+    await dispatchDragPointer("pointerdown", point, source);
+    // Cross the sensor's activation distance before moving to the destination.
+    await gesture.moveTo({ x: point.x, y: point.y + 10 });
+    return gesture;
+  } catch (error) {
+    await gesture[Symbol.asyncDispose]();
+    throw error;
+  }
 }
 
 function sidebarSearchField(): HTMLInputElement {
@@ -813,13 +869,27 @@ describe("working section: the list below", () => {
     const last = order.at(-1)!;
     const first = order[0]!;
 
-    await userEvent.dragAndDrop(
-      document.querySelector<HTMLElement>(`[data-mesura-thread-key="${last}"]`)!,
-      document.querySelector<HTMLElement>(`[data-mesura-thread-key="${first}"]`)!,
+    const source = document.querySelector<HTMLElement>(`[data-mesura-thread-key="${last}"]`)!;
+    const target = document.querySelector<HTMLElement>(`[data-mesura-thread-key="${first}"]`)!;
+    await using gesture = await startThreadDrag(source);
+    await vi.waitFor(() =>
+      expect(source.closest("[data-thread-item]")?.classList.contains("z-20")).toBe(true),
     );
-    await settle();
+    const targetBounds = target.getBoundingClientRect();
+    await gesture.moveTo({
+      x: targetBounds.left + 16,
+      y: targetBounds.top + targetBounds.height / 2,
+    });
+    await gesture.release();
 
-    expect(sidebarLists.activeReorders.length, "the drop asked for a reorder").toBeGreaterThan(0);
+    await vi.waitFor(() =>
+      expect(sidebarLists.activeReorders.length, "the drop asked for a reorder").toBeGreaterThan(0),
+    );
+    expect(sidebarLists.activeReorders).toContainEqual([
+      { environmentId, threadId: ThreadId.make("idle-b") },
+      expect.any(String),
+    ]);
+    await vi.waitFor(() => expect(keysBelow()).toEqual([last, ...order.slice(0, -1)]));
   });
 
   it("working section spec: the band runs only while the section is open, as finite crossings", async () => {
@@ -858,13 +928,23 @@ describe("working section: what the rows keep", () => {
     const onDrop = (event: Event) => dropped.push(...(event as CustomEvent<unknown[]>).detail);
     dropTarget.addEventListener(THREAD_CONTEXT_DROP_EVENT, onDrop);
     try {
-      await userEvent.dragAndDrop(rowCard("working-a"), dropTarget);
-      await settle();
+      await using gesture = await startThreadDrag(rowCard("working-a"));
+      const bounds = dropTarget.getBoundingClientRect();
+      await gesture.moveTo({
+        x: bounds.left + bounds.width / 2,
+        y: bounds.top + bounds.height / 2,
+      });
+      await vi.waitFor(() =>
+        expect(dropTarget.hasAttribute("data-thread-context-over")).toBe(true),
+      );
+      expect(dropped, "moving over the composer does not drop before release").toEqual([]);
+      await gesture.release();
     } finally {
       dropTarget.removeEventListener(THREAD_CONTEXT_DROP_EVENT, onDrop);
     }
 
     expect(dropped).toEqual([{ environmentId, threadId: ThreadId.make("working-a") }]);
+    expect(sidebarLists.activeReorders, "Working references never reorder the list").toEqual([]);
   });
 
   it("working section spec: switching reduced motion on stops the band and switching it off restarts it", async () => {

@@ -131,8 +131,9 @@ describe("PR sweep local git cost", () => {
           expect(gitPerSweep, JSON.stringify({ providerPerSweep, breakdown })).toBeLessThanOrEqual(
             BASE_GIT_PROCESSES_PER_SWEEP * 0.2,
           );
-          // The provider is still consulted as often as at the base.
-          expect(providerPerSweep).toBeGreaterThanOrEqual(BASE_PROVIDER_LOOKUPS_PER_SWEEP);
+          // Open PRs still refresh every sweep. Upstream bounds branches with no PR.
+          expect(providerPerSweep).toBeGreaterThanOrEqual(OPEN_PULL_REQUESTS);
+          expect(providerPerSweep).toBeLessThanOrEqual(BASE_PROVIDER_LOOKUPS_PER_SWEEP);
           expect(sweep.harness.logs.filter((log) => log.level === "Warn")).toEqual([]);
         }),
       ),

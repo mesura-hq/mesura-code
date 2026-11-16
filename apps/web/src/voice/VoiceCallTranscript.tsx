@@ -22,7 +22,7 @@ export function VoiceCallTranscript({
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
-  // oxlint-disable-next-line t3code/react-effect-budget -- follows the latest caption as the DOM resizes
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the latest caption as the DOM resizes
   useLayoutEffect(() => {
     const node = scrollRef.current;
     const content = contentRef.current;

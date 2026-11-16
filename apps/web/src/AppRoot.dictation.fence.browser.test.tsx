@@ -195,7 +195,6 @@ vi.mock("./hooks/useSettings", async (importOriginal) => {
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/Sidebar", () => ({ default: () => null }));
-vi.mock("./components/LegacySidebar", () => ({ default: () => null }));
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
@@ -204,6 +203,7 @@ vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }))
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 vi.mock("@legendapp/list/react", () => ({
+  useSyncLayout: () => () => {},
   LegendList: ({
     data,
     renderItem,
@@ -733,6 +733,36 @@ describe("dictation phase 4 fence", () => {
     expect(startCalls()).toHaveLength(1);
   });
 
+  // Mesura: on Chrome Android a tap focuses the button before its click. Focus that
+  // expanded the composer unmounted the collapsed row under the tap, so dictation never started.
+  it("phone collapsed composer: a tap on the microphone starts dictation without expanding first", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const previous = { width: window.innerWidth, height: window.innerHeight };
+    await using _viewport = {
+      [Symbol.asyncDispose]: () => page.viewport(previous.width, previous.height),
+    };
+    await page.viewport(412, 915);
+
+    await mountApp();
+    await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+    const surface = () =>
+      document.querySelector<HTMLElement>('[data-chat-composer-surface="true"]');
+    await vi.waitFor(() =>
+      expect(surface()?.getAttribute("data-chat-composer-mobile-collapsed")).toBe("true"),
+    );
+
+    const microphone = requireButton("Start voice dictation");
+    expect(microphone.closest('[data-chat-composer-collapsed-controls="true"]')).not.toBeNull();
+    await act(async () => microphone.focus());
+    await settle();
+    expect(surface()?.getAttribute("data-chat-composer-mobile-collapsed")).toBe("true");
+    expect(microphone.isConnected).toBe(true);
+    await click(microphone);
+    expect(media.recorders).toHaveLength(1);
+    expect(media.recorders[0]!.calls).toContain("start");
+    await click(requireButton("Cancel dictation"));
+  });
+
   it("dictation phase 4 AC2: Alt+S, Alt+I and Alt+Enter select the mode while recording and while the last job transcribes", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
@@ -1182,6 +1212,7 @@ interface StartedTurn {
     readonly commandId?: string;
     readonly message: {
       readonly text: string;
+      readonly context?: import("@t3tools/contracts").OrchestrationMessageContext;
       readonly attachments: ReadonlyArray<Record<string, unknown>>;
     };
   };
@@ -2088,9 +2119,17 @@ describe("dictation phase 5 rework regressions", () => {
 
     await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
     const text = onlyTurnText();
-    // A server without inline context gets the record serialized: the raw link is replaced.
-    expect(text).not.toContain("t3-context://");
+    // Upstream carries context records separately from the reference in the prompt.
     expect(text).toContain("notes.txt");
+    expect(turnStarts()[0]!.input.message.context).toMatchObject({
+      records: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "file",
+          name: "notes.txt",
+          attachmentId: "uploaded-notes",
+        }),
+      ]),
+    });
   });
 });
 

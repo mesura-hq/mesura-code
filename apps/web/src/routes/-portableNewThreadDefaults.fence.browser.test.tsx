@@ -153,10 +153,12 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   useRouter: () => state.router,
 }));
 vi.mock("../components/Sidebar.logic", () => ({
+  isSidebarHiddenThread: () => false,
   orderItemsByPreferredIds: () => [],
   sortScopedProjectsForSidebar: (projects: unknown[]) => projects,
 }));
 vi.mock("../composerDraftStore", () => ({
+  clearComposerDraftsEnvironment: vi.fn(),
   composerDraftHasUserContent: () => false,
   markPromotedDraftThreadByRef: vi.fn(),
   useComposerDraftStore: {
@@ -185,10 +187,18 @@ vi.mock("../composerDraftStore", () => ({
   },
 }));
 vi.mock("../lib/utils", () => ({
+  cn: (...classes: unknown[]) => classes.filter(Boolean).join(" "),
+  isMacPlatform: () => false,
+  isWindowsPlatform: () => false,
+  randomUUID: (() => {
+    let count = 0;
+    return () => `fence-uuid-${++count}`;
+  })(),
   newDraftId: () => "draft-from-index",
   newThreadId: () => "thread-from-index",
 }));
-vi.mock("../logicalProject", () => ({
+vi.mock("@t3tools/client-runtime/state/project-grouping", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/client-runtime/state/project-grouping")>()),
   deriveLogicalProjectKeyFromSettings: () => "remote-project",
   getProjectOrderKey: () => "remote-project",
   selectProjectGroupingSettings: () => ({}),
@@ -200,7 +210,7 @@ vi.mock("../state/entities", () => ({
   useProjects: () => [state.project],
   useThread: () => null,
   useQuietThreadShell: () => null,
-  useThreadShells: () => [],
+  useVisibleThreadShells: () => [],
   useAllEnvironmentShellsBootstrapped: () => true,
 }));
 vi.mock("../state/environments", () => ({
@@ -209,9 +219,11 @@ vi.mock("../state/environments", () => ({
 }));
 vi.mock("../state/server", () => ({
   environmentServerConfigsAtom: "configs",
+  primaryServerKeybindingsAtom: "keybindings",
   serverEnvironment: { providersValueAtom: () => "providers" },
 }));
 vi.mock("../threadRoutes", () => ({
+  resolveThreadRouteRef: vi.fn(),
   resolveThreadRouteTarget: () =>
     state.openDraft
       ? { kind: "draft", draftId: "explicit-draft" }
@@ -224,6 +236,7 @@ vi.mock("../uiStateStore", () => ({
   useUiStateStore: () => [],
 }));
 vi.mock("../hooks/useSettings", () => ({
+  getClientSettings: () => ({}),
   useClientSettings: () => ({}),
 }));
 vi.mock("../components/files/projectFilesQueryState", () => ({

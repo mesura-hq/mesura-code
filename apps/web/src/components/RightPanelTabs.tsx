@@ -1,7 +1,16 @@
 import { FileSurfacePendingMarker } from "./files/fileSurfacePendingStore";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  threadRuntimeIsActive,
+  type EnvironmentThreadShell,
+} from "@t3tools/client-runtime/state/shell";
+import {
+  useProjects,
+  useQuietThreadShell,
+  useServerConfigs,
+  useThreadShells,
+} from "~/state/entities";
 import {
   threadPullRequestKeysEqual,
   visibleThreadPullRequests,
@@ -13,6 +22,7 @@ import type {
   ProjectId,
   PullRequestState,
   ResolvedKeybindingsConfig,
+  ThreadId,
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
@@ -36,10 +46,12 @@ import {
   FileDiff,
   Files,
   Globe2,
+  MessagesSquare,
   Plus,
   TerminalSquare,
+  Volume2Icon,
+  VolumeOffIcon,
 } from "lucide-react";
-import { Volume2, VolumeOff } from "lucide";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -60,7 +72,6 @@ import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings
 import { readLocalApi } from "~/localApi";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { Button } from "~/components/ui/button";
-import { MorphIcon } from "~/components/MorphIcon";
 import { AndroidIcon, AppleIcon } from "~/components/Icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { Kbd } from "~/components/ui/kbd";
@@ -68,7 +79,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger, MenuShortcut } from "~/componen
 import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
-import { faviconUrlForOrigin } from "~/lib/favicon";
+import { faviconUrlForOrigin } from "@t3tools/shared/favicon";
 import { useTheme } from "~/hooks/useTheme";
 import { useDeviceState } from "~/state/device";
 import type { PreviewPanelInlineSize } from "~/hooks/usePreviewPanelInlineSize";
@@ -101,10 +112,13 @@ import {
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { FaviconImage } from "./preview/PreviewFaviconIcon";
 import { previewBridge } from "./preview/previewBridge";
+import { dispatchPreviewAction } from "./preview/previewActionBus";
+import { preventThumbButtonFocus, takeThumbButtonNavigation } from "./preview/thumbButtons";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
+import { surfaceShortcutKey } from "~/lib/surfaceShortcutKey";
 
 export interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -147,6 +161,8 @@ export interface RightPanelTabsProps {
   onAddDevice: () => void;
   /** Opens the Software Factory surface; absent while the thread has nothing to show there. */
   onAddFactory?: (() => void) | undefined;
+  /** Absent where side chats are not offered. */
+  onAddSideChat?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -154,6 +170,9 @@ export interface RightPanelTabsProps {
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
   deviceAvailable: boolean;
+  sideChatAvailable?: boolean;
+  /** Overrides the default reason while side chats are available but cannot start. */
+  sideChatDisabledReason?: string | null;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   children: ReactNode;
 }
@@ -209,6 +228,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequests: "No linked pull requests available.",
   device: "Available from a thread.",
   factory: "Available once a plan is presented.",
+  sideChat: "Available after the first message.",
 } as const;
 
 type TabContextMenuAction =
@@ -261,17 +281,17 @@ function tabAudioState(overlay: DesktopPreviewOverlay | null): TabAudioState {
 type SurfaceShortcutEvent = Pick<
   KeyboardEvent,
   "altKey" | "ctrlKey" | "defaultPrevented" | "isComposing" | "key" | "metaKey"
->;
+> &
+  Partial<Pick<KeyboardEvent, "code" | "getModifierState">>;
 
 export function surfaceShortcutActionForKey<
   const Action extends { available: boolean; shortcut: string },
 >(actions: readonly Action[], event: SurfaceShortcutEvent): Action | null {
   if (event.defaultPrevented || event.isComposing) return null;
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
+  const key = surfaceShortcutKey(event);
   return (
-    actions.find(
-      (action) => action.available && action.shortcut.toLowerCase() === event.key.toLowerCase(),
-    ) ?? null
+    actions.find((action) => action.available && action.shortcut.toLowerCase() === key) ?? null
   );
 }
 
@@ -331,6 +351,8 @@ function RightPanelEmptyState(props: {
   onAddDevice: () => void;
   /** Opens the Software Factory surface; absent while the thread has nothing to show there. */
   onAddFactory?: (() => void) | undefined;
+  /** Absent where side chats are not offered. */
+  onAddSideChat?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -340,6 +362,8 @@ function RightPanelEmptyState(props: {
   deviceAvailable: boolean;
   /** Mesura: the panel actions under the surfaces (`lib/panelLauncher.ts`). */
   panelActions?: readonly PanelLauncherAction[];
+  sideChatAvailable: boolean;
+  sideChatDisabledReason: string | null;
 }) {
   const [highlight, setHighlight] = useState(-1);
 
@@ -410,6 +434,20 @@ function RightPanelEmptyState(props: {
       disabledReason: SURFACE_UNAVAILABLE_HINTS.factory,
       onClick: props.onAddFactory ?? NOOP,
     },
+    ...(props.onAddSideChat
+      ? [
+          {
+            label: "Side chat",
+            description: "Ask a side question while this thread keeps working.",
+            icon: MessagesSquare,
+            // Mesura: S stays Software Factory's (`Space p s`); A for "ask a side question".
+            shortcut: "A",
+            available: props.sideChatAvailable && !props.sideChatDisabledReason,
+            disabledReason: props.sideChatDisabledReason ?? SURFACE_UNAVAILABLE_HINTS.sideChat,
+            onClick: props.onAddSideChat,
+          },
+        ]
+      : []),
   ] as const;
 
   type SurfaceAction = (typeof actions)[number];
@@ -441,9 +479,11 @@ function RightPanelEmptyState(props: {
     panelActions,
     panelOpen: props.panelOpen,
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- latest-ref: the window listener reads the newest actions without re-subscribing
   useLayoutEffect(() => {
     shortcutActionsRef.current = { actions, runAction, panelActions, panelOpen: props.panelOpen };
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes a capture-phase window keydown listener for surface shortcuts while the menu is mounted
   useEffect(() => {
     const handler = (event: KeyboardEvent): boolean => {
       if (event.defaultPrevented || document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS))
@@ -544,6 +584,7 @@ function RightPanelEmptyState(props: {
   });
   // Mesura: `Space p` or `Ctrl+T` on an empty panel finds the launcher
   // already mounted; it takes the keys again.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: focuses the already-mounted launcher when a keyboard request reopens it
   useEffect(() => {
     if (launcherOpen) rootRef.current?.focus({ preventScroll: true });
   }, [launcherOpen]);
@@ -563,6 +604,7 @@ function RightPanelEmptyState(props: {
   return (
     <div
       ref={focusOnMount}
+      data-workspace-focus-default
       tabIndex={0}
       onKeyDown={handleKeyDown}
       aria-label="Open a surface"
@@ -749,6 +791,8 @@ function surfaceTitle(
       return "Software Factory";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
+    case "side-chat":
+      return "Side chat";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -841,6 +885,8 @@ function SurfaceIcon({
       return <CircleDot className="size-3 shrink-0" />;
     case "factory":
       return <Factory className="size-3 shrink-0" />;
+    case "side-chat":
+      return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -850,6 +896,41 @@ function SurfaceIcon({
         <Smartphone className="size-3 shrink-0" />
       );
   }
+}
+
+/** What a side chat tab's dot shows and its title's accessible name says. */
+function sideChatTabState(shell: EnvironmentThreadShell | null) {
+  if (shell === null) return null;
+  if (shell.hasPendingApprovals || shell.pendingSubagentRequest === "approval") {
+    return "needs approval";
+  }
+  if (shell.hasPendingUserInput || shell.pendingSubagentRequest === "user_input") {
+    return "needs input";
+  }
+  return threadRuntimeIsActive(shell.runtime) ? "running" : null;
+}
+
+// Static dots: a side chat tab can stay open for a whole run.
+function SideChatTabIcon(props: { environmentId: EnvironmentId | null; threadId: ThreadId }) {
+  const state = sideChatTabState(
+    useQuietThreadShell(
+      props.environmentId === null ? null : scopeThreadRef(props.environmentId, props.threadId),
+    ),
+  );
+  return (
+    <>
+      <MessagesSquare className="size-3 shrink-0" />
+      {state === null ? null : (
+        <span
+          className={cn(
+            "absolute -top-0.5 -right-0.5 size-1.5 rounded-full",
+            state === "running" ? "bg-muted-foreground" : "bg-info",
+          )}
+          aria-hidden
+        />
+      )}
+    </>
+  );
 }
 
 export function resolvePullRequestTabLink(
@@ -909,17 +990,17 @@ function PullRequestSurfaceIcon({
       ? undefined
       : configs.get(resolvedEnvironmentId)?.environment.capabilities;
   const linkedSnapshot =
-    capabilities?.threadPullRequests === true
+    capabilities !== undefined
       ? (resolvePullRequestTabLink(threads, resolvedEnvironmentId, host, surface)?.snapshot ?? null)
       : null;
   const detail = useEnvironmentQuery(
-    resolvedEnvironmentId === null || capabilities?.pullRequests !== true || linkedSnapshot !== null
+    resolvedEnvironmentId === null || capabilities === undefined || linkedSnapshot !== null
       ? null
       : pullRequestEnvironment.detail({
           environmentId: resolvedEnvironmentId,
           input: {
             projectId: surface.projectId as ProjectId,
-            ...(capabilities?.threadPullRequests === true && surface.host !== undefined
+            ...(capabilities !== undefined && surface.host !== undefined
               ? { host: surface.host }
               : {}),
             repository: surface.repository,
@@ -943,10 +1024,6 @@ function PullRequestSurfaceIcon({
     isDraft: status.isDraft ?? detail?.isDraft ?? seed?.isDraft ?? false,
   });
   return <presentation.Icon className={cn("size-3 shrink-0", presentation.toneClassName)} />;
-}
-
-export function focusOnMount(node: HTMLDivElement | null) {
-  node?.focus();
 }
 
 function SortableTabList(props: {
@@ -1015,7 +1092,6 @@ function RightPanelTab(
 ) {
   const {
     surface,
-    title,
     audio,
     audioRuntimeTabId,
     onActivate,
@@ -1029,6 +1105,13 @@ function RightPanelTab(
     id: surface.id,
     disabled: props.dragDisabled,
   });
+  const sideChatShell = useQuietThreadShell(
+    surface.kind === "side-chat" && props.environmentId !== null
+      ? scopeThreadRef(props.environmentId, surface.threadId)
+      : null,
+  );
+  const title = sideChatShell?.title ?? props.title;
+  const sideChatState = sideChatTabState(sideChatShell);
   const content = (
     <>
       <PanelTabCloseButton label={`Close ${title}`} onClick={() => onClose(surface)}>
@@ -1066,7 +1149,11 @@ function RightPanelTab(
                     .catch(() => undefined);
                 }}
               >
-                <MorphIcon className="size-3" icon={audio === "muted" ? VolumeOff : Volume2} />
+                {audio === "muted" ? (
+                  <VolumeOffIcon className="size-3" />
+                ) : (
+                  <Volume2Icon className="size-3" />
+                )}
               </button>
             }
           />
@@ -1085,6 +1172,7 @@ function RightPanelTab(
           onBlur={(event) => onFinishRename(surface.id, event.currentTarget.value)}
           onKeyDown={(event) => {
             event.stopPropagation();
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (event.key === "Enter") event.currentTarget.blur();
             if (event.key === "Escape") {
               event.currentTarget.value = title;
@@ -1102,6 +1190,7 @@ function RightPanelTab(
                   if (surface.kind === "device" && props.canRename) onStartRename(surface.id);
                 }}
                 className="cursor-pointer flex min-w-0 items-center"
+                aria-label={sideChatState === null ? undefined : `${title}, ${sideChatState}`}
                 onClick={() => onActivate(surface)}
               >
                 <span className="truncate">{title}</span>
@@ -1148,6 +1237,7 @@ function RightPanelTab(
 }
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
+  const focusedSurface = props.surfaces.find((surface) => surface.id === props.activeSurfaceId);
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
@@ -1189,6 +1279,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     event.stopPropagation();
     if (!event.repeat) openPanelLauncher(tabListRef.current?.closest("[data-preview-panel-mode]"));
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes a document keydown listener for the new surface shortcut while the panel is open
   useEffect(() => {
     if (props.open === false) return;
     document.addEventListener("keydown", onNewSurfaceKeyDown, true);
@@ -1327,6 +1418,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   });
 
   // A newly active tab, or tabs that start overflowing, can sit outside the scrolled strip.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- scrolls the active tab DOM node into view after it changes or the tab strip starts overflowing
   useEffect(() => {
     if (!props.activeSurfaceId || !tabScrollState.hasOverflow) return;
     const activeTab = tabListRef.current?.querySelector<HTMLElement>("[data-active-tab='true']");
@@ -1339,12 +1431,13 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     if (!viewport) return;
 
     const update = () => updateTabScrollState(viewport);
+    // Only a vertical mouse wheel is translated. Horizontal input scrolls natively, since
+    // consuming it keeps Chromium from starting the gesture scroll that swipe navigation tracks.
     const handleWheel = (event: WheelEvent) => {
-      if (event.ctrlKey) return;
-      let delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+      let delta = event.deltaY;
       if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 16;
       if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= viewport.clientWidth;
-      if (delta === 0) return;
 
       const previousScrollLeft = viewport.scrollLeft;
       viewport.scrollLeft += delta;
@@ -1369,12 +1462,26 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
 
   return (
     <PreviewPanelShell
+      workspaceArea
+      workspaceFocusKey={`panel:${props.environmentId}:${props.activeSurfaceId ?? "empty"}`}
+      workspaceLabel={
+        focusedSurface
+          ? `Workspace panel: ${surfaceTitle(focusedSurface, props.previewSessions, props.terminalLabelsById)}`
+          : "Workspace panel"
+      }
       mode={props.mode}
       {...(props.maximized !== undefined ? { maximized: props.maximized } : {})}
       {...(props.open !== undefined ? { open: props.open } : {})}
       {...(props.widthStorageKey !== undefined ? { widthStorageKey: props.widthStorageKey } : {})}
       {...(props.defaultWidth !== undefined ? { defaultWidth: props.defaultWidth } : {})}
       {...(props.inlineSize ? { inlineSize: props.inlineSize } : {})}
+      onMouseDown={preventThumbButtonFocus}
+      onMouseUp={(event) =>
+        takeThumbButtonNavigation(
+          event,
+          focusedSurface?.kind === "preview" ? dispatchPreviewAction : undefined,
+        )
+      }
     >
       <div
         className={cn(
@@ -1391,7 +1498,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           ref={attachTabList}
           hideScrollbars
           scrollFade
-          className="min-w-0 flex-1"
+          className={cn(
+            "min-w-0 flex-1",
+            ownsDesktopTitleBar && tabScrollState.hasOverflow && "[-webkit-app-region:no-drag]",
+          )}
           data-right-panel-tab-list
         >
           <div className="flex h-full w-max min-w-full items-center gap-1">
@@ -1524,6 +1634,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddIssues={props.onAddIssues}
             onAddDevice={props.onAddDevice}
             onAddFactory={props.onAddFactory}
+            onAddSideChat={props.onAddSideChat}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
@@ -1532,6 +1643,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             pullRequestsAvailable={props.pullRequestsAvailable}
             deviceAvailable={props.deviceAvailable}
             panelActions={panelActions}
+            sideChatAvailable={props.sideChatAvailable === true}
+            sideChatDisabledReason={props.sideChatDisabledReason ?? null}
           />
         ) : (
           <>
@@ -1553,6 +1666,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   onAddIssues={props.onAddIssues}
                   onAddDevice={props.onAddDevice}
                   onAddFactory={props.onAddFactory}
+                  onAddSideChat={props.onAddSideChat}
                   browserAvailable={props.browserAvailable}
                   terminalAvailable={props.terminalAvailable}
                   diffAvailable={props.diffAvailable}
@@ -1561,6 +1675,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   pullRequestsAvailable={props.pullRequestsAvailable}
                   deviceAvailable={props.deviceAvailable}
                   panelActions={panelActions}
+                  sideChatAvailable={props.sideChatAvailable === true}
+                  sideChatDisabledReason={props.sideChatDisabledReason ?? null}
                 />
               </div>
             ) : null}

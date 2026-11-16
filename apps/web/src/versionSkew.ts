@@ -96,12 +96,6 @@ export function supportsDesktopAppUpdate(
   return serverConfig?.environment.capabilities.desktopAppUpdate === true;
 }
 
-export function supportsServerUpdateThreadContinuation(
-  serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
-): boolean {
-  return serverConfig?.environment.capabilities.serverUpdateThreadContinuation === true;
-}
-
 /**
  * Returns `null`: Mesura Code publishes no npm package, so `npx t3@<version>` would quietly replace
  * the user's server with upstream's, which lacks Mesura's own RPC methods.
@@ -125,32 +119,17 @@ export function manualServerUpdateCommandForPackage(
   targetVersion: string,
   installation?: ServerInstallation,
 ): string {
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   if (installation?.kind === "npm-global") {
-    const prefix = `'${installation.prefix.replaceAll("'", "'\\''")}'`;
-    return `npm install --global --prefix ${prefix} ${packageName}@${targetVersion}`;
+    return `npm install --global --prefix ${quote(installation.prefix)} ${packageName}@${targetVersion}`;
+  }
+  if (installation?.kind === "t3-launcher") {
+    // An inherited T3CODE_HOME would otherwise send the update to a home the launcher is not in.
+    return `${quote(installation.launcher)} update --base-dir ${quote(installation.baseDir)} ${targetVersion}`;
   }
   const runner =
     installation?.kind === "pnpm-dlx" ? "pnpm dlx" : installation?.kind === "bunx" ? "bunx" : "npx";
   return `${runner} ${packageName}@${targetVersion}`;
-}
-
-/** One sentence telling the user how to resolve version skew for a server,
-    matched to the update path it offers. */
-export function serverUpdateGuidance(
-  capability: ServerSelfUpdateCapability | null,
-  serverLabel: string,
-): string {
-  switch (capability) {
-    case "boot-service":
-    case "respawn":
-      return `Update the ${serverLabel} so they stay in sync.`;
-    case "desktop-managed":
-      return `Update the desktop app that runs the ${serverLabel}.`;
-    default:
-      return PUBLISHED_SERVER_PACKAGE_NAME === null
-        ? `Install a matching Mesura Code build on the ${serverLabel}'s machine to sync them.`
-        : `Relaunch the ${serverLabel} with the copied command to sync them.`;
-  }
 }
 
 export function buildVersionMismatchDismissalKey(

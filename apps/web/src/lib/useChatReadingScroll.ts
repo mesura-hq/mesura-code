@@ -47,7 +47,7 @@ export function useChatReadingScroll(
     [getScrollNode, getComposerOverlayHeight, onBreakLiveFollow],
   );
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: disposes the scroller's animation frame and gesture listeners on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: disposes the scroller's animation frame and gesture listeners on unmount
   useEffect(() => scroller.dispose, [scroller]);
 
   return scroller.scroll;

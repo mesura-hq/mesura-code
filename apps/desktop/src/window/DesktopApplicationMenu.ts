@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import type * as Electron from "electron";
+import * as Electron from "electron";
 
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
@@ -189,13 +189,20 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    // On Linux and Windows the windowMenu role's Close (CmdOrCtrl+W) quits the app, and it fired
-    // when Ctrl+W was meant for terminal.close. Drop it there; the renderer still gets Ctrl+W.
-    // before-input-event cannot block it: its preventDefault also suppresses the page keydown.
-    // macOS keeps the stock menu, where Cmd+W closes a window without quitting.
+    // The stock windowMenu adds Close on CmdOrCtrl+W, stealing the renderer's tab-close shortcut.
+    // An explicit macOS submenu keeps the window roles without that accelerator.
+    // before-input-event.preventDefault also blocks page keydown.
     const windowMenuItem: Electron.MenuItemConstructorOptions =
       environment.platform === "darwin"
-        ? { role: "windowMenu" }
+        ? {
+            role: "windowMenu",
+            submenu: [
+              { role: "minimize" },
+              { role: "zoom" },
+              { type: "separator" },
+              { role: "front" },
+            ],
+          }
         : { label: "Window", submenu: [{ role: "minimize" }, { role: "zoom" }] };
     template.push(
       {
@@ -211,8 +218,20 @@ export const make = Effect.gen(function* () {
                 },
                 { type: "separator" as const },
               ]),
+          {
+            label: "Close Developer Tools",
+            accelerator: "CmdOrCtrl+W",
+            visible: false,
+            click: () => {
+              Electron.webContents
+                .getAllWebContents()
+                .find((contents) => !contents.isDestroyed() && contents.isDevToolsFocused())
+                ?.closeDevTools();
+            },
+          },
+          // Cmd/Ctrl+W belongs to the renderer's tab close; it must never close the window.
           environment.platform === "darwin"
-            ? { role: "close" }
+            ? { label: "Close Window", click: (_item, window) => window?.close() }
             : environment.platform === "linux"
               ? // Mesura: no accelerator, so Ctrl+Q reaches the page (DesktopWindow.ts).
                 { label: "Quit", click: () => void runPromise(electronApp.quit) }

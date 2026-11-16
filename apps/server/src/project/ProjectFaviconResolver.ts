@@ -10,6 +10,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -165,7 +166,7 @@ function extractIconHref(source: string): string | null {
   return null;
 }
 
-const optionOnNotFound = <A, R>(
+export const optionOnNotFound = <A, R>(
   effect: Effect.Effect<A, PlatformError.PlatformError, R>,
 ): Effect.Effect<Option.Option<A>, PlatformError.PlatformError, R> =>
   effect.pipe(
@@ -183,7 +184,8 @@ export const make = Effect.gen(function* () {
   const projectFileLoader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
 
   const resolveIconHref = (href: string): ReadonlyArray<string> => {
-    const clean = href.replace(/^\//, "");
+    // Browsers strip surrounding whitespace from URL attributes; file paths keep theirs.
+    const clean = href.trim().replace(/^\//, "");
     return [path.join("public", clean), clean];
   };
 
@@ -354,7 +356,16 @@ export const make = Effect.gen(function* () {
       // Date.getTime() collapsed rapid equal-length saves into one revision.
       // Preserve the filesystem's precision and detect timestamp-preserving
       // writes through ctime, plus atomic editor replacements through inode.
-      const info = yield* Effect.tryPromise(() => NodeFSP.stat(configPath, { bigint: true })).pipe(
+      const info = yield* Effect.tryPromise({
+        try: () => NodeFSP.stat(configPath, { bigint: true }),
+        catch: (cause) =>
+          new ProjectFaviconResolutionError({
+            operation: "stat-candidate",
+            workspaceRoot: cwd,
+            absolutePath: configPath,
+            cause,
+          }),
+      }).pipe(
         Effect.match({
           onSuccess: (stats) => stats,
           onFailure: (error) =>
@@ -392,7 +403,10 @@ export const make = Effect.gen(function* () {
       timeToLive: Exit.match({
         onSuccess: (value) =>
           value.resolved === null ? FAVICON_NEGATIVE_CACHE_TTL : FAVICON_POSITIVE_CACHE_TTL,
-        onFailure: () => Duration.zero,
+        onFailure: (cause) =>
+          Option.exists(Cause.findErrorOption(cause), isMissingWorkspaceRoot)
+            ? FAVICON_NEGATIVE_CACHE_TTL
+            : Duration.zero,
       }),
     },
   );

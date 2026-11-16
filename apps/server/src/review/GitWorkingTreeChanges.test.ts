@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics nodeBuiltinImport:off - the fixture drives real git synchronously.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -135,7 +136,7 @@ function makeReviewLayer(workspaceRoot: string) {
     // ReviewService checks managed worktree roots from settings (upstream).
     Layer.provide(ServerSettings.layerTest()),
     Layer.provide(ServerConfig.layerTest(workspaceRoot, { prefix: "t3-tree-read-base-" })),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
 }
 
@@ -172,7 +173,7 @@ describe("ReviewService.getWorkingTreeChanges one-shot read", () => {
       assert.strictEqual(error.cwd, repo);
       assert.strictEqual(
         error.detail,
-        "Working tree changes cwd must stay within the configured workspace root.",
+        "Review working tree changes cwd must stay within the configured workspace root.",
       );
     }).pipe(
       Effect.provide(makeReviewLayer(workspaceRoot)),

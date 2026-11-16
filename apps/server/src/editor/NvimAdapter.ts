@@ -1,5 +1,5 @@
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -10,11 +10,11 @@ import * as Stream from "effect/Stream";
  * and line discipline would corrupt that binary protocol.
  */
 
-export class NvimSpawnError extends Data.TaggedError("NvimSpawnError")<{
-  readonly executable: string;
-  readonly reason: "binary-missing" | "spawn-failed";
-  readonly message: string;
-}> {}
+export class NvimSpawnError extends Schema.TaggedError<NvimSpawnError>()("NvimSpawnError", {
+  executable: Schema.String,
+  reason: Schema.Literals(["binary-missing", "spawn-failed"]),
+  message: Schema.String,
+}) {}
 
 export interface NvimProcess {
   readonly pid: number;

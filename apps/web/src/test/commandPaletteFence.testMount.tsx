@@ -1,3 +1,4 @@
+import { installCommandPaletteCommands } from "../shortcuts/commandPaletteCommands";
 import { flushBrowserTasks } from "./browserTasks";
 import { act, render as renderBrowser } from "../../test/render";
 import "../index.css";
@@ -85,6 +86,8 @@ export async function mountApp(
   });
   const router = createAppRouter(options.homeRoute);
   await router.load();
+  // appInit installs the palette's chords outside React; the app root here does not.
+  resources.defer(installCommandPaletteCommands(router));
   // AppRoot owns this fixture's memory router.
   resources.use(
     await renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {

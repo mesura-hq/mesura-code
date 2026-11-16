@@ -160,14 +160,14 @@ export function ThreadVoicePanel({
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const [captions, setCaptions] = useState<ReadonlyArray<VoiceCaption>>([]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- pushes thread changes into the live call, which runs outside React
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pushes thread changes into the live call, which runs outside React
   useEffect(() => {
     threadSourceRef.current = { projection, hasPendingApprovals, hasPendingUserInput };
     const call = callRef.current;
     if (call) updateCallSnapshot(call, threadSourceRef.current);
   }, [projection, hasPendingApprovals, hasPendingUserInput]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- loads this connection's voice settings from the environment
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads this connection's voice settings from the environment
   useEffect(() => {
     // Environments without voice support have no voice routes; never ask them.
     if (!preparedConnection || !supported) return;
@@ -185,7 +185,7 @@ export function ThreadVoicePanel({
     };
   }, [preparedConnection, supported]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- sends stored history to the environment on mount and reconnect
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- sends stored history to the environment on mount and reconnect
   useEffect(() => {
     // On mount and on every reconnect, send the history this browser kept for earlier calls.
     // The environment's fresh owner decides; a call still recording is skipped.
@@ -209,7 +209,7 @@ export function ThreadVoicePanel({
     };
   }, [preparedConnection, supported, threadRef.environmentId]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- ends the live call and its microphone claim on unmount
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- ends the live call and its microphone claim on unmount
   useEffect(() => {
     mountedRef.current = true;
     // ChatView keys this panel by environment and thread, so navigation unmounts it. The call

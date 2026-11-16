@@ -25,8 +25,8 @@ export async function confirmTerminalClose(
               .map((label) => `"${label}"`)
               .join(", ")}.`,
           ].join("\n"),
-      // Closing a terminal is routine: Enter confirms it.
-      { variant: "destructive", initialFocus: "confirm" },
+      // Closing a terminal is routine: Enter confirms it. Destructive confirmations keep Cancel.
+      { initialFocus: "confirm" },
     );
   } catch {
     return false;

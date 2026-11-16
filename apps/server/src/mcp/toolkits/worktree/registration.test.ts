@@ -1,3 +1,8 @@
+import * as AssetSigner from "../../../assets/AssetSigner.ts";
+import * as EnvironmentThemeService from "../../../environmentTheme.ts";
+import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
+import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
 import * as DeviceService from "../../../device/DeviceService.ts";
@@ -49,6 +54,10 @@ import * as ProviderSessionManager from "../../../orchestration-v2/ProviderSessi
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
 
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(AssetSigner.AssetSigner)({}),
+  Layer.mock(EnvironmentThemeService.EnvironmentThemeService)({}),
+  Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
+  Layer.mock(PullRequestService.PullRequestService)({}),
   Layer.mock(PullRequestReviewGuideService.PullRequestReviewGuideService)({}),
   Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
@@ -200,9 +209,9 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       Layer.mergeAll(
         NodeHttpServer.layerTest,
         ServerConfig.layerTest(process.cwd(), { prefix: "t3-worktree-mcp-" }).pipe(
-          Layer.provide(NodeServices.layer),
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         ),
-        NodeServices.layer,
+        Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
       ),
     ),
   ),

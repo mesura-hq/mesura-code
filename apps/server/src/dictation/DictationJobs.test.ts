@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 /**
  * Drives `DictationJobs.layer` as `server.ts` composes it: `stream` is what
  * `subscribeDictationJobs` sends unchanged, so these events are what a client receives.
@@ -26,6 +27,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -104,7 +106,7 @@ const startDictationJobs = (options: HarnessOptions = {}) =>
     const openAi = yield* makeFakeOpenAi;
 
     const settingsLayer = ServerSettingsModule.layer.pipe(
-      Layer.provide(ServerSecretStore.layer),
+      Layer.provide(Layer.merge(ServerSecretStore.layer, ManagedPolicy.layerTest())),
       Layer.provideMerge(Layer.fresh(SqlitePersistence.layerMemory)),
       Layer.provideMerge(Layer.fresh(ServerConfig.layerTest(process.cwd(), baseDir))),
     );
@@ -199,438 +201,451 @@ const withKey = {
   dictation: { openAiApiKey: API_KEY, vocabularyHints: ["Mesura", "Hyprland"] },
 } as const satisfies HarnessOptions;
 
-it.layer(NodeServices.layer)("DictationJobs phase 1 fence", (it) => {
-  it.effect(
-    "dictation phase 1 AC1: starting a job sends the uploaded audio to gpt-4o-transcribe at temperature 0 with the bilingual prompt and the settings' hints",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs({
-          dictation: { openAiApiKey: API_KEY, vocabularyHints: ["Mesura", "Hyprland"] },
-        });
-        yield* harness.jobs.start(startInput("job-ac1"));
-        const call = yield* Queue.take(harness.openAi.calls);
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
+  "DictationJobs phase 1 fence",
+  (it) => {
+    it.effect(
+      "dictation phase 1 AC1: starting a job sends the uploaded audio to gpt-4o-transcribe at temperature 0 with the bilingual prompt and the settings' hints",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs({
+            dictation: { openAiApiKey: API_KEY, vocabularyHints: ["Mesura", "Hyprland"] },
+          });
+          yield* harness.jobs.start(startInput("job-ac1"));
+          const call = yield* Queue.take(harness.openAi.calls);
 
-        assert.strictEqual(call.authorization, `Bearer ${API_KEY}`);
-        assert.strictEqual(call.model, "gpt-4o-transcribe");
-        assert.strictEqual(call.temperature, "0");
-        assert.isFalse(call.hasLanguage, "no language field is sent");
-        assert.deepStrictEqual(call.audio, AUDIO);
-        assert.include(call.prompt ?? "", LANGUAGE_LINE);
-        assert.include(call.prompt ?? "", "Use these exact spellings: Mesura, Hyprland");
-        yield* call.answer(200, "done");
-      }),
-  );
+          assert.strictEqual(call.authorization, `Bearer ${API_KEY}`);
+          assert.strictEqual(call.model, "gpt-4o-transcribe");
+          assert.strictEqual(call.temperature, "0");
+          assert.isFalse(call.hasLanguage, "no language field is sent");
+          assert.deepStrictEqual(call.audio, AUDIO);
+          assert.include(call.prompt ?? "", LANGUAGE_LINE);
+          assert.include(call.prompt ?? "", "Use these exact spellings: Mesura, Hyprland");
+          yield* call.answer(200, "done");
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 AC2: a job for a recording longer than 420 seconds is sent to whisper-1",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs(withKey);
-        yield* harness.jobs.start(startInput("job-ac2", { durationMs: 420_001 }));
-        const call = yield* Queue.take(harness.openAi.calls);
-        assert.strictEqual(call.model, "whisper-1");
-        yield* call.answer(200, "done");
-      }),
-  );
+    it.effect(
+      "dictation phase 1 AC2: a job for a recording longer than 420 seconds is sent to whisper-1",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs(withKey);
+          yield* harness.jobs.start(startInput("job-ac2", { durationMs: 420_001 }));
+          const call = yield* Queue.take(harness.openAi.calls);
+          assert.strictEqual(call.model, "whisper-1");
+          yield* call.answer(200, "done");
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 AC4: a subscriber receives the job list first, then transcribing, completed with text, and failed",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs(withKey);
-        const received = yield* subscribeInto(harness.jobs);
-        assert.deepStrictEqual(yield* takeSnapshot(received), []);
+    it.effect(
+      "dictation phase 1 AC4: a subscriber receives the job list first, then transcribing, completed with text, and failed",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs(withKey);
+          const received = yield* subscribeInto(harness.jobs);
+          assert.deepStrictEqual(yield* takeSnapshot(received), []);
 
-        yield* harness.jobs.start(startInput("job-ac4-completed", { mode: "inject" }));
-        const transcribing = yield* takeUpsert(received);
-        assert.strictEqual(transcribing.id, "job-ac4-completed");
-        assert.strictEqual(transcribing.status, "transcribing");
-        assert.strictEqual(transcribing.mode, "inject");
-        assert.strictEqual(transcribing.durationMs, 30_000);
-        assert.deepStrictEqual(transcribing.target, startInput("job").target);
+          yield* harness.jobs.start(startInput("job-ac4-completed", { mode: "inject" }));
+          const transcribing = yield* takeUpsert(received);
+          assert.strictEqual(transcribing.id, "job-ac4-completed");
+          assert.strictEqual(transcribing.status, "transcribing");
+          assert.strictEqual(transcribing.mode, "inject");
+          assert.strictEqual(transcribing.durationMs, 30_000);
+          assert.deepStrictEqual(transcribing.target, startInput("job").target);
 
-        yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "Hola, mundo.");
-        const completed = yield* takeUpsert(received);
-        assert.strictEqual(completed.id, "job-ac4-completed");
-        assert.strictEqual(completed.status, "completed");
-        assert.strictEqual(completed.text, "Hola, mundo.");
-        assert.isString(completed.completedAt);
+          yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "Hola, mundo.");
+          const completed = yield* takeUpsert(received);
+          assert.strictEqual(completed.id, "job-ac4-completed");
+          assert.strictEqual(completed.status, "completed");
+          assert.strictEqual(completed.text, "Hola, mundo.");
+          assert.isString(completed.completedAt);
 
-        yield* harness.jobs.start(startInput("job-ac4-failed"));
-        assert.strictEqual((yield* takeUpsert(received)).status, "transcribing");
-        yield* (yield* Queue.take(harness.openAi.calls)).answer(401, "invalid key");
-        const failed = yield* takeUpsert(received);
-        assert.strictEqual(failed.id, "job-ac4-failed");
-        assert.strictEqual(failed.status, "failed");
-        assert.isAbove(failed.failure?.trim().length ?? 0, 0);
-        assert.isUndefined(failed.text);
+          yield* harness.jobs.start(startInput("job-ac4-failed"));
+          assert.strictEqual((yield* takeUpsert(received)).status, "transcribing");
+          yield* (yield* Queue.take(harness.openAi.calls)).answer(401, "invalid key");
+          const failed = yield* takeUpsert(received);
+          assert.strictEqual(failed.id, "job-ac4-failed");
+          assert.strictEqual(failed.status, "failed");
+          assert.isAbove(failed.failure?.trim().length ?? 0, 0);
+          assert.isUndefined(failed.text);
 
-        // A later subscriber starts from the current list.
-        const late = yield* subscribeInto(harness.jobs);
-        const snapshot = yield* takeSnapshot(late);
-        assert.deepStrictEqual(snapshot.map((job) => [job.id, job.status]).toSorted(), [
-          ["job-ac4-completed", "completed"],
-          ["job-ac4-failed", "failed"],
-        ]);
-        assert.strictEqual(
-          snapshot.find((job) => job.id === "job-ac4-completed")?.text,
-          "Hola, mundo.",
-        );
-      }),
-  );
+          // A later subscriber starts from the current list.
+          const late = yield* subscribeInto(harness.jobs);
+          const snapshot = yield* takeSnapshot(late);
+          assert.deepStrictEqual(snapshot.map((job) => [job.id, job.status]).toSorted(), [
+            ["job-ac4-completed", "completed"],
+            ["job-ac4-failed", "failed"],
+          ]);
+          assert.strictEqual(
+            snapshot.find((job) => job.id === "job-ac4-completed")?.text,
+            "Hola, mundo.",
+          );
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 AC3: a job whose answer is an empty body ends failed as No speech detected",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs(withKey);
-        const received = yield* subscribeInto(harness.jobs);
-        yield* takeSnapshot(received);
-        yield* harness.jobs.start(startInput("job-ac3-empty"));
-        yield* takeUpsert(received);
-        yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "");
-        const failed = yield* takeUpsert(received);
-        assert.strictEqual(failed.status, "failed");
-        assert.strictEqual(failed.failure, "No speech detected");
-        assert.strictEqual(harness.openAi.requestCount(), 1);
-      }),
-  );
+    it.effect(
+      "dictation phase 1 AC3: a job whose answer is an empty body ends failed as No speech detected",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs(withKey);
+          const received = yield* subscribeInto(harness.jobs);
+          yield* takeSnapshot(received);
+          yield* harness.jobs.start(startInput("job-ac3-empty"));
+          yield* takeUpsert(received);
+          yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "");
+          const failed = yield* takeUpsert(received);
+          assert.strictEqual(failed.status, "failed");
+          assert.strictEqual(failed.failure, "No speech detected");
+          assert.strictEqual(harness.openAi.requestCount(), 1);
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 AC5: retrying a failed job resends the stored audio under the same job id",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs(withKey);
-        const received = yield* subscribeInto(harness.jobs);
-        yield* takeSnapshot(received);
+    it.effect(
+      "dictation phase 1 AC5: retrying a failed job resends the stored audio under the same job id",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs(withKey);
+          const received = yield* subscribeInto(harness.jobs);
+          yield* takeSnapshot(received);
 
-        const jobId = DictationJobId.make("job-ac5");
-        yield* harness.jobs.start(startInput(jobId));
-        yield* takeUpsert(received);
-        yield* (yield* Queue.take(harness.openAi.calls)).answer(429, "slow down");
-        assert.strictEqual((yield* takeUpsert(received)).status, "failed");
+          const jobId = DictationJobId.make("job-ac5");
+          yield* harness.jobs.start(startInput(jobId));
+          yield* takeUpsert(received);
+          yield* (yield* Queue.take(harness.openAi.calls)).answer(429, "slow down");
+          assert.strictEqual((yield* takeUpsert(received)).status, "failed");
 
-        yield* harness.jobs.retry(jobId);
-        const again = yield* takeUpsert(received);
-        assert.strictEqual(again.id, jobId);
-        assert.strictEqual(again.status, "transcribing");
-        assert.isUndefined(again.failure);
+          yield* harness.jobs.retry(jobId);
+          const again = yield* takeUpsert(received);
+          assert.strictEqual(again.id, jobId);
+          assert.strictEqual(again.status, "transcribing");
+          assert.isUndefined(again.failure);
 
-        const second = yield* Queue.take(harness.openAi.calls);
-        assert.deepStrictEqual(second.audio, AUDIO);
-        yield* second.answer(200, "second attempt");
-        const completed = yield* takeUpsert(received);
-        assert.strictEqual(completed.id, jobId);
-        assert.strictEqual(completed.status, "completed");
-        assert.strictEqual(completed.text, "second attempt");
-        assert.strictEqual(harness.openAi.requestCount(), 2);
+          const second = yield* Queue.take(harness.openAi.calls);
+          assert.deepStrictEqual(second.audio, AUDIO);
+          yield* second.answer(200, "second attempt");
+          const completed = yield* takeUpsert(received);
+          assert.strictEqual(completed.id, jobId);
+          assert.strictEqual(completed.status, "completed");
+          assert.strictEqual(completed.text, "second attempt");
+          assert.strictEqual(harness.openAi.requestCount(), 2);
 
-        const snapshot = yield* takeSnapshot(yield* subscribeInto(harness.jobs));
-        assert.deepStrictEqual(
-          snapshot.map((job) => job.id),
-          [jobId],
-        );
-      }),
-  );
+          const snapshot = yield* takeSnapshot(yield* subscribeInto(harness.jobs));
+          assert.deepStrictEqual(
+            snapshot.map((job) => job.id),
+            [jobId],
+          );
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 AC7: a job started with no OpenAI key fails at once naming the missing key",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs();
-        const received = yield* subscribeInto(harness.jobs);
-        yield* takeSnapshot(received);
+    it.effect(
+      "dictation phase 1 AC7: a job started with no OpenAI key fails at once naming the missing key",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs();
+          const received = yield* subscribeInto(harness.jobs);
+          yield* takeSnapshot(received);
 
-        yield* harness.jobs.start(startInput("job-ac7"));
-        const job = yield* takeUpsert(received);
-        assert.strictEqual(job.id, "job-ac7");
-        assert.strictEqual(job.status, "failed");
-        assert.match(job.failure ?? "", /OpenAI API key/i);
-        assert.strictEqual(harness.openAi.requestCount(), 0);
-      }),
-  );
-  it.effect(
-    "dictation phase 1 regression: a start interrupted while its settings load still transcribes to completion",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs({ ...withKey, gateSettingsReads: true });
-        const received = yield* subscribeInto(harness.jobs);
-        yield* takeSnapshot(received);
+          yield* harness.jobs.start(startInput("job-ac7"));
+          const job = yield* takeUpsert(received);
+          assert.strictEqual(job.id, "job-ac7");
+          assert.strictEqual(job.status, "failed");
+          assert.match(job.failure ?? "", /OpenAI API key/i);
+          assert.strictEqual(harness.openAi.requestCount(), 0);
+        }),
+    );
+    it.effect(
+      "dictation phase 1 regression: a start interrupted while its settings load still transcribes to completion",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs({ ...withKey, gateSettingsReads: true });
+          const received = yield* subscribeInto(harness.jobs);
+          yield* takeSnapshot(received);
 
-        const request = yield* Effect.forkChild(harness.jobs.start(startInput("job-interrupted")));
-        yield* harness.settingsRead;
-        // The client disconnects: its RPC fiber is interrupted mid-launch.
-        yield* Fiber.interrupt(request);
-        yield* harness.releaseSettingsRead;
+          const request = yield* Effect.forkChild(
+            harness.jobs.start(startInput("job-interrupted")),
+          );
+          yield* harness.settingsRead;
+          // The client disconnects: its RPC fiber is interrupted mid-launch.
+          yield* Fiber.interrupt(request);
+          yield* harness.releaseSettingsRead;
 
-        assert.strictEqual((yield* takeUpsert(received)).status, "transcribing");
-        yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "still here");
-        const completed = yield* takeUpsert(received);
-        assert.strictEqual(completed.id, "job-interrupted");
-        assert.strictEqual(completed.status, "completed");
-        assert.strictEqual(completed.text, "still here");
-      }),
-  );
+          assert.strictEqual((yield* takeUpsert(received)).status, "transcribing");
+          yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "still here");
+          const completed = yield* takeUpsert(received);
+          assert.strictEqual(completed.id, "job-interrupted");
+          assert.strictEqual(completed.status, "completed");
+          assert.strictEqual(completed.text, "still here");
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 regression: a retry interrupted while its settings load still transcribes to completion",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs({ ...withKey, gateSettingsReads: true });
-        const received = yield* subscribeInto(harness.jobs);
-        yield* takeSnapshot(received);
-        const jobId = DictationJobId.make("job-retry-interrupted");
+    it.effect(
+      "dictation phase 1 regression: a retry interrupted while its settings load still transcribes to completion",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs({ ...withKey, gateSettingsReads: true });
+          const received = yield* subscribeInto(harness.jobs);
+          yield* takeSnapshot(received);
+          const jobId = DictationJobId.make("job-retry-interrupted");
 
-        yield* harness.releaseSettingsRead;
-        yield* harness.jobs.start(startInput(jobId));
-        yield* takeUpsert(received);
-        yield* (yield* Queue.take(harness.openAi.calls)).answer(401, "invalid key");
-        assert.strictEqual((yield* takeUpsert(received)).status, "failed");
+          yield* harness.releaseSettingsRead;
+          yield* harness.jobs.start(startInput(jobId));
+          yield* takeUpsert(received);
+          yield* (yield* Queue.take(harness.openAi.calls)).answer(401, "invalid key");
+          assert.strictEqual((yield* takeUpsert(received)).status, "failed");
 
-        const request = yield* Effect.forkChild(harness.jobs.retry(jobId));
-        yield* harness.settingsRead;
-        yield* harness.settingsRead;
-        yield* Fiber.interrupt(request);
-        yield* harness.releaseSettingsRead;
+          const request = yield* Effect.forkChild(harness.jobs.retry(jobId));
+          yield* harness.settingsRead;
+          yield* harness.settingsRead;
+          yield* Fiber.interrupt(request);
+          yield* harness.releaseSettingsRead;
 
-        assert.strictEqual((yield* takeUpsert(received)).status, "transcribing");
-        yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "second try");
-        const completed = yield* takeUpsert(received);
-        assert.strictEqual(completed.status, "completed");
-        assert.strictEqual(completed.text, "second try");
-      }),
-  );
+          assert.strictEqual((yield* takeUpsert(received)).status, "transcribing");
+          yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "second try");
+          const completed = yield* takeUpsert(received);
+          assert.strictEqual(completed.status, "completed");
+          assert.strictEqual(completed.text, "second try");
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 regression: cancelling a job while its settings load ends it and sends no audio",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs({ ...withKey, gateSettingsReads: true });
-        const received = yield* subscribeInto(harness.jobs);
-        yield* takeSnapshot(received);
+    it.effect(
+      "dictation phase 1 regression: cancelling a job while its settings load ends it and sends no audio",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs({ ...withKey, gateSettingsReads: true });
+          const received = yield* subscribeInto(harness.jobs);
+          yield* takeSnapshot(received);
 
-        const request = yield* Effect.forkChild(harness.jobs.start(startInput("job-cancel-early")));
-        yield* harness.settingsRead;
-        assert.isTrue(yield* harness.jobs.cancel(DictationJobId.make("job-cancel-early")));
+          const request = yield* Effect.forkChild(
+            harness.jobs.start(startInput("job-cancel-early")),
+          );
+          yield* harness.settingsRead;
+          assert.isTrue(yield* harness.jobs.cancel(DictationJobId.make("job-cancel-early")));
 
-        const cancelled = yield* takeUpsert(received);
-        assert.strictEqual(cancelled.status, "failed");
-        assert.strictEqual(cancelled.failure, "Cancelled.");
-        yield* harness.releaseSettingsRead;
-        assert.strictEqual((yield* Fiber.join(request)).status, "failed");
-        assert.strictEqual(harness.openAi.requestCount(), 0);
-        assert.isFalse(yield* harness.jobs.cancel(DictationJobId.make("job-cancel-early")));
-      }),
-  );
+          const cancelled = yield* takeUpsert(received);
+          assert.strictEqual(cancelled.status, "failed");
+          assert.strictEqual(cancelled.failure, "Cancelled.");
+          yield* harness.releaseSettingsRead;
+          assert.strictEqual((yield* Fiber.join(request)).status, "failed");
+          assert.strictEqual(harness.openAi.requestCount(), 0);
+          assert.isFalse(yield* harness.jobs.cancel(DictationJobId.make("job-cancel-early")));
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 regression: a mode set while settings load is the mode every later event carries",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs({ ...withKey, gateSettingsReads: true });
-        const received = yield* subscribeInto(harness.jobs);
-        yield* takeSnapshot(received);
-        const jobId = DictationJobId.make("job-mode-early");
+    it.effect(
+      "dictation phase 1 regression: a mode set while settings load is the mode every later event carries",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs({ ...withKey, gateSettingsReads: true });
+          const received = yield* subscribeInto(harness.jobs);
+          yield* takeSnapshot(received);
+          const jobId = DictationJobId.make("job-mode-early");
 
-        yield* Effect.forkChild(harness.jobs.start(startInput(jobId, { mode: "submit" })));
-        yield* harness.settingsRead;
-        yield* harness.jobs.setMode(jobId, "clipboard");
-        assert.strictEqual((yield* takeUpsert(received)).mode, "clipboard");
-        yield* harness.releaseSettingsRead;
+          yield* Effect.forkChild(harness.jobs.start(startInput(jobId, { mode: "submit" })));
+          yield* harness.settingsRead;
+          yield* harness.jobs.setMode(jobId, "clipboard");
+          assert.strictEqual((yield* takeUpsert(received)).mode, "clipboard");
+          yield* harness.releaseSettingsRead;
 
-        const launched = yield* takeUpsert(received);
-        assert.strictEqual(launched.status, "transcribing");
-        assert.strictEqual(launched.mode, "clipboard");
-        yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "done");
-        assert.strictEqual((yield* takeUpsert(received)).mode, "clipboard");
-        const snapshot = yield* takeSnapshot(yield* subscribeInto(harness.jobs));
-        assert.strictEqual(snapshot[0]?.mode, "clipboard");
-      }),
-  );
+          const launched = yield* takeUpsert(received);
+          assert.strictEqual(launched.status, "transcribing");
+          assert.strictEqual(launched.mode, "clipboard");
+          yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "done");
+          assert.strictEqual((yield* takeUpsert(received)).mode, "clipboard");
+          const snapshot = yield* takeSnapshot(yield* subscribeInto(harness.jobs));
+          assert.strictEqual(snapshot[0]?.mode, "clipboard");
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 regression: a start beyond the transcribing limit ends failed without reading audio, and can be retried",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs(withKey);
-        for (let index = 0; index < DictationJobsModule.MAX_ACTIVE_JOBS; index += 1) {
-          yield* harness.jobs.start(startInput(`job-capacity-${index}`));
-        }
-        const calls = [];
-        for (let index = 0; index < DictationJobsModule.MAX_ACTIVE_JOBS; index += 1) {
-          calls.push(yield* Queue.take(harness.openAi.calls));
-        }
+    it.effect(
+      "dictation phase 1 regression: a start beyond the transcribing limit ends failed without reading audio, and can be retried",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs(withKey);
+          for (let index = 0; index < DictationJobsModule.MAX_ACTIVE_JOBS; index += 1) {
+            yield* harness.jobs.start(startInput(`job-capacity-${index}`));
+          }
+          const calls = [];
+          for (let index = 0; index < DictationJobsModule.MAX_ACTIVE_JOBS; index += 1) {
+            calls.push(yield* Queue.take(harness.openAi.calls));
+          }
 
-        const received = yield* subscribeInto(harness.jobs);
-        yield* takeSnapshot(received);
-        const overflowId = DictationJobId.make("job-capacity-overflow");
-        const rejected = yield* harness.jobs.start(startInput(overflowId));
-        assert.strictEqual(rejected.status, "failed");
-        assert.strictEqual(rejected.failure, DictationJobsModule.CAPACITY_FAILURE);
-        assert.strictEqual(harness.openAi.requestCount(), DictationJobsModule.MAX_ACTIVE_JOBS);
+          const received = yield* subscribeInto(harness.jobs);
+          yield* takeSnapshot(received);
+          const overflowId = DictationJobId.make("job-capacity-overflow");
+          const rejected = yield* harness.jobs.start(startInput(overflowId));
+          assert.strictEqual(rejected.status, "failed");
+          assert.strictEqual(rejected.failure, DictationJobsModule.CAPACITY_FAILURE);
+          assert.strictEqual(harness.openAi.requestCount(), DictationJobsModule.MAX_ACTIVE_JOBS);
 
-        yield* calls[0]!.answer(200, "first done");
-        while ((yield* takeUpsert(received)).status !== "completed") {
-          // The overflow job's failure arrives first.
-        }
-        const retried = yield* harness.jobs.retry(overflowId);
-        assert.strictEqual(retried.status, "transcribing");
-        yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "overflow done");
-        assert.strictEqual(harness.openAi.requestCount(), DictationJobsModule.MAX_ACTIVE_JOBS + 1);
-      }),
-  );
+          yield* calls[0]!.answer(200, "first done");
+          while ((yield* takeUpsert(received)).status !== "completed") {
+            // The overflow job's failure arrives first.
+          }
+          const retried = yield* harness.jobs.retry(overflowId);
+          assert.strictEqual(retried.status, "transcribing");
+          yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "overflow done");
+          assert.strictEqual(
+            harness.openAi.requestCount(),
+            DictationJobsModule.MAX_ACTIVE_JOBS + 1,
+          );
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 regression: an idle server forgets jobs after 24 hours and subscribers get the new list",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs(withKey);
-        yield* harness.jobs.start(startInput("job-expires"));
-        yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "old news");
-        const received = yield* subscribeInto(harness.jobs);
-        const before = yield* takeSnapshot(received);
-        assert.deepStrictEqual(
-          before.map((job) => job.status),
-          ["completed"],
-        );
+    it.effect(
+      "dictation phase 1 regression: an idle server forgets jobs after 24 hours and subscribers get the new list",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs(withKey);
+          yield* harness.jobs.start(startInput("job-expires"));
+          yield* (yield* Queue.take(harness.openAi.calls)).answer(200, "old news");
+          const received = yield* subscribeInto(harness.jobs);
+          const before = yield* takeSnapshot(received);
+          assert.deepStrictEqual(
+            before.map((job) => job.status),
+            ["completed"],
+          );
 
-        yield* TestClock.adjust("25 hours");
-        yield* TestClock.adjust("10 minutes");
-        assert.deepStrictEqual(yield* takeSnapshot(received), []);
-        assert.deepStrictEqual(yield* takeSnapshot(yield* subscribeInto(harness.jobs)), []);
-      }),
-  );
+          yield* TestClock.adjust("25 hours");
+          yield* TestClock.adjust("10 minutes");
+          assert.deepStrictEqual(yield* takeSnapshot(received), []);
+          assert.deepStrictEqual(yield* takeSnapshot(yield* subscribeInto(harness.jobs)), []);
+        }),
+    );
 
-  it.effect(
-    "dictation phase 1 regression: a subscriber that stops reading holds a bounded backlog and still ends on the latest state",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs();
-        const jobId = DictationJobId.make("job-backlog");
-        yield* harness.jobs.start(startInput(jobId));
+    it.effect(
+      "dictation phase 1 regression: a subscriber that stops reading holds a bounded backlog and still ends on the latest state",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs();
+          const jobId = DictationJobId.make("job-backlog");
+          yield* harness.jobs.start(startInput(jobId));
 
-        const received = yield* Queue.unbounded<DictationJobEvent>();
-        const gate = yield* Deferred.make<void>();
-        yield* harness.jobs.stream.pipe(
-          Stream.runForEach((event) =>
-            Queue.offer(received, event).pipe(
-              Effect.andThen(event.type === "snapshot" ? Deferred.await(gate) : Effect.void),
+          const received = yield* Queue.unbounded<DictationJobEvent>();
+          const gate = yield* Deferred.make<void>();
+          yield* harness.jobs.stream.pipe(
+            Stream.runForEach((event) =>
+              Queue.offer(received, event).pipe(
+                Effect.andThen(event.type === "snapshot" ? Deferred.await(gate) : Effect.void),
+              ),
             ),
-          ),
-          Effect.forkScoped({ startImmediately: true }),
-        );
-        assert.strictEqual((yield* Queue.take(received)).type, "snapshot");
+            Effect.forkScoped({ startImmediately: true }),
+          );
+          assert.strictEqual((yield* Queue.take(received)).type, "snapshot");
 
-        for (let index = 0; index < 5_000; index += 1) {
-          yield* harness.jobs.setMode(jobId, index % 2 === 0 ? "inject" : "submit");
-        }
-        yield* harness.jobs.setMode(jobId, "clipboard");
-        yield* Deferred.succeed(gate, undefined);
-
-        let delivered = 0;
-        for (;;) {
-          const event = yield* Queue.take(received);
-          delivered += 1;
-          if (event.type === "upsert" && event.job.mode === "clipboard") break;
-        }
-        assert.isAtMost(delivered, 32);
-      }),
-  );
-
-  it.effect(
-    "dictation phase 1 regression: a subscribed list stays equal to a fresh snapshot when jobs past the cap are evicted",
-    () =>
-      Effect.gen(function* () {
-        const harness = yield* startDictationJobs();
-        const received = yield* subscribeInto(harness.jobs);
-        const reduced = new Map<string, DictationJob>();
-        const apply = (event: DictationJobEvent) => {
-          if (event.type === "snapshot") {
-            reduced.clear();
-            for (const job of event.jobs) reduced.set(job.id, job);
-          } else {
-            reduced.set(event.job.id, event.job);
+          for (let index = 0; index < 5_000; index += 1) {
+            yield* harness.jobs.setMode(jobId, index % 2 === 0 ? "inject" : "submit");
           }
-        };
-        apply(yield* Queue.take(received));
+          yield* harness.jobs.setMode(jobId, "clipboard");
+          yield* Deferred.succeed(gate, undefined);
 
-        const total = DictationJobsModule.MAX_KEPT_JOBS + 5;
-        for (let index = 0; index < total; index += 1) {
-          yield* harness.jobs.start(startInput(`job-evict-${index}`));
-        }
-        // A last change marks the end of what the subscriber must catch up on.
-        const lastId = DictationJobId.make(`job-evict-${total - 1}`);
-        yield* harness.jobs.setMode(lastId, "clipboard");
-        for (;;) {
-          const event = yield* Queue.take(received);
-          apply(event);
-          if (
-            event.type === "upsert" &&
-            event.job.id === lastId &&
-            event.job.mode === "clipboard"
-          ) {
-            break;
+          let delivered = 0;
+          for (;;) {
+            const event = yield* Queue.take(received);
+            delivered += 1;
+            if (event.type === "upsert" && event.job.mode === "clipboard") break;
           }
-        }
+          assert.isAtMost(delivered, 32);
+        }),
+    );
 
-        const fresh = yield* takeSnapshot(yield* subscribeInto(harness.jobs));
-        assert.lengthOf(fresh, DictationJobsModule.MAX_KEPT_JOBS);
-        assert.deepStrictEqual(
-          [...reduced.keys()].toSorted(),
-          fresh.map((job) => job.id).toSorted(),
-        );
-        assert.isFalse(reduced.has("job-evict-0"));
-      }),
-  );
-});
+    it.effect(
+      "dictation phase 1 regression: a subscribed list stays equal to a fresh snapshot when jobs past the cap are evicted",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs();
+          const received = yield* subscribeInto(harness.jobs);
+          const reduced = new Map<string, DictationJob>();
+          const apply = (event: DictationJobEvent) => {
+            if (event.type === "snapshot") {
+              reduced.clear();
+              for (const job of event.jobs) reduced.set(job.id, job);
+            } else {
+              reduced.set(event.job.id, event.job);
+            }
+          };
+          apply(yield* Queue.take(received));
 
-it.layer(NodeServices.layer)("DictationJobs snapshot ordering", (it) => {
-  it.effect(
-    "stamps every published state and snapshot with the run's epoch and a rising revision, and start returns the stamped job",
-    () =>
+          const total = DictationJobsModule.MAX_KEPT_JOBS + 5;
+          for (let index = 0; index < total; index += 1) {
+            yield* harness.jobs.start(startInput(`job-evict-${index}`));
+          }
+          // A last change marks the end of what the subscriber must catch up on.
+          const lastId = DictationJobId.make(`job-evict-${total - 1}`);
+          yield* harness.jobs.setMode(lastId, "clipboard");
+          for (;;) {
+            const event = yield* Queue.take(received);
+            apply(event);
+            if (
+              event.type === "upsert" &&
+              event.job.id === lastId &&
+              event.job.mode === "clipboard"
+            ) {
+              break;
+            }
+          }
+
+          const fresh = yield* takeSnapshot(yield* subscribeInto(harness.jobs));
+          assert.lengthOf(fresh, DictationJobsModule.MAX_KEPT_JOBS);
+          assert.deepStrictEqual(
+            [...reduced.keys()].toSorted(),
+            fresh.map((job) => job.id).toSorted(),
+          );
+          assert.isFalse(reduced.has("job-evict-0"));
+        }),
+    );
+  },
+);
+
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
+  "DictationJobs snapshot ordering",
+  (it) => {
+    it.effect(
+      "stamps every published state and snapshot with the run's epoch and a rising revision, and start returns the stamped job",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs(withKey);
+          const received = yield* subscribeInto(harness.jobs);
+          const first = yield* Queue.take(received);
+          assert.strictEqual(first.type, "snapshot");
+          const empty = first as Extract<DictationJobEvent, { type: "snapshot" }>;
+          assert.isString(empty.epoch);
+
+          const started = yield* harness.jobs.start(startInput("job-stamped"));
+          const transcribing = yield* takeUpsert(received);
+          assert.strictEqual(started.epoch, empty.epoch);
+          assert.strictEqual(started.revision, transcribing.revision);
+          assert.isAbove(transcribing.revision ?? -1, empty.revision ?? -1);
+
+          const call = yield* Queue.take(harness.openAi.calls);
+          yield* call.answer(200, "done");
+          const completed = yield* takeUpsert(received);
+          assert.isAbove(completed.revision ?? -1, transcribing.revision ?? -1);
+
+          const late = yield* subscribeInto(harness.jobs);
+          const snapshot = (yield* Queue.take(late)) as Extract<
+            DictationJobEvent,
+            { type: "snapshot" }
+          >;
+          assert.strictEqual(snapshot.epoch, empty.epoch);
+          assert.isAtLeast(snapshot.revision ?? -1, completed.revision ?? -1);
+          assert.strictEqual(snapshot.jobs[0]?.revision, completed.revision);
+        }),
+    );
+
+    it.effect("a new server run has a new epoch, so clients know the old run's jobs are gone", () =>
       Effect.gen(function* () {
-        const harness = yield* startDictationJobs(withKey);
-        const received = yield* subscribeInto(harness.jobs);
-        const first = yield* Queue.take(received);
-        assert.strictEqual(first.type, "snapshot");
-        const empty = first as Extract<DictationJobEvent, { type: "snapshot" }>;
-        assert.isString(empty.epoch);
-
-        const started = yield* harness.jobs.start(startInput("job-stamped"));
-        const transcribing = yield* takeUpsert(received);
-        assert.strictEqual(started.epoch, empty.epoch);
-        assert.strictEqual(started.revision, transcribing.revision);
-        assert.isAbove(transcribing.revision ?? -1, empty.revision ?? -1);
-
-        const call = yield* Queue.take(harness.openAi.calls);
-        yield* call.answer(200, "done");
-        const completed = yield* takeUpsert(received);
-        assert.isAbove(completed.revision ?? -1, transcribing.revision ?? -1);
-
-        const late = yield* subscribeInto(harness.jobs);
-        const snapshot = (yield* Queue.take(late)) as Extract<
+        const first = yield* startDictationJobs(withKey);
+        const second = yield* startDictationJobs(withKey);
+        const one = (yield* Queue.take(yield* subscribeInto(first.jobs))) as Extract<
           DictationJobEvent,
           { type: "snapshot" }
         >;
-        assert.strictEqual(snapshot.epoch, empty.epoch);
-        assert.isAtLeast(snapshot.revision ?? -1, completed.revision ?? -1);
-        assert.strictEqual(snapshot.jobs[0]?.revision, completed.revision);
+        const two = (yield* Queue.take(yield* subscribeInto(second.jobs))) as Extract<
+          DictationJobEvent,
+          { type: "snapshot" }
+        >;
+        assert.notStrictEqual(one.epoch, two.epoch);
       }),
-  );
-
-  it.effect("a new server run has a new epoch, so clients know the old run's jobs are gone", () =>
-    Effect.gen(function* () {
-      const first = yield* startDictationJobs(withKey);
-      const second = yield* startDictationJobs(withKey);
-      const one = (yield* Queue.take(yield* subscribeInto(first.jobs))) as Extract<
-        DictationJobEvent,
-        { type: "snapshot" }
-      >;
-      const two = (yield* Queue.take(yield* subscribeInto(second.jobs))) as Extract<
-        DictationJobEvent,
-        { type: "snapshot" }
-      >;
-      assert.notStrictEqual(one.epoch, two.epoch);
-    }),
-  );
-});
+    );
+  },
+);

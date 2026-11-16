@@ -1,10 +1,6 @@
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 
-import { isElectron } from "../../env";
-import { useTerminalFocus } from "../../hooks/useTerminalFocus";
-import { isModelPickerOpen } from "../../modelPickerVisibility";
-import { useShortcutModifierState } from "../../shortcutModifierState";
-import { shouldShowThreadJumpHintsForModifiers } from "../../keybindings";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useThreadJumpHintsVisible } from "../Sidebar.logic";
 import { useEffect } from "react";
 
@@ -17,30 +13,12 @@ import { useEffect } from "react";
 export function ThreadJumpHintModifierSync(props: {
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly terminalOpen: boolean;
+  readonly routeThreadRef?: ScopedThreadRef | null;
   readonly onChange: (shouldShow: boolean) => void;
 }) {
-  const { keybindings, terminalOpen, onChange } = props;
-  // Same predicate as v1: hints show only while the held modifiers exactly
-  // match a thread-jump binding. Adding Shift (screenshots) or Alt no
-  // longer matches ⌘1..9, so the overlay hides for chords like ⌘⇧4.
-  const shortcutModifiers = useShortcutModifierState();
-  const terminalFocused = useTerminalFocus();
-  const shouldShowJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
-    shortcutModifiers,
-    keybindings,
-    {
-      platform: navigator.platform,
-      context: {
-        terminalFocus: terminalFocused,
-        terminalOpen,
-        modelPickerOpen: isModelPickerOpen(),
-        isWeb: !isElectron,
-        isDesktop: isElectron,
-      },
-    },
-  );
-  const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reports the delayed hint visibility to the parent after commit
+  const { keybindings, onChange, routeThreadRef = null } = props;
+  const showJumpHints = useThreadJumpHintsVisible(keybindings, routeThreadRef);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: reports the delayed hint visibility to the parent after commit
   useEffect(() => {
     onChange(showJumpHints);
   }, [showJumpHints, onChange]);

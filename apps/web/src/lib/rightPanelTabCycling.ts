@@ -18,12 +18,12 @@ export function useRightPanelTabCycling<const Surface extends { readonly id: str
 }): void {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const latest = useRef(input);
-  // oxlint-disable-next-line t3code/react-effect-budget -- latest-ref: the window listener reads the newest surfaces and callbacks without resubscribing
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- latest-ref: the window listener reads the newest surfaces and callbacks without resubscribing
   useLayoutEffect(() => {
     latest.current = input;
   });
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes the capture-phase window keydown listener for the tab bar's lifetime
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes the capture-phase window keydown listener for the tab bar's lifetime
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;

@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics nodeBuiltinImport:off - the fixture drives real git and the real disk synchronously.
 /**
  * Specs for `ReviewService.subscribeWorkingTreeChanges` over the real watcher layer and real git
@@ -99,7 +100,7 @@ function makeLayer(workspaceRoot: string, tuning: Layer.Layer<never> = Layer.emp
     Layer.provide(ServerSettings.layerTest()),
     Layer.provide(ServerConfig.layerTest(workspaceRoot, { prefix: "t3-tree-watch-base-" })),
     Layer.provideMerge(tuning),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
 }
 

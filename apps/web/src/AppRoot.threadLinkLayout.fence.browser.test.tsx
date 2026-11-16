@@ -53,9 +53,6 @@ vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSett
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/Sidebar", async () => (await fenceMocks()).mockSidebar());
-vi.mock("./components/LegacySidebar", async () =>
-  (await fenceMocks()).mockRendersNothing("default"),
-);
 vi.mock("./components/preview/PreviewAutomationHosts", async () =>
   (await fenceMocks()).mockRendersNothing("PreviewAutomationHosts"),
 );
@@ -222,6 +219,7 @@ function agentOwnsTarget() {
   applyPreviewDesktopState(ref, "layout-target", {
     hasWebContents: true,
     loading: false,
+    navStatus: { _tag: "Idle" },
     canGoBack: false,
     canGoForward: false,
     zoomFactor: 1,
@@ -360,6 +358,7 @@ it("thread link AppRoot guard: forwarded configured close reaches the mounted re
   Object.defineProperty(window, "desktopBridge", {
     configurable: true,
     value: {
+      getWindowZoomFactor: () => 1,
       onMenuAction: (listener: (action: string) => void) => {
         listeners.add(listener);
         return () => {
@@ -514,6 +513,7 @@ it.each(["web shortcut", "forwarded command", "public close"] as const)(
       Object.defineProperty(window, "desktopBridge", {
         configurable: true,
         value: {
+          getWindowZoomFactor: () => 1,
           onMenuAction: (listener: (action: string) => void) => {
             actions.add(listener);
             return () => actions.delete(listener);
@@ -526,11 +526,8 @@ it.each(["web shortcut", "forwarded command", "public close"] as const)(
     useRightPanelStore.getState().requestMaximize(ref);
     await mount();
     const editor = composerEditor();
-    await act(() => editor.focus());
-    expect(
-      document.activeElement,
-      "the mounted editor accepts real DOM focus before panel entry",
-    ).toBe(editor);
+    // The maximized panel makes the composer inert until the close restores the layout.
+    expect(editor.closest("[inert]")).not.toBeNull();
     const panel = await focusPanel();
     if (entry === "web shortcut") {
       const event = new KeyboardEvent("keydown", {

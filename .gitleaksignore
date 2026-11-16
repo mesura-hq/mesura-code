@@ -45,3 +45,24 @@ infra/relay/src/hooks/HookForwarder.test.ts:generic-api-key:56
 infra/task-cache/src/NativeClients.test.ts:generic-api-key:6
 packages/provider-opencode/src/server/status.test.ts:generic-api-key:121
 packages/provider-opencode/src/server/status.test.ts:generic-api-key:122
+
+# EnvironmentAuth uses a fixed public DPoP thumbprint to test device approval.
+a2edd281df232ddb635d006a7569b3e8e628b875:apps/server/src/auth/EnvironmentAuth.test.ts:generic-api-key:312
+
+# PeerLinks uses a committed self-signed localhost TLS key, only in its loopback test.
+1d78b3320328709d266ffd36af0dd75e614d14de:apps/server/src/peer/fixtures/localhost-key.pem:private-key:1
+
+# The secret-request evaluation uses an explicit declined-card authorization fixture.
+7f782b4d6da6493fb7b0d9f12290480e0c8f16f1:evals/mcp-tool-use/run.test.ts:curl-auth-header:842
+
+# The secret-request evaluation embeds a fake Stripe key with a repeated-zero payload.
+7f782b4d6da6493fb7b0d9f12290480e0c8f16f1:evals/mcp-tool-use/cases/secrets.ndjson:stripe-access-token:14
+
+# Claude startup-error tests verify redaction of the literal sk-private-123 fixture.
+fd63914c77c844df1e011eef26c1f12bb61ed944:apps/server/src/orchestration-v2/Adapters/ClaudeAgentSdkQueryRunner.test.ts:generic-api-key:580
+
+# The second Claude startup-error case uses the same literal redaction fixture.
+fd63914c77c844df1e011eef26c1f12bb61ed944:apps/server/src/orchestration-v2/Adapters/ClaudeAgentSdkQueryRunner.test.ts:generic-api-key:586
+
+# Pi text generation uses sk-test-SECRET123 to exercise an authentication failure.
+26dc3688e2c927053bc3613fff1e506328a1a430:packages/provider-pi/src/server/textGeneration.test.ts:generic-api-key:103

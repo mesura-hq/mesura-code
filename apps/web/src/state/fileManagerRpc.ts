@@ -129,9 +129,8 @@ export function followSession(
 }
 
 /**
- * `immediate` is load-bearing: a runtime atom's effect starts on its first read, and a
- * plain `registry.subscribe` never reads, which left the session unopened and the columns
- * silently empty.
+ * `immediate` is load-bearing: a runtime atom's effect starts on its first read, and the
+ * callback must receive that first value, or the session opens with its columns empty.
  */
 export function watchAtom<A>(
   registry: AtomRegistry.AtomRegistry,

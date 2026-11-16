@@ -94,7 +94,7 @@ const makeServer = Effect.fn("ThreadSearchToolTest.makeServer")(function* () {
   const registration = McpHttpServer.toolkitRegistration(
     ThreadSearchToolkit,
     ThreadSearchHandlers.layer,
-  ).pipe(Layer.provideMerge(McpServer.McpServer.layer), Layer.provide(dependencies));
+  ).pipe(Layer.provideMerge(McpHttpServer.layerInProcessMcpServer), Layer.provide(dependencies));
   const server = yield* McpServer.McpServer.pipe(Effect.provide(registration));
   const call = (
     description: string,

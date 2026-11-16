@@ -199,6 +199,8 @@ vi.mock("./state/query", async (importOriginal) => {
       ),
   };
 });
+// The query filter above knows only the fixture's own atoms, not a revisioned wrapper of one.
+vi.mock("./state/revisionedQuery", () => ({ revisionedQuery: <A,>(query: A) => query }));
 vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
 vi.mock("./state/environments", async (importOriginal) => {
   const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
@@ -261,7 +263,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 import { reviewEnvironment } from "./state/review";
 
-import { useFileTreeShortcut } from "./components/files/mesuraTree/useFileTreeShortcut";
+import { MesuraChatRouteLayer } from "./components/MesuraChatRouteLayer";
 import { useFileTreeStore } from "./components/files/mesuraTree/fileTreeStore";
 import { openCommandPalette } from "./commandPaletteBus";
 
@@ -397,11 +399,11 @@ async function setupBrowserFixture0() {
   };
 }
 
-/** The chat route's shell around ChatView: the `fileTree.toggle` listener `_chat.tsx` mounts. */
+/** The chat route's shell around ChatView: the `fileTree.toggle` layer `_chat.tsx` mounts. */
 function ThreadRoute() {
-  useFileTreeShortcut(threadRef);
   return (
     <SidebarProvider>
+      <MesuraChatRouteLayer />
       <ChatView environmentId={environmentId} threadId={threadId} routeKind="server" />
     </SidebarProvider>
   );
@@ -535,7 +537,7 @@ async function pushLive(result: GitWorkingTreeChangesResult) {
   await settle();
 }
 
-it("Tree diff fence: the mode menu lists Tree diff, Files diff, Branch changes, Latest turn, Turn in order", async () => {
+it("Tree diff fence: the mode menu lists Tree diff, Files diff, Branch changes, Latest turn, Turn, Commits in order", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("branch");
@@ -546,6 +548,7 @@ it("Tree diff fence: the mode menu lists Tree diff, Files diff, Branch changes, 
     "Branch changes",
     "Latest turn",
     "Turn",
+    "Commits",
   ]);
   for (const label of labels) {
     expect(label).not.toMatch(/Working tree|Uncommitted/);

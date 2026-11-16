@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics nodeBuiltinImport:off
 /**
  * A GitManager over real git whose every spawned process goes through one counting spawner, so
@@ -58,12 +59,12 @@ export const makeGitManagerOverRealGit = (options?: {
   Effect.gen(function* () {
     const spawned: Array<SpawnedProcess> = [];
     const realSpawner = yield* ChildProcessSpawner.ChildProcessSpawner.pipe(
-      Effect.provide(NodeServices.layer),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     const countingSpawner = ChildProcessSpawner.make((command) => {
       spawned.push(
         command._tag === "StandardCommand"
-          ? { command: command.command, args: command.args }
+          ? { command: command.command, args: command.args.map(String) }
           : { command: "<piped>", args: [] },
       );
       return realSpawner.spawn(command);
@@ -75,6 +76,7 @@ export const makeGitManagerOverRealGit = (options?: {
     );
     const layerGit = Layer.mergeAll(GitVcsDriver.layer, VcsDriverRegistry.layer).pipe(
       Layer.provideMerge(layerProcesses),
+      Layer.provideMerge(NodeCrypto.layer),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-git-testkit-" })),
       Layer.provideMerge(ServerSettings.layerTest()),
     );
@@ -132,7 +134,7 @@ export const makeGitManagerOverRealGit = (options?: {
       // The counting spawner is provided before NodeServices, so every layer
       // above that spawns gets it instead of the platform's.
       Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, countingSpawner)),
-      Layer.provide(NodeServices.layer),
+      Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     const context = yield* Layer.build(layerManager).pipe(Effect.orDie);
     return {

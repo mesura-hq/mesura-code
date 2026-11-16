@@ -45,13 +45,9 @@ const writeTextFile = Effect.fn("writeTextFile")(function* (
 });
 
 const makeResolverWithFileSystem = (fileSystem: FileSystem.FileSystem) =>
-  T3ProjectFileLoader.make.pipe(
-    Effect.flatMap((loader) =>
-      ProjectFaviconResolver.make.pipe(
-        Effect.provideService(T3ProjectFileLoader.T3ProjectFileLoader, loader),
-        Effect.provide(WorkspacePaths.layer),
-      ),
-    ),
+  ProjectFaviconResolver.make.pipe(
+    // The suite memoizes these layers; injected FileSystem implementations need fresh instances.
+    Effect.provide([Layer.fresh(WorkspacePaths.layer), Layer.fresh(T3ProjectFileLoader.layer)]),
     Effect.provideService(FileSystem.FileSystem, fileSystem),
   );
 
@@ -312,6 +308,28 @@ it.layer(layerTest)("ProjectFaviconResolverLive", (it) => {
       }).pipe(Effect.provide(TestClock.layer())),
     );
 
+    it.effect("looks up a missing workspace root once within the negative cache window", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = path.join(yield* makeTempDir, "deleted-project");
+        let rootStats = 0;
+        const resolver = yield* makeResolverWithFileSystem(
+          FileSystem.FileSystem.of({
+            ...fileSystem,
+            stat: (filePath) => {
+              if (filePath === cwd) rootStats += 1;
+              return fileSystem.stat(filePath);
+            },
+          }),
+        );
+
+        yield* Effect.exit(resolver.resolvePath(cwd));
+        yield* Effect.exit(resolver.resolvePath(cwd));
+        expect(rootStats).toBe(1);
+      }),
+    );
+
     it.effect("prefers a t3.json iconPath over well-known files", () =>
       Effect.gen(function* () {
         const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
@@ -410,6 +428,17 @@ it.layer(layerTest)("ProjectFaviconResolverLive", (it) => {
 
         expect(resolved).not.toBeNull();
         expect(resolved).toBe((yield* Path.Path).join(cwd, "public", "brand", "logo.svg"));
+
+        const paddedCwd = yield* makeTempDir;
+        yield* writeTextFile(
+          paddedCwd,
+          "index.html",
+          '<link rel="icon" href=" brand/custom.svg ">',
+        );
+        yield* writeTextFile(paddedCwd, "brand/custom.svg", "<svg>custom</svg>");
+        expect(yield* resolver.resolvePath(paddedCwd)).toBe(
+          (yield* Path.Path).join(paddedCwd, "brand", "custom.svg"),
+        );
       }),
     );
 

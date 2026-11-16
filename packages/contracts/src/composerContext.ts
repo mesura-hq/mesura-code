@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import { VoiceAgentContext } from "./voiceConversation.ts";
 
+import { AssistantCitation } from "./assistantCitations.ts";
 import {
   EnvironmentId,
   ForwardCompatibleArray,
@@ -10,6 +11,7 @@ import {
   PositiveInt,
   ThreadId,
   TrimmedNonEmptyString,
+  TurnItemId,
 } from "./baseSchemas.ts";
 import { GUEST_MESSAGE_MAX_LENGTH, GUEST_NAME_MAX_LENGTH } from "./guestShare.ts";
 
@@ -34,6 +36,7 @@ export const COMPOSER_CONTEXT_KINDS = [
   DICTATION_CONTEXT_KIND,
   "thread",
   "environment",
+  "response",
 ] as const;
 export type KnownComposerContextKind = (typeof COMPOSER_CONTEXT_KINDS)[number];
 
@@ -48,7 +51,7 @@ const COMPOSER_CONTEXT_ELEMENT_HTML_MAX_CHARS = 8_000;
 const COMPOSER_CONTEXT_ELEMENT_STYLES_MAX_CHARS = 8_000;
 export const COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS = 16_000;
 export const COMPOSER_CONTEXT_REVIEW_DIFF_MAX_CHARS = 32_000;
-const COMPOSER_CONTEXT_PREVIEW_COMMENT_MAX_CHARS = 8_000;
+export const COMPOSER_CONTEXT_PREVIEW_COMMENT_MAX_CHARS = 8_000;
 
 export const ComposerContextId = TrimmedNonEmptyString.check(
   Schema.isMaxLength(CONTEXT_ID_MAX_CHARS),
@@ -233,6 +236,30 @@ export const EnvironmentContextRecord = Schema.Struct({
 });
 export type EnvironmentContextRecord = typeof EnvironmentContextRecord.Type;
 
+/**
+ * An earlier assistant response the user is replying to. Only its identity and opening travel:
+ * the agent rereads the rest by item id, so a reply costs the same however long the response is.
+ */
+export const ResponseContextRecord = Schema.Struct({
+  ...recordBase,
+  kind: Schema.Literal("response"),
+  /** Where the response is and how it starts, as the reader saw it. */
+  citation: AssistantCitation,
+  itemId: TurnItemId,
+  /** The subagents whose results that response reported on. */
+  subagents: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        threadId: ThreadId,
+        title: ContextLabel,
+        /** Set when the subagent's thread lives on a linked environment. */
+        environmentId: Schema.optional(EnvironmentId),
+      }),
+    ).check(Schema.isMaxLength(20)),
+  ),
+});
+export type ResponseContextRecord = typeof ResponseContextRecord.Type;
+
 const isJson = Schema.is(Schema.Json);
 
 /** Excludes known discriminators so malformed known records fail their own schema. */
@@ -264,6 +291,7 @@ export const KnownComposerContextRecord = Schema.Union([
   SkillContextRecord,
   ThreadContextRecord,
   EnvironmentContextRecord,
+  ResponseContextRecord,
 ]);
 export type KnownComposerContextRecord = typeof KnownComposerContextRecord.Type;
 

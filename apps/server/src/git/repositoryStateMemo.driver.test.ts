@@ -1,3 +1,4 @@
+import { vi } from "vite-plus/test";
 // @effect-diagnostics nodeBuiltinImport:off
 /**
  * Drives `memoizeRepositoryReads` over the counting real driver: only reads under
@@ -111,14 +112,8 @@ describe("repository state memo through the git driver", () => {
         const { repo, memoized, asSweep, nextTurn } = yield* makeMemoizedDriver;
         const systemConfig = NodePath.join(NodePath.dirname(repo), "system.gitconfig");
         NodeFS.writeFileSync(systemConfig, "[t3code]\n\tsystem = one\n");
-        const previous = process.env.GIT_CONFIG_SYSTEM;
-        process.env.GIT_CONFIG_SYSTEM = systemConfig;
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            if (previous === undefined) delete process.env.GIT_CONFIG_SYSTEM;
-            else process.env.GIT_CONFIG_SYSTEM = previous;
-          }),
-        );
+        vi.stubEnv("GIT_CONFIG_SYSTEM", systemConfig);
+        yield* Effect.addFinalizer(() => Effect.sync(() => vi.unstubAllEnvs()));
         expect(yield* asSweep(memoized.readConfigValue(repo, "t3code.system"))).toBe("one");
         yield* nextTurn;
         NodeFS.writeFileSync(systemConfig, "[t3code]\n\tsystem = two\n");

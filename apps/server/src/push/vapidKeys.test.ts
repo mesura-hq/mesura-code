@@ -1,3 +1,4 @@
+import * as EffectNodeCrypto from "@effect/platform-node/NodeCrypto";
 /**
  * Push fence, acceptance criterion 1: the VAPID key pair in the secret store, through
  * `VapidKeys.layer` over the real `ServerSecretStore`. A restart is a fresh secret store and a
@@ -36,58 +37,65 @@ const readStoredSecret = Effect.gen(function* () {
   );
 });
 
-it.layer(NodeServices.layer)("VapidKeys phase 1 fence (AC1)", (it) => {
-  it.effect(
-    "push phase 1 AC1: the first server run creates a P-256 key pair and keeps it in the secret store",
-    () =>
-      Effect.gen(function* () {
-        const before = yield* readStoredSecret.pipe(
-          Effect.provide(Layer.fresh(ServerSecretStore.layer)),
-        );
-        assert.isTrue(Option.isNone(before), "no VAPID secret before the first run");
+it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
+  "VapidKeys phase 1 fence (AC1)",
+  (it) => {
+    it.effect(
+      "push phase 1 AC1: the first server run creates a P-256 key pair and keeps it in the secret store",
+      () =>
+        Effect.gen(function* () {
+          const before = yield* readStoredSecret.pipe(
+            Effect.provide(Layer.fresh(ServerSecretStore.layer)),
+          );
+          assert.isTrue(Option.isNone(before), "no VAPID secret before the first run");
 
-        const { keys, stored } = yield* serverRun(
-          Effect.gen(function* () {
-            return { keys: yield* VapidKeys, stored: yield* readStoredSecret };
-          }),
-        );
-        assert.isTrue(Option.isSome(stored), "the first run stores the VAPID secret");
+          const { keys, stored } = yield* serverRun(
+            Effect.gen(function* () {
+              return { keys: yield* VapidKeys, stored: yield* readStoredSecret };
+            }),
+          );
+          assert.isTrue(Option.isSome(stored), "the first run stores the VAPID secret");
 
-        // An uncompressed P-256 point, as `applicationServerKey` needs it.
-        const publicPoint = Buffer.from(keys.publicKey, "base64url");
-        assert.strictEqual(publicPoint.length, 65);
-        assert.strictEqual(publicPoint[0], 0x04);
-        assert.strictEqual(publicPoint.toString("base64url"), keys.publicKey);
+          // An uncompressed P-256 point, as `applicationServerKey` needs it.
+          const publicPoint = Buffer.from(keys.publicKey, "base64url");
+          assert.strictEqual(publicPoint.length, 65);
+          assert.strictEqual(publicPoint[0], 0x04);
+          assert.strictEqual(publicPoint.toString("base64url"), keys.publicKey);
 
-        // The two halves belong together.
-        const privateScalar = Buffer.from(keys.privateKey, "base64url");
-        assert.strictEqual(privateScalar.length, 32);
-        const ecdh = NodeCrypto.createECDH("prime256v1");
-        ecdh.setPrivateKey(privateScalar);
-        assert.strictEqual(ecdh.getPublicKey().toString("base64url"), keys.publicKey);
+          // The two halves belong together.
+          const privateScalar = Buffer.from(keys.privateKey, "base64url");
+          assert.strictEqual(privateScalar.length, 32);
+          const ecdh = NodeCrypto.createECDH("prime256v1");
+          ecdh.setPrivateKey(privateScalar);
+          assert.strictEqual(ecdh.getPublicKey().toString("base64url"), keys.publicKey);
 
-        assert.match(keys.subject, /^(mailto:\S+@\S+|https:\/\/\S+)$/);
-      }).pipe(Effect.provide(layerServerConfig())),
-  );
+          assert.match(keys.subject, /^(mailto:\S+@\S+|https:\/\/\S+)$/);
+        }).pipe(Effect.provide(layerServerConfig())),
+    );
 
-  it.effect(
-    "push phase 1 AC1: a restarted server returns the same public key and keeps one stored key pair",
-    () =>
-      Effect.gen(function* () {
-        const first = yield* serverRun(
-          Effect.gen(function* () {
-            return { keys: yield* VapidKeys, stored: yield* readStoredSecret };
-          }),
-        );
-        const second = yield* serverRun(
-          Effect.gen(function* () {
-            return { keys: yield* VapidKeys, stored: yield* readStoredSecret };
-          }),
-        );
+    it.effect(
+      "push phase 1 AC1: a restarted server returns the same public key and keeps one stored key pair",
+      () =>
+        Effect.gen(function* () {
+          const first = yield* serverRun(
+            Effect.gen(function* () {
+              return { keys: yield* VapidKeys, stored: yield* readStoredSecret };
+            }),
+          );
+          const second = yield* serverRun(
+            Effect.gen(function* () {
+              return { keys: yield* VapidKeys, stored: yield* readStoredSecret };
+            }),
+          );
 
-        assert.strictEqual(second.keys.publicKey, first.keys.publicKey);
-        assert.strictEqual(second.keys.privateKey, first.keys.privateKey);
-        assert.deepStrictEqual(second.stored, first.stored, "the restart did not rewrite the key");
-      }).pipe(Effect.provide(layerServerConfig())),
-  );
-});
+          assert.strictEqual(second.keys.publicKey, first.keys.publicKey);
+          assert.strictEqual(second.keys.privateKey, first.keys.privateKey);
+          assert.deepStrictEqual(
+            second.stored,
+            first.stored,
+            "the restart did not rewrite the key",
+          );
+        }).pipe(Effect.provide(layerServerConfig())),
+    );
+  },
+);

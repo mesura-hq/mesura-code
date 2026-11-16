@@ -12,12 +12,8 @@ import {
   pushSettingsFence as browser,
 } from "../test/pushSettingsFenceMocks";
 
-vi.hoisted(() => {
-  Object.defineProperty(window, "desktopBridge", {
-    value: { getLocalEnvironmentBootstraps: () => [] },
-    configurable: true,
-    writable: true,
-  });
+await vi.hoisted(async () => {
+  (await import("../test/desktopBridgeLoadStub")).installDesktopBridgeLoadStub();
 });
 
 const fenceMocks = vi.hoisted(() => () => import("../test/pushSettingsFenceMocks"));

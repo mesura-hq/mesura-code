@@ -49,6 +49,7 @@ export const VoiceSessionManagerConfig = Context.Reference<
   Omit<VoiceSessionManagerOptions, "onServerEnd" | "onSweep">
 >("t3/voice/VoiceSessionManagerConfig", { defaultValue: () => ({}) });
 
+// @effect-diagnostics-next-line extendsNativeError:off - Promise-based manager errors carry HTTP status into the Effect boundary.
 export class VoiceSessionError extends Error {
   readonly status: number;
 

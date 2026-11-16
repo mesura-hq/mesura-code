@@ -8,6 +8,11 @@ vi.mock(import("@effect/atom-react"), async (original) => ({
   useAtomValue: (() =>
     AsyncResult.success({ authenticated: true, scopes: ["environment:maintain"] })) as never,
 }));
+// The useAtomValue stub above answers every atom with a session, so the config map is stubbed too.
+vi.mock(import("~/state/entities"), async (original) => ({
+  ...(await original()),
+  useServerConfigs: (() => new Map()) as never,
+}));
 vi.mock(import("~/state/use-atom-command"), async (original) => ({
   ...(await original()),
   useAtomCommand: (() => testState.update) as never,

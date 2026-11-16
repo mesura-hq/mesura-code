@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 /**
  * Phone push: the `push.presence` RPC and criterion 4's "when its connection closes".
  * `ws.ts` provides the handler layer to protocol setup, so that layer's scope closes at
@@ -91,7 +92,7 @@ const connectAsWs = (
       report,
       close: Scope.close(connection, Exit.void),
     } as PresenceClient;
-  });
+  }).pipe(Effect.provide(NodeCrypto.layer));
 
 const withServer = <E>(
   body: (
@@ -108,7 +109,7 @@ const withServer = <E>(
       Layer.succeed(ClientPresence.ClientPresence, presence),
     );
     yield* body(serverScope, presence);
-  }).pipe(Effect.scoped);
+  }).pipe(Effect.scoped, Effect.provide(NodeCrypto.layer));
 
 describe("push.presence phase 4 fence: the RPC", () => {
   it("push phase 4 contract: push.presence is served by the WebSocket RPC groups", () => {
@@ -260,7 +261,7 @@ describe("push.presence phase 4 regression: the pushPresence capability", () => 
         ),
       );
       assert.strictEqual(descriptor.capabilities.pushPresence, true);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
   it("push phase 4 guard: a descriptor from a server without pushPresence still decodes", () => {

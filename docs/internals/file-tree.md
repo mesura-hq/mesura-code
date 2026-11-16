@@ -34,7 +34,6 @@ job:
 | `fileTreeStore.ts`            | zustand: `explorerOpen` (persisted under the T3 key), `pendingFocus`                                                                                                                 |
 | `fileTreeShortcutDecision.ts` | The pure decision table for `Ctrl+E`                                                                                                                                                 |
 | `fileTreeFocusMoves.ts`       | `leaveFileTree`, `runFileTreeToggle`: the effects that decision names                                                                                                                |
-| `useFileTreeShortcut.ts`      | The window capture-phase listener that resolves `fileTree.toggle` and `fileTree.miller`                                                                                              |
 | `fileTreeContextMenu.ts`      | Copy mention / Add to chat, ported from the T3 tree                                                                                                                                  |
 | `treeShapeStorage.ts`         | The persisted tree shape (cursor and collapsed folders), with a coalescing persister                                                                                                 |
 | `schemaLocalStorage.ts`       | Local storage behind an Effect schema that never throws at the caller                                                                                                                |

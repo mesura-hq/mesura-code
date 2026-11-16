@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 /**
  * Harness shared by `PushDispatcher.test.ts` (whose header explains how `flushSends` avoids
  * sleeps) and `PushDispatcher.presence.test.ts`. Without a `presence`, the dispatcher reads a
@@ -113,6 +114,7 @@ const layerProjectService = Layer.succeed(
     update: unused,
     delete: unused,
     getByWorkspaceRoot: unused,
+    workspaceScanDirectory: unused,
     snapshot: Effect.succeed({ projects: [project] } as never),
     listPage: unused,
     getShell: unused,
@@ -120,7 +122,7 @@ const layerProjectService = Layer.succeed(
     commitIconDiscovery: unused,
     getById: (projectId) =>
       Effect.succeed(projectId === PROJECT_ID ? Option.some(project as never) : Option.none()),
-  } as ProjectService.ProjectService["Service"]),
+  }),
 );
 
 const layerServerEnvironment = Layer.succeed(ServerEnvironment.ServerEnvironment, {
@@ -197,7 +199,10 @@ const makeHarness = Effect.fnUntraced(function* (
       layerProjectService,
       layerServerEnvironment,
       presence,
-    ).pipe(Layer.provideMerge(SqlitePersistence.layerMemory), Layer.provide(NodeServices.layer)),
+    ).pipe(
+      Layer.provideMerge(SqlitePersistence.layerMemory),
+      Layer.provide(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
+    ),
   );
   const sink = Context.get(base, EventSinkV2);
   const threads = Context.get(base, ThreadManagementService.ThreadManagementService);

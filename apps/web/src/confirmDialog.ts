@@ -6,18 +6,19 @@ export type ConfirmDialogState =
       readonly status: "confirming";
       readonly message: string;
       readonly variant: ConfirmDialogVariant;
-      readonly focusConfirm?: boolean;
+      readonly initialFocus: ConfirmDialogOptions["initialFocus"];
     }
   | {
       readonly status: "closing";
       readonly message: string;
       readonly variant: ConfirmDialogVariant;
+      readonly initialFocus: ConfirmDialogOptions["initialFocus"];
     };
 
 type PendingConfirmation = {
   readonly message: string;
   readonly variant: ConfirmDialogVariant;
-  readonly focusConfirm: boolean;
+  readonly initialFocus: ConfirmDialogOptions["initialFocus"];
   readonly resolve: (confirmed: boolean) => void;
 };
 
@@ -43,13 +44,13 @@ function resolvePendingConfirmations(confirmed: boolean): void {
   queuedConfirmations = [];
 }
 
-/** The shown state; `focusConfirm` appears only when the request asked for it. */
+/** Shared state for queued confirmations. */
 function confirmingState(pending: PendingConfirmation): ConfirmDialogState {
   return {
     status: "confirming",
     message: pending.message,
     variant: pending.variant,
-    ...(pending.focusConfirm ? { focusConfirm: true } : {}),
+    initialFocus: pending.initialFocus,
   };
 }
 
@@ -81,7 +82,7 @@ export function requestConfirmDialog(
     const pending = {
       message,
       variant: options?.variant ?? "default",
-      focusConfirm: options?.initialFocus === "confirm",
+      initialFocus: options?.initialFocus,
       resolve,
     } satisfies PendingConfirmation;
     if (activeConfirmation || state.status === "closing") {
@@ -106,7 +107,12 @@ export function respondToConfirmDialog(confirmed: boolean): void {
   const confirmation = activeConfirmation;
   activeConfirmation = null;
   confirmation.resolve(confirmed);
-  publish({ status: "closing", message: state.message, variant: state.variant });
+  publish({
+    status: "closing",
+    message: state.message,
+    variant: state.variant,
+    initialFocus: state.initialFocus,
+  });
 }
 
 export function completeConfirmDialogClose(): void {

@@ -111,7 +111,7 @@ export function MesuraFileTree({
     viewport?.focus({ preventScroll: true });
     return viewport !== null && viewport !== undefined;
   }, []);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the tree as a focus target while mounted
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: registers the tree as a focus target while mounted
   useEffect(() => registerFocusTarget("tree", focusViewport), [focusViewport]);
   // The panel's entry when no editor shows beside the tree; a ref callback,
   // because the wrapper first renders after the entries load.
@@ -129,7 +129,7 @@ export function MesuraFileTree({
   );
   // Registered here for as long as the tree is mounted, which is the only time
   // a move out of the tree can be asked for; the composer's owner is upstream's.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: registers the composer focus target for the tree's lifetime
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: registers the composer focus target for the tree's lifetime
   useEffect(
     () =>
       registerFocusTarget("composer", () => {
@@ -141,7 +141,7 @@ export function MesuraFileTree({
     [composerRef],
   );
   // A chord that opened the surface asked for focus before the tree existed.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: focuses the DOM after mount for a chord that fired first
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: focuses the DOM after mount for a chord that fired first
   useEffect(() => {
     if (useFileTreeStore.getState().consumePendingFocus()) focusViewport();
   }, [focusViewport]);
@@ -164,7 +164,7 @@ export function MesuraFileTree({
   // again would only move a cursor that is already there.
   const openedFromTree = useRef<string | null>(null);
   const handledReveal = useRef<HandledReveal | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: drives the imperative tree controller from the selected-path prop
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: drives the imperative tree controller from the selected-path prop
   useEffect(() => {
     const next = nextRevealRequest(handledReveal.current, selectedPath, selectedPathRevealId);
     handledReveal.current = next.handled;

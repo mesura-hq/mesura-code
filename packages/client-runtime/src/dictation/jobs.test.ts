@@ -141,6 +141,7 @@ const makeHarness = Effect.fn("DictationJobsTest.makeHarness")(function* () {
     subscribeServerConfig: () => Stream.never,
     ready: Effect.void,
     probe: Effect.void,
+    inboundFrames: Effect.succeed(0),
     closed: Effect.never,
   };
   const supervisor = EnvironmentSupervisor.of({

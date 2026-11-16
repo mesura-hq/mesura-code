@@ -1,3 +1,4 @@
+import * as PlatformError from "effect/PlatformError";
 // @effect-diagnostics nodeBuiltinImport:off - Effect has no free-space query; `statfs` fills that gap.
 import * as NodeFSP from "node:fs/promises";
 import type { HostStatsGpu, HostStatsSample } from "@t3tools/contracts";
@@ -112,7 +113,17 @@ function ratesBetween(previous: CounterReading | null, current: CounterReading) 
 
 /** `statfs` is portable across Linux, macOS and Windows. */
 const readDisk = (diskPath: string) =>
-  Effect.tryPromise(() => NodeFSP.statfs(diskPath)).pipe(
+  Effect.tryPromise({
+    try: () => NodeFSP.statfs(diskPath),
+    catch: (cause) =>
+      PlatformError.systemError({
+        _tag: "Unknown",
+        module: "FileSystem",
+        method: "statfs",
+        pathOrDescriptor: diskPath,
+        cause,
+      }),
+  }).pipe(
     Effect.map((stats) => ({
       diskUsedBytes: (stats.blocks - stats.bfree) * stats.bsize,
       diskTotalBytes: stats.blocks * stats.bsize,

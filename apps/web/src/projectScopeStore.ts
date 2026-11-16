@@ -1,31 +1,47 @@
 /**
- * A store, not `Sidebar.tsx` state, because `projectScope.toggleAll` changes the scope while
- * the sidebar is unmounted. The key is a logical project key spanning every environment.
- * Deliberately NOT persisted: a filter that survives a reload reads as lost threads.
+ * Scope remains unpersisted so a reload cannot hide threads. Upstream's multiple-project
+ * selection and Mesura's toggle-all command share the same selection and recall state.
  */
 import { create } from "zustand";
 
 interface ProjectScopeStore {
+  projectScopeKeys: readonly string[];
+  lastProjectScopeKeys: readonly string[];
+  /** Scalar compatibility for commands that report the current scope. */
   projectScopeKey: string | null;
   lastProjectScopeKey: string | null;
-  setProjectScopeKey: (projectScopeKey: string | null) => void;
-  /** Every project from a project, the last project from every project; returns the new scope. */
+  setProjectScopeKeys: (keys: readonly string[]) => void;
+  setProjectScopeKey: (key: string | null) => void;
   toggleAllProjects: () => string | null;
 }
 
-export const useProjectScopeStore = create<ProjectScopeStore>()((set, get) => ({
-  projectScopeKey: null,
-  lastProjectScopeKey: null,
-  setProjectScopeKey: (projectScopeKey) =>
-    set(
-      projectScopeKey === null
-        ? { projectScopeKey }
-        : { projectScopeKey, lastProjectScopeKey: projectScopeKey },
-    ),
-  toggleAllProjects: () => {
-    const { projectScopeKey, lastProjectScopeKey } = get();
-    const next = projectScopeKey === null ? lastProjectScopeKey : null;
-    if (next !== projectScopeKey) set({ projectScopeKey: next });
-    return next;
-  },
-}));
+const scopeKey = (keys: readonly string[]) => (keys.length === 0 ? null : keys.join("\n"));
+
+export const useProjectScopeStore = create<ProjectScopeStore>()((set, get) => {
+  const setProjectScopeKeys = (keys: readonly string[]) => {
+    const projectScopeKeys = [...new Set(keys)];
+    set({
+      projectScopeKeys,
+      projectScopeKey: scopeKey(projectScopeKeys),
+      ...(projectScopeKeys.length === 0
+        ? {}
+        : {
+            lastProjectScopeKeys: projectScopeKeys,
+            lastProjectScopeKey: scopeKey(projectScopeKeys),
+          }),
+    });
+  };
+  return {
+    projectScopeKeys: [],
+    lastProjectScopeKeys: [],
+    projectScopeKey: null,
+    lastProjectScopeKey: null,
+    setProjectScopeKeys,
+    setProjectScopeKey: (key) => setProjectScopeKeys(key === null ? [] : [key]),
+    toggleAllProjects: () => {
+      const state = get();
+      setProjectScopeKeys(state.projectScopeKeys.length === 0 ? state.lastProjectScopeKeys : []);
+      return get().projectScopeKey;
+    },
+  };
+});

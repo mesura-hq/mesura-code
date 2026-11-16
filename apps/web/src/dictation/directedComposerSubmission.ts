@@ -1,6 +1,5 @@
-import type { StartThreadTurnInput } from "@t3tools/client-runtime/state/threads";
+import type { StartThreadTurnInput } from "@t3tools/client-runtime/operations";
 import {
-  PlanId,
   type CommandId,
   type DictationTarget,
   type EnvironmentId,
@@ -12,11 +11,10 @@ import {
   type ServerProvider,
   type ThreadId,
 } from "@t3tools/contracts";
+import { DEFAULT_INTERACTION_MODE } from "../types";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
-import { deriveLatestThreadRun } from "@t3tools/client-runtime/state/thread-execution";
 import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
-import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
 
 import {
   useComposerDraftStore,
@@ -30,9 +28,6 @@ import { environmentProjects } from "../state/projects";
 import { readThread } from "../state/entities";
 import { threadEnvironment } from "../state/threads";
 import { buildMessageContext } from "../lib/composerContextRecords";
-import { environmentServerConfigsAtom } from "../state/server";
-import { findLatestProposedPlan, hasActionableProposedPlan } from "../session-logic";
-import { resolvePlanFollowUpSubmission } from "../proposedPlan";
 import {
   formatOutgoingComposerPrompt,
   getComposerPromptLengthValidationMessage,
@@ -47,11 +42,6 @@ type DirectedTurnStartBootstrap = NonNullable<StartThreadTurnInput["bootstrap"]>
 
 export type DirectedComposerPendingAction =
   | { readonly kind: "composer" }
-  | {
-      readonly kind: "plan-follow-up";
-      readonly planId: string;
-      readonly planMarkdown: string;
-    }
   | { readonly kind: "button-approval" };
 
 export type DirectedComposerSubmission = {
@@ -68,18 +58,7 @@ export type DirectedComposerSubmission = {
   readonly attachments: StartThreadTurnInput["message"]["attachments"];
   readonly bootstrap: DirectedTurnStartBootstrap | undefined;
   readonly pendingAction: DirectedComposerPendingAction;
-  /**
-   * Terminal picks, review comments and preview annotations that travel with
-   * the message, and whether this server takes them inline. A server from
-   * before inline context drops the records, so for those the same content is
-   * serialized into the text instead.
-   */
-  readonly messageContext?:
-    | {
-        readonly inline: boolean;
-        readonly context: OrchestrationMessageContext | undefined;
-      }
-    | undefined;
+  readonly messageContext?: OrchestrationMessageContext | undefined;
 };
 
 export type DirectedSubmissionContext = {
@@ -199,32 +178,9 @@ async function submitDirectedComposer(
 export function buildDirectedTurnStartInput(
   submission: DirectedComposerSubmission,
 ): StartThreadTurnInput {
-  const planFollowUp =
-    submission.pendingAction.kind === "plan-follow-up"
-      ? resolvePlanFollowUpSubmission({
-          draftText: submission.prompt,
-          planMarkdown: submission.pendingAction.planMarkdown,
-        })
-      : null;
-  const interactionMode = planFollowUp?.interactionMode ?? submission.interactionMode;
-  const text = planFollowUp?.text ?? submission.prompt;
-  const messageContext = submission.messageContext;
-  // The legacy text is built from `text`, not from the raw prompt: a plan
-  // follow-up rewrites the message, and serializing the prompt would send the
-  // pre-rewrite words to exactly the servers that cannot read the records.
-  const contextFields =
-    messageContext === undefined
-      ? {}
-      : messageContext.inline
-        ? messageContext.context
-          ? { context: messageContext.context }
-          : {}
-        : {
-            text: serializeLegacyContextMessage({
-              text,
-              records: messageContext.context?.records ?? [],
-            }),
-          };
+  const interactionMode = DEFAULT_INTERACTION_MODE;
+  const text = submission.prompt;
+  const contextFields = submission.messageContext ? { context: submission.messageContext } : {};
   return {
     commandId: submission.commandId,
     threadId: submission.threadId,
@@ -240,15 +196,6 @@ export function buildDirectedTurnStartInput(
     runtimeMode: submission.runtimeMode,
     interactionMode,
     ...(submission.bootstrap ? { bootstrap: submission.bootstrap } : {}),
-    ...(planFollowUp?.interactionMode === "default" &&
-    submission.pendingAction.kind === "plan-follow-up"
-      ? {
-          sourceProposedPlan: {
-            threadId: submission.threadId,
-            planId: PlanId.make(submission.pendingAction.planId),
-          },
-        }
-      : {}),
     createdAt: submission.createdAt,
   };
 }
@@ -336,20 +283,9 @@ export async function submitDirectedDictation(input: {
 
   const pendingRequests = projection ? derivePendingThreadRequests(projection) : null;
   const pendingApproval = pendingRequests?.approvals[0];
-  const latestPlan = projection
-    ? findLatestProposedPlan(projection, deriveLatestThreadRun(projection)?.runId ?? null)
-    : null;
   const pendingAction: DirectedComposerPendingAction =
     input.submissionContext?.pendingAction ??
-    (pendingApproval
-      ? { kind: "button-approval" }
-      : thread?.interactionMode === "plan" && hasActionableProposedPlan(latestPlan)
-        ? {
-            kind: "plan-follow-up",
-            planId: latestPlan!.id,
-            planMarkdown: latestPlan!.planMarkdown,
-          }
-        : { kind: "composer" });
+    (pendingApproval ? { kind: "button-approval" } : { kind: "composer" });
 
   const sendState = deriveComposerSendState({
     prompt: input.prompt,
@@ -394,10 +330,7 @@ export async function submitDirectedDictation(input: {
     })),
   );
   const attachments = [...images, ...files];
-  // v0.0.42 stopped appending this material to the prompt as text. It travels
-  // as records beside the message now, and only a server too old to read them
-  // gets the serialized form — which `buildDirectedTurnStartInput` decides.
-  // Built after the uploads: a file's record binds to the id its upload got on the wire.
+  // Build after uploads so a file's context record uses its persisted attachment id.
   const messageContext = buildMessageContext({
     terminalContexts: sendState.sendableTerminalContexts,
     reviewComments: draft.reviewComments,
@@ -412,8 +345,7 @@ export async function submitDirectedDictation(input: {
     : undefined;
   const modelSelection = selectedModel ?? thread?.modelSelection ?? project.defaultModelSelection;
   const runtimeMode = draft.runtimeMode ?? thread?.runtimeMode ?? draftSession?.runtimeMode;
-  const interactionMode =
-    draft.interactionMode ?? thread?.interactionMode ?? draftSession?.interactionMode;
+  const interactionMode = DEFAULT_INTERACTION_MODE;
   if (runtimeMode === undefined || interactionMode === undefined) {
     return { kind: "refused", code: "unsupported_composer_action" };
   }
@@ -488,12 +420,7 @@ export async function submitDirectedDictation(input: {
     attachments,
     bootstrap,
     pendingAction,
-    messageContext: {
-      inline:
-        appAtomRegistry.get(environmentServerConfigsAtom).get(threadRef.environmentId)?.environment
-          .capabilities.inlineMessageContext === true,
-      context: messageContext,
-    },
+    messageContext,
   });
   if (result.kind !== "turn-dispatched") restoreDirectedComposerDraft(input.composerTarget, draft);
   return result;

@@ -1,4 +1,4 @@
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -37,7 +37,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
   grokSettings: GrokSettings,
   environment: NodeJS.ProcessEnv = process.env,
 ) {
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -62,7 +62,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
         cwd,
         clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
       }).pipe(
-        Effect.provideService(Crypto.Crypto, crypto),
+        Effect.provideService(SecureRandom.SecureRandom, random),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, commandSpawner),
       );
 

@@ -148,6 +148,8 @@ vi.mock("./state/environments", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./state/environments")>()),
   useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
   useEnvironment: () => fixture.environments[0],
+  readEnvironment: (environmentId: string) =>
+    fixture.environments.find((environment) => environment.environmentId === environmentId) ?? null,
   useEnvironmentProviders: () => new Map(),
   usePrimaryEnvironment: () => null,
   usePrimaryEnvironmentId: () => "icon-laptop",

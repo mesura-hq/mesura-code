@@ -124,7 +124,11 @@ const fenceShell = vi.hoisted(() => {
       }).pipe(Atom.setIdleTTL(0)),
     );
     return {
-      shells: createEnvironmentThreadShellAtoms({ catalogValueAtom, snapshotAtom }),
+      shells: createEnvironmentThreadShellAtoms({
+        catalogValueAtom,
+        snapshotAtom,
+        hiddenThreadTagsAtom: () => Atom.make(null),
+      }),
       projects: createEnvironmentProjectAtoms({ catalogValueAtom, snapshotAtom }),
     };
   };
@@ -161,10 +165,38 @@ vi.mock("./state/entities", async (original) => {
       ) ?? null,
   };
 });
-vi.mock("./state/environments", async (original) =>
-  (await fenceMocks()).mockEnvironments(original),
-);
-vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
+vi.mock("./state/environments", async (original) => {
+  const mocks = await fenceMocks();
+  return {
+    ...(await mocks.mockEnvironments(original)),
+    useEnvironmentIdentities: () =>
+      mocks.appRootFence.environments.map(({ environmentId, label }) => ({ environmentId, label })),
+  };
+});
+vi.mock("./state/query", async (original) => {
+  const query = await (await fenceMocks()).mockQuery(original);
+  return {
+    ...query,
+    useEnvironmentQuery: (atom?: object | null) => {
+      const result = query.useEnvironmentQuery(atom);
+      const label = String((atom as { label?: unknown } | null)?.label ?? "");
+      if (!label.includes("thread-link-metadata")) return result;
+      return {
+        ...result,
+        data: Object.fromEntries(
+          server.archived.flatMap(({ threads }) =>
+            threads.map((thread) => [
+              thread.id,
+              { title: thread.title, projectId: thread.projectId },
+            ]),
+          ),
+        ),
+        isPending: false,
+        isSuccess: true,
+      };
+    },
+  };
+});
 vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", async () => ({
@@ -241,9 +273,6 @@ vi.mock("./components/ui/toast", async (original) => {
     },
   };
 });
-vi.mock("./components/LegacySidebar", async () =>
-  (await fenceMocks()).mockRendersNothing("default"),
-);
 vi.mock("./components/preview/PreviewAutomationHosts", async () =>
   (await fenceMocks()).mockRendersNothing("PreviewAutomationHosts"),
 );

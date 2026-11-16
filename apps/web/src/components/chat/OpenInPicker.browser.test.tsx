@@ -1,9 +1,5 @@
-import {
-  AuthOrchestrationOperateScope,
-  EnvironmentId,
-  type EditorId,
-  type ResolvedKeybindingsConfig,
-} from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, EnvironmentId, type EditorId } from "@t3tools/contracts";
+import { compileResolvedKeybindingsConfig } from "@t3tools/shared/keybindings";
 import { Cause } from "effect";
 import { AsyncResult } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -11,20 +7,20 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { act, fakeTimers, render as renderUi } from "../../../test/render";
 import type { RemoteOpenState } from "../../remoteOpen";
 
-// Mesura: no default chord opens an external editor, so this spec binds upstream's mod+o itself.
-const DEFAULT_RESOLVED_KEYBINDINGS: ResolvedKeybindingsConfig = [
-  {
-    command: "editor.openFavorite",
-    shortcut: {
-      key: "o",
-      metaKey: false,
-      ctrlKey: false,
-      shiftKey: false,
-      altKey: false,
-      modKey: true,
-    },
-  },
-];
+// Mesura: no default chord opens an external editor, so this spec binds upstream's mod+o itself,
+// for the picker and for the window dispatcher alike.
+const openFavoriteRule = vi.hoisted(
+  () => ({ key: "mod+o", command: "editor.openFavorite" }) as const,
+);
+const DEFAULT_RESOLVED_KEYBINDINGS = compileResolvedKeybindingsConfig([openFavoriteRule]);
+vi.mock(import("../../state/server"), async (original) => {
+  const { Atom } = await import("effect/reactivity");
+  const { compileResolvedKeybindingsConfig } = await import("@t3tools/shared/keybindings");
+  return {
+    ...(await original()),
+    primaryServerKeybindingsAtom: Atom.make(compileResolvedKeybindingsConfig([openFavoriteRule])),
+  };
+});
 
 const state = vi.hoisted(() => ({
   allowed: new Set<string>(),
@@ -85,7 +81,10 @@ vi.mock(import("../../remoteOpen"), async (importOriginal) => ({
 }));
 
 import { OpenInPicker } from "./OpenInPicker";
-import { useOpenFavoriteEditorShortcut } from "./OpenInPickerShortcut";
+import {
+  registerOpenFavoriteEditorCommand,
+  useOpenFavoriteEditorShortcut,
+} from "./OpenInPickerShortcut";
 
 const primary = EnvironmentId.make("primary");
 const selected = EnvironmentId.make("selected");
@@ -107,6 +106,9 @@ async function setup() {
   stack.use(_platform);
   const _storage = { [Symbol.dispose]: () => window.localStorage.clear() };
   stack.use(_storage);
+  // The app registers this command at startup (appInit).
+  const _openFavorite = { [Symbol.dispose]: registerOpenFavoriteEditorCommand() };
+  stack.use(_openFavorite);
   const screen = stack.use(await renderUi(null));
   async function renderPicker(
     availableEditors: readonly EditorId[] = editors,
@@ -190,15 +192,49 @@ describe("host editor access", () => {
     state.allowed.delete(selected);
     state.allowed.add(primary);
     await click(primaryButton());
-    const event = await pressOpenFavorite();
+    // The shortcut is consumed and opens nothing once the grant is gone.
+    expect((await pressOpenFavorite()).defaultPrevented).toBe(true);
     expect(state.run).not.toHaveBeenCalled();
     expect(state.setPreferred).not.toHaveBeenCalled();
-    expect(event.defaultPrevented).toBe(false);
 
     await renderPicker();
     expect(primaryButton().disabled).toBe(true);
     expect(byLabel("Choose editor").disabled).toBe(true);
     expect((await pressOpenFavorite()).defaultPrevented).toBe(false);
+  });
+});
+
+describe("remote editor links", () => {
+  it("opens the link from the fallback when the picker is not mounted", async () => {
+    await using fixture = await setup();
+    const { screen, pressOpenFavorite, FavoriteEditorFallback } = fixture;
+    state.remote = { mode: "remote-links", host: { kind: "ssh-alias", host: "sol" } };
+    // A successful open would announce on a real timer that fires in the next test.
+    state.openUrl.mockResolvedValueOnce(false);
+    await act(async () => screen.rerender(<FavoriteEditorFallback />));
+
+    expect((await pressOpenFavorite()).defaultPrevented).toBe(true);
+    expect(state.openUrl).toHaveBeenCalledWith(expect.stringContaining("ssh-remote+sol"));
+    expect(state.run).not.toHaveBeenCalled();
+  });
+
+  it("explains why a phone or tablet browser has no editor to open", async () => {
+    await using fixture = await setup();
+    const { renderPicker, byLabel, primaryButton, menuItems, click, pressOpenFavorite } = fixture;
+    state.remote = { mode: "remote-links", host: { kind: "ssh-alias", host: "sol" } };
+    state.clientEditors = [];
+    await renderPicker();
+
+    expect(primaryButton().disabled).toBe(true);
+    expect((await pressOpenFavorite()).defaultPrevented).toBe(false);
+    await click(byLabel("Choose editor"));
+    await vi.waitFor(() =>
+      expect(menuItems().map((item) => item.textContent)).toEqual([
+        "Open from a computer to edit on Test host",
+      ]),
+    );
+    expect(menuItems()[0]!.getAttribute("aria-disabled")).toBe("true");
+    expect(state.openUrl).not.toHaveBeenCalled();
   });
 });
 

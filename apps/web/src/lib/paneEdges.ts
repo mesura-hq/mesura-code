@@ -138,7 +138,7 @@ export interface UsePaneEdgeOptions extends Omit<PaneEdge, "id" | "side"> {
  */
 export function usePaneEdge(options: UsePaneEdgeOptions) {
   const latest = useRef(options);
-  // oxlint-disable-next-line t3code/react-effect-budget -- latest-ref: the registered edge reads the owner's newest callbacks without re-registering
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- latest-ref: the registered edge reads the owner's newest callbacks without re-registering
   useLayoutEffect(() => {
     latest.current = options;
   });
@@ -155,7 +155,7 @@ export function usePaneEdge(options: UsePaneEdgeOptions) {
     [id, side],
   );
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- subscribes the edge to the module registry for the mount's lifetime
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes the edge to the module registry for the mount's lifetime
   useEffect(() => {
     if (!enabled) return;
     return registerPaneEdge(edge);

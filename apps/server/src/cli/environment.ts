@@ -15,6 +15,8 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as PeerLinks from "../peer/PeerLinks.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { authLocationFlags, type CliAuthLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
@@ -28,7 +30,7 @@ const runWithPeerLinks = Effect.fn("environment.runWithPeerLinks")(function* <A,
   options?: { readonly quietLogs?: boolean },
 ) {
   const logLevel = yield* GlobalFlag.LogLevel;
-  const config = yield* resolveCliAuthConfig(flags, logLevel);
+  const config = yield* resolveCliAuthConfig(flags, logLevel, options);
   return yield* PeerLinks.PeerLinks.pipe(
     Effect.flatMap(run),
     Effect.provide(
@@ -36,11 +38,22 @@ const runWithPeerLinks = Effect.fn("environment.runWithPeerLinks")(function* <A,
         Layer.provide(
           Layer.mergeAll(
             ServerSecretStore.layer,
-            SqlitePersistence.layerConfig,
+            SqlitePersistence.layerCliConfig,
             FetchHttpClient.layer,
           ),
         ),
         Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+        Layer.provide(
+          ServerSettings.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                ServerSecretStore.layer,
+                SqlitePersistence.layerCliConfig,
+                ManagedPolicy.layer,
+              ),
+            ),
+          ),
+        ),
         Layer.provide(ServerConfig.layer(config)),
         Layer.provide(
           Layer.succeed(References.MinimumLogLevel, options?.quietLogs ? "Error" : config.logLevel),
@@ -91,7 +104,7 @@ const environmentLinkCommand = Command.make("link", {
   ),
 }).pipe(
   Command.withDescription(
-    "Link another Mesura Code environment, so agents here can work there. It shows up there under Settings → Connections, where it can be revoked.",
+    "Link another Mesura Code environment, so agents here can work there. It shows up there under Authorized clients in Settings → Sharing & access, where it can be revoked.",
   ),
   Command.withHandler((flags) =>
     runWithPeerLinks(flags, (links) =>
@@ -132,7 +145,7 @@ const environmentUnlinkCommand = Command.make("unlink", {
   ),
 }).pipe(
   Command.withDescription(
-    "Forget a linked environment here. Revoke it in that environment's Connections to end its session there too.",
+    "Forget a linked environment here. Revoke it in that environment's Sharing & access to end its session there too.",
   ),
   Command.withHandler((flags) =>
     runWithPeerLinks(flags, (links) =>
@@ -140,7 +153,7 @@ const environmentUnlinkCommand = Command.make("unlink", {
         const removed = yield* links.unlink(EnvironmentId.make(flags.environmentId));
         yield* Console.log(
           removed
-            ? `Forgot ${flags.environmentId}. Revoke it in that environment's Connections to end its session there.\n`
+            ? `Forgot ${flags.environmentId}. Revoke it in that environment's Sharing & access to end its session there.\n`
             : `No linked environment ${flags.environmentId}.\n`,
         );
       }),

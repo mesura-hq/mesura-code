@@ -1,8 +1,4 @@
-import {
-  appendVersionMismatchHint,
-  supportsDesktopAppUpdate,
-  serverUpdateGuidance,
-} from "./versionSkew";
+import { appendVersionMismatchHint, supportsDesktopAppUpdate } from "./versionSkew";
 import { EnvironmentId } from "@t3tools/contracts";
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -42,6 +38,20 @@ describe("versionSkew", () => {
         prefix: "/opt/maria's node",
       }),
     ).toBe("npm install --global --prefix '/opt/maria'\\''s node' t3@0.0.45");
+    expect(
+      manualServerUpdateCommandForPackage("t3", "0.0.45", {
+        kind: "t3-launcher",
+        launcher: "t3",
+        baseDir: "/home/u/.t3",
+      }),
+    ).toBe("'t3' update --base-dir '/home/u/.t3' 0.0.45");
+    expect(
+      manualServerUpdateCommandForPackage("t3", "0.0.45", {
+        kind: "t3-launcher",
+        launcher: "/opt/maria's bin/t3",
+        baseDir: "/data/t3 home",
+      }),
+    ).toBe("'/opt/maria'\\''s bin/t3' update --base-dir '/data/t3 home' 0.0.45");
   });
 
   it("keeps runner and unknown commands as relaunches", () => {
@@ -207,18 +217,6 @@ describe("versionSkew", () => {
     expect(supportsDesktopAppUpdate(descriptor(false))).toBe(false);
     expect(supportsDesktopAppUpdate(descriptor())).toBe(false);
     expect(supportsDesktopAppUpdate(null)).toBe(false);
-  });
-
-  it("matches version-drift guidance to the advertised update path", () => {
-    expect(serverUpdateGuidance("respawn", "Remote server")).toBe(
-      "Update the Remote server so they stay in sync.",
-    );
-    expect(serverUpdateGuidance("desktop-managed", "Desktop server")).toBe(
-      "Update the desktop app that runs the Desktop server.",
-    );
-    expect(serverUpdateGuidance(null, "Local server")).toBe(
-      "Install a matching Mesura Code build on the Local server's machine to sync them.",
-    );
   });
 
   // Regression guard: a hardcoded `npx t3@<version>` installed upstream's server over the fork's.

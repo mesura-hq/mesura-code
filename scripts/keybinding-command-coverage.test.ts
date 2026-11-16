@@ -307,12 +307,12 @@ it("does not let a picker-scoped consumer hide a missing chat dispatcher", () =>
   const sources = runtimeSources();
   const file = NodePath.join(web, "components/chat/chatPickerCommands.ts");
   const source = sources.get(file)!;
-  // This models a sync dropping the primary dispatchers while the model picker still consumes traits.
+  // This models a sync dropping the primary dispatchers while a picker still consumes them.
   const mutated = source
     .getText()
-    .replace(/^.*"(?:traitsPicker.toggle|runContext.toggle)":.*\n/gm, "");
+    .replace(/^.*"(?:workspacePicker.toggle|runContext.toggle)":.*\n/gm, "");
   sources.set(file, ts.createSourceFile(file, mutated, ts.ScriptTarget.Latest, true));
-  expect(missingCommands(sources)).toEqual(["traitsPicker.toggle", "runContext.toggle"]);
+  expect(missingCommands(sources)).toEqual(["workspacePicker.toggle", "runContext.toggle"]);
 });
 
 it.each(["chord", "registry"] as const)(
@@ -336,7 +336,7 @@ it.each(["chord", "registry"] as const)(
 
 it.each([
   ["removed", ""],
-  ["misrouted", '    "traitsPicker.toggle": chatPickerCommands["workspacePicker.toggle"],\n'],
+  ["misrouted", '    "workspacePicker.toggle": chatPickerCommands["branchPicker.toggle"],\n'],
 ])("detects a %s shared handler in the local picker map", (_mutation, replacement) => {
   const sources = runtimeSources();
   const file = NodePath.join(web, "components/ChatView.tsx");
@@ -344,12 +344,12 @@ it.each([
   const mutated = source
     .getText()
     .replace(
-      /^.*"traitsPicker.toggle": chatPickerCommands\["traitsPicker.toggle"\],\n/m,
+      /^.*"workspacePicker.toggle": chatPickerCommands\["workspacePicker.toggle"\],\n/m,
       replacement,
     );
   expect(mutated).not.toBe(source.getText());
   sources.set(file, ts.createSourceFile(file, mutated, ts.ScriptTarget.Latest, true));
   expect(() => missingCommands(sources)).toThrow(
-    "mesuraPickerCommands does not forward traitsPicker.toggle",
+    "mesuraPickerCommands does not forward workspacePicker.toggle",
   );
 });

@@ -30,8 +30,6 @@ const sidebarLists = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   shellReads: new Map<string, number>(),
   messageSearchPending: false,
-  /** What `useLegacySidebarEnabled` answers. */
-  legacySidebar: false,
 }));
 vi.mock("./state/entities", async (original) => {
   const mocks = await fenceMocks();
@@ -79,11 +77,16 @@ vi.mock("./state/entities", async (original) => {
       return read();
     }).pipe(Atom.setIdleTTL(0)),
   );
-  const shells = createEnvironmentThreadShellAtoms({ catalogValueAtom, snapshotAtom });
+  const shells = createEnvironmentThreadShellAtoms({
+    catalogValueAtom,
+    snapshotAtom,
+    hiddenThreadTagsAtom: () => Atom.make(null),
+  });
   const emptyShell = Atom.make(null);
   return {
     ...(await mocks.mockEntities(original)),
     useThreadShells: () => useAtomValue(shells.threadShellsAtom),
+    useVisibleThreadShells: () => useAtomValue(shells.visibleThreadShellsAtom),
     useQuietThreadShells: () => useAtomValue(shells.quietThreadShellsAtom),
     useThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) => {
       if (ref)
@@ -99,9 +102,16 @@ vi.mock("./state/entities", async (original) => {
     useProjects: () => sidebarLists.projects,
   };
 });
-vi.mock("./state/environments", async (original) =>
-  (await fenceMocks()).mockEnvironments(original),
-);
+vi.mock("./state/environments", async (original) => {
+  const mocks = await fenceMocks();
+  return {
+    ...(await mocks.mockEnvironments(original)),
+    useConnectedEnvironmentIds: () =>
+      mocks.appRootFence.environments
+        .filter((environment) => environment.connection.phase === "connected")
+        .map((environment) => environment.environmentId),
+  };
+});
 vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/queries", async (original) => ({
   ...(await (await fenceMocks()).mockQueries(original)),
@@ -135,13 +145,9 @@ vi.mock("./state/server", async (original) => {
 });
 vi.mock("./hooks/useSettings", async (original) => ({
   ...(await (await fenceMocks()).mockSettings(original)),
-  useLegacySidebarEnabled: () => sidebarLists.legacySidebar,
 }));
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
-vi.mock("./components/LegacySidebar", async () =>
-  (await fenceMocks()).mockRendersNothing("default"),
-);
 vi.mock("./components/preview/PreviewAutomationHosts", async () =>
   (await fenceMocks()).mockRendersNothing("PreviewAutomationHosts"),
 );
@@ -218,7 +224,6 @@ async function setupBrowserFixture0() {
       sidebarLists.threads = [];
       sidebarLists.projects = [];
       sidebarLists.messageHits = [];
-      sidebarLists.legacySidebar = false;
       useProjectScopeStore.setState(useProjectScopeStore.getInitialState(), true);
       window.localStorage.clear();
       vi.unstubAllGlobals();
@@ -368,7 +373,7 @@ function projectFilterTrigger(): HTMLElement {
 }
 
 function mobileDrawerOpen(): boolean {
-  return document.querySelector('[data-mobile="true"][data-slot="sidebar"]') !== null;
+  return document.querySelector('[data-mobile="true"][data-slot="sidebar"][data-open]') !== null;
 }
 
 function paletteOpen(): boolean {
@@ -446,10 +451,16 @@ describe("search unification: the sidebar Search reaches every project", () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await mountWithThreads(crossProjectThreads());
     await typeIntoSearch("rename");
+    const beforeRow = document.querySelector(
+      `[data-search-result-key="${threadKey("beta-rename")}"]`,
+    );
     const before = sidebarLists.shellReads.get("beta-rename");
     expect(before).toBeGreaterThan(0);
     await typeIntoSearch("rename ");
     expect(searchResultKeys()).toEqual([threadKey("beta-rename"), threadKey("alpha-rename")]);
+    expect(document.querySelector(`[data-search-result-key="${threadKey("beta-rename")}"]`)).toBe(
+      beforeRow,
+    );
     expect(sidebarLists.shellReads.get("beta-rename")).toBe(before);
   });
 
@@ -920,7 +931,7 @@ async function openPalette(): Promise<void> {
   await vi.waitFor(() => expect(paletteMode()).toBe("command"));
 }
 
-describe("search unification regression: the commands on Settings and with the legacy sidebar", () => {
+describe("search unification regression: the commands on Settings", () => {
   it("search unification regression: Mod+Alt+K on Settings returns to the thread and focuses the sidebar Search field", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await mountWithThreads(crossProjectThreads());
@@ -974,33 +985,6 @@ describe("search unification regression: the commands on Settings and with the l
     expect(useProjectScopeStore.getState().projectScopeKey).toBe(null);
     await press(TOGGLE_ALL_CHORD);
     expect(useProjectScopeStore.getState().projectScopeKey).toBe(betaKey);
-  });
-
-  it("search unification regression: with the legacy sidebar Mod+Alt+K and Mod+Shift+F open the command palette", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-    sidebarLists.legacySidebar = true;
-    await mountWithThreads(crossProjectThreads());
-
-    await press(THREAD_SEARCH_CHORD);
-    await vi.waitFor(() => expect(paletteMode()).toBe("command"));
-    await press({ key: "Escape", code: "Escape" });
-    await vi.waitFor(() => expect(paletteOpen()).toBe(false));
-    (document.activeElement as HTMLElement | null)?.blur?.();
-
-    await press(PROJECT_SCOPE_CHORD);
-    await vi.waitFor(() => expect(paletteMode()).toBe("command"));
-  });
-
-  it("search unification regression: with the legacy sidebar Mod+Alt+P still flips the project scope store", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-    sidebarLists.legacySidebar = true;
-    await mountWithThreads(crossProjectThreads());
-    useProjectScopeStore.getState().setProjectScopeKey("legacy-fence-scope");
-
-    await press(TOGGLE_ALL_CHORD);
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe(null);
-    await press(TOGGLE_ALL_CHORD);
-    expect(useProjectScopeStore.getState().projectScopeKey).toBe("legacy-fence-scope");
   });
 });
 

@@ -51,7 +51,7 @@
   },
   "scripts": {
     "generate": "node scripts/emit-json-schema.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "effect-tsgo tsrs --noEmit",
     "test": "vp test run"
   },
   "dependencies": {

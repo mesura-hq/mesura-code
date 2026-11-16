@@ -35,6 +35,7 @@ const VITE_PLUS_BUILTIN_NOTE = /as a Vite\+ built-in command/u;
 
 const repositoryRoot = NodePath.resolve(import.meta.dirname, "..");
 
+// @effect-diagnostics-next-line extendsNativeError:off - This synchronous CLI catches ToolingFailure at main; it never enters an Effect failure channel.
 class ToolingFailure extends Error {}
 
 function git(args: ReadonlyArray<string>): string {
@@ -287,26 +288,27 @@ function checkTypes(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEnv
     process.stdout.write("typecheck: no workspace package owns a changed file\n");
     return EXIT_CLEAN;
   }
-  const lock = hasCommand("flock") ? ["flock", TYPECHECK_LOCK] : [];
-  const timeout = hasCommand("timeout")
-    ? ["timeout", "-k", "30", String(TYPECHECK_TIMEOUT_SECONDS)]
-    : [];
-  // A host without them still gets a typecheck, but loudly: on a shared host the
-  // lock and the hard kill are what keep parallel agents from exhausting memory.
-  if (lock.length === 0)
-    process.stderr.write("warning: no `flock`: typechecks are not serialized across agents\n");
-  if (timeout.length === 0)
-    process.stderr.write("warning: no `timeout`: a hung typecheck is never killed\n");
-  const tscVersion = run("tsc", ["--version"], environment).output;
-  const isTypeScript7 = /Version 7\./u.test(tscVersion);
+  // Every package must hold the host-wide lock and have a hard timeout.
+  for (const command of ["flock", "timeout"]) {
+    if (!hasCommand(command)) {
+      throw new ToolingFailure(`typecheck requires ${command} to bound shared-host resources`);
+    }
+  }
+  const lock = ["flock", TYPECHECK_LOCK];
+  const timeout = ["timeout", "-k", "30", String(TYPECHECK_TIMEOUT_SECONDS)];
   let worst = EXIT_CLEAN;
   for (const workspacePackage of selected) {
-    const usesPlainTsc = workspacePackage.typecheckScript === "tsc --noEmit";
+    const usesPlainTsc = /^(?:tsc|effect-tsgo (?:tsc|tsrs)) --noEmit$/u.test(
+      workspacePackage.typecheckScript ?? "",
+    );
     const command = usesPlainTsc
       ? [
-          ...(isTypeScript7 ? ["env", "GOMEMLIMIT=1536MiB"] : []),
+          "env",
+          "GOMEMLIMIT=1536MiB",
+          "effect-tsgo",
           "tsc",
-          ...(isTypeScript7 ? ["--checkers", "1"] : []),
+          "--checkers",
+          "1",
           "-p",
           `${workspacePackage.directory}/tsconfig.json`,
           "--noEmit",

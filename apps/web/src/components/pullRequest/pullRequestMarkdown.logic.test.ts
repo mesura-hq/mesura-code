@@ -4,6 +4,7 @@ import { unified } from "unified";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  pullRequestCommentPreview,
   remarkPullRequestAutolinks,
   sameRepositoryReferenceAutolinker,
 } from "./pullRequestMarkdown.logic";
@@ -72,5 +73,33 @@ describe("same-repository reference autolinks (issues phase 3 fence)", () => {
       ["section #9", "#9", undefined],
       ["#12", "https://github.com/acme/alpha/issues/12", "reference"],
     ]);
+  });
+});
+
+describe("pullRequestCommentPreview", () => {
+  it.each([
+    ["<!-- hidden -->\n> [!WARNING]\n**Guard** [this](https://example.com).", "Guard this."],
+    [
+      '<a href="https://example.com"><img src="badge.svg" /></a>\n<strong>Tasks keep the wrong computer</strong>',
+      "Tasks keep the wrong computer",
+    ],
+    [
+      "<details><summary>Review &amp; fixes</summary><p>First<br>Second</p></details>",
+      "Review & fixes First Second",
+    ],
+    ['<p title="value > limit">Keep <strong>this</strong> readable.</p>', "Keep this readable."],
+    [
+      "Use `<div>` and `Promise<void>`.\n\n```html\n<span>example</span>\n```",
+      "Use <div> and Promise<void>. <span>example</span>",
+    ],
+    ["![badge](https://example.com/badge.svg) **Review**", "badge Review"],
+    ["```md\n[!TIP]\n> [!WARNING]\n```\n\n    [!NOTE]", "[!TIP] > [!WARNING] [!NOTE]"],
+    [
+      "Review :codex-file-citation{purpose='output'} safely.",
+      "Review :codex-file-citation{purpose='output'} safely.",
+    ],
+    [":codex-followup[Prepare **print** version]", ":codex-followup[Prepare **print** version]"],
+  ])("extracts readable text from %s", (body, expected) => {
+    expect(pullRequestCommentPreview(body)).toBe(expected);
   });
 });

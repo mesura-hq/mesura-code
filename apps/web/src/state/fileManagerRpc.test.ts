@@ -115,10 +115,6 @@ describe("watching an atom", () => {
     });
     const registry = AtomRegistry.make();
     const seen: number[] = [];
-    // A plain subscription asks only to be told of changes; nothing runs.
-    const plain = registry.subscribe(atom, (value) => seen.push(value));
-    expect(computed).toBe(0);
-    plain();
     const stop = watchAtom(registry, atom, (value) => seen.push(value));
     expect(computed).toBe(1);
     expect(seen).toEqual([1]);

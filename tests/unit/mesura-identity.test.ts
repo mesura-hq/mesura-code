@@ -21,6 +21,8 @@ it("leaves no product code defaulting to T3 Code's shared home", () => {
     ":(exclude)docs/",
     ":(exclude)packaging/",
     ":(exclude)tests/",
+    // Upstream's evals simulate a server on a no-op filesystem; their paths are scenario data.
+    ":(exclude)evals/",
     ":(exclude)AGENTS.md",
   ]);
 

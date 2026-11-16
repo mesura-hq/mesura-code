@@ -1,6 +1,4 @@
-// Entry point: `presentThreadShell` (client-runtime models.ts) on a raw thread shell, then the
-// sidebar's own resolvers in Sidebar.logic.ts: `resolveSidebarThreadStatus` for the status and
-// `resolveSidebarV2TopStatus` for the label the current sidebar draws in the row's top slot.
+// Entry point: presentThreadShell feeds the status and attention resolvers used by SidebarThreadRow.
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
   EnvironmentId,
@@ -13,10 +11,11 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import { makeThreadFixture } from "../test-fixtures";
+import { resolveSidebarThreadAttention } from "./sidebarThreadAttention";
+import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-inbox";
 import {
   hasUnseenCompletion,
   resolveSidebarThreadStatus,
-  resolveSidebarV2TopStatus,
   resolveThreadStatusPill,
 } from "./Sidebar.logic";
 
@@ -53,7 +52,19 @@ function sidebarRow(shell: OrchestrationV2ThreadShell) {
   const thread = presentThreadShell(environmentId, shell);
   const status = resolveSidebarThreadStatus(thread);
   const isUnread = hasUnseenCompletion(thread);
-  return { status, isUnread, top: resolveSidebarV2TopStatus({ status, isUnread, isWoke: false }) };
+  return {
+    status,
+    isUnread,
+    top:
+      resolveSidebarThreadAttention({
+        status,
+        isUnread,
+        isWoke: false,
+        agentSignal: thread.agentSignal,
+        agentExecuting: threadRuntimeIsExecuting(thread.runtime),
+        factoryRun: thread.factoryRun,
+      })?.kind ?? null,
+  };
 }
 
 describe("sidebar thread attention: Done only when nothing can wake the agent", () => {
@@ -63,10 +74,10 @@ describe("sidebar thread attention: Done only when nothing can wake the agent", 
     expect(row.top).toBe("waiting");
   });
 
-  it("sidebar thread attention: a running Factory run shows Waiting, not Done", () => {
+  it("sidebar thread attention: a running Factory run shows its Factory attention, not Done", () => {
     const row = sidebarRow({ ...completedUnread, factoryRun: runningFactoryRun });
     expect(row.status).toBe("waiting");
-    expect(row.top).toBe("waiting");
+    expect(row.top).toBe("factory");
   });
 
   it("sidebar thread attention: Done follows the end of the last pending command", () => {

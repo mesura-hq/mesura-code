@@ -23,7 +23,7 @@ import {
   removeSocketPath,
   restrictSocketPath,
 } from "../symmetria/socketFiles.ts";
-import { closeServer, listenOnPath } from "../symmetria/unixSocket.ts";
+import { closeServer, listenOnPathEffect } from "../symmetria/unixSocket.ts";
 import { forwardDictationCommand } from "./dictationCommandForwarding.ts";
 
 const { logInfo, logWarning } = makeComponentLogger("dictation-command-socket");
@@ -96,17 +96,15 @@ export const makeDictationCommandSocket = Effect.fn("desktop.dictation.makeComma
       server.on("error", (error) => {
         runFork(logWarning("dictation socket server error", { message: error.message }));
       });
-      yield* Effect.acquireRelease(
-        Effect.tryPromise(() => listenOnPath(server, socketPath)),
-        () =>
-          Effect.sync(() => {
-            // `close` waits for open connections, and a stuck client must not hold the session.
-            for (const connection of connections) connection.destroy();
-          }).pipe(
-            Effect.andThen(Effect.promise(() => closeServer(server))),
-            Effect.andThen(removeSocketPath(socketPath)),
-            Effect.orDie,
-          ),
+      yield* Effect.acquireRelease(listenOnPathEffect(server, socketPath), () =>
+        Effect.sync(() => {
+          // `close` waits for open connections, and a stuck client must not hold the session.
+          for (const connection of connections) connection.destroy();
+        }).pipe(
+          Effect.andThen(Effect.promise(() => closeServer(server))),
+          Effect.andThen(removeSocketPath(socketPath)),
+          Effect.orDie,
+        ),
       );
       yield* restrictSocketPath(socketPath);
       yield* logInfo("dictation socket listening", { socketPath });

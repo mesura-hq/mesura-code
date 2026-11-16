@@ -3,9 +3,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./voice-conversation-prompts": {
-      "types": "./src/voiceConversationPrompts.ts",
-      "import": "./src/voiceConversationPrompts.ts"
+    "./png": {
+      "types": "./src/png.ts",
+      "import": "./src/png.ts"
+    },
+    "./pullRequestAnchor": {
+      "types": "./src/pullRequestAnchor.ts",
+      "import": "./src/pullRequestAnchor.ts"
     },
     "./changedFileKind": {
       "types": "./src/changedFileKind.ts",
@@ -19,13 +23,13 @@
       "types": "./src/orchestrationV2ThreadError.ts",
       "import": "./src/orchestrationV2ThreadError.ts"
     },
-    "./codexCapacityRetrySchedule": {
-      "types": "./src/codexCapacityRetrySchedule.ts",
-      "import": "./src/codexCapacityRetrySchedule.ts"
-    },
     "./delimitedPreview": {
       "types": "./src/delimitedPreview.ts",
       "import": "./src/delimitedPreview.ts"
+    },
+    "./socketFrameParts": {
+      "types": "./src/socketFrameParts.ts",
+      "import": "./src/socketFrameParts.ts"
     },
     "./composerPullRequestMatches": {
       "types": "./src/composerPullRequestMatches.ts",
@@ -35,29 +39,25 @@
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"
     },
+    "./themeCss": {
+      "types": "./src/themeCss.ts",
+      "import": "./src/themeCss.ts"
+    },
     "./themePreview": {
       "types": "./src/themePreview.ts",
       "import": "./src/themePreview.ts"
+    },
+    "./textDirection": {
+      "types": "./src/textDirection.ts",
+      "import": "./src/textDirection.ts"
     },
     "./projectFavicon": {
       "types": "./src/projectFavicon.ts",
       "import": "./src/projectFavicon.ts"
     },
-    "./factoryDocument": {
-      "types": "./src/factoryDocument.ts",
-      "import": "./src/factoryDocument.ts"
-    },
-    "./factoryRun": {
-      "types": "./src/factoryRun.ts",
-      "import": "./src/factoryRun.ts"
-    },
-    "./factoryRunTrace": {
-      "types": "./src/factoryRunTrace.ts",
-      "import": "./src/factoryRunTrace.ts"
-    },
-    "./factoryRunUsage": {
-      "types": "./src/factoryRunUsage.ts",
-      "import": "./src/factoryRunUsage.ts"
+    "./mobileSourceMaps": {
+      "types": "./src/mobileSourceMaps.ts",
+      "import": "./src/mobileSourceMaps.ts"
     },
     "./model": {
       "types": "./src/model.ts",
@@ -107,13 +107,13 @@
       "types": "./src/shell.ts",
       "import": "./src/shell.ts"
     },
+    "./envTrampoline": {
+      "types": "./src/envTrampoline.ts",
+      "import": "./src/envTrampoline.ts"
+    },
     "./semver": {
       "types": "./src/semver.ts",
       "import": "./src/semver.ts"
-    },
-    "./stateHome": {
-      "types": "./src/stateHome.ts",
-      "import": "./src/stateHome.ts"
     },
     "./Net": {
       "types": "./src/Net.ts",
@@ -154,10 +154,6 @@
     "./htmlRender": {
       "types": "./src/htmlRender.ts",
       "import": "./src/htmlRender.ts"
-    },
-    "./embeddedDocument": {
-      "types": "./src/embeddedDocument.ts",
-      "import": "./src/embeddedDocument.ts"
     },
     "./favicon": {
       "types": "./src/favicon.ts",
@@ -259,13 +255,13 @@
       "types": "./src/path.ts",
       "import": "./src/path.ts"
     },
-    "./renamedKeybindingCommands": {
-      "types": "./src/renamedKeybindingCommands.ts",
-      "import": "./src/renamedKeybindingCommands.ts"
-    },
     "./keybindings": {
       "types": "./src/keybindings.ts",
       "import": "./src/keybindings.ts"
+    },
+    "./keybindingMatching": {
+      "types": "./src/keybindingMatching.ts",
+      "import": "./src/keybindingMatching.ts"
     },
     "./threadTranscript": {
       "types": "./src/threadTranscript.ts",
@@ -283,9 +279,13 @@
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"
     },
-    "./composerControlCommand": {
-      "types": "./src/composerControlCommand.ts",
-      "import": "./src/composerControlCommand.ts"
+    "./triagePrompt": {
+      "types": "./src/triagePrompt.ts",
+      "import": "./src/triagePrompt.ts"
+    },
+    "./pullRequestComposerTrigger": {
+      "types": "./src/pullRequestComposerTrigger.ts",
+      "import": "./src/pullRequestComposerTrigger.ts"
     },
     "./composerInlineTokens": {
       "types": "./src/composerInlineTokens.ts",
@@ -307,17 +307,9 @@
       "types": "./src/composerContextReferences.ts",
       "import": "./src/composerContextReferences.ts"
     },
-    "./dictationSlots": {
-      "types": "./src/dictationSlots.ts",
-      "import": "./src/dictationSlots.ts"
-    },
     "./composerContextLegacy": {
       "types": "./src/composerContextLegacy.ts",
       "import": "./src/composerContextLegacy.ts"
-    },
-    "./composerContextLegacySend": {
-      "types": "./src/composerContextLegacySend.ts",
-      "import": "./src/composerContextLegacySend.ts"
     },
     "./composerContextClipboard": {
       "types": "./src/composerContextClipboard.ts",
@@ -338,10 +330,6 @@
     "./preview": {
       "types": "./src/preview.ts",
       "import": "./src/preview.ts"
-    },
-    "./paymentDomains": {
-      "types": "./src/paymentDomains.ts",
-      "import": "./src/paymentDomains.ts"
     },
     "./previewViewport": {
       "types": "./src/previewViewport.ts",
@@ -379,6 +367,10 @@
       "types": "./src/AgentScope.ts",
       "import": "./src/AgentScope.ts"
     },
+    "./managedPolicyFile": {
+      "types": "./src/managedPolicyFile.ts",
+      "import": "./src/managedPolicyFile.ts"
+    },
     "./HostProcess": {
       "types": "./src/HostProcess.ts",
       "import": "./src/HostProcess.ts"
@@ -390,6 +382,10 @@
     "./testing/symlinks": {
       "types": "./src/testing/symlinks.ts",
       "import": "./src/testing/symlinks.ts"
+    },
+    "./databaseMigrationLog": {
+      "types": "./src/databaseMigrationLog.ts",
+      "import": "./src/databaseMigrationLog.ts"
     },
     "./httpReadiness": {
       "types": "./src/httpReadiness.ts",
@@ -422,6 +418,10 @@
     "./thirdPartyLicenses": {
       "types": "./src/thirdPartyLicenses.ts",
       "import": "./src/thirdPartyLicenses.ts"
+    },
+    "./commandOutput": {
+      "types": "./src/commandOutput.ts",
+      "import": "./src/commandOutput.ts"
     },
     "./claudeCompaction": {
       "types": "./src/claudeCompaction.ts",
@@ -463,10 +463,6 @@
       "types": "./src/cliRelease.ts",
       "import": "./src/cliRelease.ts"
     },
-    "./timelineActivity": {
-      "types": "./src/timelineActivity.ts",
-      "import": "./src/timelineActivity.ts"
-    },
     "./gitPatchPath": {
       "types": "./src/gitPatchPath.ts",
       "import": "./src/gitPatchPath.ts"
@@ -499,6 +495,14 @@
       "types": "./src/markdownGithubAlerts.ts",
       "import": "./src/markdownGithubAlerts.ts"
     },
+    "./markdownFrontmatter": {
+      "types": "./src/markdownFrontmatter.ts",
+      "import": "./src/markdownFrontmatter.ts"
+    },
+    "./markdownTaskList": {
+      "types": "./src/markdownTaskList.ts",
+      "import": "./src/markdownTaskList.ts"
+    },
     "./markdownListIndentation": {
       "types": "./src/markdownListIndentation.ts",
       "import": "./src/markdownListIndentation.ts"
@@ -506,6 +510,14 @@
     "./proposedPlanText": {
       "types": "./src/proposedPlanText.ts",
       "import": "./src/proposedPlanText.ts"
+    },
+    "./markdownWindowsPaths": {
+      "types": "./src/markdownWindowsPaths.ts",
+      "import": "./src/markdownWindowsPaths.ts"
+    },
+    "./generatedImageMarkdown": {
+      "types": "./src/generatedImageMarkdown.ts",
+      "import": "./src/generatedImageMarkdown.ts"
     },
     "./markdownPipeline": {
       "types": "./src/markdownPipeline.ts",
@@ -554,10 +566,66 @@
     "./cloneUrl": {
       "types": "./src/cloneUrl.ts",
       "import": "./src/cloneUrl.ts"
+    },
+    "./speech": {
+      "types": "./src/speech.ts",
+      "import": "./src/speech.ts"
+    },
+    "./voice-conversation-prompts": {
+      "types": "./src/voiceConversationPrompts.ts",
+      "import": "./src/voiceConversationPrompts.ts"
+    },
+    "./codexCapacityRetrySchedule": {
+      "types": "./src/codexCapacityRetrySchedule.ts",
+      "import": "./src/codexCapacityRetrySchedule.ts"
+    },
+    "./factoryDocument": {
+      "types": "./src/factoryDocument.ts",
+      "import": "./src/factoryDocument.ts"
+    },
+    "./factoryRun": {
+      "types": "./src/factoryRun.ts",
+      "import": "./src/factoryRun.ts"
+    },
+    "./factoryRunTrace": {
+      "types": "./src/factoryRunTrace.ts",
+      "import": "./src/factoryRunTrace.ts"
+    },
+    "./factoryRunUsage": {
+      "types": "./src/factoryRunUsage.ts",
+      "import": "./src/factoryRunUsage.ts"
+    },
+    "./stateHome": {
+      "types": "./src/stateHome.ts",
+      "import": "./src/stateHome.ts"
+    },
+    "./embeddedDocument": {
+      "types": "./src/embeddedDocument.ts",
+      "import": "./src/embeddedDocument.ts"
+    },
+    "./renamedKeybindingCommands": {
+      "types": "./src/renamedKeybindingCommands.ts",
+      "import": "./src/renamedKeybindingCommands.ts"
+    },
+    "./composerControlCommand": {
+      "types": "./src/composerControlCommand.ts",
+      "import": "./src/composerControlCommand.ts"
+    },
+    "./dictationSlots": {
+      "types": "./src/dictationSlots.ts",
+      "import": "./src/dictationSlots.ts"
+    },
+    "./paymentDomains": {
+      "types": "./src/paymentDomains.ts",
+      "import": "./src/paymentDomains.ts"
+    },
+    "./timelineActivity": {
+      "types": "./src/timelineActivity.ts",
+      "import": "./src/timelineActivity.ts"
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "effect-tsgo tsrs --noEmit",
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
@@ -565,11 +633,13 @@
     "@noble/hashes": "catalog:",
     "@t3tools/contracts": "workspace:*",
     "effect": "catalog:",
-    "jose": "catalog:",
+    "ffi-rs": "1.3.2",
+    "get-east-asian-width": "^1.6.0",
     "mdast-util-directive": "catalog:",
     "mdast-util-to-hast": "^13.2.1",
     "micromark-extension-directive": "catalog:",
     "micromark-util-character": "catalog:",
+    "property-information": "^7.2.0",
     "rehype-raw": "catalog:",
     "rehype-sanitize": "catalog:",
     "remark-breaks": "catalog:",

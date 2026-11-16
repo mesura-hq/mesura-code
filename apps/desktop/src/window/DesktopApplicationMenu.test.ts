@@ -4,7 +4,12 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import type * as Electron from "electron";
+import * as Electron from "electron";
+import { vi } from "vite-plus/test";
+
+vi.mock("electron", () => ({
+  webContents: { getAllWebContents: vi.fn(() => []) },
+}));
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
@@ -31,6 +36,7 @@ const layerElectronApp = Layer.succeed(ElectronApp.ElectronApp, {
   metadata: Effect.die("unexpected metadata read"),
   name: Effect.succeed("Mesura Code"),
   systemLocale: Effect.succeed("en-US"),
+  preferredSystemLanguages: Effect.succeed(["en-US"]),
   whenReady: Effect.void,
   requestSingleInstanceLock: Effect.succeed(true),
   quit: Effect.void,
@@ -265,6 +271,102 @@ describe("DesktopApplicationMenu", () => {
         resetZoom.click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
         assert.equal(yield* Deferred.await(selectedAction), "zoom-reset");
       }),
+  );
+
+  it.effect("never binds Cmd/Ctrl+W to closing the window", () =>
+    Effect.gen(function* () {
+      for (const platform of ["darwin", "linux", "win32"] as const) {
+        const applicationMenuTemplate =
+          yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+        yield* configureMenu(yield* Deferred.make<string>(), applicationMenuTemplate, {
+          platform,
+        });
+
+        const items: Electron.MenuItemConstructorOptions[] = [];
+        const collect = (template: readonly Electron.MenuItemConstructorOptions[]) => {
+          for (const item of template) {
+            items.push(item);
+            if (Array.isArray(item.submenu)) collect(item.submenu);
+          }
+        };
+        collect(yield* Deferred.await(applicationMenuTemplate));
+
+        assert.isUndefined(
+          items.find((item) => item.role === "close"),
+          platform,
+        );
+        // Electron's default windowMenu submenu includes a close role.
+        assert.isUndefined(
+          items.find((item) => item.role === "windowMenu" && item.submenu === undefined),
+          platform,
+        );
+        const closeTools = items.find((item) => item.accelerator === "CmdOrCtrl+W");
+        assert.equal(closeTools?.label, "Close Developer Tools", platform);
+        assert.isFunction(closeTools?.click);
+        const appContents = {
+          isDestroyed: () => false,
+          isDevToolsFocused: () => false,
+          closeDevTools: vi.fn(),
+        };
+        const inspectedContents = {
+          ...appContents,
+          isDevToolsFocused: () => true,
+          closeDevTools: vi.fn(),
+        };
+        using allContents = vi
+          .spyOn(Electron.webContents, "getAllWebContents")
+          .mockReturnValue([
+            appContents as unknown as Electron.WebContents,
+            inspectedContents as unknown as Electron.WebContents,
+          ]);
+        closeTools?.click?.({} as Electron.MenuItem, undefined, {} as KeyboardEvent);
+        assert.equal(inspectedContents.closeDevTools.mock.calls.length, 1);
+        assert.equal(appContents.closeDevTools.mock.calls.length, 0);
+
+        allContents.mockReturnValue([appContents as unknown as Electron.WebContents]);
+        closeTools?.click?.({} as Electron.MenuItem, undefined, {} as KeyboardEvent);
+        assert.equal(appContents.closeDevTools.mock.calls.length, 0);
+      }
+    }),
+  );
+
+  it.effect("keeps macOS window actions and Close Window without a shortcut", () =>
+    Effect.gen(function* () {
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+      yield* configureMenu(yield* Deferred.make<string>(), applicationMenuTemplate, {
+        platform: "darwin",
+      });
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const windowMenu = template.find((item) => item.role === "windowMenu");
+      if (!Array.isArray(windowMenu?.submenu)) {
+        throw new Error("Expected an explicit macOS Window menu submenu.");
+      }
+      assert.deepEqual(
+        windowMenu.submenu.filter((item) => item.type !== "separator").map((item) => item.role),
+        ["minimize", "zoom", "front"],
+      );
+
+      const fileMenu = template.find((item) => item.label === "File");
+      if (!Array.isArray(fileMenu?.submenu)) {
+        throw new Error("Expected File menu submenu to be an array.");
+      }
+      const closeWindow = fileMenu.submenu.find((item) => item.label === "Close Window");
+      assert.isDefined(closeWindow);
+      assert.isUndefined(closeWindow.accelerator);
+      assert.isUndefined(closeWindow.role);
+      if (typeof closeWindow.click !== "function") {
+        throw new Error("Expected Close Window menu item to have a click handler.");
+      }
+      const close = vi.fn();
+      closeWindow.click(
+        {} as Electron.MenuItem,
+        { close } as unknown as Electron.BrowserWindow,
+        {} as KeyboardEvent,
+      );
+      assert.equal(close.mock.calls.length, 1);
+    }),
   );
 
   it.effect("reloads the main window even while a browser page has focus", () =>

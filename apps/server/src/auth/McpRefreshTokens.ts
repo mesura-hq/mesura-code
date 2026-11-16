@@ -5,7 +5,8 @@
  */
 import { AuthMcpClientAccess, type AuthSessionId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -96,12 +97,13 @@ const isAccess = Schema.is(AuthMcpClientAccess);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
+  const digest = yield* Digest.Digest;
   const sessions = yield* SessionStore.SessionStore;
 
   const hash = (value: string) =>
-    crypto
-      .digest("SHA-256", new TextEncoder().encode(value))
+    digest
+      .digest(Digest.sha256, new TextEncoder().encode(value))
       .pipe(Effect.orDie, Effect.map(base64UrlEncode));
 
   const storeFailure = (operation: string) => (cause: unknown) =>

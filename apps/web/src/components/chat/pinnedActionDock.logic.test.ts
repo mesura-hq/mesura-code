@@ -1,33 +1,17 @@
 // Thread attention phase 6: the dock's policy, as pure functions in `pinnedActionDock.logic.ts`.
 // What only a browser shows is in `PinnedActionDock.browser.test.tsx`.
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { ThreadPendingApproval } from "@t3tools/client-runtime/state/thread-requests";
-import {
-  EnvironmentId,
-  PlanId,
-  RuntimeRequestId,
-  ThreadId,
-  type ThreadAgentSignal,
-} from "@t3tools/contracts";
+import { RuntimeRequestId, type ThreadAgentSignal } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   PHONE_DOCK_EXPANDED_LIMIT,
   derivePinnedActionDockItems,
-  dismissPlanFollowUp,
   layoutPinnedActionDock,
-  parsePinnedActionDockUnpins,
   pinnedActionDockCloseAction,
-  readThreadDockUnpins,
   type PinnedActionDockInput,
   type PinnedActionDockItem,
-  type PinnedActionDockUnpins,
 } from "./pinnedActionDock.logic";
-
-const threadA = scopedThreadKey(
-  scopeThreadRef(EnvironmentId.make("dock-environment"), ThreadId.make("dock-thread-a")),
-);
-const NO_UNPINS: PinnedActionDockUnpins = {};
 
 const approval = (id: string, createdAt: string): ThreadPendingApproval => ({
   requestId: RuntimeRequestId.make(id),
@@ -45,29 +29,11 @@ const signal = (setAt: string): ThreadAgentSignal => ({
 });
 
 const input = (overrides: Partial<PinnedActionDockInput> = {}): PinnedActionDockInput => ({
-  threadKey: threadA,
   approvals: [],
-  planFollowUp: null,
-  unpins: NO_UNPINS,
   ...overrides,
 });
 
 const kinds = (items: ReadonlyArray<PinnedActionDockItem>) => items.map((item) => item.kind);
-
-describe("persisted dock dismissals", () => {
-  it("ignores obsolete plan unpins and retains follow-up dismissals on reload", () => {
-    const parsed = parsePinnedActionDockUnpins({
-      [threadA]: { planDigests: ["obsolete-digest"], followUpPlanIds: ["follow-up", 3] },
-    });
-    expect(parsed).toEqual({ [threadA]: { followUpPlanIds: ["follow-up"] } });
-    expect([...readThreadDockUnpins(parsed, threadA).followUpPlanIds]).toEqual(["follow-up"]);
-    for (const garbage of [null, 7, "x", [], { [threadA]: { planDigests: [3] } }]) {
-      expect(readThreadDockUnpins(parsePinnedActionDockUnpins(garbage), threadA)).toEqual({
-        followUpPlanIds: new Set(),
-      });
-    }
-  });
-});
 
 describe("phase6 dock AC4: every pending approval has an X that declines it", () => {
   it("phase6 dock AC4 the X on an approval sends the decline decision, not cancel", () => {
@@ -83,41 +49,13 @@ describe("phase6 dock AC4: every pending approval has an X that declines it", ()
   });
 });
 
-describe("phase6 dock AC5: the plan follow-up stays in the dock and signals stay outside it", () => {
-  const followUp = {
-    id: PlanId.make("proposed-plan-1"),
-    createdAt: "2026-10-24T10:02:00.000Z",
-    title: "Ship the dock",
-  };
-
+describe("phase6 dock AC5: agent signals stay outside the dock", () => {
   it.each(["needs_input", "ready_to_close"] as const)("the dock ignores a %s signal", (kind) => {
     const sources = {
-      ...input({ planFollowUp: followUp }),
+      ...input({ approvals: [approval("approval-1", "2026-10-24T10:00:00.000Z")] }),
       agentSignal: { ...signal("2026-10-24T10:03:00.000Z"), kind },
     };
-    const items = derivePinnedActionDockItems(sources);
-    expect(kinds(items)).toEqual(["plan-follow-up"]);
-  });
-
-  it("phase6 dock AC5 the X on the follow-up dismisses it", () => {
-    const items = derivePinnedActionDockItems(input({ planFollowUp: followUp }));
-    expect(items.map(pinnedActionDockCloseAction)).toEqual([
-      { type: "dismiss-plan-follow-up", planId: "proposed-plan-1" },
-    ]);
-  });
-
-  it("phase6 dock AC5 a dismissed plan follow-up stays closed for that proposed plan only", () => {
-    const unpins = dismissPlanFollowUp(NO_UNPINS, threadA, followUp.id);
-    expect(kinds(derivePinnedActionDockItems(input({ planFollowUp: followUp, unpins })))).toEqual(
-      [],
-    );
-    expect(
-      kinds(
-        derivePinnedActionDockItems(
-          input({ planFollowUp: { ...followUp, id: PlanId.make("proposed-plan-2") }, unpins }),
-        ),
-      ),
-    ).toEqual(["plan-follow-up"]);
+    expect(kinds(derivePinnedActionDockItems(sources))).toEqual(["approval"]);
   });
 });
 
@@ -125,20 +63,18 @@ describe("phase6 dock AC6: newest first, at most two expanded at phone width", (
   const several = input({
     approvals: [
       approval("approval-1", "2026-10-24T10:00:00.000Z"),
+      approval("approval-3", "2026-10-24T10:02:00.000Z"),
       approval("approval-2", "2026-10-24T10:01:00.000Z"),
     ],
-    planFollowUp: {
-      id: PlanId.make("follow-up"),
-      createdAt: "2026-10-24T10:02:00.000Z",
-      title: "Ready",
-    },
   });
+  const requestIds = (items: ReadonlyArray<PinnedActionDockItem>) =>
+    items.map((item) => item.approval.requestId);
 
   it("phase6 dock AC6 stacks the items newest first", () => {
-    expect(kinds(derivePinnedActionDockItems(several))).toEqual([
-      "plan-follow-up",
-      "approval",
-      "approval",
+    expect(requestIds(derivePinnedActionDockItems(several))).toEqual([
+      "approval-3",
+      "approval-2",
+      "approval-1",
     ]);
   });
 
@@ -148,10 +84,10 @@ describe("phase6 dock AC6: newest first, at most two expanded at phone width", (
       expandedKeys: new Set(),
     });
     expect(PHONE_DOCK_EXPANDED_LIMIT).toBe(2);
-    expect(layout.map((entry) => [entry.item.kind, entry.expanded])).toEqual([
-      ["plan-follow-up", true],
-      ["approval", true],
-      ["approval", false],
+    expect(layout.map((entry) => [entry.item.approval.requestId, entry.expanded])).toEqual([
+      ["approval-3", true],
+      ["approval-2", true],
+      ["approval-1", false],
     ]);
   });
 
@@ -185,20 +121,11 @@ describe("phase6 dock AC6: newest first, at most two expanded at phone width", (
 describe("phase6 dock AC7: every X is labelled with the item it closes", () => {
   it("phase6 dock AC7 each close label names its item", () => {
     const items = derivePinnedActionDockItems(
-      input({
-        approvals: [approval("approval-1", "2026-10-24T10:00:00.000Z")],
-        planFollowUp: {
-          id: PlanId.make("proposed-plan-1"),
-          createdAt: "2026-10-24T10:03:00.000Z",
-          title: "Ship the dock",
-        },
-      }),
+      input({ approvals: [approval("approval-1", "2026-10-24T10:00:00.000Z")] }),
     );
-    const labels = Object.fromEntries(items.map((item) => [item.kind, item.closeLabel]));
-    expect(labels).toEqual({
-      "plan-follow-up": expect.stringMatching(/^Dismiss .*Ship the dock/),
-      approval: expect.stringMatching(/^Decline .*command/i),
-    });
+    expect(items.map((item) => item.closeLabel)).toEqual([
+      expect.stringMatching(/^Decline .*command.*pnpm install/i),
+    ]);
   });
 });
 

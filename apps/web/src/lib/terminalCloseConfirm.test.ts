@@ -51,7 +51,7 @@ describe("terminal close confirmation", () => {
         "Close 2 terminals?",
         'This stops their running processes and clears their histories: "Terminal 1", "Development server".',
       ].join("\n"),
-      { variant: "destructive", initialFocus: "confirm" },
+      { initialFocus: "confirm" },
     );
   });
 

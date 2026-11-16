@@ -173,21 +173,21 @@ export function useMonacoFileComments({
   // work inside an updater means doing it during render, and writing to the
   // composer store from there updates another component mid-render.
   const entriesRef = useRef(entries);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref that Monaco callbacks read outside render
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref that Monaco callbacks read outside render
   useLayoutEffect(() => {
     entriesRef.current = entries;
   }, [entries]);
 
   const hasOpenDraft = entries.some((entry) => entry.kind === "draft");
   const hasOpenDraftRef = useRef(hasOpenDraft);
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: latest-value ref that Monaco callbacks read outside render
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref that Monaco callbacks read outside render
   useLayoutEffect(() => {
     hasOpenDraftRef.current = hasOpenDraft;
   }, [hasOpenDraft]);
 
   // The editor owns the decorations. Only release the anchor registry here:
   // the surface can dispose the editor before passive cleanups run.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: releases the anchor registry when the model changes or unmounts
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: releases the anchor registry when the model changes or unmounts
   useEffect(() => {
     if (model === null) return;
     const anchors = anchorsRef.current;
@@ -252,7 +252,7 @@ export function useMonacoFileComments({
   );
 
   // Gutter drag selects the lines to comment on.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: installs the gutter drag listeners on the editor for its lifetime
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: installs the gutter drag listeners on the editor for its lifetime
   useEffect(() => {
     if (editor === null) return;
     return installGutterLineSelection(editor, {
@@ -266,7 +266,7 @@ export function useMonacoFileComments({
   }, [editor, beginComment]);
 
   // The live gutter selection, drawn as whole lines.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: mirrors the gutter selection into a Monaco decorations collection
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: mirrors the gutter selection into a Monaco decorations collection
   useEffect(() => {
     if (editor === null) return;
     const decorations = editor.createDecorationsCollection();
@@ -285,7 +285,7 @@ export function useMonacoFileComments({
   // Follow the text. Monaco has already remapped the anchors; this reads where
   // they landed, drops the comments whose lines are gone, and tells the composer
   // about the ones that moved.
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: subscribes to model content changes to follow the comment anchors
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: subscribes to model content changes to follow the comment anchors
   useEffect(() => {
     if (model === null) return;
     const subscription = model.onDidChangeContent(() => {
@@ -417,13 +417,13 @@ function useCommentZones(
   // Monaco zone reconciliation and a new resize subscription.
   const zoneLines = groups.map((group) => group.endLine).join(",");
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reconciles Monaco view zones (an external system) with the comment groups
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: reconciles Monaco view zones (an external system) with the comment groups
   useEffect(() => {
     if (editor === null) return;
     return store.synchronize(editor, zoneLines);
   }, [editor, store, zoneLines]);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: clears the Monaco view zones when the editor changes or unmounts
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: clears the Monaco view zones when the editor changes or unmounts
   useEffect(() => {
     if (editor === null) return;
     return () => store.clear();

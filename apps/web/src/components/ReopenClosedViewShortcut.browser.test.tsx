@@ -272,6 +272,17 @@ describe("root reopen shortcut", () => {
       expect(useClosedViewStore.getState().entries).toEqual([]);
     },
   );
+  it("forwards address-bar focus and zoom from a focused desktop page", async () => {
+    setup();
+    await using _shortcut = await renderShortcut();
+    expect(state.setShortcuts).toHaveBeenLastCalledWith(
+      expect.arrayContaining(
+        ["preview.focusUrl", "preview.zoomIn", "preview.zoomOut", "preview.resetZoom"].map(
+          (command) => expect.objectContaining({ command }),
+        ),
+      ),
+    );
+  });
 });
 
 it("thread link integration fence: configured panel close enters and leaves actual guest forwarding registration", async () => {

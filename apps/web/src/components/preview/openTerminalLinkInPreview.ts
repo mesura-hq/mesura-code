@@ -11,6 +11,8 @@ import {
 } from "~/browser/openThreadLinkInPreview";
 import { BrowserSettingsReadError } from "~/browser/openFileInPreview";
 
+const isBrowserSettingsReadError = Schema.is(BrowserSettingsReadError);
+
 const terminalLinkErrorContext = {
   environmentId: Schema.String,
   threadId: Schema.String,
@@ -60,7 +62,7 @@ export async function openTerminalLinkInPreview<E>(
       return;
     }
     const error = squashAtomCommandFailure(result);
-    if (error instanceof BrowserSettingsReadError) throw error.cause;
+    if (isBrowserSettingsReadError(error)) throw error.cause;
     console.error(
       new TerminalLinkPreviewOpenError({
         ...errorContext,

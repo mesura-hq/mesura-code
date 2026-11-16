@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // `set_project_icon` through the production handlers and their `McpToolAccess`,
 // on the real v2 `ProjectService` and favicon resolver. Thread messages come
 // from a `ThreadManagementService` stand-in, so attachments are message records
@@ -63,7 +64,7 @@ const testLayer = RuntimeLayer.layerProjectService.pipe(
   Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "project-icon-tool-" })),
   Layer.provideMerge(ServerSettings.layerTest({})),
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>

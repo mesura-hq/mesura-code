@@ -33,10 +33,7 @@ const modelSelection = {
 const driver = ProviderDriverKind.make("claudeAgent");
 const providerInstanceId = modelSelection.instanceId;
 
-it.effect.each([
-  ["memory", ProjectionStore.layerMemory],
-  ["SQL", layerSql],
-] as const)(
+it.effect.each([["SQL", layerSql]] as const)(
   "%s delegated result hold: a finished delegated task holds its parent until delivery",
   ([, layer]) =>
     Effect.gen(function* () {

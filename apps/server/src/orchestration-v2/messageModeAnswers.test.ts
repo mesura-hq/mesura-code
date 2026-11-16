@@ -20,6 +20,12 @@ describe("messageModeAnswerText", () => {
     expect(messageModeAnswerText(question, ["Keep", "  a note  "])).toBe("Keep\na note");
   });
 
+  it("joins multiple selected choices as upstream does", () => {
+    expect(messageModeAnswerText({ ...question, multiSelect: true }, ["Small", "Large"])).toBe(
+      "Small, Large",
+    );
+  });
+
   it("requires the exact provider value for a choice-only question", () => {
     const value = " Keep\t";
     const choiceOnly = {
@@ -32,8 +38,23 @@ describe("messageModeAnswerText", () => {
     expect(messageModeAnswerText(choiceOnly, value)).toBe(value);
   });
 
+  it("accepts the exact choices of a choice-only multiselect question", () => {
+    const choiceOnlyMultiSelect = {
+      allowCustomAnswer: false,
+      multiSelect: true,
+      options: [
+        { label: "Tests", description: "Cover behavior" },
+        { label: "Docs", description: "Explain usage" },
+      ],
+    };
+    expect(messageModeAnswerText(choiceOnlyMultiSelect, ["Tests"])).toBe("Tests");
+    expect(messageModeAnswerText(choiceOnlyMultiSelect, ["Tests", "Docs"])).toBe("Tests, Docs");
+    expect(messageModeAnswerText(choiceOnlyMultiSelect, ["Tests", "Other"])).toBeNull();
+    expect(messageModeAnswerText(choiceOnlyMultiSelect, [" Tests"])).toBeNull();
+  });
+
   it("refuses blank, empty-array and non-string answers", () => {
-    for (const answer of ["", "   ", [], [1], undefined, null, 3]) {
+    for (const answer of ["", "   ", [], [1], ["Keep", " "], undefined, null, 3]) {
       expect(messageModeAnswerText(question, answer)).toBeNull();
     }
   });

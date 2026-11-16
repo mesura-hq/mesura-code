@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - Resolves executables for plain CLI scripts.
+// @effect-diagnostics nodeBuiltinImport:off extendsNativeError:off - Plain CLI errors do not enter an Effect failure channel.
 /**
  * The environment the agent-facing scripts (`mesura-checks.ts`, `mesura-browser.ts`)
  * give their children. Agent shells on the developer's hosts often have neither

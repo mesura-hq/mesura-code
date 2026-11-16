@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - hashes a path into a directory name.
 import * as NodeCrypto from "node:crypto";
 
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 
@@ -14,15 +14,16 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
  * `NVIM_APPNAME` also moves data, reinstalling every plugin. Data, state and cache stay put.
  */
 
-export class NvimLaunchError extends Data.TaggedError("NvimLaunchError")<{
-  readonly reason:
-    | "binary-missing"
-    | "version"
-    | "config-missing"
-    | "spawn-failed"
-    | "runtime-unwritable";
-  readonly detail: string;
-}> {}
+export class NvimLaunchError extends Schema.TaggedError<NvimLaunchError>()("NvimLaunchError", {
+  reason: Schema.Literals([
+    "binary-missing",
+    "version",
+    "config-missing",
+    "spawn-failed",
+    "runtime-unwritable",
+  ]),
+  detail: Schema.String,
+}) {}
 
 export interface NvimLaunchInput {
   /** As the developer typed it, `~` included. Empty means the default. */

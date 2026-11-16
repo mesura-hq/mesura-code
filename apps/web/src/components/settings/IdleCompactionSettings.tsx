@@ -53,7 +53,7 @@ export function IdleCompactionSettings() {
         serverScoped
         settingKeys={["idleCompactionEnabled"]}
         {...searchableSetting("idle-compaction")}
-        description="Let a long idle Claude thread compact without you asking: a Compact chip when you return, or a compaction before its prompt cache expires. Off, threads compact only by hand, with /compact or Compact context."
+        description="Let a long idle Claude thread compact without you asking: a Compact chip when you return, or a compaction before its prompt cache expires. Off, threads compact only by hand."
         resetAction={
           settings.idleCompactionEnabled !== DEFAULT_UNIFIED_SETTINGS.idleCompactionEnabled ? (
             <SettingResetButton

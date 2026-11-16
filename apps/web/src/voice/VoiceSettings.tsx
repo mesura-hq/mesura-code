@@ -241,7 +241,7 @@ function VoiceKeySetting({
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- loads the environment's voice settings for this connection
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the environment's voice settings for this connection
   useEffect(() => {
     // Environments without voice support have no voice routes; never ask them.
     if (!supported || !connected || !prepared) return;

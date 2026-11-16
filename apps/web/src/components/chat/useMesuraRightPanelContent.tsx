@@ -82,6 +82,7 @@ export function MesuraRightPanelSurfaceContent(
           environmentId={props.environmentId}
           cwd={files.workspaceRoot ?? ""}
           projectName={files.projectName ?? ""}
+          projectId={files.projectId}
           threadRef={threadRef}
           composerDraftTarget={props.composerDraftTarget}
           relativePath={surface.kind === "file" ? surface.relativePath : null}
@@ -101,6 +102,7 @@ export function MesuraRightPanelSurfaceContent(
           onRevealExplorer={() =>
             useRightPanelStore.getState().revealFileExplorer(threadRef, surface.id)
           }
+          selectedFilePending={surface.kind === "file" && files.pendingSurfaceIds.has(surface.id)}
           workspaceMutationId={props.workspaceMutationId}
         />
       </Suspense>
