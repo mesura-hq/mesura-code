@@ -75,7 +75,8 @@ const MISSING_KEY_FAILURE =
 const MISSING_AUDIO_FAILURE = "The recording is no longer on the server.";
 const CANCELLED_FAILURE = "Cancelled.";
 const SETTINGS_UNREADABLE_FAILURE = "The server could not read its dictation settings.";
-export const NO_SPEECH_FAILURE = "No speech detected. Retry sends the whole recording.";
+const WHOLE_RECORDING_RETRY = "Retry sends the whole recording.";
+export const NO_SPEECH_FAILURE = `No speech detected. ${WHOLE_RECORDING_RETRY}`;
 export const CAPACITY_FAILURE = `Too many recordings are transcribing (${MAX_ACTIVE_JOBS}). Retry when one finishes.`;
 
 interface TrackedJob {
@@ -233,6 +234,12 @@ export const make = Effect.gen(function* () {
     return { audio, fileName: path.basename(audioPath) };
   });
 
+  const sendWholeRecordingOnRetry = (jobId: DictationJobId) =>
+    Effect.sync(() => {
+      const tracked = jobs.get(jobId);
+      if (tracked) jobs.set(jobId, { ...tracked, filterSilence: false });
+    });
+
   /**
    * The recording as OpenAI gets it: its speech alone when the filter cut silence out, else
    * the whole file. The model split follows the length of the audio sent.
@@ -248,19 +255,18 @@ export const make = Effect.gen(function* () {
     const audioPath = yield* audioPathOf(plan.attachmentId);
     const whole = Effect.map(readAudio(audioPath), (original) => ({
       ...original,
+      filtered: false,
       durationMs: plan.durationMs,
     }));
     if (!plan.filterSilence) return yield* whole;
     const outcome = yield* silenceFilter.filter(audioPath);
     if (outcome.kind === "no-speech") {
-      yield* Effect.sync(() => {
-        const tracked = jobs.get(jobId);
-        if (tracked) jobs.set(jobId, { ...tracked, filterSilence: false });
-      });
+      yield* sendWholeRecordingOnRetry(jobId);
       return yield* new OpenAiTranscriptionError({ reason: NO_SPEECH_FAILURE, retryable: false });
     }
     if (outcome.kind !== "filtered") return yield* whole;
     return {
+      filtered: true,
       audio: outcome.audio,
       fileName: `${path.basename(audioPath, path.extname(audioPath))}.ogg`,
       durationMs: outcome.speechMs,
@@ -309,14 +315,33 @@ export const make = Effect.gen(function* () {
       });
       yield* Deferred.succeed(published, undefined);
       if (!plan) return null;
-      const { audio, fileName, durationMs } = yield* transcriptionAudio(jobId, plan);
-      return yield* openAi.transcribe({
-        apiKey: plan.openAiApiKey,
-        audio,
-        fileName,
-        durationMs,
-        vocabularyHints: plan.vocabularyHints,
-      });
+      const { audio, fileName, durationMs, filtered } = yield* transcriptionAudio(jobId, plan);
+      return yield* openAi
+        .transcribe({
+          apiKey: plan.openAiApiKey,
+          audio,
+          fileName,
+          durationMs,
+          vocabularyHints: plan.vocabularyHints,
+        })
+        .pipe(
+          // The cut may be what OpenAI could not use, so the next attempt sends everything.
+          Effect.catchTags({
+            OpenAiTranscriptionError: (error) =>
+              filtered && error.audioRejected === true
+                ? sendWholeRecordingOnRetry(jobId).pipe(
+                    Effect.andThen(
+                      Effect.fail(
+                        new OpenAiTranscriptionError({
+                          ...error,
+                          reason: `${error.reason.replace(/\.?$/u, ".")} ${WHOLE_RECORDING_RETRY}`,
+                        }),
+                      ),
+                    ),
+                  )
+                : Effect.fail(error),
+          }),
+        );
     },
     (effect, jobId, attempt, published) =>
       effect.pipe(

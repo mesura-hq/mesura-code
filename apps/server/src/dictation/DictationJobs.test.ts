@@ -774,5 +774,58 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
           assert.strictEqual(completed.text, "algo bajito");
         }),
     );
+
+    it.effect.each([
+      { origin: "an empty transcript", status: 200, body: "" },
+      { origin: "a refused recording", status: 400, body: "invalid audio" },
+    ])(
+      "retries with the whole recording after OpenAI meets the filtered audio with $origin",
+      ({ status, body }) =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs({
+            ...withKey,
+            silenceFilter: {
+              kind: "filtered",
+              audio: SPEECH,
+              speechMs: 20_000,
+              recordingMs: 30_000,
+            },
+          });
+          const received = yield* subscribeInto(harness.jobs);
+          yield* takeSnapshot(received);
+          const jobId = DictationJobId.make(`job-rejected-${status}`);
+          yield* harness.jobs.start(startInput(jobId));
+          const first = yield* Queue.take(harness.openAi.calls);
+          assert.deepStrictEqual(first.audio, SPEECH);
+          yield* first.answer(status, body);
+          const failed = yield* takeUpsertUntil(received, (job) => job.status === "failed");
+          assert.include(failed.failure ?? "", "Retry sends the whole recording.");
+
+          yield* harness.jobs.retry(jobId);
+          const second = yield* Queue.take(harness.openAi.calls);
+          assert.deepStrictEqual(second.audio, AUDIO);
+          assert.strictEqual(harness.filteredPaths.length, 1);
+          yield* second.answer(200, "dicho");
+        }),
+    );
+
+    it.effect("keeps filtering on Retry after a failure that is not about the audio", () =>
+      Effect.gen(function* () {
+        const harness = yield* startDictationJobs({
+          ...withKey,
+          silenceFilter: { kind: "filtered", audio: SPEECH, speechMs: 20_000, recordingMs: 30_000 },
+        });
+        const received = yield* subscribeInto(harness.jobs);
+        yield* takeSnapshot(received);
+        const jobId = DictationJobId.make("job-rate-limited");
+        yield* harness.jobs.start(startInput(jobId));
+        yield* (yield* Queue.take(harness.openAi.calls)).answer(429, "slow down");
+        yield* takeUpsertUntil(received, (job) => job.status === "failed");
+        yield* harness.jobs.retry(jobId);
+        const second = yield* Queue.take(harness.openAi.calls);
+        assert.deepStrictEqual(second.audio, SPEECH);
+        yield* second.answer(200, "dicho");
+      }),
+    );
   },
 );

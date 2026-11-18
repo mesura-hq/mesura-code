@@ -23,7 +23,12 @@ const RETRIES = 2;
 
 export class OpenAiTranscriptionError extends Schema.TaggedError<OpenAiTranscriptionError>()(
   "OpenAiTranscriptionError",
-  { reason: Schema.String, retryable: Schema.Boolean },
+  {
+    reason: Schema.String,
+    retryable: Schema.Boolean,
+    /** OpenAI refused the audio itself or heard nothing in it, as opposed to the key or the network. */
+    audioRejected: Schema.optional(Schema.Boolean),
+  },
 ) {}
 
 export interface OpenAiTranscriptionRequest {
@@ -78,6 +83,7 @@ function statusFailure(status: number): OpenAiTranscriptionError {
         ? `OpenAI failed to transcribe (HTTP ${status}).`
         : `OpenAI refused the recording (HTTP ${status}).`,
     retryable: status >= 500,
+    audioRejected: status < 500,
   });
 }
 
@@ -118,6 +124,7 @@ export const makeOpenAiTranscription: Effect.Effect<
         return yield* new OpenAiTranscriptionError({
           reason: "No speech detected",
           retryable: false,
+          audioRejected: true,
         });
       }
       return text;
