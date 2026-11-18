@@ -64,6 +64,10 @@ function transcriptionPrompt(useWhisper: boolean, hints: ReadonlyArray<string>):
   return spellings.length > 0 ? `${prompt} Use these exact spellings: ${spellings}` : prompt;
 }
 
+const decodeTranscriptionBody = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ text: Schema.String })),
+);
+
 function statusFailure(status: number): OpenAiTranscriptionError {
   if (status === 401) {
     return new OpenAiTranscriptionError({
@@ -106,7 +110,8 @@ export const makeOpenAiTranscription: Effect.Effect<
     const form = new FormData();
     form.append("file", new Blob([request.audio]), request.fileName);
     form.append("model", useWhisper ? "whisper-1" : "gpt-4o-transcribe");
-    form.append("response_format", "text");
+    // gpt-4o-transcribe answers only in json; whisper-1 takes it too, so both parse one shape.
+    form.append("response_format", "json");
     form.append("prompt", transcriptionPrompt(useWhisper, request.vocabularyHints));
     form.append("temperature", "0");
     const httpRequest = HttpClientRequest.post(transcriptionUrl).pipe(
@@ -119,7 +124,17 @@ export const makeOpenAiTranscription: Effect.Effect<
       if (response.status < 200 || response.status >= 300) {
         return yield* statusFailure(response.status);
       }
-      const text = (yield* response.text).trim();
+      const body = yield* response.text;
+      const decoded = yield* decodeTranscriptionBody(body).pipe(
+        Effect.mapError(
+          () =>
+            new OpenAiTranscriptionError({
+              reason: "OpenAI answered in an unexpected format.",
+              retryable: false,
+            }),
+        ),
+      );
+      const text = decoded.text.trim();
       if (text.length === 0) {
         return yield* new OpenAiTranscriptionError({
           reason: "No speech detected",

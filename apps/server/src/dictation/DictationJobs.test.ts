@@ -81,9 +81,14 @@ const makeFakeOpenAi = Effect.gen(function* () {
         answer: (status, body) => Deferred.succeed(reply, { status, body }).pipe(Effect.asVoid),
       });
       const { status, body } = yield* Deferred.await(reply);
+      // Answered the way OpenAI answers the requested format; `body` is the transcript.
+      const json = field("response_format") === "json";
       return HttpClientResponse.fromWeb(
         request,
-        new Response(body, { status, headers: { "content-type": "text/plain" } }),
+        new Response(status === 200 && json ? JSON.stringify({ text: body }) : body, {
+          status,
+          headers: { "content-type": json ? "application/json" : "text/plain" },
+        }),
       );
     }),
   );
