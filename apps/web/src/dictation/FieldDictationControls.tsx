@@ -179,7 +179,8 @@ export function FieldDictationControls(props: {
   return (
     <>
       {dictation.transcribing ? (
-        <span role="status" className="shrink-0 text-xs text-muted-foreground">
+        // Wraps rather than overflows in a narrow editor, such as a phone's Monaco comment.
+        <span role="status" className="min-w-0 text-xs text-pretty text-muted-foreground">
           {dictation.submitQueued ? "Sends when transcribed" : "Transcribing…"}
         </span>
       ) : null}

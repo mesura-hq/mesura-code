@@ -443,7 +443,7 @@ function useCommentZones(
 
 // Monaco owns mutable zones. React subscribes only to the portal destinations,
 // which change after reconciliation, never while React renders a comment.
-function createCommentZoneStore() {
+export function createCommentZoneStore() {
   const zones = new Map<number, CommentZone>();
   const listeners = new Set<() => void>();
   let snapshot: {
@@ -494,6 +494,7 @@ function createCommentZoneStore() {
           touched = true;
         }
       });
+      for (const zone of zones.values()) exposeZoneToAssistiveTechnology(zone.domNode);
 
       if (touched) {
         snapshot = {
@@ -531,6 +532,16 @@ function createCommentZoneStore() {
       snapshot = { editor: null, contentNodes: new Map() };
     },
   };
+}
+
+/**
+ * WORKAROUND: Monaco marks its whole view-zones layer `aria-hidden` once, when the editor is
+ * built, which hides a comment form's textarea and buttons from screen readers. Lifting it is
+ * safe because this editor's other zones are empty spacers. Remove once comments move to a
+ * Monaco surface that stays in the accessibility tree, such as a content widget.
+ */
+function exposeZoneToAssistiveTechnology(zoneNode: HTMLElement): void {
+  zoneNode.parentElement?.removeAttribute("aria-hidden");
 }
 
 /**
