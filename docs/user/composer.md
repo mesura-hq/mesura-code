@@ -269,6 +269,12 @@ Select the microphone beside Send to start recording. The strip above the compos
 elapsed time, a live waveform, and pause, restart, cancel and stop. Stop and transcribe ends the
 recording; the composer stays editable the whole time.
 
+Dictation records from the first connected microphone in **Settings → Voice → Microphone**, then
+the next one, then the system default. Before transcribing, the server cuts the silence out of the
+recording, so long recordings with pauses cost less and quiet stretches add no invented words. Turn
+**Silence filtering** off in **Settings → Dictation** to send whole recordings. A recording with no
+speech fails as "No speech detected"; **Retry** sends the whole recording.
+
 A recording belongs to the chat you started it in. If you open another chat while you speak, the
 text still goes to the first chat, and Send mode sends it there. While it records, that chat's row in
 the sidebar shows a sound wave: select the wave to stop and deliver the recording in its current
@@ -298,6 +304,11 @@ dictated text starts with one `[voiced]` tag.
 
 **Transcriptions** in the command palette lists recent dictation on the server, to copy or retry.
 The server keeps it for a day, and a server restart clears it.
+
+The microphone in citation comments, diff comments and pull request comments and reviews dictates
+too. Stop the recording and the text lands at the caret, or at the end when the field has lost focus.
+These fields take no marker or mode: if you close one before the text arrives, it appears when you
+open it again, and it is in Transcriptions either way.
 
 ### Dictation on a phone
 

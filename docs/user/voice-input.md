@@ -6,6 +6,11 @@ also works in citation comments, diff and file annotations, pull request
 comments, replies, and review summaries, and in the desktop app's browser
 annotation editor.
 
+In Mesura Code, the microphone in the composer and in comment editors is Mesura
+dictation (see [Voice dictation](./composer.md#voice-dictation)). The voice input on
+this page appears in the composer only after you choose **Transcribe with** below; in
+comment editors, use its dictation shortcut.
+
 On iPhone and Android, voice input transcribes on the device by default. To opt in
 to a named environment on that phone, open **Settings → Voice → Transcribe on**. See
 [Voice input on mobile](./composer.md#voice-input-on-mobile).
