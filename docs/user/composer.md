@@ -305,12 +305,14 @@ dictated text starts with one `[voiced]` tag.
 **Transcriptions** in the command palette lists recent dictation on the server, to copy or retry.
 The server keeps it for a day, and a server restart clears it.
 
-The microphone in citation comments, diff comments and pull request comments and reviews dictates
-too. Stop the recording and the text lands at the caret, or at the end when the field has lost focus.
-These fields take no marker or mode: if you close one before the text arrives, it appears when you
-open it again, and it is in Transcriptions either way. Submitting while you record or while the text
-is on its way stops the recording and sends once the text is in; a failed transcription keeps the
-comment unsent.
+The microphone in citation comments, diff and file comments, review guide comments, and pull
+request comments and reviews dictates too. Stop the recording and the text lands at the caret, or at
+the end when the field has lost focus. These fields take no marker or mode. If you close, cancel or
+submit a comment before its text arrives, the text goes only to Transcriptions, never into the next
+comment you open there. Submitting while you record or while the text is on its way stops the
+recording and sends once all of its text is in. A failed upload or transcription, a cancelled
+recording, or a new recording keeps the comment unsent. While the microphone is still starting,
+Submit does nothing; stop or cancel the recording first.
 
 ### Dictation on a phone
 

@@ -6,10 +6,13 @@ also works in citation comments, diff and file annotations, pull request
 comments, replies, and review summaries, and in the desktop app's browser
 annotation editor.
 
-In Mesura Code, the microphone in the composer and in comment editors is Mesura
-dictation (see [Voice dictation](./composer.md#voice-dictation)). The voice input on
-this page appears in the composer only after you choose **Transcribe with** below; in
-comment editors, use its dictation shortcut.
+In Mesura Code, every microphone button in the composer and in comment editors starts
+Mesura dictation (see [Voice dictation](./composer.md#voice-dictation)), on a phone too.
+The voice input on this page starts from the keyboard only: after you choose
+**Transcribe with** below, press its dictation shortcut in the composer or a comment
+editor. Its recording strip, with finish and cancel, then shows where you started it.
+The desktop browser's annotation editor is the one place where a microphone button
+still starts this voice input.
 
 On iPhone and Android, voice input transcribes on the device by default. To opt in
 to a named environment on that phone, open **Settings → Voice → Transcribe on**. See
@@ -20,7 +23,7 @@ to a named environment on that phone, open **Settings → Voice → Transcribe o
 On web and desktop, you choose where transcription runs.
 Nothing is sent until you choose one: open **Settings → Voice** and set
 **Transcribe with** to the environment that should transcribe for you.
-On a new device, the microphone or dictation shortcut opens that setting from the composer.
+On a new device, the dictation shortcut opens that setting from the composer.
 Microphone audio recorded on this device is sent to that environment over your
 authenticated connection, transcribed there, and discarded. The choice is saved
 on this device only, so every computer and browser you use asks for it once.
@@ -56,7 +59,7 @@ until you choose another.
 
 In **Settings → Voice → Transcription**, download a model and choose **Use model** if it
 isn’t already selected. **Test model** lets you try it without sending a message.
-If you use the composer microphone before a model is installed, it offers to download one.
+If you use the dictation shortcut before a model is installed, it offers to download one.
 The recommendation uses your Voice language, or your system’s preferred languages with **Auto-detect**.
 
 If another app already downloaded one of these models, you don’t need a second copy.
@@ -83,8 +86,8 @@ while you record; models with built-in long-form support transcribe when you sto
 
 ## Dictate
 
-Press the microphone in the composer, or `mod+alt+shift+d` (`mod` is Command on
-macOS and Ctrl elsewhere). Press again, or the check mark, to finish; `Esc`
+Press `mod+alt+shift+d` (`mod` is Command on macOS and Ctrl elsewhere). In Mesura
+Code, the composer's microphone starts Mesura dictation instead. Press again, or the check mark, to finish; `Esc`
 discards the recording and leaves your draft unchanged. Recordings last up to
 five minutes. Text is inserted at the cursor or replaces the selection you had
 when recording started, and the editor is read-only while dictation runs.
