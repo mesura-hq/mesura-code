@@ -78,6 +78,7 @@ export function PullRequestGuideTab({
             }),
           onRemove: (commentId) => removeComment(reviewKey, commentId),
           onAskAgent: onAskAboutLines,
+          dictation: { environmentId, projectId: reference.projectId, scope: reviewKey },
         };
   const guide = data?.guide ?? null;
   const tourShown = active && guide !== null;

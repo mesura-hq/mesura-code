@@ -35,6 +35,8 @@ import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import type { AppRouter } from "./router";
 
 const fixture = vi.hoisted(() => ({
+  /** Stands for a device that chose an upstream voice destination in Settings → Voice. */
+  upstreamVoiceChosen: false,
   projection: null as OrchestrationV2ThreadProjection | null,
   project: {
     id: "app-root-fence-project",
@@ -192,6 +194,16 @@ vi.mock("./hooks/useSettings", async (importOriginal) => {
     useLegacySidebarEnabled: () => false,
   };
 });
+vi.mock("./speech/useEnvironmentSpeechInput", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./speech/useEnvironmentSpeechInput")>();
+  return {
+    ...actual,
+    useEnvironmentSpeechInput: (input: Parameters<typeof actual.useEnvironmentSpeechInput>[0]) => {
+      const speech = actual.useEnvironmentSpeechInput(input);
+      return fixture.upstreamVoiceChosen ? { ...speech, available: true } : speech;
+    },
+  };
+});
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/Sidebar", () => ({ default: () => null }));
@@ -245,6 +257,7 @@ import { useDictationSessionStore } from "./dictation/dictationSessionStore";
 import { useDictationWidgetActivityStore } from "./dictation/dictationWidgetState";
 import { createFakeMedia } from "./dictation/dictationMedia.testFixtures";
 import { setDictationMediaBackend } from "./dictation/recorder";
+import { __setClientSettingsForTests, getClientSettings } from "./hooks/useSettings";
 
 import { dictationEnvironment } from "./state/dictation";
 import { threadEnvironment } from "./state/threads";
@@ -305,6 +318,7 @@ async function desktopViewport() {
 
 async function setupBrowserFixture0() {
   fixture.projection = makeThreadProjection();
+  fixture.upstreamVoiceChosen = false;
   appRootFence.openThreadId = threadId;
   installFenceFontEvents();
   fixture.dictationCalls.length = 0;
@@ -588,6 +602,26 @@ function tiptapEditor(): Editor {
   return editor!;
 }
 
+const QUESTION_ANSWER_FIELD =
+  '[data-testid="question-answer-editor"][aria-label="Which scope first?"]';
+
+/** Places a ProseMirror caret after `before` in a question card's answer editor. */
+async function placeAnswerCaretAfter(field: HTMLElement, before: string) {
+  await act(async () => {
+    const editor = (field as HTMLElement & { editor?: Editor }).editor!;
+    let caret: number | undefined;
+    editor.state.doc.descendants((node, position) => {
+      if (caret !== undefined || !node.isText) return;
+      const offset = node.text!.indexOf(before);
+      if (offset >= 0) caret = position + offset + before.length;
+    });
+    expect(caret, `No text node holds ${before}`).toBeDefined();
+    editor.view.dispatch(
+      editor.state.tr.setSelection(TextSelection.create(editor.state.doc, caret!)),
+    );
+  });
+}
+
 /** Places a real ProseMirror text selection after `before` in the document. */
 async function placeCaretAfter(before: string) {
   // A native click waits for the editor's real layout while pending focus callbacks run.
@@ -693,8 +727,7 @@ describe("dictation phase 4 fence", () => {
     await mountApp();
 
     await startRecordingFromMicrophone();
-    expect(media.constraints).toHaveLength(1);
-    expect(media.constraints[0]).toEqual(expect.objectContaining({ audio: expect.anything() }));
+    expect(media.openedMicrophones).toEqual([""]);
     expect(media.recorders).toHaveLength(1);
     expect(media.recorders[0]!.options).toMatchObject({
       mimeType: "audio/webm;codecs=opus",
@@ -731,6 +764,25 @@ describe("dictation phase 4 fence", () => {
     expect(media.recorders[1]!.calls).toContain("stop");
     expect(buttonLabelled("Stop and transcribe")).toBeUndefined();
     expect(startCalls()).toHaveLength(1);
+  });
+
+  it("the composer offers Mesura dictation as its only microphone on a device that never chose upstream voice", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await mountApp();
+
+    requireButton("Start voice dictation");
+    expect(buttonLabelled("Start voice input")).toBeUndefined();
+  });
+
+  it("keeps one composer microphone on a device that chose upstream voice", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    fixture.upstreamVoiceChosen = true;
+
+    await mountApp();
+
+    requireButton("Start voice dictation");
+    expect(buttonLabelled("Start voice input")).toBeUndefined();
   });
 
   // Mesura: on Chrome Android a tap focuses the button before its click. Focus that
@@ -836,11 +888,24 @@ describe("dictation phase 4 fence", () => {
         durationMs: expect.any(Number),
         mode: "submit",
         target: { kind: "thread", environmentId, threadId },
+        filterSilence: true,
       },
     });
     // The microphone is released and the strip goes away once recording stops.
     expect(media.stoppedTracks).toEqual([1]);
     expect(buttonLabelled("Stop and transcribe")).toBeUndefined();
+  });
+
+  it("a device with silence filtering off asks the server to send the whole recording", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const previous = getClientSettings();
+    using _settings = { [Symbol.dispose]: () => __setClientSettingsForTests(previous) };
+    __setClientSettingsForTests({ ...previous, speechSilenceFiltering: false });
+
+    await mountApp();
+    await startRecordingFromMicrophone();
+    await stopRecordingFromStrip();
+    expect(startedJob(0).input).toMatchObject({ filterSilence: false });
   });
 
   it("dictation phase 4 AC3: a composer without a caret gets the marker at the end", async () => {
@@ -1768,9 +1833,7 @@ describe("dictation phase 5 fence", () => {
     fixture.projection = withOpenQuestion(makeThreadProjection());
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Composer draft");
     await mountApp();
-    const field = container.querySelector<HTMLTextAreaElement>(
-      'textarea[aria-label="Which scope first?"]',
-    );
+    const field = container.querySelector<HTMLElement>(QUESTION_ANSWER_FIELD);
     expect(field, "Expected the question card's answer field").not.toBeNull();
     await act(async () => field!.focus());
     await settle();
@@ -1825,10 +1888,8 @@ describe("dictation phase 5 guards", () => {
 });
 
 describe("dictation phase 5 rework regressions", () => {
-  async function focusQuestionAnswer(): Promise<HTMLTextAreaElement> {
-    const field = container.querySelector<HTMLTextAreaElement>(
-      'textarea[aria-label="Which scope first?"]',
-    );
+  async function focusQuestionAnswer(): Promise<HTMLElement> {
+    const field = container.querySelector<HTMLElement>(QUESTION_ANSWER_FIELD);
     expect(field, "Expected the question card's answer field").not.toBeNull();
     await act(async () => field!.focus());
     await settle();
@@ -2046,7 +2107,7 @@ describe("dictation phase 5 rework regressions", () => {
       );
     });
     await settle();
-    field.setSelectionRange(5, 5);
+    await placeAnswerCaretAfter(field, "Hello");
     await recordIntoQuestion("send");
     const { jobId } = startedJob(0).input;
     expect(slotsIn(questionAnswerText())).toHaveLength(1);
@@ -2077,7 +2138,7 @@ describe("dictation phase 5 rework regressions", () => {
     });
     await settle();
     expect(questionAnswerText()).toBe("Hello world");
-    field.setSelectionRange(5, 5);
+    await placeAnswerCaretAfter(field, "Hello");
 
     await recordIntoQuestion("insert");
     const answer = questionAnswerText();

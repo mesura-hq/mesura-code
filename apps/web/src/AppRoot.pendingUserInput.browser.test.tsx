@@ -321,7 +321,8 @@ it("AppRoot clears optimistic selection after a noted draft is confirmed during 
   await act(async () => button("Workspace").click());
   expect(button("Workspace").querySelector("svg")).toBeNull();
   expect(
-    container.querySelector<HTMLTextAreaElement>('[data-question-id="scope"] textarea')?.value,
+    container.querySelector('[data-question-id="scope"] [data-testid="question-answer-editor"]')
+      ?.textContent,
   ).toContain("Keep this note");
   expect(fixture.respond).not.toHaveBeenCalled();
 });

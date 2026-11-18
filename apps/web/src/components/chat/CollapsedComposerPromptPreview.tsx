@@ -1,6 +1,7 @@
 import { isProviderSkillUserInvocable } from "@t3tools/client-runtime/providerSkills";
 import type { ServerProviderSkill } from "@t3tools/contracts";
 import { assistantCitationLabel } from "@t3tools/shared/assistantCitations";
+import { isDictationContextKind } from "@t3tools/shared/dictationSlots";
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import { fileBasename } from "@t3tools/shared/path";
 import {
@@ -23,6 +24,7 @@ import type {
 } from "../composerContextPresentation";
 import { ContextChip, ContextChipLabel } from "../ContextChip";
 import { ContextChipShell } from "../contextChipParts";
+import { DictationSlotChip } from "~/dictation/DictationSlotChip";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { SkillChipIcon } from "./SkillInlineText";
 
@@ -93,6 +95,10 @@ export function CollapsedComposerPromptPreview(props: {
           />
         );
       case "context-reference": {
+        // Mesura: a dictation marker draws as the editor's transcribing chip.
+        if (isDictationContextKind(segment.kind)) {
+          return <DictationSlotChip key={key} jobId={segment.contextId} inert />;
+        }
         const entry = resolvedContextRecord(props.contextRecords, segment.kind, segment.contextId);
         return entry ? (
           <ContextChipShell

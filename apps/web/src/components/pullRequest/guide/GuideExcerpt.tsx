@@ -5,7 +5,12 @@ import type {
   SelectedLineRange,
 } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
-import type { PullRequestReviewGuideExcerpt, PullRequestReviewPosition } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  PullRequestReviewGuideExcerpt,
+  PullRequestReviewPosition,
+} from "@t3tools/contracts";
 import { ArrowUpRightIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -63,6 +68,12 @@ export interface ExcerptCommenting {
   }) => void;
   readonly onRemove: (commentId: string) => void;
   readonly onAskAgent: ((comment: ReviewCommentContext, request: string) => void) | null;
+  /** Mesura: where a draft is dictated; `scope` keeps drafts of different reviews apart. */
+  readonly dictation?: {
+    readonly environmentId: EnvironmentId;
+    readonly projectId: ProjectId;
+    readonly scope: string;
+  };
 }
 
 interface ExcerptAnnotation {
@@ -294,6 +305,14 @@ function ExcerptDiff({
             ))}
             {annotation.metadata.draft && draft !== null && commenting !== null ? (
               <DiffCommentAnnotation
+                environmentId={commenting.dictation?.environmentId}
+                projectId={commenting.dictation?.projectId}
+                ownerKey={JSON.stringify([
+                  "pr-guide",
+                  commenting.dictation?.scope,
+                  excerpt.path,
+                  draft.range,
+                ])}
                 kind="draft"
                 rangeLabel={`${excerpt.path}:${getReviewPositionAnchor(draft.position).line}`}
                 text=""

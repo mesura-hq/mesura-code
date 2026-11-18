@@ -185,6 +185,11 @@ export interface ComposerPromptEditorProps {
   /** Rendered after the placeholder text, such as a key hint. */
   placeholderSuffix?: ReactNode;
   ariaLabel?: string | undefined;
+  /** Mesura: another surface's id, so it never matches the composer's keys and focus lookups. */
+  editorTestId?: string | undefined;
+  /** Mesura: validation state for a form field such as a question answer. */
+  ariaInvalid?: boolean | undefined;
+  ariaDescribedBy?: string | undefined;
   suggestionListId?: string | undefined;
   activeSuggestionId?: string | undefined;
   isPathQueryActive?: () => boolean;
@@ -1105,11 +1110,13 @@ function ComposerPromptEditorTiptapInner(
       "composer-tiptap -m-1 block max-h-52 min-h-[calc(2lh+--spacing(2))] overflow-y-auto p-1 whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
       className,
     ),
-    "data-testid": "composer-editor",
+    "data-testid": props.editorTestId ?? "composer-editor",
     "data-composer-rich-text": richText ? "true" : "false",
     role: "textbox",
     "aria-multiline": "true",
     ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
+    ...(props.ariaInvalid ? { "aria-invalid": "true" } : {}),
+    ...(props.ariaDescribedBy ? { "aria-describedby": props.ariaDescribedBy } : {}),
     ...(disabled ? { "aria-readonly": "true" } : {}),
     ...(!disabled && suggestionListId
       ? {

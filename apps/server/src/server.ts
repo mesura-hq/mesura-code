@@ -158,6 +158,7 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as DictationJobs from "./dictation/DictationJobs.ts";
+import * as DictationSilenceFilter from "./dictation/DictationSilenceFilter.ts";
 import * as ClientPresence from "./push/ClientPresence.ts";
 import * as PushDispatcher from "./push/PushDispatcher.ts";
 import * as PushSender from "./push/PushSender.ts";
@@ -519,7 +520,10 @@ const layerProjectCloneTracker = ProjectCloneTracker.layer.pipe(
 );
 
 // Mesura: server-side dictation, transcribed with the key from server settings.
-const layerDictationJobs = DictationJobs.layer.pipe(Layer.provide(layerServerSettings));
+const layerDictationJobs = DictationJobs.layer.pipe(
+  Layer.provide(layerServerSettings),
+  Layer.provide(DictationSilenceFilter.layer.pipe(Layer.provide(SpeechModelStore.layer))),
+);
 
 // Mesura: Web Push to subscribed devices, signed with this server's VAPID key pair.
 const layerPushSubscriptions = PushSubscriptions.layer.pipe(

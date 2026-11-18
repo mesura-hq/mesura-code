@@ -78,6 +78,8 @@ export const DictationStartInput = Schema.Struct({
   durationMs: NonNegativeInt,
   mode: DictationMode,
   target: DictationTarget,
+  /** Drop silence before transcribing (Settings → Voice → Silence filtering). Absent means on. */
+  filterSilence: Schema.optional(Schema.Boolean),
 });
 export type DictationStartInput = typeof DictationStartInput.Type;
 

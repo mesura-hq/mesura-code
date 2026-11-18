@@ -1,4 +1,4 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import * as monaco from "monaco-editor";
 import {
   useCallback,
@@ -128,6 +128,8 @@ export interface UseMonacoFileCommentsInput {
   readonly model: monaco.editor.ITextModel | null;
   readonly relativePath: string;
   readonly composerDraftTarget: ScopedThreadRef | DraftId;
+  /** Where a comment's dictation is transcribed. */
+  readonly environmentId: EnvironmentId;
 }
 
 export interface MonacoFileComments {
@@ -147,6 +149,7 @@ export function useMonacoFileComments({
   model,
   relativePath,
   composerDraftTarget,
+  environmentId,
 }: UseMonacoFileCommentsInput): MonacoFileComments {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
@@ -387,6 +390,8 @@ export function useMonacoFileComments({
     zones: zones.map(({ group, contentNode }) =>
       createPortal(
         <FileCommentZoneContent
+          environmentId={environmentId}
+          relativePath={relativePath}
           group={group}
           onCancel={removeEntry}
           onComment={submitEntry}
@@ -438,7 +443,7 @@ function useCommentZones(
 
 // Monaco owns mutable zones. React subscribes only to the portal destinations,
 // which change after reconciliation, never while React renders a comment.
-function createCommentZoneStore() {
+export function createCommentZoneStore() {
   const zones = new Map<number, CommentZone>();
   const listeners = new Set<() => void>();
   let snapshot: {
@@ -489,6 +494,7 @@ function createCommentZoneStore() {
           touched = true;
         }
       });
+      for (const zone of zones.values()) exposeZoneToAssistiveTechnology(zone.domNode);
 
       if (touched) {
         snapshot = {
@@ -529,6 +535,16 @@ function createCommentZoneStore() {
 }
 
 /**
+ * WORKAROUND: Monaco marks its whole view-zones layer `aria-hidden` once, when the editor is
+ * built, which hides a comment form's textarea and buttons from screen readers. Lifting it is
+ * safe because this editor's other zones are empty spacers. Remove once comments move to a
+ * Monaco surface that stays in the accessibility tree, such as a content widget.
+ */
+function exposeZoneToAssistiveTechnology(zoneNode: HTMLElement): void {
+  zoneNode.parentElement?.removeAttribute("aria-hidden");
+}
+
+/**
  * Keeps the zone's own interactions out of the editor.
  *
  * A view zone is inside Monaco's DOM, so without this a keystroke in the
@@ -541,13 +557,17 @@ function stopEditorEvents(node: HTMLElement): void {
   }
 }
 
-function FileCommentZoneContent({
+export function FileCommentZoneContent({
+  environmentId,
+  relativePath,
   group,
   onCancel,
   onComment,
   onDelete,
   onTextChange,
 }: {
+  environmentId: EnvironmentId;
+  relativePath: string;
   group: FileCommentGroup;
   onCancel: (entryId: string) => void;
   onComment: (entryId: string, text: string) => void;
@@ -559,6 +579,8 @@ function FileCommentZoneContent({
       {group.entries.map((entry) => (
         <DiffCommentAnnotation
           key={entry.id}
+          environmentId={environmentId}
+          ownerKey={JSON.stringify(["file-comment", environmentId, relativePath, entry.id])}
           kind={entry.kind}
           rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
           text={entry.text}

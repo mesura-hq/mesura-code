@@ -17,12 +17,11 @@ import { disarmSendWhenReady, useSendWhenReadyArmed } from "./sendWhenReady";
 const WAVE_BARS = [0, 1, 2, 3, 4, 5] as const;
 
 /**
- * How a `dictation` context link draws in the composer: a caret bar, the stepped wave and the
- * job's mode, or Retry and Discard when it failed. The mode is this device's choice for its own
- * job (the server's copy lags a round trip); another device's job reads the composer's environment.
- * In an armed draft every marker shows the send glyph as a button that keeps the draft unsent.
+ * A `dictation` link in the composer: caret, wave and mode, or Retry and Discard once it failed.
+ * The mode is this device's own choice (the server's copy lags); an armed draft shows the send
+ * glyph as a button that keeps it unsent. `inert` drops the buttons, for a preview that is one.
  */
-export function DictationSlotChip(props: { readonly jobId: string }) {
+export function DictationSlotChip(props: { readonly jobId: string; readonly inert?: boolean }) {
   const own = useOwnDictationJobsStore((state) => state.jobs[props.jobId]);
   const composer = use(ComposerContextActionsContext);
   const { jobs } = useDictationJobs(own?.environmentId ?? composer.environmentId);
@@ -30,7 +29,9 @@ export function DictationSlotChip(props: { readonly jobId: string }) {
   const draftTarget = own?.question ? null : (own?.target ?? job?.target ?? null);
   const armed = useSendWhenReadyArmed(draftTarget ? toComposerThreadTarget(draftTarget) : null);
   const sendGlyph =
-    armed && draftTarget ? <CancelSendWhenReadyButton target={draftTarget} /> : null;
+    armed && draftTarget && !props.inert ? (
+      <CancelSendWhenReadyButton target={draftTarget} />
+    ) : null;
 
   // A job that never reached the server fails here too, so its marker can be retried.
   if (job?.status === "failed" || own?.notStarted !== undefined) {
@@ -42,7 +43,7 @@ export function DictationSlotChip(props: { readonly jobId: string }) {
         transcription failed
         {sendGlyph}
         {/* Retry and Discard act on this device's jobs; another device owns its own. */}
-        {own ? (
+        {own && !props.inert ? (
           <>
             <button
               type="button"
