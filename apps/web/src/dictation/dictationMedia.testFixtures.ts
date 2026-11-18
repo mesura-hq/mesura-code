@@ -50,29 +50,33 @@ export class FakeMediaRecorder extends EventTarget {
 }
 
 /**
- * The fake microphone the dictation tests install with `setDictationMediaBackend`. Each
- * `getUserMedia` call is stream number n (from 1); `stoppedTracks` lists the streams whose track
- * was stopped. `holdMicrophone` makes the next `getUserMedia` wait for `releaseMicrophone`, and
- * `failRecorder` makes the next recorder throw when it is created or when it starts.
+ * The fake microphone for `setDictationMediaBackend`. Open n (from 1) records its device id;
+ * `stoppedTracks` lists streams whose track stopped. `preferMicrophone` sets the chosen id,
+ * `holdMicrophone` parks the next open until `releaseMicrophone`, `failRecorder` breaks one.
  */
 export function createFakeMedia() {
   const recorders: FakeMediaRecorder[] = [];
-  const constraints: MediaStreamConstraints[] = [];
+  const openedMicrophones: string[] = [];
+  let preferredMicrophoneId = "";
   const stoppedTracks: number[] = [];
   const meterCloses: number[] = [];
   let held: (() => void) | null = null;
   let holdNext = false;
   let failNext: "create" | "start" | null = null;
   const backend: DictationMediaBackend = {
-    getUserMedia: async (requested) => {
-      constraints.push(requested);
-      const index = constraints.length;
+    // The hold sits on the first step of opening, so a release right after a start reaches it.
+    chooseMicrophone: async () => {
       if (holdNext) {
         holdNext = false;
         await new Promise<void>((resolve) => {
           held = resolve;
         });
       }
+      return preferredMicrophoneId;
+    },
+    openMicrophone: async (microphoneId) => {
+      openedMicrophones.push(microphoneId);
+      const index = openedMicrophones.length;
       return {
         getTracks: () => [{ stop: () => stoppedTracks.push(index) }],
         getAudioTracks: () => [{ stop: () => stoppedTracks.push(index) }],
@@ -89,15 +93,18 @@ export function createFakeMedia() {
     },
     createLevelMeter: () => ({
       read: () => 0.4,
-      close: () => meterCloses.push(constraints.length),
+      close: () => meterCloses.push(openedMicrophones.length),
     }),
   };
   return {
     backend,
     recorders,
-    constraints,
+    openedMicrophones,
     stoppedTracks,
     meterCloses,
+    preferMicrophone: (microphoneId: string) => {
+      preferredMicrophoneId = microphoneId;
+    },
     holdMicrophone: () => {
       holdNext = true;
     },

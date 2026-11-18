@@ -713,8 +713,7 @@ describe("dictation phase 4 fence", () => {
     await mountApp();
 
     await startRecordingFromMicrophone();
-    expect(media.constraints).toHaveLength(1);
-    expect(media.constraints[0]).toEqual(expect.objectContaining({ audio: expect.anything() }));
+    expect(media.openedMicrophones).toEqual([""]);
     expect(media.recorders).toHaveLength(1);
     expect(media.recorders[0]!.options).toMatchObject({
       mimeType: "audio/webm;codecs=opus",

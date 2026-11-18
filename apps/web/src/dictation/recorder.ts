@@ -1,3 +1,6 @@
+import { chooseRecordingMicrophone } from "../speech/browserMicrophones";
+import { openMicrophone } from "../speech/browserPcmCapture";
+
 /**
  * Records dictation audio with one `MediaRecorder` per recording: opus in WebM where available
  * (MP4 otherwise), at 32 kbps so 45 minutes stay far under OpenAI's 25 MB limit, plus an
@@ -10,7 +13,10 @@ export interface DictationLevelMeter {
 }
 
 export interface DictationMediaBackend {
-  readonly getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
+  /** The device id from Settings → Voice → Microphone: the first connected entry, or "" for the default. */
+  readonly chooseMicrophone: () => Promise<string>;
+  /** Opens `microphoneId`, falling back to the system default when that device is gone. */
+  readonly openMicrophone: (microphoneId: string) => Promise<MediaStream>;
   readonly isTypeSupported: (mimeType: string) => boolean;
   readonly createMediaRecorder: (
     stream: MediaStream,
@@ -64,7 +70,8 @@ function createBrowserLevelMeter(stream: MediaStream): DictationLevelMeter {
 }
 
 const browserBackend: DictationMediaBackend = {
-  getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+  chooseMicrophone: chooseRecordingMicrophone,
+  openMicrophone,
   isTypeSupported: (mimeType) =>
     typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(mimeType),
   createMediaRecorder: (stream, options) => new MediaRecorder(stream, options),
@@ -80,7 +87,7 @@ export function setDictationMediaBackend(backend: DictationMediaBackend | null):
 
 export async function openDictationRecording(): Promise<DictationRecording> {
   const backend = backendOverride ?? browserBackend;
-  const stream = await backend.getUserMedia({ audio: true });
+  const stream = await backend.openMicrophone(await backend.chooseMicrophone());
   const mimeType =
     PREFERRED_MIME_TYPES.find((candidate) => backend.isTypeSupported(candidate)) ?? "";
   const chunks: Blob[] = [];
