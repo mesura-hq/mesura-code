@@ -73,6 +73,7 @@ const decodeErrorBody = Schema.decodeUnknownOption(
   Schema.fromJsonString(
     Schema.Struct({
       error: Schema.Struct({
+        message: Schema.optional(Schema.NullOr(Schema.String)),
         param: Schema.optional(Schema.NullOr(Schema.String)),
         code: Schema.optional(Schema.NullOr(Schema.String)),
       }),
@@ -80,21 +81,34 @@ const decodeErrorBody = Schema.decodeUnknownOption(
   ),
 );
 
+/** Whisper reports a refused file with no `param` or `code`; only its message names the file. */
+const FILE_FORMAT_MESSAGE =
+  /invalid file format|corrupted or unsupported|could not be decoded|unsupported (?:file|audio) format/i;
+
 /**
  * Whether OpenAI refused the recording itself, so sending the whole recording may succeed. A
- * 403, a 404 or a 400 about another parameter (the model, the key's project) is not that.
+ * 403, a 404, a 413 (the whole recording is larger) or a 400 about another field is not that.
  */
 function rejectsAudio(status: number, body: string): boolean {
-  if (status === 413 || status === 415) return true;
-  if (status !== 400 && status !== 422) return false;
+  if (status !== 400 && status !== 415 && status !== 422) return false;
   const error = Option.getOrUndefined(decodeErrorBody(body))?.error;
-  return error?.param === "file" || /audio|file/i.test(error?.code ?? "");
+  return (
+    error?.param === "file" ||
+    /audio|file/i.test(error?.code ?? "") ||
+    FILE_FORMAT_MESSAGE.test(error?.message ?? "")
+  );
 }
 
 function statusFailure(status: number, body: string): OpenAiTranscriptionError {
   if (status === 401) {
     return new OpenAiTranscriptionError({
       reason: "OpenAI rejected the API key (HTTP 401). Check the key in Settings.",
+      retryable: false,
+    });
+  }
+  if (status === 413) {
+    return new OpenAiTranscriptionError({
+      reason: "OpenAI refused the recording as too large (HTTP 413).",
       retryable: false,
     });
   }

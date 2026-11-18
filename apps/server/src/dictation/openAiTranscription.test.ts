@@ -333,8 +333,30 @@ describe("openAiTranscription phase 1 fence", () => {
       raw: openAiError(null, "Audio file is too short.", "audio_too_short"),
       audioRejected: true,
     },
-    { origin: "a 413", status: 413, raw: "Request Entity Too Large", audioRejected: true },
-    { origin: "a 415", status: 415, raw: "", audioRejected: true },
+    {
+      origin: "GPT-4o's corrupted-file 400",
+      status: 400,
+      raw: openAiError("file", "Audio file might be corrupted or unsupported", "invalid_value"),
+      audioRejected: true,
+    },
+    {
+      origin: "Whisper's invalid-format 400 with no param or code",
+      status: 400,
+      raw: openAiError(
+        null,
+        "Invalid file format. Supported formats: ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm']",
+      ),
+      audioRejected: true,
+    },
+    // The whole recording is larger than the cut, so it cannot pass a size limit the cut failed.
+    { origin: "a 413", status: 413, raw: "Request Entity Too Large", audioRejected: false },
+    { origin: "a bare 415", status: 415, raw: "", audioRejected: false },
+    {
+      origin: "a 400 about another field",
+      status: 400,
+      raw: openAiError(null, "Invalid value for 'temperature'."),
+      audioRejected: false,
+    },
     {
       origin: "a 400 about the model",
       status: 400,
@@ -444,5 +466,14 @@ describe("openAiTranscription phase 4 fence", () => {
           "https://api.openai.com/v1/audio/transcriptions",
         );
       }),
+  );
+});
+
+describe("openAiTranscription size refusal", () => {
+  it.effect("names a 413 as too large", () =>
+    Effect.gen(function* () {
+      const { exit } = yield* transcribeWith([{ status: 413, raw: "" }]);
+      assert.include(failureReason(exit), "too large");
+    }),
   );
 });

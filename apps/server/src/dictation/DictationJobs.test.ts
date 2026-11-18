@@ -787,6 +787,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
         status: 400,
         body: '{"error":{"message":"Invalid file format.","param":"file","code":null}}',
       },
+      {
+        origin: "Whisper's invalid-format error",
+        status: 400,
+        body: '{"error":{"message":"Invalid file format. Supported formats: [\'ogg\', \'webm\']","type":"invalid_request_error","param":null,"code":null}}',
+      },
     ])(
       "retries with the whole recording after OpenAI meets the filtered audio with $origin",
       ({ status, body }) =>
