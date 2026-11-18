@@ -8,10 +8,14 @@ import { useDictationJobs } from "~/state/dictation";
 import { useMicrophoneBlocker } from "../voice/microphoneClaim";
 import {
   cancelFieldDictation,
+  cancelQueuedFieldSubmit,
   deliverFieldDictationJobs,
   insertTranscriptAtCaret,
+  isFieldDictationBusy,
+  queueFieldSubmit,
   startFieldDictation,
   stopFieldDictation,
+  takeQueuedFieldSubmit,
   useFieldDictationStore,
 } from "./fieldDictation";
 
@@ -22,6 +26,7 @@ export function useFieldDictation(input: {
   readonly text: string;
   readonly textareaRef: RefObject<HTMLTextAreaElement | null>;
   readonly onTextChange: (text: string) => void;
+  readonly disabled?: boolean | undefined;
 }) {
   const { environmentId, ownerKey } = input;
   const latest = useRef(input);
@@ -29,7 +34,16 @@ export function useFieldDictation(input: {
   useEffect(() => {
     latest.current = input;
   });
-  const recordingHere = useFieldDictationStore((state) => state.recording?.ownerKey === ownerKey);
+  const phase = useFieldDictationStore((state) =>
+    state.recording?.ownerKey === ownerKey ? state.recording.phase : null,
+  );
+  const busy = useFieldDictationStore((state) => isFieldDictationBusy(state, ownerKey));
+  const failedPending = useFieldDictationStore((state) =>
+    (state.pending[ownerKey] ?? []).some((jobId) => state.failed.has(jobId)),
+  );
+  const pending = useFieldDictationStore((state) => state.pending[ownerKey]?.length ?? 0);
+  const submitQueued = useFieldDictationStore((state) => state.submitQueued.has(ownerKey));
+
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an editor that closes mid-recording transcribes it, so no hidden recording holds the microphone
   useEffect(
     () => () => {
@@ -39,7 +53,13 @@ export function useFieldDictation(input: {
     },
     [ownerKey],
   );
-  const pending = useFieldDictationStore((state) => state.pending[ownerKey]?.length ?? 0);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an editor that can no longer submit, such as a hidden form, ends its recording
+  useEffect(() => {
+    if (input.disabled && useFieldDictationStore.getState().recording?.ownerKey === ownerKey) {
+      void stopFieldDictation();
+    }
+  }, [input.disabled, ownerKey]);
+
   const { jobs, loaded } = useDictationJobs(pending > 0 ? environmentId : null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- inserts transcripts as the server's job subscription reports them
   useEffect(() => {
@@ -48,13 +68,19 @@ export function useFieldDictation(input: {
       ownerKey,
       environmentId,
       jobs,
-      insert: (transcript) => {
+      insert: (transcripts) => {
         const field = latest.current.textareaRef.current;
-        const text = latest.current.text;
         // At the caret of a focused field, else at the end; a late transcript never takes focus.
         const focused = field !== null && document.activeElement === field;
-        const caret = focused ? field.selectionStart : text.length;
-        const next = insertTranscriptAtCaret(text, caret, transcript);
+        let next = {
+          text: latest.current.text,
+          caret: focused ? field.selectionStart : latest.current.text.length,
+        };
+        for (const transcript of transcripts) {
+          next = insertTranscriptAtCaret(next.text, next.caret, transcript);
+        }
+        // Read by a submission that runs before the editor re-renders with the text.
+        latest.current = { ...latest.current, text: next.text };
         latest.current.onTextChange(next.text);
         if (focused) {
           window.requestAnimationFrame(() => field.setSelectionRange(next.caret, next.caret));
@@ -62,7 +88,35 @@ export function useFieldDictation(input: {
       },
     });
   }, [environmentId, jobs, loaded, ownerKey, pending]);
-  return { environmentId, ownerKey, recordingHere, transcribing: pending > 0 };
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- sends a held submission once the last transcript is in the draft, or drops it when one failed
+  useEffect(() => {
+    if (!submitQueued) return;
+    if (failedPending) cancelQueuedFieldSubmit(ownerKey);
+    else if (!busy) {
+      const submit = takeQueuedFieldSubmit(ownerKey);
+      if (submit && !latest.current.disabled) submit(latest.current.text);
+    }
+  }, [busy, failedPending, ownerKey, submitQueued]);
+
+  /** Holds `submit` until the recording and its transcript are in the draft; stops a recording. */
+  const submitWhenTranscribed = (submit: (text: string) => void) => {
+    queueFieldSubmit(ownerKey, submit);
+    if (useFieldDictationStore.getState().recording?.ownerKey === ownerKey) {
+      void stopFieldDictation();
+    }
+  };
+
+  return {
+    environmentId,
+    ownerKey,
+    phase,
+    busy,
+    transcribing: busy && phase === null,
+    submitQueued,
+    submitWhenTranscribed,
+    cancelQueuedSubmit: () => cancelQueuedFieldSubmit(ownerKey),
+  };
 }
 
 type FieldDictation = ReturnType<typeof useFieldDictation>;
@@ -113,10 +167,12 @@ export function FieldDictationControls(props: {
   const recordingElsewhere = useFieldDictationStore(
     (state) => state.recording !== null && state.recording.ownerKey !== dictation.ownerKey,
   );
-  if (dictation.recordingHere) {
+  if (dictation.phase !== null) {
     return (
       <>
-        <span className="shrink-0 text-xs text-muted-foreground">Recording</span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {dictation.phase === "opening" ? "Starting…" : "Recording"}
+        </span>
         <IconButton label="Stop and transcribe" onClick={() => void stopFieldDictation()}>
           <SquareIcon className="fill-current" />
         </IconButton>
@@ -131,8 +187,16 @@ export function FieldDictationControls(props: {
     <>
       {dictation.transcribing ? (
         <span role="status" className="shrink-0 text-xs text-muted-foreground">
-          Transcribing…
+          {dictation.submitQueued ? "Sends when transcribed" : "Transcribing…"}
         </span>
+      ) : null}
+      {dictation.submitQueued ? (
+        <IconButton
+          label="Don't send when the transcription lands"
+          onClick={dictation.cancelQueuedSubmit}
+        >
+          <XIcon />
+        </IconButton>
       ) : null}
       <IconButton
         label={

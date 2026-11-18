@@ -59,7 +59,16 @@ export function useTextFieldSpeech(input: {
   });
   // Mesura: the editor's microphone is Mesura dictation; upstream's stays reachable by its shortcut.
   const mesuraDictation = useFieldDictation(input);
-  return { ...speech, shortcutLabel, mesuraDictation };
+  return {
+    ...speech,
+    shortcutLabel,
+    mesuraDictation,
+    blocksSubmission: speech.blocksSubmission || mesuraDictation.busy,
+    submitAfterDictation: (submit: (text: string) => void) =>
+      mesuraDictation.busy
+        ? mesuraDictation.submitWhenTranscribed(submit)
+        : speech.submitAfterDictation(submit),
+  };
 }
 
 export type TextFieldSpeech = ReturnType<typeof useTextFieldSpeech>;
