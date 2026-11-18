@@ -18,6 +18,7 @@ import {
   EnvironmentId,
   ThreadId,
   ProjectId,
+  RuntimeRequestId,
   type OrchestrationV2ThreadProjection,
   ApprovalRequestId,
 } from "@t3tools/contracts";
@@ -132,7 +133,11 @@ vi.mock("@legendapp/list/react", () => ({
     );
   },
 }));
-import { usePendingUserInputDraftStore } from "./pendingUserInputDraftStore";
+import {
+  pendingUserInputRequestKey,
+  readPendingUserInputAnswerText,
+  usePendingUserInputDraftStore,
+} from "./pendingUserInputDraftStore";
 
 import { threadEnvironment } from "./state/threads";
 import { useComposerDraftStore } from "./composerDraftStore";
@@ -255,20 +260,14 @@ async function setupBrowserFixture0() {
   }
 
   function questionField(questionId: string) {
-    return container.querySelector<HTMLTextAreaElement>(
-      `[data-question-id="${questionId}"] textarea`,
+    return container.querySelector<HTMLElement>(
+      `[data-question-id="${questionId}"] [data-testid="question-answer-editor"]`,
     );
   }
 
   async function typeQuestion(questionId: string, text: string) {
-    const field = questionField(questionId)!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
-        field,
-        text,
-      );
-      field.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    await userEvent.click(questionField(questionId)!);
+    await userEvent.keyboard(text.replaceAll("\n", "{Enter}"));
   }
 
   return {
@@ -278,6 +277,11 @@ async function setupBrowserFixture0() {
     button,
     questionField,
     typeQuestion,
+    answerText: (questionId: string) =>
+      readPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, RuntimeRequestId.make(requestId)),
+        questionId,
+      ),
     async [Symbol.asyncDispose]() {
       container.remove();
       appRootFence.threads.clear();
@@ -320,8 +324,8 @@ it("phase two incomplete inline request focuses its missing question and retains
   await act(async () => button("Submit").click());
   expect(fixture.respond).not.toHaveBeenCalled();
   expect(questionField("timing")).toBe(document.activeElement);
-  expect(questionField("scope")?.disabled).toBe(false);
-  expect(questionField("timing")?.disabled).toBe(false);
+  expect(questionField("scope")?.isContentEditable).toBe(true);
+  expect(questionField("timing")?.isContentEditable).toBe(true);
 });
 
 it("phase two pending row survives a thread refresh and remains outside collapsed work", async () => {
@@ -387,7 +391,7 @@ it("phase two per-question upload state appears beside its own text field", asyn
   await using _screen = await mountApp();
   const field = questionField("timing");
   expect(field).not.toBeNull();
-  expect(field?.parentElement?.textContent).toMatch(/upload|prepar/i);
+  expect(field?.closest("[data-question-id]")?.textContent).toMatch(/upload|prepar/i);
 });
 
 it("phase two failed answer retains an inline retry and resolved request keeps history", async () => {
@@ -472,7 +476,7 @@ it("phase two guard keeps attachment drafts separate by question", async () => {
 
 it("phase two inline keyboard choices and multiline text submit one complete request", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
-  const { mountApp, button, questionField, typeQuestion } = _browserFixture0;
+  const { mountApp, button, answerText, typeQuestion } = _browserFixture0;
 
   await using _screen = await mountApp();
   await act(async () => {
@@ -482,7 +486,7 @@ it("phase two inline keyboard choices and multiline text submit one complete req
   });
   expect(button("Workspace").getAttribute("aria-pressed")).toBe("true");
   await typeQuestion("timing", "Tomorrow\nAfter the backup");
-  expect(questionField("timing")?.value).toBe("Tomorrow\nAfter the backup");
+  expect(answerText("timing")).toBe("Tomorrow\nAfter the backup");
   expect(fixture.respond).not.toHaveBeenCalled();
   await act(async () => button("Submit").click());
   expect(fixture.respond).toHaveBeenCalledOnce();
@@ -506,7 +510,7 @@ it("phase two inline drafts survive app remount without entering the normal comp
   await typeQuestion("scope", "Keep this answer");
   await _screen.unmount();
   await using _remountedScreen = await mountApp();
-  expect(questionField("scope")?.value).toBe("Keep this answer");
+  await expect.element(questionField("scope")!).toHaveTextContent("Keep this answer");
   expect(container.querySelector("[data-normal-composer]")?.textContent).not.toContain(
     "Keep this answer",
   );
@@ -602,8 +606,12 @@ it("phase two question upload failure stays beside its field and blocks request 
     },
   });
   await using _screen = await mountApp();
-  expect(questionField("timing")?.parentElement?.textContent).toContain("Connection lost");
-  expect(questionField("scope")?.parentElement?.textContent).not.toContain("notes.txt");
+  expect(questionField("timing")?.closest("[data-question-id]")?.textContent).toContain(
+    "Connection lost",
+  );
+  expect(questionField("scope")?.closest("[data-question-id]")?.textContent).not.toContain(
+    "notes.txt",
+  );
   expect(button("Submit").disabled).toBe(true);
   const retry = vi.spyOn(attachmentUploads, "retryAttachmentUpload").mockImplementation(() => {});
   await act(async () => button("Retry upload").click());
@@ -612,7 +620,9 @@ it("phase two question upload failure stays beside its field and blocks request 
     container.querySelector<HTMLButtonElement>('button[aria-label="Remove notes.txt"]')!.click(),
   );
   expect(button("Submit").disabled).toBe(false);
-  expect(questionField("timing")?.parentElement?.textContent).not.toContain("notes.txt");
+  expect(questionField("timing")?.closest("[data-question-id]")?.textContent).not.toContain(
+    "notes.txt",
+  );
 });
 
 it("phase two remote reconnect keeps editable answers and resumes the same request", async () => {
@@ -622,7 +632,7 @@ it("phase two remote reconnect keeps editable answers and resumes the same reque
   appRootFence.environments[0]!.connection.phase = "reconnecting";
   await using _screen = await mountApp();
   await typeQuestion("scope", "Remote draft");
-  expect(questionField("scope")?.disabled).toBe(false);
+  expect(questionField("scope")?.isContentEditable).toBe(true);
   expect(button("Submit").disabled).toBe(true);
   expect(container.textContent).toContain("Reconnecting. Your answers are saved.");
   await act(async () => {
@@ -634,7 +644,7 @@ it("phase two remote reconnect keeps editable answers and resumes the same reque
     publishFenceThreadProjection(fixture.projection!, environmentId);
     for (const listener of fixture.threadListeners) listener();
   });
-  expect(questionField("scope")?.value).toBe("Remote draft");
+  await expect.element(questionField("scope")!).toHaveTextContent("Remote draft");
   expect(button("Submit").disabled).toBe(false);
   expect(fixture.respond).not.toHaveBeenCalled();
 });
@@ -678,7 +688,7 @@ it("phase two picked question file uses the shared upload draft and request atta
     });
     button("Workspace").click();
   });
-  expect(questionField("timing")?.parentElement?.textContent).toContain("Ready");
+  expect(questionField("timing")?.closest("[data-question-id]")?.textContent).toContain("Ready");
   await act(async () => button("Submit").click());
   expect(fixture.respond).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -698,10 +708,11 @@ it("phase two rework clears missing-answer feedback as soon as a choice answers 
 
   await using _screen = await mountApp();
   await act(async () => button("Submit").click());
-  expect(questionField("scope")?.getAttribute("aria-invalid")).toBe("true");
+  expect(questionField("scope")?.closest("[data-question-id]")?.textContent).toContain(
+    "Answer this question before submitting.",
+  );
   await act(async () => button("Workspace").click());
-  expect(questionField("scope")?.getAttribute("aria-invalid")).toBeNull();
-  expect(questionField("scope")?.parentElement?.textContent).not.toContain(
+  expect(questionField("scope")?.closest("[data-question-id]")?.textContent).not.toContain(
     "Answer this question before submitting.",
   );
 });
@@ -741,7 +752,7 @@ it("phase two rework unrelated v2 detail update leaves existing Markdown rows un
 
 it("phase two regression long request keeps answers across virtual scrolling", async () => {
   await using _browserFixture0 = await setupBrowserFixture0();
-  const { container, mountApp, questionField, typeQuestion } = _browserFixture0;
+  const { container, mountApp, questionField, typeQuestion, answerText } = _browserFixture0;
 
   const item = questionItem();
   const questions = Array.from({ length: 12 }, (_, index) => ({
@@ -753,7 +764,9 @@ it("phase two regression long request keeps answers across virtual scrolling", a
   }));
   fixture.projection = { ...fixture.projection!, turnItems: [{ ...item, questions }] };
   await using _screen = await mountApp();
-  expect(container.querySelectorAll("[data-question-id] textarea")).toHaveLength(12);
+  expect(
+    container.querySelectorAll('[data-question-id] [data-testid="question-answer-editor"]'),
+  ).toHaveLength(12);
   await typeQuestion("long-11", "Last answer\nWith more detail");
   await act(async () => {
     fixture.pendingRowsVisible = false;
@@ -767,7 +780,8 @@ it("phase two regression long request keeps answers across virtual scrolling", a
     publishFenceThreadProjection(fixture.projection!, environmentId);
     for (const listener of fixture.threadListeners) listener();
   });
-  expect(questionField("long-11")?.value).toContain("Last answer\nWith more detail");
+  expect(questionField("long-11")).not.toBeNull();
+  expect(answerText("long-11")).toBe("Last answer\nWith more detail");
   expect(fixture.respond).not.toHaveBeenCalled();
   expect(fixture.startTurn).not.toHaveBeenCalled();
 });
@@ -828,7 +842,7 @@ it("phase two regression both file pickers preserve normal and question attachme
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
   }
-  expect(questionField("scope")?.parentElement?.textContent).toContain(
+  expect(questionField("scope")?.closest("[data-question-id]")?.textContent).toContain(
     "Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.",
   );
   expect(useComposerDraftStore.getState().getComposerDraft(normalTarget)?.images).toHaveLength(0);

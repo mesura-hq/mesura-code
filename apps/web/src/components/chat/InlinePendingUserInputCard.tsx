@@ -1,5 +1,5 @@
 import type { PendingUserInputError } from "../../pendingUserInputDraftStore";
-import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useId, useRef, useState } from "react";
 import { CheckIcon, PaperclipIcon, XIcon } from "lucide-react";
 import type {
   RuntimeRequestId,
@@ -36,6 +36,7 @@ import {
   useAttachmentUploadStore,
 } from "../../lib/attachmentUploadQueue";
 import { AttachmentPicker } from "./AttachmentPicker";
+import { QuestionAnswerEditor, type QuestionAnswerFieldHandle } from "./QuestionAnswerEditor";
 import { DictationStartButton } from "../../dictation/DictationControls";
 import { registerDictationComposer } from "../../dictation/dictationController";
 import { MaterialDictationModeIcon } from "../../dictation/MaterialDictationModeIcon";
@@ -101,7 +102,7 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
   const setError = (value: PendingUserInputError | null) =>
     usePendingUserInputDraftStore.getState().setError(key, value);
   const [missingQuestionId, setMissingQuestionId] = useState<string | null>(null);
-  const fields = useRef(new Map<string, HTMLTextAreaElement>());
+  const fields = useRef(new Map<string, QuestionAnswerFieldHandle>());
   const unregisterDictation = useRef<(() => void) | null>(null);
   const responding = context.respondingRequestIds.includes(request.requestId);
   const targets = request.questions.map((question) =>
@@ -161,8 +162,8 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
       // At the field's caret, read when the recording stops; at the end once it is gone.
       insertSlot: (slot) => {
         const field = fields.current.get(question.id);
-        if (!field?.isConnected) return false;
-        const caret = field.selectionStart ?? field.value.length;
+        if (!field?.isConnected()) return false;
+        const caret = field.caret();
         return editPendingUserInputAnswerText(key, question.id, (text) =>
           insertDictationSlotAt(text, caret, slot),
         );
@@ -174,13 +175,14 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
 
   const focusAnswerField = (questionId: string | undefined) => {
     const field = questionId ? fields.current.get(questionId) : undefined;
-    const focusable = field?.disabled
-      ? field
-          .closest("[data-question-id]")
-          ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
-      : field;
-    focusable?.focus({ preventScroll: true });
-    return field;
+    if (field?.disabled) {
+      field
+        .element()
+        ?.closest("[data-question-id]")
+        ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+        ?.focus({ preventScroll: true });
+    } else field?.focus();
+    return field?.element();
   };
   // A deferred focus callback used stale completeness after an option changed.
   // Read this render's answers so the shortcut reaches the first missing answer.
@@ -292,8 +294,8 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
             onOption={(option) =>
               usePendingUserInputDraftStore.getState().update(key, question, { option })
             }
-            fieldRef={(element) => {
-              if (element) fields.current.set(question.id, element);
+            fieldRef={(handle) => {
+              if (handle) fields.current.set(question.id, handle);
               else fields.current.delete(question.id);
             }}
             context={context}
@@ -359,12 +361,11 @@ function QuestionField({
   onFocus: () => void;
   onText: (text: string) => void;
   onOption: (value: string) => void;
-  fieldRef: (element: HTMLTextAreaElement | null) => void;
+  fieldRef: (handle: QuestionAnswerFieldHandle | null) => void;
   context: InlinePendingUserInputContext;
   request: PendingUserInput;
 }) {
   const id = useId();
-  const textarea = useRef<HTMLTextAreaElement | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const target = questionAttachmentDraftId(
     context.environmentId,
@@ -394,13 +395,6 @@ function QuestionField({
       startAttachmentUpload({ environmentId: context.environmentId, image, draftTarget: target });
     }
   }, [draft?.images, draft?.files, context.environmentId, context.supportsAttachments, target]);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: sizes the textarea to its content before paint
-  useLayoutEffect(() => {
-    const element = textarea.current;
-    if (!element || element.value !== (answer?.customAnswer ?? "")) return;
-    element.style.height = "auto";
-    element.style.height = `${Math.max(72, element.scrollHeight)}px`;
-  }, [answer?.customAnswer]);
   const addFiles = async (files: File[]) => {
     if (!canAttach || files.length === 0) return;
     try {
@@ -438,7 +432,8 @@ function QuestionField({
           event.metaKey ||
           event.altKey ||
           event.target instanceof HTMLTextAreaElement ||
-          event.target instanceof HTMLInputElement
+          event.target instanceof HTMLInputElement ||
+          (event.target instanceof HTMLElement && event.target.isContentEditable)
         )
           return;
         if (!/^[1-9]$/.test(event.key)) return;
@@ -515,9 +510,9 @@ function QuestionField({
         })}
       </div>
       <div className="mb-1.5 mt-3 flex items-center justify-between gap-2">
-        <label htmlFor={id} className="text-xs font-medium text-muted-foreground">
+        <span className="text-xs font-medium text-muted-foreground">
           {question.options.length ? "Additional detail" : "Your answer"}
-        </label>
+        </span>
         {question.allowCustomAnswer !== false ? (
           <div className="flex items-center gap-1">
             {context.supportsAttachments ? (
@@ -547,35 +542,22 @@ function QuestionField({
         ) : null}
       </div>
       <div>
-        <textarea
-          id={id}
-          ref={(element) => {
-            textarea.current = element;
-            fieldRef(element);
-          }}
+        <QuestionAnswerEditor
+          handleRef={fieldRef}
           value={answer?.customAnswer ?? ""}
           disabled={disabled || question.allowCustomAnswer === false}
-          aria-label={question.question}
-          aria-invalid={invalid || undefined}
-          aria-describedby={
-            invalid
-              ? `${id}-missing`
-              : question.allowCustomAnswer === false
-                ? `${id}-choice-only`
-                : undefined
-          }
-          onChange={(event) => onText(event.target.value)}
+          ariaLabel={question.question}
+          invalid={invalid}
+          onChange={onText}
           onPaste={(event) => {
             if (event.clipboardData.files.length && canAttach) {
               event.preventDefault();
               void addFiles(Array.from(event.clipboardData.files));
             }
           }}
-          rows={2}
           placeholder={
             question.options.length ? "Add context to your selection…" : "Type your answer…"
           }
-          className="block min-h-18 w-full resize-none overflow-hidden rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 outline-none focus:border-primary focus:ring-1 focus:ring-inset focus:ring-primary/30 disabled:opacity-50"
         />
         {question.allowCustomAnswer === false ? (
           <p id={`${id}-choice-only`} className="mt-1 text-xs text-muted-foreground">

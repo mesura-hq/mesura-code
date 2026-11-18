@@ -705,7 +705,9 @@ it.each(WIDTHS)(
     const currentQuestion = screen.container.querySelector<HTMLElement>(
       '[data-pending-user-input-request-id="pinned-dock-message-question"]',
     )!;
-    const answer = currentQuestion.querySelector<HTMLTextAreaElement>("textarea")!;
+    const answer = currentQuestion.querySelector<HTMLElement>(
+      '[data-testid="question-answer-editor"]',
+    )!;
     await userEvent.fill(answer, "Update the user docs");
     await act(async () => buttonNamed(currentQuestion, "Submit")!.click());
     await vi.waitFor(() => expect(fixture.respondToUserInput).toHaveBeenCalledOnce());

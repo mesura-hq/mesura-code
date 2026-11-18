@@ -109,7 +109,7 @@ it("gives real question options their numbers and arrows, then Escape returns to
   await screen.getByRole("textbox", { name: "Pick an option" }).click();
   expect(resolveKeyScope()).toBe("insert");
   await userEvent.keyboard("j");
-  await expect.element(screen.getByRole("textbox")).toHaveValue("j");
+  await expect.element(screen.getByRole("textbox")).toHaveTextContent("j");
 });
 
 it("gives the real minimap arrows, Home, End, Enter and Space without a leader", async () => {

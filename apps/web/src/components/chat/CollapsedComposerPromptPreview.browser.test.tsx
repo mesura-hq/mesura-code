@@ -1,7 +1,8 @@
 import "~/index.css";
 
-import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
+import { DictationJobId, EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
+import { formatDictationSlot } from "@t3tools/shared/dictationSlots";
 import { expect, it } from "vite-plus/test";
 
 import { formatInlineContextReference } from "~/lib/composerContextReferences";
@@ -97,4 +98,23 @@ it("leaves unknown skills as the text the user typed", async () => {
 
   expect(container.querySelector('[data-slot="context-chip"]')).toBeNull();
   expect(container.textContent).toBe("run $missing now");
+});
+
+it("shows a dictation marker as the transcribing chip, inert inside the row's button", async () => {
+  const prompt = `Before ${formatDictationSlot(DictationJobId.make("job-collapsed-1"))} after`;
+  await using screen = await render(
+    <button type="button">
+      <CollapsedComposerPromptPreview
+        prompt={prompt}
+        skills={[]}
+        contextRecords={EMPTY_COMPOSER_CONTEXT_RECORDS}
+        theme="light"
+      />
+    </button>,
+    // The inert preview has no router-dependent children.
+    { router: false },
+  );
+  await expect.element(screen.getByRole("img", { name: "Transcribing" })).toBeVisible();
+  expect(screen.container.textContent).not.toContain("t3-context");
+  expect(screen.container.querySelectorAll("button button")).toHaveLength(0);
 });

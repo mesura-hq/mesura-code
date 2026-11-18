@@ -588,6 +588,26 @@ function tiptapEditor(): Editor {
   return editor!;
 }
 
+const QUESTION_ANSWER_FIELD =
+  '[data-testid="question-answer-editor"][aria-label="Which scope first?"]';
+
+/** Places a ProseMirror caret after `before` in a question card's answer editor. */
+async function placeAnswerCaretAfter(field: HTMLElement, before: string) {
+  await act(async () => {
+    const editor = (field as HTMLElement & { editor?: Editor }).editor!;
+    let caret: number | undefined;
+    editor.state.doc.descendants((node, position) => {
+      if (caret !== undefined || !node.isText) return;
+      const offset = node.text!.indexOf(before);
+      if (offset >= 0) caret = position + offset + before.length;
+    });
+    expect(caret, `No text node holds ${before}`).toBeDefined();
+    editor.view.dispatch(
+      editor.state.tr.setSelection(TextSelection.create(editor.state.doc, caret!)),
+    );
+  });
+}
+
 /** Places a real ProseMirror text selection after `before` in the document. */
 async function placeCaretAfter(before: string) {
   // A native click waits for the editor's real layout while pending focus callbacks run.
@@ -1768,9 +1788,7 @@ describe("dictation phase 5 fence", () => {
     fixture.projection = withOpenQuestion(makeThreadProjection());
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Composer draft");
     await mountApp();
-    const field = container.querySelector<HTMLTextAreaElement>(
-      'textarea[aria-label="Which scope first?"]',
-    );
+    const field = container.querySelector<HTMLElement>(QUESTION_ANSWER_FIELD);
     expect(field, "Expected the question card's answer field").not.toBeNull();
     await act(async () => field!.focus());
     await settle();
@@ -1825,10 +1843,8 @@ describe("dictation phase 5 guards", () => {
 });
 
 describe("dictation phase 5 rework regressions", () => {
-  async function focusQuestionAnswer(): Promise<HTMLTextAreaElement> {
-    const field = container.querySelector<HTMLTextAreaElement>(
-      'textarea[aria-label="Which scope first?"]',
-    );
+  async function focusQuestionAnswer(): Promise<HTMLElement> {
+    const field = container.querySelector<HTMLElement>(QUESTION_ANSWER_FIELD);
     expect(field, "Expected the question card's answer field").not.toBeNull();
     await act(async () => field!.focus());
     await settle();
@@ -2046,7 +2062,7 @@ describe("dictation phase 5 rework regressions", () => {
       );
     });
     await settle();
-    field.setSelectionRange(5, 5);
+    await placeAnswerCaretAfter(field, "Hello");
     await recordIntoQuestion("send");
     const { jobId } = startedJob(0).input;
     expect(slotsIn(questionAnswerText())).toHaveLength(1);
@@ -2077,7 +2093,7 @@ describe("dictation phase 5 rework regressions", () => {
     });
     await settle();
     expect(questionAnswerText()).toBe("Hello world");
-    field.setSelectionRange(5, 5);
+    await placeAnswerCaretAfter(field, "Hello");
 
     await recordIntoQuestion("insert");
     const answer = questionAnswerText();
