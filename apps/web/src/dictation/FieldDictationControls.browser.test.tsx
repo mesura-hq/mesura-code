@@ -4,67 +4,26 @@ import { expect, it, vi } from "vite-plus/test";
 
 import { render } from "../../test/render";
 import { TextFieldSpeechControls, useTextFieldSpeech } from "~/speech/useTextFieldSpeech";
-import { claimMicrophone, resetMicrophoneClaimForTest } from "../voice/microphoneClaim";
-import { createFakeMedia } from "./dictationMedia.testFixtures";
+import { claimMicrophone } from "../voice/microphoneClaim";
 import * as transport from "./dictationTransport";
 import { useFieldDictationStore } from "./fieldDictation";
-import { setDictationMediaBackend } from "./recorder";
+import { fieldJob, setupFieldDictation, startedJobIds } from "./fieldDictation.testFixtures";
+import { publishJobs } from "./fieldDictation.testMocks";
 
-const jobsFixture = vi.hoisted(() => ({
-  jobs: [] as DictationJob[],
-  listeners: new Set<() => void>(),
-}));
-
-vi.mock("./dictationTransport", () => ({
-  uploadDictationAudio: vi.fn(async () => "field-audio-1"),
-  startDictationTranscription: vi.fn(async () => ({})),
-}));
-vi.mock("~/state/dictation", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  return {
-    ...(await importOriginal<typeof import("~/state/dictation")>()),
-    useDictationJobs: (environmentId: string | null) => {
-      const jobs = useSyncExternalStore(
-        (listener) => {
-          jobsFixture.listeners.add(listener);
-          return () => jobsFixture.listeners.delete(listener);
-        },
-        () => jobsFixture.jobs,
-      );
-      return {
-        jobs: environmentId === null ? [] : jobs,
-        cursor: { epoch: null, revision: null },
-        loaded: environmentId !== null,
-      };
-    },
-  };
-});
+vi.mock("./dictationTransport", async () =>
+  (await import("./fieldDictation.testMocks")).mockDictationTransportModule(),
+);
+vi.mock("~/state/dictation", async (importOriginal) =>
+  (await import("./fieldDictation.testMocks")).mockDictationJobsModule(importOriginal),
+);
 
 const environmentId = EnvironmentId.make("field-dictation-environment");
-
-function publishJobs(jobs: DictationJob[]) {
-  jobsFixture.jobs = jobs;
-  for (const listener of jobsFixture.listeners) listener();
-}
-
-function setup() {
-  const media = createFakeMedia();
-  setDictationMediaBackend(media.backend);
-  publishJobs([]);
-  useFieldDictationStore.setState({
-    recording: null,
-    pending: {},
-    failed: new Set(),
-    submitQueued: new Set(),
-  });
-  resetMicrophoneClaimForTest();
-  vi.mocked(transport.startDictationTranscription).mockClear();
-  return media;
-}
+const setup = setupFieldDictation;
 
 function CommentEditor(props: {
   readonly initial: string;
   readonly onSubmit?: (text: string) => void;
+  readonly disabled?: boolean;
 }) {
   const [text, setText] = useState(props.initial);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -74,6 +33,7 @@ function CommentEditor(props: {
     text,
     textareaRef,
     onTextChange: setText,
+    disabled: props.disabled,
   });
   return (
     <div>
@@ -138,7 +98,7 @@ it("discards a cancelled recording and frees the microphone", async () => {
   expect(transport.startDictationTranscription).not.toHaveBeenCalled();
 });
 
-it("transcribes a recording whose editor closes, and inserts it when the editor opens again", async () => {
+it("transcribes a recording whose editor closes, and keeps it out of the next draft", async () => {
   const media = setup();
   {
     await using screen = await render(<CommentEditor initial="Draft" />);
@@ -148,35 +108,22 @@ it("transcribes a recording whose editor closes, and inserts it when the editor 
   expect(media.stoppedTracks).toEqual([1]);
   await vi.waitFor(() => expect(transport.startDictationTranscription).toHaveBeenCalledOnce());
   const [, input] = vi.mocked(transport.startDictationTranscription).mock.calls[0]!;
-  const job: DictationJob = {
-    id: DictationJobId.make(input.jobId),
-    target: null,
-    mode: "inject",
-    status: "completed",
-    text: "late words",
-    durationMs: 1_000,
-    createdAt: "2026-11-18T00:00:00.000Z",
-  };
-  publishJobs([job]);
+  expect(useFieldDictationStore.getState().pending).toEqual({});
+  publishJobs([
+    {
+      id: DictationJobId.make(input.jobId),
+      target: null,
+      mode: "inject",
+      status: "completed",
+      text: "late words",
+      durationMs: 1_000,
+      createdAt: "2026-11-18T00:00:00.000Z",
+    },
+  ]);
 
   await using reopened = await render(<CommentEditor initial="Draft" />);
-  await expect
-    .element(reopened.getByRole("textbox", { name: "Comment" }))
-    .toHaveValue("Draft late words");
+  await expect.element(reopened.getByRole("textbox", { name: "Comment" })).toHaveValue("Draft");
 });
-
-const fieldJob = (jobId: string, overrides: Partial<DictationJob> = {}): DictationJob => ({
-  id: DictationJobId.make(jobId),
-  target: null,
-  mode: "inject",
-  status: "transcribing",
-  durationMs: 1_000,
-  createdAt: "2026-11-18T00:00:00.000Z",
-  ...overrides,
-});
-
-const startedJobIds = () =>
-  vi.mocked(transport.startDictationTranscription).mock.calls.map(([, input]) => input.jobId);
 
 it("submits a comment only once its Mesura transcript has landed", async () => {
   setup();
@@ -212,24 +159,21 @@ it("does not hold a submission for a transcription that failed", async () => {
   expect(submitted).toEqual(["Draft"]);
 });
 
-it("inserts every transcript that landed while the editor was closed", async () => {
+it("inserts transcripts that land together in one update, in recording order", async () => {
   setup();
-  {
-    await using screen = await render(<CommentEditor initial="Draft" />);
-    for (let recording = 0; recording < 2; recording += 1) {
-      await screen.getByRole("button", { name: "Start voice dictation" }).click();
-      await screen.getByRole("button", { name: "Stop and transcribe" }).click();
-      await vi.waitFor(() => expect(startedJobIds()).toHaveLength(recording + 1));
-    }
+  await using screen = await render(<CommentEditor initial="Draft" />);
+  for (let recording = 0; recording < 2; recording += 1) {
+    await screen.getByRole("button", { name: "Start voice dictation" }).click();
+    await screen.getByRole("button", { name: "Stop and transcribe" }).click();
+    await vi.waitFor(() => expect(startedJobIds()).toHaveLength(recording + 1));
   }
   const [first, second] = startedJobIds();
   publishJobs([
     fieldJob(first!, { status: "completed", text: "one" }),
     fieldJob(second!, { status: "completed", text: "two" }),
   ]);
-  await using reopened = await render(<CommentEditor initial="Draft" />);
   await expect
-    .element(reopened.getByRole("textbox", { name: "Comment" }))
+    .element(screen.getByRole("textbox", { name: "Comment" }))
     .toHaveValue("Draft one two");
 });
 
@@ -247,4 +191,123 @@ it("discards a microphone granted after its editor closed, and frees the claim",
   expect(call).not.toBeNull();
   call?.();
   expect(transport.startDictationTranscription).not.toHaveBeenCalled();
+});
+
+/** Renders an editor whose Submit is held for a recording it stopped; returns the started job. */
+async function queueSubmitDuringRecording(
+  screen: Awaited<ReturnType<typeof render>>,
+): Promise<void> {
+  await screen.getByRole("button", { name: "Start voice dictation" }).click();
+  await expect.element(screen.getByRole("button", { name: "Stop and transcribe" })).toBeVisible();
+  await screen.getByRole("button", { name: "Submit" }).click();
+}
+
+it("drops a held submission when the recording cannot be uploaded", async () => {
+  setup();
+  vi.mocked(transport.uploadDictationAudio).mockRejectedValueOnce(new Error("offline"));
+  const submitted: string[] = [];
+  await using screen = await render(
+    <CommentEditor initial="Draft" onSubmit={(text) => submitted.push(text)} />,
+  );
+  await queueSubmitDuringRecording(screen);
+  await vi.waitFor(() => expect(transport.uploadDictationAudio).toHaveBeenCalledOnce());
+  await expect.element(screen.getByRole("status")).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole("button", { name: "Start voice dictation" }))
+    .not.toHaveAttribute("aria-disabled", "true");
+  expect(useFieldDictationStore.getState().submitQueued.size).toBe(0);
+  expect(submitted).toEqual([]);
+});
+
+it("does not send while the microphone is still starting", async () => {
+  const media = setup();
+  const submitted: string[] = [];
+  await using screen = await render(
+    <CommentEditor initial="Draft" onSubmit={(text) => submitted.push(text)} />,
+  );
+  media.holdMicrophone();
+  await screen.getByRole("button", { name: "Start voice dictation" }).click();
+  await expect.element(screen.getByText("Starting…")).toBeVisible();
+  await screen.getByRole("button", { name: "Submit" }).click();
+  expect(useFieldDictationStore.getState().submitQueued.size).toBe(0);
+  await screen.getByRole("button", { name: "Cancel dictation" }).click();
+  media.releaseMicrophone();
+  await vi.waitFor(() => expect(media.stoppedTracks).toEqual([1]));
+  await expect
+    .element(screen.getByRole("button", { name: "Start voice dictation" }))
+    .not.toHaveAttribute("aria-disabled", "true");
+  expect(submitted).toEqual([]);
+});
+
+it("drops a held submission when another recording starts, even if that one is cancelled", async () => {
+  setup();
+  const submitted: string[] = [];
+  await using screen = await render(
+    <CommentEditor initial="Draft" onSubmit={(text) => submitted.push(text)} />,
+  );
+  await queueSubmitDuringRecording(screen);
+  await vi.waitFor(() => expect(startedJobIds()).toHaveLength(1));
+  await screen.getByRole("button", { name: "Start voice dictation" }).click();
+  await expect.element(screen.getByRole("button", { name: "Cancel dictation" })).toBeVisible();
+  publishJobs([fieldJob(startedJobIds()[0]!, { status: "completed", text: "first" })]);
+  await expect.element(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Draft first");
+  await screen.getByRole("button", { name: "Cancel dictation" }).click();
+  await expect
+    .element(screen.getByRole("button", { name: "Start voice dictation" }))
+    .not.toHaveAttribute("aria-disabled", "true");
+  expect(submitted).toEqual([]);
+});
+
+it("forgets a held submission when its editor closes, so reopening it sends nothing", async () => {
+  setup();
+  const submitted: string[] = [];
+  {
+    await using screen = await render(
+      <CommentEditor initial="Draft" onSubmit={(text) => submitted.push(text)} />,
+    );
+    await queueSubmitDuringRecording(screen);
+    await vi.waitFor(() => expect(startedJobIds()).toHaveLength(1));
+  }
+  await using reopened = await render(
+    <CommentEditor initial="Reopened" onSubmit={(text) => submitted.push(text)} />,
+  );
+  publishJobs([fieldJob(startedJobIds()[0]!, { status: "completed", text: "old words" })]);
+  const field = reopened.getByRole("textbox", { name: "Comment" });
+  await expect.element(field).toHaveValue("Reopened");
+  expect(useFieldDictationStore.getState().submitQueued.size).toBe(0);
+  expect(submitted).toEqual([]);
+});
+
+it("forgets a held submission and its transcript when the editor is disabled", async () => {
+  setup();
+  const submitted: string[] = [];
+  const onSubmit = (text: string) => submitted.push(text);
+  await using screen = await render(<CommentEditor initial="Draft" onSubmit={onSubmit} />);
+  await queueSubmitDuringRecording(screen);
+  await vi.waitFor(() => expect(startedJobIds()).toHaveLength(1));
+  await screen.rerender(<CommentEditor initial="Draft" onSubmit={onSubmit} disabled />);
+  await vi.waitFor(() => expect(useFieldDictationStore.getState().pending).toEqual({}));
+  await screen.rerender(<CommentEditor initial="Draft" onSubmit={onSubmit} />);
+  publishJobs([fieldJob(startedJobIds()[0]!, { status: "completed", text: "old words" })]);
+  await expect.element(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Draft");
+  expect(submitted).toEqual([]);
+});
+
+it("keeps a failed recording's retry out of the draft after a manual submit", async () => {
+  setup();
+  const submitted: string[] = [];
+  await using screen = await render(
+    <CommentEditor initial="Draft" onSubmit={(text) => submitted.push(text)} />,
+  );
+  await screen.getByRole("button", { name: "Start voice dictation" }).click();
+  await screen.getByRole("button", { name: "Stop and transcribe" }).click();
+  await vi.waitFor(() => expect(startedJobIds()).toHaveLength(1));
+  const jobId = startedJobIds()[0]!;
+  publishJobs([fieldJob(jobId, { status: "failed", failure: "OpenAI refused" })]);
+  await expect.element(screen.getByRole("status")).not.toBeInTheDocument();
+  await screen.getByRole("button", { name: "Submit" }).click();
+  expect(submitted).toEqual(["Draft"]);
+  publishJobs([fieldJob(jobId, { status: "completed", text: "retried words" })]);
+  expect(useFieldDictationStore.getState().pending).toEqual({});
+  await expect.element(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Draft");
 });

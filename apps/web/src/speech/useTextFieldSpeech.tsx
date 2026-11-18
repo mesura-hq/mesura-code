@@ -64,10 +64,11 @@ export function useTextFieldSpeech(input: {
     shortcutLabel,
     mesuraDictation,
     blocksSubmission: speech.blocksSubmission || mesuraDictation.busy,
-    submitAfterDictation: (submit: (text: string) => void) =>
-      mesuraDictation.busy
-        ? mesuraDictation.submitWhenTranscribed(submit)
-        : speech.submitAfterDictation(submit),
+    submitAfterDictation: (submit: (text: string) => void) => {
+      if (mesuraDictation.busy) return mesuraDictation.submitWhenTranscribed(submit);
+      mesuraDictation.releaseDraft();
+      return speech.submitAfterDictation(submit);
+    },
   };
 }
 

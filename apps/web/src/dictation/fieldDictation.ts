@@ -16,8 +16,9 @@ import { guardRecordingScreen, warnRecordingMayBeSilent } from "./recordingScree
 
 /**
  * Mesura dictation for a plain comment editor: record, transcribe, insert at the caret. No marker:
- * a transcript waits in its editor's pending list and in Transcriptions, so it still lands after
- * the editor reopens. One recording at a time, shared with the composer through the claim.
+ * a transcript belongs to the mounted editor (its draft) that recorded it. An editor that closes,
+ * is disabled or submits by hand lets go of its jobs, whose text stays in Transcriptions. One
+ * recording at a time, shared with the composer through the claim.
  */
 
 interface FieldRecording {
@@ -45,7 +46,13 @@ export const useFieldDictationStore = create<FieldDictationState>(() => ({
   submitQueued: new Set(),
 }));
 
-const queuedSubmits = new Map<string, (text: string) => void>();
+/** A held submission and the jobs whose text has to land before it may run. */
+interface QueuedSubmit {
+  readonly submit: (text: string) => void;
+  readonly awaiting: Set<string>;
+}
+
+const queuedSubmits = new Map<string, QueuedSubmit>();
 
 function setSubmitQueued(ownerKey: string, queued: boolean) {
   useFieldDictationStore.setState((state) => {
@@ -57,10 +64,19 @@ function setSubmitQueued(ownerKey: string, queued: boolean) {
   });
 }
 
-/** Holds `submit` until the editor's recording and transcripts are in its draft. */
-export function queueFieldSubmit(ownerKey: string, submit: (text: string) => void): void {
-  queuedSubmits.set(ownerKey, submit);
+/**
+ * Holds `submit` until every transcript `ownerKey` waits for is in its draft. False when there is
+ * nothing to wait for, such as a microphone still starting, and nothing was held.
+ */
+export function queueFieldSubmit(ownerKey: string, submit: (text: string) => void): boolean {
+  const state = useFieldDictationStore.getState();
+  const awaiting = new Set(
+    (state.pending[ownerKey] ?? []).filter((jobId) => !state.failed.has(jobId)),
+  );
+  if (awaiting.size === 0) return false;
+  queuedSubmits.set(ownerKey, { submit, awaiting });
   setSubmitQueued(ownerKey, true);
+  return true;
 }
 
 export function cancelQueuedFieldSubmit(ownerKey: string): void {
@@ -68,11 +84,9 @@ export function cancelQueuedFieldSubmit(ownerKey: string): void {
   setSubmitQueued(ownerKey, false);
 }
 
-/** The held submission, now released to its caller. */
-export function takeQueuedFieldSubmit(ownerKey: string): ((text: string) => void) | undefined {
-  const submit = queuedSubmits.get(ownerKey);
-  cancelQueuedFieldSubmit(ownerKey);
-  return submit;
+/** A held submission that waits for `jobId` can no longer get its text, so it never runs. */
+function cancelSubmitAwaiting(ownerKey: string, jobId: string) {
+  if (queuedSubmits.get(ownerKey)?.awaiting.has(jobId)) cancelQueuedFieldSubmit(ownerKey);
 }
 
 /** True while `ownerKey` records or has a transcript on the way. */
@@ -125,6 +139,8 @@ export async function startFieldDictation(
     if (blocker !== null) reportError(blocker);
     return;
   }
+  // A new recording means the draft is still being written: a held submission no longer applies.
+  cancelQueuedFieldSubmit(ownerKey);
   const opened = ++generation;
   releaseMicrophone = claim;
   // Published before the permission prompt, so an editor closed during it can cancel.
@@ -162,7 +178,9 @@ export async function startFieldDictation(
 }
 
 export function cancelFieldDictation(): void {
-  const opening = useFieldDictationStore.getState().recording?.phase === "opening";
+  const current = useFieldDictationStore.getState().recording;
+  const opening = current?.phase === "opening";
+  if (current) cancelQueuedFieldSubmit(current.ownerKey);
   generation += 1;
   const { recording, release } = endRecording();
   recording?.discard();
@@ -171,10 +189,11 @@ export function cancelFieldDictation(): void {
 }
 
 /**
- * Stops the recording, then uploads it and starts its job; the editor inserts the text. An
- * editor that closes or goes inactive calls this too: opening is cancelled, a recording is kept.
+ * Stops the recording, then uploads it and starts its job; the editor inserts the text. A
+ * `detached` stop, for an editor that let go of its draft, leaves the text in Transcriptions.
+ * Opening is cancelled either way. The job is pending before the first await.
  */
-export async function stopFieldDictation(): Promise<void> {
+export async function stopFieldDictation(options?: { readonly detached?: boolean }): Promise<void> {
   const current = useFieldDictationStore.getState().recording;
   if (!current) return;
   if (current.phase === "opening") {
@@ -186,7 +205,7 @@ export async function stopFieldDictation(): Promise<void> {
   if (!recording) return;
   const jobId = DictationJobId.make(randomUUID());
   const durationMs = Date.now() - current.startedAt;
-  addPending(current.ownerKey, jobId);
+  if (!options?.detached) addPending(current.ownerKey, jobId);
   try {
     const audio = await recording.stop().finally(release);
     const attachmentId = await uploadDictationAudio(current.environmentId, audio, jobId);
@@ -198,9 +217,38 @@ export async function stopFieldDictation(): Promise<void> {
       target: null,
     });
   } catch (cause) {
+    cancelSubmitAwaiting(current.ownerKey, jobId);
     removePending(current.ownerKey, [jobId]);
     reportError("Dictation could not be sent for transcription", cause);
   }
+}
+
+/**
+ * The editor let go of its draft: it closed, was disabled, or was submitted by hand. Its held
+ * submission is dropped, a recording is still transcribed, and every job's text stays in
+ * Transcriptions instead of landing in a later draft with the same owner key.
+ */
+export function detachFieldDictation(ownerKey: string, environmentId: EnvironmentId): void {
+  cancelQueuedFieldSubmit(ownerKey);
+  const state = useFieldDictationStore.getState();
+  const recording = state.recording?.ownerKey === ownerKey ? state.recording : null;
+  if (recording) void stopFieldDictation({ detached: true });
+  const jobs = state.pending[ownerKey] ?? [];
+  for (const jobId of jobs) listedJobs.delete(jobId);
+  removePending(ownerKey, jobs);
+  const inFlight = recording?.phase === "recording" || jobs.some((id) => !state.failed.has(id));
+  if (!inFlight) return;
+  const toastId = toastManager.add({
+    type: "info",
+    title: "The transcript will be in Transcriptions",
+    actionProps: {
+      children: "Show",
+      onClick: () => {
+        toastManager.close(toastId);
+        openTranscriptionsList(environmentId);
+      },
+    },
+  });
 }
 
 function addPending(ownerKey: string, jobId: DictationJobId) {
@@ -245,25 +293,28 @@ export function insertTranscriptAtCaret(
 const listedJobs = new Set<string>();
 
 /**
- * Delivers one editor's finished jobs from the environment's job list. The completed ones'
- * texts go in through one `insert`, in recording order, so none overwrites another; a failure is
- * announced once and stays pending, so a retry from the Transcriptions list still lands here. A
- * job the server no longer lists is dropped.
+ * Delivers one editor's finished jobs: completed texts go in through one `insert`, in recording
+ * order; a failure is announced once and stays pending for a retry; a job no longer listed is
+ * dropped. Returns the held submission once every transcript it waited for went in.
  */
 export function deliverFieldDictationJobs(input: {
   readonly ownerKey: string;
   readonly environmentId: EnvironmentId;
   readonly jobs: ReadonlyArray<DictationJob>;
   readonly insert: (transcripts: ReadonlyArray<string>) => void;
-}): void {
+}): ((text: string) => void) | null {
   const state = useFieldDictationStore.getState();
   const settled: string[] = [];
+  const inserted: string[] = [];
   const transcripts: string[] = [];
   for (const jobId of state.pending[input.ownerKey] ?? []) {
     const job = input.jobs.find((candidate) => candidate.id === jobId);
     if (!job) {
       // Not listed yet while it uploads; gone once a list that showed it lacks it.
-      if (listedJobs.delete(jobId)) settled.push(jobId);
+      if (listedJobs.delete(jobId)) {
+        settled.push(jobId);
+        cancelSubmitAwaiting(input.ownerKey, jobId);
+      }
       continue;
     }
     listedJobs.add(jobId);
@@ -272,6 +323,7 @@ export function deliverFieldDictationJobs(input: {
       continue;
     }
     if (job.status === "failed") {
+      cancelSubmitAwaiting(input.ownerKey, jobId);
       if (state.failed.has(jobId)) continue;
       setFailed(jobId, true);
       const toastId = toastManager.add({
@@ -290,8 +342,19 @@ export function deliverFieldDictationJobs(input: {
     }
     settled.push(jobId);
     listedJobs.delete(jobId);
-    if (job.text) transcripts.push(job.text);
+    if (job.text) {
+      transcripts.push(job.text);
+      inserted.push(jobId);
+    } else {
+      cancelSubmitAwaiting(input.ownerKey, jobId);
+    }
   }
   if (transcripts.length > 0) input.insert(transcripts);
   removePending(input.ownerKey, settled);
+  const queued = queuedSubmits.get(input.ownerKey);
+  if (!queued) return null;
+  for (const jobId of inserted) queued.awaiting.delete(jobId);
+  if (queued.awaiting.size > 0) return null;
+  cancelQueuedFieldSubmit(input.ownerKey);
+  return queued.submit;
 }

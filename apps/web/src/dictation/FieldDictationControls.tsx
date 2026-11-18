@@ -3,6 +3,7 @@ import { MicIcon, SquareIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, type PointerEvent, type RefObject } from "react";
 
 import { Button } from "~/components/ui/button";
+import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useDictationJobs } from "~/state/dictation";
 import { useMicrophoneBlocker } from "../voice/microphoneClaim";
@@ -10,12 +11,12 @@ import {
   cancelFieldDictation,
   cancelQueuedFieldSubmit,
   deliverFieldDictationJobs,
+  detachFieldDictation,
   insertTranscriptAtCaret,
   isFieldDictationBusy,
   queueFieldSubmit,
   startFieldDictation,
   stopFieldDictation,
-  takeQueuedFieldSubmit,
   useFieldDictationStore,
 } from "./fieldDictation";
 
@@ -38,33 +39,21 @@ export function useFieldDictation(input: {
     state.recording?.ownerKey === ownerKey ? state.recording.phase : null,
   );
   const busy = useFieldDictationStore((state) => isFieldDictationBusy(state, ownerKey));
-  const failedPending = useFieldDictationStore((state) =>
-    (state.pending[ownerKey] ?? []).some((jobId) => state.failed.has(jobId)),
-  );
   const pending = useFieldDictationStore((state) => state.pending[ownerKey]?.length ?? 0);
   const submitQueued = useFieldDictationStore((state) => state.submitQueued.has(ownerKey));
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an editor that closes mid-recording transcribes it, so no hidden recording holds the microphone
-  useEffect(
-    () => () => {
-      if (useFieldDictationStore.getState().recording?.ownerKey === ownerKey) {
-        void stopFieldDictation();
-      }
-    },
-    [ownerKey],
-  );
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an editor that can no longer submit, such as a hidden form, ends its recording
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a closed editor's draft is gone: its recording and transcripts go to Transcriptions, never into a later draft
+  useEffect(() => () => detachFieldDictation(ownerKey, environmentId), [environmentId, ownerKey]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an editor that can no longer submit, such as a hidden form, lets go of its draft the same way
   useEffect(() => {
-    if (input.disabled && useFieldDictationStore.getState().recording?.ownerKey === ownerKey) {
-      void stopFieldDictation();
-    }
-  }, [input.disabled, ownerKey]);
+    if (input.disabled) detachFieldDictation(ownerKey, environmentId);
+  }, [environmentId, input.disabled, ownerKey]);
 
   const { jobs, loaded } = useDictationJobs(pending > 0 ? environmentId : null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- inserts transcripts as the server's job subscription reports them
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- inserts transcripts as the server's job subscription reports them, then runs a submission held for them
   useEffect(() => {
     if (!loaded || pending === 0) return;
-    deliverFieldDictationJobs({
+    const submit = deliverFieldDictationJobs({
       ownerKey,
       environmentId,
       jobs,
@@ -79,7 +68,7 @@ export function useFieldDictation(input: {
         for (const transcript of transcripts) {
           next = insertTranscriptAtCaret(next.text, next.caret, transcript);
         }
-        // Read by a submission that runs before the editor re-renders with the text.
+        // Read by the held submission below, before the editor re-renders with the text.
         latest.current = { ...latest.current, text: next.text };
         latest.current.onTextChange(next.text);
         if (focused) {
@@ -87,25 +76,28 @@ export function useFieldDictation(input: {
         }
       },
     });
+    if (submit && !latest.current.disabled) submit(latest.current.text);
   }, [environmentId, jobs, loaded, ownerKey, pending]);
-
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- sends a held submission once the last transcript is in the draft, or drops it when one failed
-  useEffect(() => {
-    if (!submitQueued) return;
-    if (failedPending) cancelQueuedFieldSubmit(ownerKey);
-    else if (!busy) {
-      const submit = takeQueuedFieldSubmit(ownerKey);
-      if (submit && !latest.current.disabled) submit(latest.current.text);
-    }
-  }, [busy, failedPending, ownerKey, submitQueued]);
 
   /** Holds `submit` until the recording and its transcript are in the draft; stops a recording. */
   const submitWhenTranscribed = (submit: (text: string) => void) => {
-    queueFieldSubmit(ownerKey, submit);
-    if (useFieldDictationStore.getState().recording?.ownerKey === ownerKey) {
+    const recording = useFieldDictationStore.getState().recording;
+    if (recording?.ownerKey === ownerKey) {
+      if (recording.phase === "opening") {
+        toastManager.add({
+          type: "info",
+          title: "The microphone is still starting",
+          description: "Stop or cancel the recording, then send.",
+        });
+        return;
+      }
       void stopFieldDictation();
     }
+    if (!queueFieldSubmit(ownerKey, submit)) submit(latest.current.text);
   };
+
+  /** A submission by hand ends the draft: a failed job's retry no longer lands here. */
+  const releaseDraft = () => detachFieldDictation(ownerKey, environmentId);
 
   return {
     environmentId,
@@ -115,6 +107,7 @@ export function useFieldDictation(input: {
     transcribing: busy && phase === null,
     submitQueued,
     submitWhenTranscribed,
+    releaseDraft,
     cancelQueuedSubmit: () => cancelQueuedFieldSubmit(ownerKey),
   };
 }
