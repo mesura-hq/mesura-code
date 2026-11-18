@@ -203,7 +203,7 @@ type Reply = {
 
 // transcribe-cpp has an import-only export. Load its disk entry with require so
 // Node SEA can reach it, including its native dependencies.
-const loaderEntry = `
+export const loaderEntry = `
   const { createRequire, findPackageJSON } = await import("node:module");
   const { dirname, join } = await import("node:path");
   const loadSpeechModule = async (moduleUrl) => {

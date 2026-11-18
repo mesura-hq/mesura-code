@@ -39,6 +39,7 @@ import {
   useComposerDraftStore,
 } from "~/composerDraftStore";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
+import { getClientSettings } from "~/hooks/useSettings";
 import {
   editPendingUserInputAnswerText,
   markPendingUserInputAnswerVoiced,
@@ -704,7 +705,17 @@ async function startUploadedDictationJob(
   const result = await runAtomCommand(
     appAtomRegistry,
     dictationEnvironment.start,
-    { environmentId, input: { jobId, attachmentId, durationMs, mode, target } },
+    {
+      environmentId,
+      input: {
+        jobId,
+        attachmentId,
+        durationMs,
+        mode,
+        target,
+        filterSilence: getClientSettings().speechSilenceFiltering,
+      },
+    },
     { reportFailure: false },
   );
   if (result._tag !== "Success") throw squashAtomCommandFailure(result);

@@ -245,6 +245,7 @@ import { useDictationSessionStore } from "./dictation/dictationSessionStore";
 import { useDictationWidgetActivityStore } from "./dictation/dictationWidgetState";
 import { createFakeMedia } from "./dictation/dictationMedia.testFixtures";
 import { setDictationMediaBackend } from "./dictation/recorder";
+import { __setClientSettingsForTests, getClientSettings } from "./hooks/useSettings";
 
 import { dictationEnvironment } from "./state/dictation";
 import { threadEnvironment } from "./state/threads";
@@ -864,11 +865,24 @@ describe("dictation phase 4 fence", () => {
         durationMs: expect.any(Number),
         mode: "submit",
         target: { kind: "thread", environmentId, threadId },
+        filterSilence: true,
       },
     });
     // The microphone is released and the strip goes away once recording stops.
     expect(media.stoppedTracks).toEqual([1]);
     expect(buttonLabelled("Stop and transcribe")).toBeUndefined();
+  });
+
+  it("a device with silence filtering off asks the server to send the whole recording", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const previous = getClientSettings();
+    using _settings = { [Symbol.dispose]: () => __setClientSettingsForTests(previous) };
+    __setClientSettingsForTests({ ...previous, speechSilenceFiltering: false });
+
+    await mountApp();
+    await startRecordingFromMicrophone();
+    await stopRecordingFromStrip();
+    expect(startedJob(0).input).toMatchObject({ filterSilence: false });
   });
 
   it("dictation phase 4 AC3: a composer without a caret gets the marker at the end", async () => {

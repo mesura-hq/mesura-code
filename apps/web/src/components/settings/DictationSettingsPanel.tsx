@@ -1,10 +1,17 @@
 import { type EnvironmentId, SECRET_SETTING_REDACTION_MARKER } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
+import {
+  updateClientSettings,
+  useClientSettings,
+  useEnvironmentSettings,
+  useUpdateEnvironmentSettings,
+} from "../../hooks/useSettings";
 import { openTranscriptionsList } from "../dictation/TranscriptionsList";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -35,6 +42,8 @@ export function DictationSettingsPanel({
   const [hintsDraft, setHintsDraft] = useState<string | null>(null);
   const hintsText = hintsDraft ?? dictation.vocabularyHints.join("\n");
   const trimmedKey = keyDraft.trim();
+  const navigate = useNavigate();
+  const silenceFiltering = useClientSettings((settings) => settings.speechSilenceFiltering);
 
   const saveKey = () => {
     if (trimmedKey.length === 0) return;
@@ -114,6 +123,32 @@ export function DictationSettingsPanel({
             </div>
           </SettingsRow>
         </form>
+        <SettingsRow
+          title="Microphone"
+          description="Dictation records from the first connected microphone in your Voice settings."
+          control={
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void navigate({ to: "/settings/voice" })}
+            >
+              Choose microphones
+            </Button>
+          }
+        />
+        <SettingsRow
+          title="Silence filtering"
+          description="Cuts silence out before transcribing, so long recordings cost less and quiet stretches add no invented words. Shared with Voice settings on this device."
+          control={
+            <Switch
+              aria-label="Silence filtering"
+              checked={silenceFiltering}
+              onCheckedChange={(checked) =>
+                void updateClientSettings({ speechSilenceFiltering: checked })
+              }
+            />
+          }
+        />
         <SettingsRow
           title="Transcriptions"
           description="Recent dictation on this server, to copy or retry."

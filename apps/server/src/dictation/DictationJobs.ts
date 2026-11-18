@@ -25,6 +25,7 @@ import * as Stream from "effect/Stream";
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { DictationSilenceFilter } from "./DictationSilenceFilter.ts";
 import { makeOpenAiTranscription, OpenAiTranscriptionError } from "./openAiTranscription.ts";
 
 /**
@@ -74,11 +75,14 @@ const MISSING_KEY_FAILURE =
 const MISSING_AUDIO_FAILURE = "The recording is no longer on the server.";
 const CANCELLED_FAILURE = "Cancelled.";
 const SETTINGS_UNREADABLE_FAILURE = "The server could not read its dictation settings.";
+export const NO_SPEECH_FAILURE = "No speech detected. Retry sends the whole recording.";
 export const CAPACITY_FAILURE = `Too many recordings are transcribing (${MAX_ACTIVE_JOBS}). Retry when one finishes.`;
 
 interface TrackedJob {
   readonly job: DictationJob;
   readonly attachmentId: string;
+  /** Off after the filter heard no speech, so a retry sends the whole recording. */
+  readonly filterSilence: boolean;
   /** Increments per attempt, so a finished attempt never overwrites a newer one. */
   readonly attempt: number;
   /** The running attempt, from the settings read to the OpenAI answer. */
@@ -112,6 +116,7 @@ export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const openAi = yield* makeOpenAiTranscription;
+  const silenceFilter = yield* DictationSilenceFilter;
 
   // Plain state, changed only inside synchronous blocks: a change and its
   // notification happen together, so subscribers see changes in the order
@@ -228,7 +233,37 @@ export const make = Effect.gen(function* () {
           () => new OpenAiTranscriptionError({ reason: MISSING_AUDIO_FAILURE, retryable: false }),
         ),
       );
-    return { audio, fileName: path.basename(audioPath) };
+    return { audio, fileName: path.basename(audioPath), audioPath };
+  });
+
+  /**
+   * The recording as OpenAI gets it: its speech alone when the filter cut silence out, else
+   * the whole file. The model split follows the length of the audio sent.
+   */
+  const transcriptionAudio = Effect.fn(function* (
+    jobId: DictationJobId,
+    plan: {
+      readonly attachmentId: string;
+      readonly durationMs: number;
+      readonly filterSilence: boolean;
+    },
+  ) {
+    const original = yield* readAudio(plan.attachmentId);
+    if (!plan.filterSilence) return { ...original, durationMs: plan.durationMs };
+    const outcome = yield* silenceFilter.filter(original.audioPath);
+    if (outcome.kind === "no-speech") {
+      yield* Effect.sync(() => {
+        const tracked = jobs.get(jobId);
+        if (tracked) jobs.set(jobId, { ...tracked, filterSilence: false });
+      });
+      return yield* new OpenAiTranscriptionError({ reason: NO_SPEECH_FAILURE, retryable: false });
+    }
+    if (outcome.kind !== "filtered") return { ...original, durationMs: plan.durationMs };
+    return {
+      audio: outcome.audio,
+      fileName: `${path.basename(original.fileName, path.extname(original.fileName))}.ogg`,
+      durationMs: outcome.speechMs,
+    };
   });
 
   /**
@@ -267,17 +302,18 @@ export const make = Effect.gen(function* () {
         return {
           attachmentId: tracked.attachmentId,
           durationMs: tracked.job.durationMs,
+          filterSilence: tracked.filterSilence,
           ...read.value,
         };
       });
       yield* Deferred.succeed(published, undefined);
       if (!plan) return null;
-      const { audio, fileName } = yield* readAudio(plan.attachmentId);
+      const { audio, fileName, durationMs } = yield* transcriptionAudio(jobId, plan);
       return yield* openAi.transcribe({
         apiKey: plan.openAiApiKey,
         audio,
         fileName,
-        durationMs: plan.durationMs,
+        durationMs,
         vocabularyHints: plan.vocabularyHints,
       });
     },
@@ -348,7 +384,13 @@ export const make = Effect.gen(function* () {
             durationMs: input.durationMs,
             createdAt,
           };
-          const tracked = { job, attachmentId: input.attachmentId, attempt: 1, fiber: null };
+          const tracked = {
+            job,
+            attachmentId: input.attachmentId,
+            filterSilence: input.filterSilence ?? true,
+            attempt: 1,
+            fiber: null,
+          };
           if (activeCountUnsafe() >= MAX_ACTIVE_JOBS) {
             // Kept as failed so it can be retried; no audio is read for it.
             const rejected: DictationJob = {

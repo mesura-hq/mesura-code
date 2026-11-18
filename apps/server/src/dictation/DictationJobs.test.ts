@@ -33,6 +33,7 @@ import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettingsModule from "../serverSettings.ts";
 import * as DictationJobsModule from "./DictationJobs.ts";
+import { DictationSilenceFilter, type SilenceFilterOutcome } from "./DictationSilenceFilter.ts";
 
 const LANGUAGE_LINE = "The speaker primarily speaks English and Spanish.";
 const AUDIO = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 9, 8, 7, 6, 5]);
@@ -46,6 +47,7 @@ interface OpenAiCall {
   readonly hasLanguage: boolean;
   readonly authorization: string | undefined;
   readonly audio: Uint8Array | null;
+  readonly fileName: string | null;
   /** Completes the request with this status and body. */
   readonly answer: (status: number, body: string) => Effect.Effect<void>;
 }
@@ -75,6 +77,7 @@ const makeFakeOpenAi = Effect.gen(function* () {
         hasLanguage: form?.has("language") ?? false,
         authorization: request.headers.authorization,
         audio,
+        fileName: file && typeof file !== "string" ? file.name : null,
         answer: (status, body) => Deferred.succeed(reply, { status, body }).pipe(Effect.asVoid),
       });
       const { status, body } = yield* Deferred.await(reply);
@@ -95,6 +98,8 @@ interface HarnessOptions {
    * so a test can act while an attempt is still loading its settings.
    */
   readonly gateSettingsReads?: boolean;
+  /** What the silence filter answers; omitted means it is unavailable. */
+  readonly silenceFilter?: SilenceFilterOutcome;
 }
 
 /** `DictationJobs.layer` over real settings and attachment storage, with OpenAI faked. */
@@ -109,6 +114,17 @@ const startDictationJobs = (options: HarnessOptions = {}) =>
       Layer.provide(Layer.merge(ServerSecretStore.layer, ManagedPolicy.layerTest())),
       Layer.provideMerge(Layer.fresh(SqlitePersistence.layerMemory)),
       Layer.provideMerge(Layer.fresh(ServerConfig.layerTest(process.cwd(), baseDir))),
+    );
+    const filteredPaths: string[] = [];
+    const silenceFilterLayer = Layer.succeed(
+      DictationSilenceFilter,
+      DictationSilenceFilter.of({
+        filter: (audioPath) =>
+          Effect.sync(() => {
+            filteredPaths.push(audioPath);
+            return options.silenceFilter ?? { kind: "unavailable" };
+          }),
+      }),
     );
     const settingsReads = yield* Queue.unbounded<void>();
     const settingsReleases = yield* Queue.unbounded<void>();
@@ -130,6 +146,7 @@ const startDictationJobs = (options: HarnessOptions = {}) =>
         options.gateSettingsReads ? Layer.provide(gatedSettingsLayer) : (layer) => layer,
         Layer.provideMerge(settingsLayer),
         Layer.provide(Layer.succeed(HttpClient.HttpClient, openAi.http)),
+        Layer.provide(silenceFilterLayer),
       ),
     );
 
@@ -145,6 +162,8 @@ const startDictationJobs = (options: HarnessOptions = {}) =>
     return {
       jobs: Context.get(context, DictationJobsModule.DictationJobs),
       openAi,
+      /** The recordings handed to the silence filter, in order. */
+      filteredPaths,
       /** Waits until the service asks for its settings (gated harness only). */
       settingsRead: Queue.take(settingsReads),
       /** Lets one held settings read through (gated harness only). */
@@ -646,6 +665,108 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
         >;
         assert.notStrictEqual(one.epoch, two.epoch);
       }),
+    );
+  },
+);
+
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
+  "DictationJobs silence filtering",
+  (it) => {
+    const SPEECH = new Uint8Array([0x4f, 0x67, 0x67, 0x53, 1, 2]);
+
+    it.effect(
+      "sends only the filtered speech, named as Ogg, and picks the model by the speech's length",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs({
+            ...withKey,
+            silenceFilter: {
+              kind: "filtered",
+              audio: SPEECH,
+              speechMs: 300_000,
+              recordingMs: 600_000,
+            },
+          });
+          yield* harness.jobs.start(startInput("job-filtered", { durationMs: 600_000 }));
+          const call = yield* Queue.take(harness.openAi.calls);
+          assert.deepStrictEqual(call.audio, SPEECH);
+          assert.strictEqual(call.fileName, `${ATTACHMENT_ID}.ogg`);
+          assert.strictEqual(call.model, "gpt-4o-transcribe");
+          assert.include(call.prompt ?? "", LANGUAGE_LINE);
+          yield* call.answer(200, "solo lo dicho");
+        }),
+    );
+
+    it.effect("keeps the long-recording model when the speech itself is long", () =>
+      Effect.gen(function* () {
+        const harness = yield* startDictationJobs({
+          ...withKey,
+          silenceFilter: {
+            kind: "filtered",
+            audio: SPEECH,
+            speechMs: 900_000,
+            recordingMs: 1_200_000,
+          },
+        });
+        yield* harness.jobs.start(startInput("job-filtered-long", { durationMs: 1_200_000 }));
+        const call = yield* Queue.take(harness.openAi.calls);
+        assert.strictEqual(call.model, "whisper-1");
+        yield* call.answer(200, "done");
+      }),
+    );
+
+    it.effect("sends the whole recording when the filter is unavailable", () =>
+      Effect.gen(function* () {
+        const harness = yield* startDictationJobs(withKey);
+        yield* harness.jobs.start(startInput("job-unfiltered", { durationMs: 420_001 }));
+        const call = yield* Queue.take(harness.openAi.calls);
+        assert.deepStrictEqual(call.audio, AUDIO);
+        assert.strictEqual(call.model, "whisper-1");
+        assert.strictEqual(harness.filteredPaths.length, 1);
+        yield* call.answer(200, "done");
+      }),
+    );
+
+    it.effect("skips the filter when the client turned silence filtering off", () =>
+      Effect.gen(function* () {
+        const harness = yield* startDictationJobs({
+          ...withKey,
+          silenceFilter: { kind: "no-speech", recordingMs: 30_000 },
+        });
+        yield* harness.jobs.start(startInput("job-filter-off", { filterSilence: false }));
+        const call = yield* Queue.take(harness.openAi.calls);
+        assert.deepStrictEqual(call.audio, AUDIO);
+        assert.deepStrictEqual(harness.filteredPaths, []);
+        yield* call.answer(200, "done");
+      }),
+    );
+
+    it.effect(
+      "fails a silent recording without calling OpenAI, and a retry sends the whole recording",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* startDictationJobs({
+            ...withKey,
+            silenceFilter: { kind: "no-speech", recordingMs: 30_000 },
+          });
+          const received = yield* subscribeInto(harness.jobs);
+          yield* takeSnapshot(received);
+          const jobId = DictationJobId.make("job-silent");
+          yield* harness.jobs.start(startInput(jobId));
+          yield* takeUpsert(received);
+          const failed = yield* takeUpsert(received);
+          assert.strictEqual(failed.status, "failed");
+          assert.strictEqual(failed.failure, DictationJobsModule.NO_SPEECH_FAILURE);
+          assert.strictEqual(harness.openAi.requestCount(), 0);
+
+          yield* harness.jobs.retry(jobId);
+          const call = yield* Queue.take(harness.openAi.calls);
+          assert.deepStrictEqual(call.audio, AUDIO);
+          assert.strictEqual(harness.filteredPaths.length, 1);
+          yield* call.answer(200, "algo bajito");
+          assert.strictEqual((yield* takeUpsert(received)).status, "transcribing");
+          assert.strictEqual((yield* takeUpsert(received)).text, "algo bajito");
+        }),
     );
   },
 );
