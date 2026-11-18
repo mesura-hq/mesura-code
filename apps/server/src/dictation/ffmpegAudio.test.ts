@@ -104,11 +104,17 @@ describe.runIf(hasFfmpeg)("checkCut", () => {
   it("rejects a cut that does not decode, is empty, or lost speech, and accepts a real one", async () => {
     const signal = new AbortController().signal;
     const broken = { audio: new Uint8Array([0x4f, 0x67, 0x67, 0x53, 1, 2, 3]), samples: 16_000 };
-    expect(await checkCut(broken, 16_000, signal)).toMatch(/decodes to 0/);
+    expect(await checkCut(broken, 16_000, signal)).toMatch(/does not decode/);
     expect(await checkCut({ audio: new Uint8Array(), samples: 16_000 }, 16_000, signal)).toBe(
       "the cut is empty",
     );
     expect(await checkCut(broken, 64_000, signal)).toMatch(/took 16000 of 64000/);
+    // The minimum speech is 4,000 samples, as large as the decode tolerance.
+    const brokenAtMinimum = { audio: broken.audio, samples: 4_000 };
+    expect(await checkCut(brokenAtMinimum, 4_000, signal)).toMatch(/does not decode/);
+    expect(await checkCut({ audio: broken.audio, samples: 3_999 }, 4_000, signal)).toMatch(
+      /took 3999 of 4000/,
+    );
 
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "dictation-cut-"));
     try {
@@ -118,6 +124,12 @@ describe.runIf(hasFfmpeg)("checkCut", () => {
         signal,
       );
       expect(await checkCut(cut, 32_000, signal)).toBeNull();
+      const shortest = await encodeSampleRanges(
+        toneFixture(directory, 3),
+        [{ start: 0, end: 4_000 }],
+        signal,
+      );
+      expect(await checkCut(shortest, 4_000, signal)).toBeNull();
     } finally {
       NodeFS.rmSync(directory, { recursive: true, force: true });
     }
@@ -170,7 +182,8 @@ describe.runIf(hasFfmpeg)("cancelling a cut", () => {
         const cut = encodeSampleRanges(path, [{ start: 0, end: 60 * RATE }], controller.signal);
         setImmediate(() => controller.abort());
         await expect(cut).rejects.toMatchObject({ name: "AbortError" });
-        expect(processIds()).toHaveLength(2);
+        // A process killed before its wrapper ran records no id.
+        expect(processIds().length).toBeGreaterThan(0);
         expect(processIds().filter(isRunning)).toEqual([]);
       });
       expect(unhandled).toEqual([]);

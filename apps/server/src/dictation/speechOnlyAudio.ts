@@ -91,19 +91,26 @@ export async function speechOnlyAudio(
   };
 }
 
-/** Why the cut cannot stand in for the recording, or null when it holds the kept speech. */
+/**
+ * Why the cut cannot stand in for the recording, or null when it holds the kept speech: every
+ * selected sample reached the encoder, and the file decodes back to about that length.
+ */
 export async function checkCut(
   cut: { readonly audio: Uint8Array; readonly samples: number },
   expectedSamples: number,
   signal: AbortSignal,
 ): Promise<string | null> {
-  const tolerance = CUT_TOLERANCE_SECONDS * VAD_SAMPLE_RATE;
-  if (Math.abs(cut.samples - expectedSamples) > tolerance) {
+  if (cut.samples !== expectedSamples) {
     return `the cut took ${cut.samples} of ${expectedSamples} speech samples`;
   }
   if (cut.audio.length === 0) return "the cut is empty";
-  const decoded = await decodedSampleCount(cut.audio, signal).catch(() => 0);
-  if (Math.abs(decoded - cut.samples) > tolerance) {
+  const decoded = await decodedSampleCount(cut.audio, signal).catch((error: unknown) => {
+    signal.throwIfAborted();
+    return error instanceof Error ? error : new Error(String(error));
+  });
+  if (decoded instanceof Error) return `the cut does not decode: ${decoded.message}`;
+  if (decoded === 0) return "the cut does not decode to any sample";
+  if (Math.abs(decoded - cut.samples) > CUT_TOLERANCE_SECONDS * VAD_SAMPLE_RATE) {
     return `the cut decodes to ${decoded} of ${cut.samples} samples`;
   }
   return null;
