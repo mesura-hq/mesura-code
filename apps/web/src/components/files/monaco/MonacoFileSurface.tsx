@@ -327,6 +327,7 @@ export function MonacoFileSurface({
     model,
     relativePath,
     composerDraftTarget,
+    environmentId,
   });
   // A ref so the dismissal listeners can read the current answer without being
   // torn down and reinstalled every time a comment form opens or closes.
