@@ -35,7 +35,9 @@ function run(
       consumer = consumer
         .then(() => onStdout(chunk))
         .then(
-          () => child.stdout.resume(),
+          () => {
+            child.stdout.resume();
+          },
           (error: unknown) => {
             child.kill("SIGKILL");
             reject(error);

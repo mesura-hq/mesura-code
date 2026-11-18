@@ -2,6 +2,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 import { SILERO_VAD } from "../speech/silero.ts";
@@ -20,6 +21,11 @@ export class DictationSilenceFilter extends Context.Service<
   DictationSilenceFilter,
   { readonly filter: (audioPath: string) => Effect.Effect<SilenceFilterOutcome> }
 >()("t3/dictation/DictationSilenceFilter") {}
+
+class DictationSilenceFilterError extends Schema.TaggedError<DictationSilenceFilterError>()(
+  "DictationSilenceFilterError",
+  { cause: Schema.Defect() },
+) {}
 
 const MODEL_TIMEOUT = "15 seconds";
 const MODEL_RETRY_MS = 10 * 60_000;
@@ -49,7 +55,10 @@ export const make = Effect.gen(function* () {
   const filter = Effect.fn("DictationSilenceFilter.filter")(function* (audioPath: string) {
     const vadPath = yield* vadModelPath;
     if (vadPath === undefined) return { kind: "unavailable" } as const;
-    return yield* Effect.tryPromise((signal) => speechOnlyAudio(audioPath, vadPath, signal)).pipe(
+    return yield* Effect.tryPromise({
+      try: (signal) => speechOnlyAudio(audioPath, vadPath, signal),
+      catch: (cause) => new DictationSilenceFilterError({ cause }),
+    }).pipe(
       Effect.timeout(FILTER_TIMEOUT),
       permits.withPermits(1),
       Effect.catchCause((cause) =>

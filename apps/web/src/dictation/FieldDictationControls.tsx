@@ -84,8 +84,8 @@ function IconButton(props: {
             size="icon-xs"
             variant="ghost"
             aria-label={props.label}
-            aria-disabled={props.disabled}
-            inactive={props.disabled}
+            aria-disabled={props.disabled === true}
+            inactive={props.disabled === true}
             onPointerDown={keepFocus}
             onClick={() => {
               if (!props.disabled) props.onClick();
