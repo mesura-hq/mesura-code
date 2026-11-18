@@ -308,7 +308,9 @@ The server keeps it for a day, and a server restart clears it.
 The microphone in citation comments, diff comments and pull request comments and reviews dictates
 too. Stop the recording and the text lands at the caret, or at the end when the field has lost focus.
 These fields take no marker or mode: if you close one before the text arrives, it appears when you
-open it again, and it is in Transcriptions either way.
+open it again, and it is in Transcriptions either way. Submitting while you record or while the text
+is on its way stops the recording and sends once the text is in; a failed transcription keeps the
+comment unsent.
 
 ### Dictation on a phone
 
