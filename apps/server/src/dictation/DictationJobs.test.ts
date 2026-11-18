@@ -782,7 +782,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
 
     it.effect.each([
       { origin: "an empty transcript", status: 200, body: "" },
-      { origin: "a refused recording", status: 400, body: "invalid audio" },
+      {
+        origin: "a refused recording",
+        status: 400,
+        body: '{"error":{"message":"Invalid file format.","param":"file","code":null}}',
+      },
     ])(
       "retries with the whole recording after OpenAI meets the filtered audio with $origin",
       ({ status, body }) =>

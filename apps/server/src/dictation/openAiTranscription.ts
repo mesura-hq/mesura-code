@@ -2,6 +2,7 @@ import * as Config from "effect/Config";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
+import * as Option from "effect/Option";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 
 export const OPENAI_TRANSCRIPTION_URL = "https://api.openai.com/v1/audio/transcriptions";
@@ -68,7 +69,29 @@ const decodeTranscriptionBody = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ text: Schema.String })),
 );
 
-function statusFailure(status: number): OpenAiTranscriptionError {
+const decodeErrorBody = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      error: Schema.Struct({
+        param: Schema.optional(Schema.NullOr(Schema.String)),
+        code: Schema.optional(Schema.NullOr(Schema.String)),
+      }),
+    }),
+  ),
+);
+
+/**
+ * Whether OpenAI refused the recording itself, so sending the whole recording may succeed. A
+ * 403, a 404 or a 400 about another parameter (the model, the key's project) is not that.
+ */
+function rejectsAudio(status: number, body: string): boolean {
+  if (status === 413 || status === 415) return true;
+  if (status !== 400 && status !== 422) return false;
+  const error = Option.getOrUndefined(decodeErrorBody(body))?.error;
+  return error?.param === "file" || /audio|file/i.test(error?.code ?? "");
+}
+
+function statusFailure(status: number, body: string): OpenAiTranscriptionError {
   if (status === 401) {
     return new OpenAiTranscriptionError({
       reason: "OpenAI rejected the API key (HTTP 401). Check the key in Settings.",
@@ -87,7 +110,7 @@ function statusFailure(status: number): OpenAiTranscriptionError {
         ? `OpenAI failed to transcribe (HTTP ${status}).`
         : `OpenAI refused the recording (HTTP ${status}).`,
     retryable: status >= 500,
-    audioRejected: status < 500,
+    audioRejected: rejectsAudio(status, body),
   });
 }
 
@@ -122,7 +145,8 @@ export const makeOpenAiTranscription: Effect.Effect<
     const attempt = Effect.gen(function* () {
       const response = yield* client.execute(httpRequest);
       if (response.status < 200 || response.status >= 300) {
-        return yield* statusFailure(response.status);
+        const errorBody = yield* response.text.pipe(Effect.orElseSucceed(() => ""));
+        return yield* statusFailure(response.status, errorBody);
       }
       const body = yield* response.text;
       const decoded = yield* decodeTranscriptionBody(body).pipe(

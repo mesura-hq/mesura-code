@@ -317,14 +317,63 @@ describe("openAiTranscription phase 1 fence", () => {
     }),
   );
 
-  it.effect("dictation phase 1 AC3: an empty 200 body fails at once as No speech detected", () =>
+  const openAiError = (param: string | null, message: string, code: string | null = null) =>
+    JSON.stringify({ error: { message, type: "invalid_request_error", param, code } });
+
+  it.effect.each([
+    {
+      origin: "a 400 about the file",
+      status: 400,
+      raw: openAiError("file", "Invalid file format."),
+      audioRejected: true,
+    },
+    {
+      origin: "a 400 with an audio error code",
+      status: 400,
+      raw: openAiError(null, "Audio file is too short.", "audio_too_short"),
+      audioRejected: true,
+    },
+    { origin: "a 413", status: 413, raw: "Request Entity Too Large", audioRejected: true },
+    { origin: "a 415", status: 415, raw: "", audioRejected: true },
+    {
+      origin: "a 400 about the model",
+      status: 400,
+      raw: openAiError("model", "Invalid model."),
+      audioRejected: false,
+    },
+    {
+      origin: "a 403",
+      status: 403,
+      raw: openAiError(null, "Project lacks access.", "unsupported_country_region_territory"),
+      audioRejected: false,
+    },
+    {
+      origin: "a 404",
+      status: 404,
+      raw: openAiError(null, "The model does not exist.", "model_not_found"),
+      audioRejected: false,
+    },
+  ])("marks $origin as a rejected recording: $audioRejected", ({ status, raw, audioRejected }) =>
     Effect.gen(function* () {
-      for (const body of ["", "  \n"]) {
-        const { exit, requests } = yield* transcribeWith([{ status: 200, body }]);
-        assert.strictEqual(failureReason(exit), "No speech detected");
-        assert.lengthOf(requests, 1);
-      }
+      const { exit, requests } = yield* transcribeWith([{ status, raw }]);
+      assert.lengthOf(requests, 1);
+      assert.include(failureReason(exit), String(status));
+      const error = Exit.isFailure(exit) ? exit.cause.reasons[0] : undefined;
+      const failure = error?._tag === "Fail" ? (error.error as { audioRejected?: boolean }) : {};
+      assert.strictEqual(failure.audioRejected === true, audioRejected);
     }),
+  );
+
+  it.effect(
+    "dictation phase 1 AC3: an empty 200 transcript fails at once as No speech detected",
+    () =>
+      Effect.gen(function* () {
+        for (const body of ["", "  \n"]) {
+          const { exit, requests } = yield* transcribeWith([{ status: 200, body }]);
+          assert.strictEqual(failureReason(exit), "No speech detected");
+          assert.lengthOf(requests, 1);
+        }
+      }),
   );
 });
 
