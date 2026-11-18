@@ -23,7 +23,8 @@ const setup = setupFieldDictation;
 
 function CommentEditor(props: {
   readonly initial: string;
-  readonly onSubmit?: (text: string) => void;
+  /** Returns whether the post succeeded; a successful post clears the draft, as editors do. */
+  readonly onSubmit?: (text: string) => boolean | number | void;
   readonly disabled?: boolean;
 }) {
   const [text, setText] = useState(props.initial);
@@ -47,7 +48,11 @@ function CommentEditor(props: {
       <TextFieldSpeechControls speech={speech} />
       <button
         type="button"
-        onClick={() => speech.submitAfterDictation((submitted) => props.onSubmit?.(submitted))}
+        onClick={() =>
+          speech.submitAfterDictation((submitted) => {
+            if (props.onSubmit?.(submitted) !== false) setText("");
+          })
+        }
       >
         Submit
       </button>
@@ -279,7 +284,7 @@ it("forgets a held submission when its editor closes, so reopening it sends noth
   expect(submitted).toEqual([]);
 });
 
-it("forgets a held submission and its transcript when the editor is disabled", async () => {
+it("drops a held submission while the editor is disabled, and keeps its transcript in the draft", async () => {
   setup();
   const submitted: string[] = [];
   const onSubmit = (text: string) => submitted.push(text);
@@ -287,30 +292,51 @@ it("forgets a held submission and its transcript when the editor is disabled", a
   await queueSubmitDuringRecording(screen);
   await vi.waitFor(() => expect(startedJobIds()).toHaveLength(1));
   await screen.rerender(<CommentEditor initial="Draft" onSubmit={onSubmit} disabled />);
-  await vi.waitFor(() => expect(useFieldDictationStore.getState().pending).toEqual({}));
+  await vi.waitFor(() => expect(useFieldDictationStore.getState().submitQueued.size).toBe(0));
   await screen.rerender(<CommentEditor initial="Draft" onSubmit={onSubmit} />);
   publishJobs([fieldJob(startedJobIds()[0]!, { status: "completed", text: "old words" })]);
-  await expect.element(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Draft");
+  await expect
+    .element(screen.getByRole("textbox", { name: "Comment" }))
+    .toHaveValue("Draft old words");
   expect(submitted).toEqual([]);
 });
 
-it("keeps a failed recording's retry out of the draft after a manual submit", async () => {
-  setup();
-  const submitted: string[] = [];
-  await using screen = await render(
-    <CommentEditor initial="Draft" onSubmit={(text) => submitted.push(text)} />,
-  );
+/** Records, lets the transcription fail, and returns its job id. */
+async function failRecording(screen: Awaited<ReturnType<typeof render>>): Promise<string> {
   await screen.getByRole("button", { name: "Start voice dictation" }).click();
   await screen.getByRole("button", { name: "Stop and transcribe" }).click();
   await vi.waitFor(() => expect(startedJobIds()).toHaveLength(1));
   const jobId = startedJobIds()[0]!;
   publishJobs([fieldJob(jobId, { status: "failed", failure: "OpenAI refused" })]);
   await expect.element(screen.getByRole("status")).not.toBeInTheDocument();
+  return jobId;
+}
+
+it("keeps a failed recording's retry out of the next draft after a successful manual submit", async () => {
+  setup();
+  const submitted: string[] = [];
+  await using screen = await render(
+    <CommentEditor initial="Draft" onSubmit={(text) => submitted.push(text)} />,
+  );
+  const jobId = await failRecording(screen);
   await screen.getByRole("button", { name: "Submit" }).click();
   expect(submitted).toEqual(["Draft"]);
+  await expect.element(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("");
   publishJobs([fieldJob(jobId, { status: "completed", text: "retried words" })]);
-  expect(useFieldDictationStore.getState().pending).toEqual({});
+  await vi.waitFor(() => expect(useFieldDictationStore.getState().pending).toEqual({}));
+  await expect.element(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("");
+});
+
+it("still fills a draft whose manual post failed when the transcription retry lands", async () => {
+  setup();
+  await using screen = await render(<CommentEditor initial="Draft" onSubmit={() => false} />);
+  const jobId = await failRecording(screen);
+  await screen.getByRole("button", { name: "Submit" }).click();
   await expect.element(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Draft");
+  publishJobs([fieldJob(jobId, { status: "completed", text: "retried words" })]);
+  await expect
+    .element(screen.getByRole("textbox", { name: "Comment" }))
+    .toHaveValue("Draft retried words");
 });
 
 it("drops a held submission whose job the restarted environment never listed", async () => {

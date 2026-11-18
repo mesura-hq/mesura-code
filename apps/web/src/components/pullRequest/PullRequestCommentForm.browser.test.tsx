@@ -100,7 +100,7 @@ it("neither posts the typed prefix nor closes the pull request when the upload f
   expect(onCommentAction).not.toHaveBeenCalled();
 });
 
-it("forgets the close when the form is hidden before the transcript lands", async () => {
+it("forgets the close when the form is hidden, and keeps the transcript in its draft", async () => {
   setupFieldDictation();
   const onCommentAction = vi.fn(async () => ({ commentPosted: true }));
   await using screen = await render(renderForm({ onCommentAction }));
@@ -110,6 +110,25 @@ it("forgets the close when the form is hidden before the transcript lands", asyn
   await vi.waitFor(() => expect(useFieldDictationStore.getState().submitQueued.size).toBe(0));
   await screen.rerender(renderForm({ onCommentAction }));
   publishJobs([fieldJob(startedJobIds()[0]!, { status: "completed", text: "late" })]);
-  await expect.element(screen.getByRole("textbox")).toHaveValue("Typed prefix");
+  await expect.element(screen.getByRole("textbox")).toHaveValue("Typed prefix late");
   expect(onCommentAction).not.toHaveBeenCalled();
+});
+
+it("fills the comment from a transcription retry after its close failed to post", async () => {
+  setupFieldDictation();
+  const onCommentAction = vi.fn(async () => ({ commentPosted: false }));
+  await using screen = await render(renderForm({ onCommentAction }));
+  await screen.getByRole("textbox").fill("Typed prefix");
+  await screen.getByRole("button", { name: "Start voice dictation" }).click();
+  await screen.getByRole("button", { name: "Stop and transcribe" }).click();
+  await vi.waitFor(() => expect(startedJobIds()).toHaveLength(1));
+  const jobId = startedJobIds()[0]!;
+  publishJobs([fieldJob(jobId, { status: "failed", failure: "OpenAI refused" })]);
+  await expect.element(screen.getByRole("status")).not.toBeInTheDocument();
+  await screen.getByRole("button", { name: /Close with comment/ }).click();
+  await screen.getByRole("button", { name: /Confirm close\?/ }).click();
+  await vi.waitFor(() => expect(onCommentAction).toHaveBeenCalledWith("Typed prefix", "close"));
+  await expect.element(screen.getByRole("button", { name: /Close with comment/ })).toBeEnabled();
+  publishJobs([fieldJob(jobId, { status: "completed", text: "retried" })]);
+  await expect.element(screen.getByRole("textbox")).toHaveValue("Typed prefix retried");
 });

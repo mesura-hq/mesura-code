@@ -307,12 +307,14 @@ The server keeps it for a day, and a server restart clears it.
 
 The microphone in citation comments, diff and file comments, review guide comments, and pull
 request comments and reviews dictates too. Stop the recording and the text lands at the caret, or at
-the end when the field has lost focus. These fields take no marker or mode. If you close, cancel or
-submit a comment before its text arrives, the text goes only to Transcriptions, never into the next
-comment you open there. Submitting while you record or while the text is on its way stops the
-recording and sends once all of its text is in. A failed upload or transcription, a cancelled
-recording, or a new recording keeps the comment unsent. While the microphone is still starting,
-Submit does nothing; stop or cancel the recording first.
+the end when the field has lost focus. These fields take no marker or mode. Submitting while you
+record or while the text is on its way stops the recording and waits: the comment sends once all of
+its text is in. A failed upload or transcription, a cancelled recording, a new recording, a lost
+transcription, or a field that is hidden or locked keeps the comment unsent, and its draft keeps
+any text that arrives later. While the microphone is still starting, Submit does nothing; stop or
+cancel the recording first. Once a comment is closed, cancelled or posted, text still on its way
+goes only to Transcriptions, never into the next comment you open there. A post that fails keeps
+the draft, so a retried transcription still lands in it.
 
 ### Dictation on a phone
 

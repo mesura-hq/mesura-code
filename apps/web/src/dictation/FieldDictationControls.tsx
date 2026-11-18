@@ -49,10 +49,22 @@ export function useFieldDictation(input: {
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a closed editor's draft is gone: its recording and transcripts go to Transcriptions, never into a later draft
   useEffect(() => () => detachFieldDictation(ownerKey, environmentId), [environmentId, ownerKey]);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an editor that can no longer submit, such as a hidden form, lets go of its draft the same way
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a locked or hidden editor keeps its draft but cannot submit: its held submission is dropped and a recording ends
   useEffect(() => {
-    if (input.disabled) detachFieldDictation(ownerKey, environmentId);
-  }, [environmentId, input.disabled, ownerKey]);
+    if (!input.disabled) return;
+    cancelQueuedFieldSubmit(ownerKey);
+    if (useFieldDictationStore.getState().recording?.ownerKey === ownerKey) {
+      void stopFieldDictation();
+    }
+  }, [input.disabled, ownerKey]);
+  // Set by a manual submit; the post succeeded once the editor clears its draft.
+  const endsWhenCleared = useRef(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a draft cleared after a manual submit was posted: a failed job's retry must not land in the next one
+  useEffect(() => {
+    if (!endsWhenCleared.current || input.text.trim() !== "") return;
+    endsWhenCleared.current = false;
+    detachFieldDictation(ownerKey, environmentId);
+  }, [environmentId, input.text, ownerKey]);
 
   const { jobs, cursor, loaded } = useDictationJobs(pending > 0 ? environmentId : null);
   // A stamp that arrives after the list still has to be judged against it.
@@ -105,8 +117,13 @@ export function useFieldDictation(input: {
     if (!queueFieldSubmit(ownerKey, submit)) submit(latest.current.text);
   };
 
-  /** A submission by hand ends the draft: a failed job's retry no longer lands here. */
-  const releaseDraft = () => detachFieldDictation(ownerKey, environmentId);
+  /**
+   * A submission by hand ends the draft once it is posted, which an editor shows by clearing it
+   * or closing. A failed post leaves the draft, so a transcription retry still lands in it.
+   */
+  const releaseDraft = () => {
+    endsWhenCleared.current = true;
+  };
 
   return {
     environmentId,
