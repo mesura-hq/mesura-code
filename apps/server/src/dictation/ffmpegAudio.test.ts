@@ -123,3 +123,60 @@ describe.runIf(hasFfmpeg)("checkCut", () => {
     }
   });
 });
+
+/** Runs ffmpeg through a wrapper that records each process id, for the life of `run`. */
+async function withRecordedFfmpegProcesses<T>(
+  directory: string,
+  run: (processIds: () => number[]) => Promise<T>,
+): Promise<T> {
+  const pidFile = NodePath.join(directory, "pids");
+  const wrapper = NodePath.join(directory, "ffmpeg-wrapper.sh");
+  NodeFS.writeFileSync(wrapper, `#!/bin/sh\necho $$ >> '${pidFile}'\nexec ffmpeg "$@"\n`, {
+    mode: 0o755,
+  });
+  const previous = process.env.T3CODE_DICTATION_FFMPEG;
+  process.env.T3CODE_DICTATION_FFMPEG = wrapper;
+  try {
+    return await run(() =>
+      NodeFS.existsSync(pidFile)
+        ? NodeFS.readFileSync(pidFile, "utf8").trim().split("\n").map(Number)
+        : [],
+    );
+  } finally {
+    if (previous === undefined) delete process.env.T3CODE_DICTATION_FFMPEG;
+    else process.env.T3CODE_DICTATION_FFMPEG = previous;
+  }
+}
+
+const isRunning = (processId: number) => {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+describe.runIf(hasFfmpeg)("cancelling a cut", () => {
+  it("rejects once, after both ffmpeg processes are gone", async () => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "dictation-cut-"));
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const path = toneFixture(directory, 60);
+      await withRecordedFfmpegProcesses(directory, async (processIds) => {
+        const controller = new AbortController();
+        const cut = encodeSampleRanges(path, [{ start: 0, end: 60 * RATE }], controller.signal);
+        setImmediate(() => controller.abort());
+        await expect(cut).rejects.toMatchObject({ name: "AbortError" });
+        expect(processIds()).toHaveLength(2);
+        expect(processIds().filter(isRunning)).toEqual([]);
+      });
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});

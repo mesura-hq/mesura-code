@@ -120,7 +120,12 @@ export async function openSileroVad(
   };
   const send = async (message: object): Promise<SileroFrames> => {
     const reply = next();
-    child.send(message);
+    // A worker that died between requests fails the reply, never throws past it unobserved.
+    if (!stopped) {
+      child.send(message, (error) => {
+        if (error) fail(error);
+      });
+    }
     const { firstFrame, probs } = await reply;
     if (typeof firstFrame !== "number" || !Array.isArray(probs)) {
       throw new Error("Invalid Silero reply.");

@@ -27,11 +27,18 @@ function spawnFfmpeg(args: ReadonlyArray<string>, signal: AbortSignal, stdin: "p
   child.stderr!.on("data", (chunk: string) => {
     stderr = (stderr + chunk).slice(-2_000);
   });
+  // Settles only once a started process has exited, so a cancelled cut leaves nothing running.
   const closed = new Promise<void>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", (code) =>
-      code === 0 ? resolve() : reject(new Error(`ffmpeg exited (${code}): ${stderr.trim()}`)),
-    );
+    let failure: Error | undefined;
+    child.once("error", (error) => {
+      if (child.pid === undefined) reject(error);
+      else failure ??= error;
+    });
+    child.once("close", (code) => {
+      if (failure) reject(failure);
+      else if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited (${code}): ${stderr.trim()}`));
+    });
   });
   return { child, closed };
 }
@@ -114,6 +121,11 @@ export async function encodeSampleRanges(
   ranges: ReadonlyArray<SampleRange>,
   signal: AbortSignal,
 ): Promise<{ readonly audio: Uint8Array; readonly samples: number }> {
+  // Either process failing stops the other; both are awaited, so no rejection is left unobserved.
+  const local = new AbortController();
+  const stopBoth = () => local.abort(signal.reason);
+  if (signal.aborted) stopBoth();
+  else signal.addEventListener("abort", stopBoth, { once: true });
   const encoder = spawnFfmpeg(
     [
       "-f",
@@ -134,7 +146,7 @@ export async function encodeSampleRanges(
       "ogg",
       "pipe:1",
     ],
-    signal,
+    local.signal,
     "pipe",
   );
   const stdin = encoder.child.stdin!;
@@ -146,27 +158,37 @@ export async function encodeSampleRanges(
   let offset = 0;
   let next = 0;
   let samples = 0;
-  try {
-    await decodeToPcm(path, signal, async (pcm) => {
-      const blockEnd = offset + pcm.length;
-      while (next < ranges.length && ranges[next]!.start < blockEnd) {
-        const range = ranges[next]!;
-        const from = Math.max(range.start, offset);
-        const to = Math.min(range.end, blockEnd);
-        if (to > from) {
-          const slice = pcm.subarray(from - offset, to - offset);
-          await write(stdin, new Uint8Array(slice.buffer, slice.byteOffset, slice.byteLength));
-          samples += to - from;
-        }
-        if (range.end > blockEnd) break;
-        next += 1;
+  const decoded = decodeToPcm(path, local.signal, async (pcm) => {
+    const blockEnd = offset + pcm.length;
+    while (next < ranges.length && ranges[next]!.start < blockEnd) {
+      const range = ranges[next]!;
+      const from = Math.max(range.start, offset);
+      const to = Math.min(range.end, blockEnd);
+      if (to > from) {
+        const slice = pcm.subarray(from - offset, to - offset);
+        await write(stdin, new Uint8Array(slice.buffer, slice.byteOffset, slice.byteLength));
+        samples += to - from;
       }
-      offset = blockEnd;
-    });
-  } finally {
-    stdin.end();
-  }
-  await encoded;
+      if (range.end > blockEnd) break;
+      next += 1;
+    }
+    offset = blockEnd;
+  }).finally(() => stdin.end());
+  const outcomes = await Promise.allSettled([
+    decoded.catch((error: unknown) => {
+      local.abort(error);
+      throw error;
+    }),
+    encoded.catch((error: unknown) => {
+      local.abort(error);
+      throw error;
+    }),
+  ]);
+  signal.removeEventListener("abort", stopBoth);
+  const failure = signal.aborted
+    ? { reason: signal.reason as unknown }
+    : outcomes.find((outcome) => outcome.status === "rejected");
+  if (failure) throw failure.reason;
   return { audio: new Uint8Array(Buffer.concat(output)), samples };
 }
 
