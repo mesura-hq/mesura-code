@@ -1,5 +1,6 @@
-import { chooseRecordingMicrophone } from "../speech/browserMicrophones";
-import { openMicrophone } from "../speech/browserPcmCapture";
+import { listAudioInputs, updateMicrophoneOrder } from "../speech/browserMicrophones";
+import { rememberMicrophones } from "../speech/microphoneOrder";
+import { microphoneCandidates } from "./microphoneCandidates";
 
 /**
  * Records dictation audio with one `MediaRecorder` per recording: opus in WebM where available
@@ -13,9 +14,15 @@ export interface DictationLevelMeter {
 }
 
 export interface DictationMediaBackend {
-  /** The device id from Settings → Voice → Microphone: the first connected entry, or "" for the default. */
-  readonly chooseMicrophone: () => Promise<string>;
-  /** Opens `microphoneId`, falling back to the system default when that device is gone. */
+  /**
+   * The device ids to try from Settings → Voice → Microphone, ending with `""` for the system
+   * default, and whether the browser still hid device ids when it listed them.
+   */
+  readonly chooseMicrophones: () => Promise<{
+    readonly candidates: ReadonlyArray<string>;
+    readonly idsHidden: boolean;
+  }>;
+  /** Opens exactly `microphoneId`, or the system default for `""`. */
   readonly openMicrophone: (microphoneId: string) => Promise<MediaStream>;
   readonly isTypeSupported: (mimeType: string) => boolean;
   readonly createMediaRecorder: (
@@ -70,8 +77,19 @@ function createBrowserLevelMeter(stream: MediaStream): DictationLevelMeter {
 }
 
 const browserBackend: DictationMediaBackend = {
-  chooseMicrophone: chooseRecordingMicrophone,
-  openMicrophone,
+  chooseMicrophones: async () => {
+    // Rejects where the browser has no media devices, such as plain HTTP.
+    const devices = await listAudioInputs().catch(() => []);
+    const order = updateMicrophoneOrder((saved) => rememberMicrophones(saved, devices));
+    return {
+      candidates: microphoneCandidates(order, devices),
+      idsHidden: devices.every((device) => !device.deviceId),
+    };
+  },
+  openMicrophone: (microphoneId) =>
+    navigator.mediaDevices.getUserMedia({
+      audio: microphoneId ? { deviceId: { exact: microphoneId } } : true,
+    }),
   isTypeSupported: (mimeType) =>
     typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(mimeType),
   createMediaRecorder: (stream, options) => new MediaRecorder(stream, options),
@@ -85,9 +103,49 @@ export function setDictationMediaBackend(backend: DictationMediaBackend | null):
   backendOverride = backend;
 }
 
+const isMissingDevice = (error: unknown) =>
+  typeof error === "object" &&
+  error !== null &&
+  "name" in error &&
+  (error.name === "NotFoundError" || error.name === "OverconstrainedError");
+
+const stopTracks = (stream: MediaStream) => {
+  for (const track of stream.getTracks()) track.stop();
+};
+
+/**
+ * The first saved microphone that opens, else the system default. A denied permission stops the
+ * search. When ids were hidden and the default answered, the browser may now show the preferred
+ * device, which then replaces the default.
+ */
+async function openPreferredMicrophone(backend: DictationMediaBackend): Promise<MediaStream> {
+  const first = await backend.chooseMicrophones();
+  let opened: { readonly id: string; readonly stream: MediaStream } | null = null;
+  for (const id of first.candidates) {
+    try {
+      opened = { id, stream: await backend.openMicrophone(id) };
+      break;
+    } catch (error) {
+      if (id === "" || !isMissingDevice(error)) throw error;
+    }
+  }
+  if (!opened) return backend.openMicrophone("");
+  if (!first.idsHidden || opened.id !== "") return opened.stream;
+  const revealed = await backend.chooseMicrophones().catch(() => null);
+  const preferred = revealed && !revealed.idsHidden ? revealed.candidates[0] : undefined;
+  if (!preferred) return opened.stream;
+  try {
+    const better = await backend.openMicrophone(preferred);
+    stopTracks(opened.stream);
+    return better;
+  } catch {
+    return opened.stream;
+  }
+}
+
 export async function openDictationRecording(): Promise<DictationRecording> {
   const backend = backendOverride ?? browserBackend;
-  const stream = await backend.openMicrophone(await backend.chooseMicrophone());
+  const stream = await openPreferredMicrophone(backend);
   const mimeType =
     PREFERRED_MIME_TYPES.find((candidate) => backend.isTypeSupported(candidate)) ?? "";
   const chunks: Blob[] = [];

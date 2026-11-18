@@ -65,14 +65,17 @@ export function createFakeMedia() {
   let failNext: "create" | "start" | null = null;
   const backend: DictationMediaBackend = {
     // The hold sits on the first step of opening, so a release right after a start reaches it.
-    chooseMicrophone: async () => {
+    chooseMicrophones: async () => {
       if (holdNext) {
         holdNext = false;
         await new Promise<void>((resolve) => {
           held = resolve;
         });
       }
-      return preferredMicrophoneId;
+      return {
+        candidates: preferredMicrophoneId ? [preferredMicrophoneId, ""] : [""],
+        idsHidden: false,
+      };
     },
     openMicrophone: async (microphoneId) => {
       openedMicrophones.push(microphoneId);
