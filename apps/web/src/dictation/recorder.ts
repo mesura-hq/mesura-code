@@ -114,33 +114,41 @@ const stopTracks = (stream: MediaStream) => {
 };
 
 /**
- * The first saved microphone that opens, else the system default. A denied permission stops the
- * search. When ids were hidden and the default answered, the browser may now show the preferred
- * device, which then replaces the default.
+ * The first of `ids` that opens, in order. A missing device moves on; any other error ends the
+ * search and is thrown.
  */
-async function openPreferredMicrophone(backend: DictationMediaBackend): Promise<MediaStream> {
-  const first = await backend.chooseMicrophones();
-  let opened: { readonly id: string; readonly stream: MediaStream } | null = null;
-  for (const id of first.candidates) {
+async function openFirstMicrophone(
+  backend: DictationMediaBackend,
+  ids: ReadonlyArray<string>,
+): Promise<{ readonly id: string; readonly stream: MediaStream } | null> {
+  for (const id of ids) {
     try {
-      opened = { id, stream: await backend.openMicrophone(id) };
-      break;
+      return { id, stream: await backend.openMicrophone(id) };
     } catch (error) {
       if (id === "" || !isMissingDevice(error)) throw error;
     }
   }
+  return null;
+}
+
+/**
+ * The first saved microphone that opens, else the system default. A denied permission stops the
+ * search. When ids were hidden and the default answered, the browser may now show the saved
+ * devices, and the first of them that opens replaces the default.
+ */
+async function openPreferredMicrophone(backend: DictationMediaBackend): Promise<MediaStream> {
+  const first = await backend.chooseMicrophones();
+  const opened = await openFirstMicrophone(backend, first.candidates);
   if (!opened) return backend.openMicrophone("");
   if (!first.idsHidden || opened.id !== "") return opened.stream;
   const revealed = await backend.chooseMicrophones().catch(() => null);
-  const preferred = revealed && !revealed.idsHidden ? revealed.candidates[0] : undefined;
-  if (!preferred) return opened.stream;
-  try {
-    const better = await backend.openMicrophone(preferred);
-    stopTracks(opened.stream);
-    return better;
-  } catch {
-    return opened.stream;
-  }
+  if (!revealed || revealed.idsHidden) return opened.stream;
+  const saved = revealed.candidates.filter((id) => id !== "");
+  // The default already records: a failure here keeps it rather than failing the start.
+  const better = await openFirstMicrophone(backend, saved).catch(() => null);
+  if (!better) return opened.stream;
+  stopTracks(opened.stream);
+  return better.stream;
 }
 
 export async function openDictationRecording(): Promise<DictationRecording> {

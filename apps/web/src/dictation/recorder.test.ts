@@ -115,7 +115,12 @@ describe("dictation recorder microphone fallback", () => {
   function stub(
     devices: ReadonlyArray<Device>,
     refuse: ReadonlySet<string>,
-    options: { hidden?: boolean; refuseWhileHidden?: boolean } = {},
+    options: {
+      hidden?: boolean;
+      refuseWhileHidden?: boolean;
+      /** Refused even after a permission, as a microphone unplugged since it was listed. */
+      vanished?: ReadonlySet<string>;
+    } = {},
   ) {
     const opened: MediaStreamConstraints[] = [];
     const stopped: number[] = [];
@@ -136,7 +141,8 @@ describe("dictation recorder microphone fallback", () => {
             typeof audio === "object" && typeof audio.deviceId === "object"
               ? (audio.deviceId as { exact: string }).exact
               : "";
-          if (refuse.has(id) && (!options.refuseWhileHidden || !permitted)) {
+          const vanished = options.vanished?.has(id) ?? false;
+          if (vanished || (refuse.has(id) && (!options.refuseWhileHidden || !permitted))) {
             throw Object.assign(new Error("gone"), { name: "NotFoundError" });
           }
           permitted = true;
@@ -187,6 +193,28 @@ describe("dictation recorder microphone fallback", () => {
     (await openDictationRecording()).discard();
     expect(media.opened).toEqual([exact("usb"), { audio: true }, exact("usb")]);
     expect(media.stopped).toContain(2);
+  });
+
+  it("tries the next revealed microphone when the first one vanished after the permission", async () => {
+    __setClientSettingsForTests({
+      ...DEFAULT_CLIENT_SETTINGS,
+      voiceMicrophones: [usb, headset, { kind: "default" }],
+    });
+    const media = stub([usb, headset], new Set(["headset"]), {
+      hidden: true,
+      refuseWhileHidden: true,
+      vanished: new Set(["usb"]),
+    });
+    (await openDictationRecording()).discard();
+    expect(media.opened).toEqual([
+      exact("usb"),
+      exact("headset"),
+      { audio: true },
+      exact("usb"),
+      exact("headset"),
+    ]);
+    // The default stream (the third request) is replaced by the headset.
+    expect(media.stopped).toContain(3);
   });
 
   it("stops at a denied permission instead of trying other microphones", async () => {
