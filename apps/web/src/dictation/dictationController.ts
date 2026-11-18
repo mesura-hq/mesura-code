@@ -1,11 +1,9 @@
-import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { runAtomCommand, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import {
   DEFAULT_DICTATION_MODE,
   nextDictationMode,
   runDictationStop,
-  uploadDictationRecording,
   type DictationJobsCursor,
 } from "@t3tools/client-runtime/dictation";
 import {
@@ -39,7 +37,6 @@ import {
   useComposerDraftStore,
 } from "~/composerDraftStore";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
-import { getClientSettings } from "~/hooks/useSettings";
 import {
   editPendingUserInputAnswerText,
   markPendingUserInputAnswerVoiced,
@@ -47,9 +44,7 @@ import {
 } from "~/pendingUserInputDraftStore";
 import { randomUUID } from "~/lib/utils";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
-import { attachmentEnvironment } from "~/state/attachments";
 import { dictationEnvironment } from "~/state/dictation";
-import { readPreparedConnection } from "~/state/session";
 import {
   DICTATION_MAX_RECORDING_MS,
   openDictationRecording,
@@ -57,10 +52,11 @@ import {
   type DictationRecording,
 } from "./recorder";
 import { appendDictationSlot } from "./dictationSlotEdits";
+import { startDictationTranscription, uploadDictationAudio } from "./dictationTransport";
 import {
-  formatHiddenDuration,
   guardRecordingScreen,
   type RecordingScreenGuard,
+  warnRecordingMayBeSilent,
 } from "./recordingScreen";
 import {
   armQuestionSendWhenReady,
@@ -434,15 +430,7 @@ function startLevelPolling() {
 
 function warnMicrophoneMayHaveStopped(hiddenMs: number) {
   const { session } = useDictationSessionStore.getState();
-  if (!session) return;
-  toastManager.add({
-    // One warning per recording: base-ui updates an open toast with this id, else adds it again.
-    id: `dictation-silence-${session.sessionId}`,
-    type: "warning",
-    title: "Part of this recording may be silent",
-    description: `The screen was off or Mesura Code was in the background for ${formatHiddenDuration(hiddenMs)}. Android cuts the microphone about a minute after that, so what you said later was probably not recorded.`,
-    timeout: 0,
-  });
+  if (session) warnRecordingMayBeSilent(session.sessionId, hiddenMs);
 }
 
 function guardScreenForRecording() {
@@ -595,41 +583,6 @@ async function restartDictationRecording(): Promise<void> {
   startLevelPolling();
 }
 
-function uploadDictationAudio(
-  environmentId: EnvironmentId,
-  audio: DictationAudio,
-  jobId: DictationJobId,
-): Promise<string> {
-  return uploadDictationRecording({
-    registry: appAtomRegistry,
-    createUploadUrl: attachmentEnvironment.createUploadUrl,
-    remove: attachmentEnvironment.remove,
-    environmentId,
-    jobId,
-    mimeType: audio.mimeType,
-    sizeBytes: audio.blob.size,
-    resolveUploadUrl: (relativeUrl) => {
-      const connection = readPreparedConnection(environmentId);
-      return connection ? resolveAssetUrl(connection.httpBaseUrl, relativeUrl) : null;
-    },
-    transport: (url) => {
-      const controller = new AbortController();
-      return {
-        abort: () => controller.abort(),
-        done: fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": audio.mimeType },
-          body: audio.blob,
-          signal: controller.signal,
-        }).then((response) => {
-          if (!response.ok)
-            throw new Error(`The server refused the recording (${response.status}).`);
-        }),
-      };
-    },
-  });
-}
-
 /**
  * The audio of jobs that have not reached the server yet, so a failed upload or start can be
  * retried. Only this tab holds it; after a reload such a job can only be discarded.
@@ -702,26 +655,16 @@ async function startUploadedDictationJob(
   // A mode key pressed during the upload changed the record, not a server job.
   const mode = useOwnDictationJobsStore.getState().jobs[jobId]?.mode ?? DEFAULT_DICTATION_MODE;
   const target = mode === "clipboard" ? null : own.target;
-  const result = await runAtomCommand(
-    appAtomRegistry,
-    dictationEnvironment.start,
-    {
-      environmentId,
-      input: {
-        jobId,
-        attachmentId,
-        durationMs,
-        mode,
-        target,
-        filterSilence: getClientSettings().speechSilenceFiltering,
-      },
-    },
-    { reportFailure: false },
-  );
-  if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+  const started = await startDictationTranscription(environmentId, {
+    jobId,
+    attachmentId,
+    durationMs,
+    mode,
+    target,
+  });
   unstartedAudio.delete(jobId);
   startedJobIds.add(jobId);
-  rememberJobStamp(result.value);
+  rememberJobStamp(started);
   // A mode key pressed while the start was on the wire changed only the record.
   const latest = useOwnDictationJobsStore.getState().jobs[jobId]?.mode;
   if (latest !== undefined && latest !== mode) sendModeChange(environmentId, jobId, latest);
