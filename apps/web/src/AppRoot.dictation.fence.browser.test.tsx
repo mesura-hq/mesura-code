@@ -752,6 +752,15 @@ describe("dictation phase 4 fence", () => {
     expect(startCalls()).toHaveLength(1);
   });
 
+  it("the composer offers Mesura dictation as its only microphone on a device that never chose upstream voice", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await mountApp();
+
+    requireButton("Start voice dictation");
+    expect(buttonLabelled("Start voice input")).toBeUndefined();
+  });
+
   // Mesura: on Chrome Android a tap focuses the button before its click. Focus that
   // expanded the composer unmounted the collapsed row under the tap, so dictation never started.
   it("phone collapsed composer: a tap on the microphone starts dictation without expanding first", async () => {

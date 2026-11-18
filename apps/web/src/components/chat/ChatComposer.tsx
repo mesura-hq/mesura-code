@@ -1886,6 +1886,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectId: activeProjectId,
     projectName,
     ownerKey: questionAttachmentTarget ?? composerDraftTargetKey,
+    // Mesura: Mesura dictation is the composer's microphone; upstream's appears only once chosen in Settings → Voice.
+    offerSetup: false,
     disabled: dictationDisabled,
     readDraft: () => {
       const snapshot = readComposerSnapshot();
