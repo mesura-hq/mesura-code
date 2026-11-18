@@ -104,3 +104,27 @@ describe("microphone claim for a comment editor's dictation", () => {
     expect(claimMicrophone("field")).not.toBeNull();
   });
 });
+
+describe("microphone claim for upstream voice input", () => {
+  it("is taken by upstream capture, so Mesura dictation, comments and calls wait for it", () => {
+    const voice = claimMicrophone("voice");
+    expect(voice).not.toBeNull();
+    expect(microphoneBlocker("dictation")).toBe("Dictation is unavailable during voice input");
+    expect(microphoneBlocker("field")).toBe("Dictation is unavailable during voice input");
+    expect(microphoneBlocker("call")).toBe("Voice call is unavailable while dictation is active");
+    voice!();
+    expect(microphoneBlocker("dictation")).toBeNull();
+  });
+
+  it("waits for a Mesura recording, a comment recording and a call", () => {
+    useDictationSessionStore.setState({ session: recordingSession });
+    expect(microphoneBlocker("voice")).toBe("A dictation session is already active");
+    useDictationSessionStore.setState({ session: null });
+    const field = claimMicrophone("field");
+    expect(claimMicrophone("voice")).toBeNull();
+    field!();
+    const call = claimMicrophone("call");
+    expect(microphoneBlocker("voice")).toBe("Dictation is unavailable during a voice call");
+    call!();
+  });
+});

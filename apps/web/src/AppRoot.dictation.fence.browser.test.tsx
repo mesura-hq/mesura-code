@@ -35,6 +35,8 @@ import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import type { AppRouter } from "./router";
 
 const fixture = vi.hoisted(() => ({
+  /** Stands for a device that chose an upstream voice destination in Settings → Voice. */
+  upstreamVoiceChosen: false,
   projection: null as OrchestrationV2ThreadProjection | null,
   project: {
     id: "app-root-fence-project",
@@ -192,6 +194,16 @@ vi.mock("./hooks/useSettings", async (importOriginal) => {
     useLegacySidebarEnabled: () => false,
   };
 });
+vi.mock("./speech/useEnvironmentSpeechInput", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./speech/useEnvironmentSpeechInput")>();
+  return {
+    ...actual,
+    useEnvironmentSpeechInput: (input: Parameters<typeof actual.useEnvironmentSpeechInput>[0]) => {
+      const speech = actual.useEnvironmentSpeechInput(input);
+      return fixture.upstreamVoiceChosen ? { ...speech, available: true } : speech;
+    },
+  };
+});
 vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/Sidebar", () => ({ default: () => null }));
@@ -306,6 +318,7 @@ async function desktopViewport() {
 
 async function setupBrowserFixture0() {
   fixture.projection = makeThreadProjection();
+  fixture.upstreamVoiceChosen = false;
   appRootFence.openThreadId = threadId;
   installFenceFontEvents();
   fixture.dictationCalls.length = 0;
@@ -755,6 +768,16 @@ describe("dictation phase 4 fence", () => {
 
   it("the composer offers Mesura dictation as its only microphone on a device that never chose upstream voice", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
+
+    await mountApp();
+
+    requireButton("Start voice dictation");
+    expect(buttonLabelled("Start voice input")).toBeUndefined();
+  });
+
+  it("keeps one composer microphone on a device that chose upstream voice", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    fixture.upstreamVoiceChosen = true;
 
     await mountApp();
 

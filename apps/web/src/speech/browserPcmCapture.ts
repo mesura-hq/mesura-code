@@ -5,6 +5,7 @@ import type {
   VoiceTranscriptionOptions,
 } from "@t3tools/client-runtime/voice-input";
 import workletUrl from "./pcmWorklet.ts?worker&url";
+import { claimMicrophone, microphoneBlocker } from "../voice/microphoneClaim";
 
 type PreparedBrowserTranscription = PreparedVoiceTranscription & {
   readonly streaming?: VoiceStreamingSession & { readonly feed: (pcm: Float32Array) => void };
@@ -45,7 +46,10 @@ export function createBrowserPcmCapture(
     | { readonly resolve: () => void; readonly reject: (error: Error) => void }
     | undefined;
 
+  let releaseMicrophone: (() => void) | null = null;
   const cleanupCapture = () => {
+    releaseMicrophone?.();
+    releaseMicrophone = null;
     if (durationTimer) clearTimeout(durationTimer);
     durationTimer = undefined;
     worklet?.disconnect();
@@ -171,6 +175,19 @@ export function createBrowserPcmCapture(
         cleanupCapture();
       }
     },
+  };
+
+  // Mesura: the shared microphone claim covers this capture from open to cleanup.
+  const prepareUnclaimed = recorder.prepareToRecordAsync;
+  recorder.prepareToRecordAsync = async () => {
+    releaseMicrophone?.();
+    releaseMicrophone = claimMicrophone("voice");
+    if (!releaseMicrophone)
+      throw new Error(microphoneBlocker("voice") ?? "The microphone is busy.");
+    await prepareUnclaimed().catch((error: unknown) => {
+      cleanupCapture();
+      throw error;
+    });
   };
 
   return {

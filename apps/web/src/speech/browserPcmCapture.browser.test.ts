@@ -1,5 +1,10 @@
 import { expect, it, vi } from "vite-plus/test";
 import { createBrowserPcmCapture, openMicrophone } from "./browserPcmCapture";
+import {
+  claimMicrophone,
+  microphoneBlocker,
+  resetMicrophoneClaimForTest,
+} from "../voice/microphoneClaim";
 
 it("records from the chosen microphone, cancels an unanswered prompt, and stops a late stream", async () => {
   let grantPermission!: (media: MediaStream) => void;
@@ -49,4 +54,31 @@ it("falls back to the system default when the saved microphone is gone, and repo
   microphone.mockRejectedValueOnce(denied);
   await expect(openMicrophone("blue-yeti")).rejects.toBe(denied);
   expect(microphone).toHaveBeenCalledTimes(3);
+});
+
+it("takes the shared microphone claim while capturing and gives it back on failure", async () => {
+  resetMicrophoneClaimForTest();
+  const capture = createBrowserPcmCapture(
+    {
+      getMicrophoneId: async () => "",
+      onLevel: vi.fn(),
+      onDurationLimit: vi.fn(),
+      onError: vi.fn(),
+    },
+    async () => ({ locale: "en", transcribe: async () => "" }),
+  );
+  await capture.transcriber.prepare({ signal: new AbortController().signal });
+
+  const call = claimMicrophone("call");
+  await expect(capture.recorder.prepareToRecordAsync()).rejects.toThrow(
+    "Dictation is unavailable during a voice call",
+  );
+  call!();
+
+  const denied = new DOMException("denied", "NotAllowedError");
+  using _microphone = vi.spyOn(navigator.mediaDevices, "getUserMedia").mockRejectedValue(denied);
+  const preparing = capture.recorder.prepareToRecordAsync();
+  expect(microphoneBlocker("dictation")).toBe("Dictation is unavailable during voice input");
+  await expect(preparing).rejects.toBe(denied);
+  expect(microphoneBlocker("dictation")).toBeNull();
 });

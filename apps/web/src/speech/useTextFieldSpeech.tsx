@@ -104,7 +104,7 @@ export function TextFieldSpeechControls({
         onCancel={speech.cancel}
         onSkipPostProcessing={speech.skipPostProcessing}
       />
-      {speech.state.phase === "idle" ? (
+      {speech.state.phase === "idle" || speech.mesuraDictation.busy ? (
         <FieldDictationControls dictation={speech.mesuraDictation} disabled={disabled} />
       ) : null}
       <VoiceInputSetup

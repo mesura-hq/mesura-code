@@ -3942,12 +3942,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           onCancel={() => speechInput.cancel()}
                           onSkipPostProcessing={() => speechInput.skipPostProcessing()}
                         />
-                        <ComposerSpeechButton
-                          state={speechInput.state}
-                          shortcutLabel={dictationShortcutLabel}
-                          disabled={dictationDisabled}
-                          onStart={() => void speechInput.start()}
-                        />
+                        {/* Mesura: one idle microphone; with Mesura's present, upstream's waits for its shortcut. */}
+                        {dictationStartControl ? null : (
+                          <ComposerSpeechButton
+                            state={speechInput.state}
+                            shortcutLabel={dictationShortcutLabel}
+                            disabled={dictationDisabled}
+                            onStart={() => void speechInput.start()}
+                          />
+                        )}
                       </>
                     ) : null}
                     <VoiceInputSetup
