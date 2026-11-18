@@ -1,6 +1,6 @@
-import { decodeToPcm, encodeRanges } from "./ffmpegAudio.ts";
+import { decodedSampleCount, decodeToPcm, encodeSampleRanges } from "./ffmpegAudio.ts";
 import { openSileroVad, VAD_FRAME_SAMPLES, VAD_SAMPLE_RATE } from "./sileroVadWorker.ts";
-import { boundRanges, speechRanges, speechSeconds } from "./speechRanges.ts";
+import { speechRanges } from "./speechRanges.ts";
 
 export type SpeechOnlyAudio =
   | {
@@ -11,14 +11,16 @@ export type SpeechOnlyAudio =
     }
   /** Almost all of it is speech: the original is sent as it is, not re-encoded. */
   | { readonly kind: "unchanged"; readonly recordingMs: number }
-  | { readonly kind: "no-speech"; readonly recordingMs: number };
+  | { readonly kind: "no-speech"; readonly recordingMs: number }
+  /** The cut did not come out as the speech it should hold; the original is sent instead. */
+  | { readonly kind: "invalid-cut"; readonly recordingMs: number; readonly reason: string };
 
 /** About ten seconds per IPC round trip to Silero. */
 const FEED_SAMPLES = 10 * VAD_SAMPLE_RATE;
 const MIN_SPEECH_SECONDS = 0.25;
 const UNCHANGED_SPEECH_SHARE = 0.95;
-/** Each range is about 35 characters of ffmpeg filter; 1500 stay far below one argument's limit. */
-const MAX_RANGES = 1_500;
+/** Opus pre-skip and padding move a decoded length by milliseconds, never by this much. */
+const CUT_TOLERANCE_SECONDS = 0.25;
 
 /** Silero's verdict on a recording, then the speech alone, cut by ffmpeg into Ogg Opus. */
 export async function speechOnlyAudio(
@@ -68,13 +70,41 @@ export async function speechOnlyAudio(
     throw new Error("Silero scored an incomplete recording.");
   }
 
-  const recordingSeconds = samples / VAD_SAMPLE_RATE;
-  const recordingMs = Math.round(recordingSeconds * 1000);
-  const ranges = boundRanges(speechRanges(probs), MAX_RANGES);
-  const speech = speechSeconds(ranges);
-  if (speech < MIN_SPEECH_SECONDS) return { kind: "no-speech", recordingMs };
-  if (speech >= recordingSeconds * UNCHANGED_SPEECH_SHARE)
-    return { kind: "unchanged", recordingMs };
-  const audio = await encodeRanges(audioPath, ranges, signal);
-  return { kind: "filtered", audio, speechMs: Math.round(speech * 1000), recordingMs };
+  const recordingMs = Math.round((samples / VAD_SAMPLE_RATE) * 1000);
+  const ranges = speechRanges(probs).map((range) => ({
+    start: Math.min(range.start, samples),
+    end: Math.min(range.end, samples),
+  }));
+  const speechSamples = ranges.reduce((total, range) => total + range.end - range.start, 0);
+  if (speechSamples < MIN_SPEECH_SECONDS * VAD_SAMPLE_RATE) {
+    return { kind: "no-speech", recordingMs };
+  }
+  if (speechSamples >= samples * UNCHANGED_SPEECH_SHARE) return { kind: "unchanged", recordingMs };
+  const cut = await encodeSampleRanges(audioPath, ranges, signal);
+  const reason = await checkCut(cut, speechSamples, signal);
+  if (reason !== null) return { kind: "invalid-cut", recordingMs, reason };
+  return {
+    kind: "filtered",
+    audio: cut.audio,
+    speechMs: Math.round((cut.samples / VAD_SAMPLE_RATE) * 1000),
+    recordingMs,
+  };
+}
+
+/** Why the cut cannot stand in for the recording, or null when it holds the kept speech. */
+export async function checkCut(
+  cut: { readonly audio: Uint8Array; readonly samples: number },
+  expectedSamples: number,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const tolerance = CUT_TOLERANCE_SECONDS * VAD_SAMPLE_RATE;
+  if (Math.abs(cut.samples - expectedSamples) > tolerance) {
+    return `the cut took ${cut.samples} of ${expectedSamples} speech samples`;
+  }
+  if (cut.audio.length === 0) return "the cut is empty";
+  const decoded = await decodedSampleCount(cut.audio, signal).catch(() => 0);
+  if (Math.abs(decoded - cut.samples) > tolerance) {
+    return `the cut decodes to ${decoded} of ${cut.samples} samples`;
+  }
+  return null;
 }

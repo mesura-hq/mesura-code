@@ -200,6 +200,12 @@ const takeUpsert = (received: Queue.Queue<DictationJobEvent, string>) =>
     return (event as Extract<DictationJobEvent, { type: "upsert" }>).job;
   });
 
+const takeUpsertUntil = (
+  received: Queue.Queue<DictationJobEvent, string>,
+  done: (job: DictationJob) => boolean,
+): Effect.Effect<DictationJob, string> =>
+  takeUpsert(received).pipe(Effect.filterOrElse(done, () => takeUpsertUntil(received, done)));
+
 const startInput = (
   jobId: string,
   overrides: Partial<DictationStartInput> = {},
@@ -753,8 +759,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
           yield* takeSnapshot(received);
           const jobId = DictationJobId.make("job-silent");
           yield* harness.jobs.start(startInput(jobId));
-          yield* takeUpsert(received);
-          const failed = yield* takeUpsert(received);
+          // Upserts coalesce per job, so the transcribing state may never reach a subscriber.
+          const failed = yield* takeUpsertUntil(received, (job) => job.status !== "transcribing");
           assert.strictEqual(failed.status, "failed");
           assert.strictEqual(failed.failure, DictationJobsModule.NO_SPEECH_FAILURE);
           assert.strictEqual(harness.openAi.requestCount(), 0);
@@ -764,8 +770,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
           assert.deepStrictEqual(call.audio, AUDIO);
           assert.strictEqual(harness.filteredPaths.length, 1);
           yield* call.answer(200, "algo bajito");
-          assert.strictEqual((yield* takeUpsert(received)).status, "transcribing");
-          assert.strictEqual((yield* takeUpsert(received)).text, "algo bajito");
+          const completed = yield* takeUpsertUntil(received, (job) => job.status === "completed");
+          assert.strictEqual(completed.text, "algo bajito");
         }),
     );
   },

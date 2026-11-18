@@ -60,6 +60,13 @@ export const make = Effect.gen(function* () {
       catch: (cause) => new DictationSilenceFilterError({ cause }),
     }).pipe(
       Effect.timeout(FILTER_TIMEOUT),
+      Effect.tap((outcome) =>
+        outcome.kind === "invalid-cut"
+          ? Effect.logWarning(
+              `Dictation cut rejected (${outcome.reason}); sending the whole recording.`,
+            )
+          : Effect.void,
+      ),
       permits.withPermits(1),
       Effect.catchCause((cause) =>
         Effect.logWarning(

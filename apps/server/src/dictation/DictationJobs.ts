@@ -215,25 +215,22 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  const readAudio = Effect.fn(function* (attachmentId: string) {
+  const missingAudio = () =>
+    new OpenAiTranscriptionError({ reason: MISSING_AUDIO_FAILURE, retryable: false });
+
+  const audioPathOf = Effect.fn(function* (attachmentId: string) {
     const audioPath = resolveAttachmentPathById({
       attachmentsDir: config.attachmentsDir,
       attachmentId,
     });
-    if (!audioPath) {
-      return yield* new OpenAiTranscriptionError({
-        reason: MISSING_AUDIO_FAILURE,
-        retryable: false,
-      });
-    }
-    const audio = yield* fs
-      .readFile(audioPath)
-      .pipe(
-        Effect.mapError(
-          () => new OpenAiTranscriptionError({ reason: MISSING_AUDIO_FAILURE, retryable: false }),
-        ),
-      );
-    return { audio, fileName: path.basename(audioPath), audioPath };
+    if (!audioPath) return yield* missingAudio();
+    return audioPath;
+  });
+
+  /** Read only when it is sent, so a job waiting for the filter holds no audio in memory. */
+  const readAudio = Effect.fn(function* (audioPath: string) {
+    const audio = yield* fs.readFile(audioPath).pipe(Effect.mapError(missingAudio));
+    return { audio, fileName: path.basename(audioPath) };
   });
 
   /**
@@ -248,9 +245,13 @@ export const make = Effect.gen(function* () {
       readonly filterSilence: boolean;
     },
   ) {
-    const original = yield* readAudio(plan.attachmentId);
-    if (!plan.filterSilence) return { ...original, durationMs: plan.durationMs };
-    const outcome = yield* silenceFilter.filter(original.audioPath);
+    const audioPath = yield* audioPathOf(plan.attachmentId);
+    const whole = Effect.map(readAudio(audioPath), (original) => ({
+      ...original,
+      durationMs: plan.durationMs,
+    }));
+    if (!plan.filterSilence) return yield* whole;
+    const outcome = yield* silenceFilter.filter(audioPath);
     if (outcome.kind === "no-speech") {
       yield* Effect.sync(() => {
         const tracked = jobs.get(jobId);
@@ -258,10 +259,10 @@ export const make = Effect.gen(function* () {
       });
       return yield* new OpenAiTranscriptionError({ reason: NO_SPEECH_FAILURE, retryable: false });
     }
-    if (outcome.kind !== "filtered") return { ...original, durationMs: plan.durationMs };
+    if (outcome.kind !== "filtered") return yield* whole;
     return {
       audio: outcome.audio,
-      fileName: `${path.basename(original.fileName, path.extname(original.fileName))}.ogg`,
+      fileName: `${path.basename(audioPath, path.extname(audioPath))}.ogg`,
       durationMs: outcome.speechMs,
     };
   });
