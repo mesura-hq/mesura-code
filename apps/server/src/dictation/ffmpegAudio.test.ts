@@ -136,24 +136,44 @@ describe.runIf(hasFfmpeg)("checkCut", () => {
   });
 });
 
-/** Runs ffmpeg through a wrapper that records each process id, for the life of `run`. */
+/**
+ * Runs ffmpeg through a wrapper that records each process id, for the life of `run`.
+ * `started(count)` resolves once `count` wrappers have recorded theirs.
+ */
 async function withRecordedFfmpegProcesses<T>(
   directory: string,
-  run: (processIds: () => number[]) => Promise<T>,
+  run: (processes: {
+    readonly ids: () => number[];
+    readonly started: (count: number) => Promise<void>;
+  }) => Promise<T>,
 ): Promise<T> {
-  const pidFile = NodePath.join(directory, "pids");
+  const pidDirectory = NodePath.join(directory, "pids");
+  NodeFS.mkdirSync(pidDirectory);
+  const pidFile = NodePath.join(pidDirectory, "pids");
   const wrapper = NodePath.join(directory, "ffmpeg-wrapper.sh");
   NodeFS.writeFileSync(wrapper, `#!/bin/sh\necho $$ >> '${pidFile}'\nexec ffmpeg "$@"\n`, {
     mode: 0o755,
   });
+  const ids = () =>
+    NodeFS.existsSync(pidFile)
+      ? NodeFS.readFileSync(pidFile, "utf8").trim().split("\n").filter(Boolean).map(Number)
+      : [];
+  const started = (count: number) =>
+    new Promise<void>((resolve) => {
+      const watcher = NodeFS.watch(pidDirectory, () => {
+        if (ids().length < count) return;
+        watcher.close();
+        resolve();
+      });
+      if (ids().length >= count) {
+        watcher.close();
+        resolve();
+      }
+    });
   const previous = process.env.T3CODE_DICTATION_FFMPEG;
   process.env.T3CODE_DICTATION_FFMPEG = wrapper;
   try {
-    return await run(() =>
-      NodeFS.existsSync(pidFile)
-        ? NodeFS.readFileSync(pidFile, "utf8").trim().split("\n").map(Number)
-        : [],
-    );
+    return await run({ ids, started });
   } finally {
     if (previous === undefined) delete process.env.T3CODE_DICTATION_FFMPEG;
     else process.env.T3CODE_DICTATION_FFMPEG = previous;
@@ -177,14 +197,15 @@ describe.runIf(hasFfmpeg)("cancelling a cut", () => {
     process.on("unhandledRejection", onUnhandled);
     try {
       const path = toneFixture(directory, 60);
-      await withRecordedFfmpegProcesses(directory, async (processIds) => {
+      await withRecordedFfmpegProcesses(directory, async (processes) => {
         const controller = new AbortController();
         const cut = encodeSampleRanges(path, [{ start: 0, end: 60 * RATE }], controller.signal);
-        setImmediate(() => controller.abort());
+        // Both the decoder and the encoder are running before the abort.
+        await processes.started(2);
+        controller.abort();
         await expect(cut).rejects.toMatchObject({ name: "AbortError" });
-        // A process killed before its wrapper ran records no id.
-        expect(processIds().length).toBeGreaterThan(0);
-        expect(processIds().filter(isRunning)).toEqual([]);
+        expect(processes.ids()).toHaveLength(2);
+        expect(processes.ids().filter(isRunning)).toEqual([]);
       });
       expect(unhandled).toEqual([]);
     } finally {
