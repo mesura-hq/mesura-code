@@ -1,9 +1,10 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { MicIcon, SquareIcon, XIcon } from "lucide-react";
-import { useEffect, useRef, type PointerEvent, type RefObject } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
+import { randomUUID } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useDictationJobs } from "~/state/dictation";
 import { useMicrophoneBlocker } from "../voice/microphoneClaim";
@@ -29,7 +30,11 @@ export function useFieldDictation(input: {
   readonly onTextChange: (text: string) => void;
   readonly disabled?: boolean | undefined;
 }) {
-  const { environmentId, ownerKey } = input;
+  const { environmentId } = input;
+  // One draft is one mount: two editors showing the same range, such as overlapping guide
+  // excerpts, never share a recording, a job or a held submission.
+  const [draftId] = useState(randomUUID);
+  const ownerKey = JSON.stringify([input.ownerKey, draftId]);
   const latest = useRef(input);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes the committed field callbacks to transcripts that land later
   useEffect(() => {
