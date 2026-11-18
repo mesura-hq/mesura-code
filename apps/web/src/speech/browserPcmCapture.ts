@@ -12,7 +12,10 @@ type PreparedBrowserTranscription = PreparedVoiceTranscription & {
 };
 
 /** Opens a microphone. A saved device the browser can no longer find falls back to System default. */
-export async function openMicrophone(microphoneId: string): Promise<MediaStream> {
+export async function openMicrophone(
+  microphoneId: string,
+  signal?: AbortSignal,
+): Promise<MediaStream> {
   if (!microphoneId) return navigator.mediaDevices.getUserMedia({ audio: true });
   try {
     return await navigator.mediaDevices.getUserMedia({
@@ -21,6 +24,7 @@ export async function openMicrophone(microphoneId: string): Promise<MediaStream>
   } catch (error) {
     const name = typeof error === "object" && error !== null && "name" in error ? error.name : "";
     if (name !== "OverconstrainedError" && name !== "NotFoundError") throw error;
+    signal?.throwIfAborted();
     return navigator.mediaDevices.getUserMedia({ audio: true });
   }
 }
@@ -47,6 +51,7 @@ export function createBrowserPcmCapture(
     | undefined;
 
   let releaseMicrophone: (() => void) | null = null;
+  let microphoneRequest: Promise<unknown> = Promise.resolve();
   const cleanupCapture = () => {
     releaseMicrophone?.();
     releaseMicrophone = null;
@@ -81,7 +86,8 @@ export function createBrowserPcmCapture(
       captureSignal.throwIfAborted();
       const captured = await new Promise<MediaStream>((resolve, reject) => {
         const onAbort = () => reject(captureSignal.reason);
-        const permission = openMicrophone(microphoneId);
+        const permission = openMicrophone(microphoneId, captureSignal);
+        microphoneRequest = permission;
         captureSignal.addEventListener("abort", onAbort, { once: true });
         void permission.then(
           (media) => {
@@ -179,11 +185,16 @@ export function createBrowserPcmCapture(
 
   // Mesura: the shared microphone claim covers this capture from open to cleanup.
   const prepareUnclaimed = recorder.prepareToRecordAsync;
+  // A cancelled attempt keeps it until its browser request settles and any late tracks stopped.
   recorder.prepareToRecordAsync = async () => {
     releaseMicrophone?.();
-    releaseMicrophone = claimMicrophone("voice");
-    if (!releaseMicrophone)
-      throw new Error(microphoneBlocker("voice") ?? "The microphone is busy.");
+    const claim = claimMicrophone("voice");
+    if (!claim) throw new Error(microphoneBlocker("voice") ?? "The microphone is busy.");
+    microphoneRequest = Promise.resolve();
+    releaseMicrophone = () => {
+      const settled = microphoneRequest.catch(() => undefined);
+      void settled.then(claim);
+    };
     await prepareUnclaimed().catch((error: unknown) => {
       cleanupCapture();
       throw error;

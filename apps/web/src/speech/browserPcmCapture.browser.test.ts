@@ -82,3 +82,33 @@ it("takes the shared microphone claim while capturing and gives it back on failu
   await expect(preparing).rejects.toBe(denied);
   expect(microphoneBlocker("dictation")).toBeNull();
 });
+
+it("keeps the claim until a cancelled saved-device request settles, and opens no default after", async () => {
+  resetMicrophoneClaimForTest();
+  let failRequest!: (error: unknown) => void;
+  const request = new Promise<MediaStream>((_resolve, reject) => {
+    failRequest = reject;
+  });
+  using microphone = vi.spyOn(navigator.mediaDevices, "getUserMedia").mockReturnValue(request);
+  const capture = createBrowserPcmCapture(
+    {
+      getMicrophoneId: async () => "blue-yeti",
+      onLevel: vi.fn(),
+      onDurationLimit: vi.fn(),
+      onError: vi.fn(),
+    },
+    async () => ({ locale: "en", transcribe: async () => "" }),
+  );
+  const abort = new AbortController();
+  await capture.transcriber.prepare({ signal: abort.signal });
+  const preparing = capture.recorder.prepareToRecordAsync();
+  await vi.waitFor(() => expect(microphone).toHaveBeenCalledOnce());
+  abort.abort();
+  await expect(preparing).rejects.toBe(abort.signal.reason);
+  // Another recorder stays blocked while the browser still resolves the old request.
+  expect(microphoneBlocker("dictation")).toBe("Dictation is unavailable during voice input");
+
+  failRequest(new DOMException("gone", "NotFoundError"));
+  await vi.waitFor(() => expect(microphoneBlocker("dictation")).toBeNull());
+  expect(microphone).toHaveBeenCalledOnce();
+});
