@@ -49,7 +49,7 @@ function setup() {
   vi.mocked(dictationController.registerDictationComposer).mockClear();
 }
 
-function renderCard() {
+function renderCard(onRespond: () => Promise<boolean> = async () => false) {
   return render(
     <InlinePendingUserInputCard
       request={request}
@@ -61,7 +61,7 @@ function renderCard() {
         maxFileBytes: null,
         unavailable: false,
         respondingRequestIds: [],
-        onRespond: async () => false,
+        onRespond,
         onDismiss: async () => false,
         onDismissWithAnswer: async () => false,
       }}
@@ -162,4 +162,22 @@ it("focuses the answer from its label", async () => {
   await using screen = await renderCard();
   await screen.getByText("Additional detail").click();
   await expect.element(screen.getByRole("textbox", { name: "Anything to add?" })).toHaveFocus();
+});
+
+it("keeps a marker typed right after an exclamation point pending, then fills it", async () => {
+  setup();
+  const onRespond = vi.fn(async () => false);
+  await using screen = await renderCard(onRespond);
+  editAnswer(() => `Keep !${marker}`);
+  const field = screen.getByRole("textbox", { name: "Anything to add?" });
+  await expect.element(field.getByRole("img", { name: "Transcribing" })).toBeInTheDocument();
+  expect(field.element().textContent).toContain("Keep !");
+  await screen.getByRole("button", { name: /submit/i }).click();
+  expect(onRespond).not.toHaveBeenCalled();
+  editAnswer((text) => {
+    const result = fillDictationSlot(text, jobId, "spoken");
+    return "missing" in result ? null : result.text;
+  });
+  expect(readPendingUserInputAnswerText(key, "detail")).toBe("Keep ! spoken");
+  await expect.element(field).toHaveTextContent("Keep ! spoken");
 });
