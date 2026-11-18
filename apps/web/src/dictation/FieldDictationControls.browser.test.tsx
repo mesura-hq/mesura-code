@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { expect, it, vi } from "vite-plus/test";
 
 import { render } from "../../test/render";
+import { toastManager } from "~/components/ui/toast";
 import { TextFieldSpeechControls, useTextFieldSpeech } from "~/speech/useTextFieldSpeech";
 import { claimMicrophone } from "../voice/microphoneClaim";
 import * as transport from "./dictationTransport";
@@ -310,4 +311,29 @@ it("keeps a failed recording's retry out of the draft after a manual submit", as
   publishJobs([fieldJob(jobId, { status: "completed", text: "retried words" })]);
   expect(useFieldDictationStore.getState().pending).toEqual({});
   await expect.element(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Draft");
+});
+
+it("drops a held submission whose job the restarted environment never listed", async () => {
+  setup();
+  using toast = vi.spyOn(toastManager, "add");
+  vi.mocked(transport.startDictationTranscription).mockImplementationOnce(async (_, input) =>
+    fieldJob(input.jobId, { epoch: "run-1", revision: 4 }),
+  );
+  const submitted: string[] = [];
+  await using screen = await render(
+    <CommentEditor initial="Draft" onSubmit={(text) => submitted.push(text)} />,
+  );
+  await screen.getByRole("button", { name: "Start voice dictation" }).click();
+  await expect.element(screen.getByRole("button", { name: "Stop and transcribe" })).toBeVisible();
+  await screen.getByRole("button", { name: "Submit" }).click();
+  await vi.waitFor(() => expect(startedJobIds()).toHaveLength(1));
+  await expect.element(screen.getByRole("status")).toHaveTextContent("Sends when transcribed");
+
+  // The environment restarted: its first list is from a new run and lacks the job.
+  publishJobs([], { epoch: "run-2", revision: 0 });
+  await expect.element(screen.getByRole("status")).not.toBeInTheDocument();
+  expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: "A dictation was lost" }));
+  expect(submitted).toEqual([]);
+  await screen.getByRole("button", { name: "Submit" }).click();
+  expect(submitted).toEqual(["Draft"]);
 });

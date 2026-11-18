@@ -7,10 +7,20 @@ import { vi } from "vite-plus/test";
  * `mockDictationJobsModule` and `~/dictation/dictationTransport` with
  * `mockDictationTransportModule`. This module imports neither, so a mock factory can load it.
  */
-const jobsFixture = { jobs: [] as DictationJob[], listeners: new Set<() => void>() };
+interface JobsCursor {
+  readonly epoch: string | null;
+  readonly revision: number | null;
+}
 
-export function publishJobs(jobs: DictationJob[]): void {
-  jobsFixture.jobs = jobs;
+const NO_CURSOR: JobsCursor = { epoch: null, revision: null };
+const jobsFixture = {
+  list: { jobs: [] as DictationJob[], cursor: NO_CURSOR },
+  listeners: new Set<() => void>(),
+};
+
+/** Publishes a job list; `cursor` is the server run and change it reflects. */
+export function publishJobs(jobs: DictationJob[], cursor: JobsCursor = NO_CURSOR): void {
+  jobsFixture.list = { jobs, cursor };
   for (const listener of jobsFixture.listeners) listener();
 }
 
@@ -20,16 +30,16 @@ export async function mockDictationJobsModule(
   return {
     ...(await importOriginal()),
     useDictationJobs: (environmentId: string | null) => {
-      const jobs = useSyncExternalStore(
+      const list = useSyncExternalStore(
         (listener) => {
           jobsFixture.listeners.add(listener);
           return () => jobsFixture.listeners.delete(listener);
         },
-        () => jobsFixture.jobs,
+        () => jobsFixture.list,
       );
       return {
-        jobs: environmentId === null ? [] : jobs,
-        cursor: { epoch: null, revision: null },
+        jobs: environmentId === null ? [] : list.jobs,
+        cursor: environmentId === null ? NO_CURSOR : list.cursor,
         loaded: environmentId !== null,
       };
     },

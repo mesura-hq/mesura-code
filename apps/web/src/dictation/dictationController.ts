@@ -43,6 +43,7 @@ import {
   readPendingUserInputAnswerText,
 } from "~/pendingUserInputDraftStore";
 import { randomUUID } from "~/lib/utils";
+import { dictationJobStamp, listProvesJobGone, type DictationJobStamp } from "./dictationJobStamps";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { dictationEnvironment } from "~/state/dictation";
 import {
@@ -130,7 +131,7 @@ const listedJobIds = new Set<string>();
  * or past that revision, and that lacks the job, proves the server forgot it. A list behind it is
  * only older than the job.
  */
-const jobStamps = new Map<string, { readonly epoch: string; readonly revision: number }>();
+const jobStamps = new Map<string, DictationJobStamp>();
 /**
  * Jobs forgotten as vanished. A forgotten job that a later snapshot lists as transcribing (a start
  * resent after a reconnect) takes the mode keys back.
@@ -921,8 +922,9 @@ function restoreLastJob(environmentId: EnvironmentId, jobs: ReadonlyArray<Dictat
  * else may only predate the job, so it stays.
  */
 function rememberJobStamp(job: DictationJob) {
-  if (job.epoch === undefined || job.revision === undefined || jobStamps.has(job.id)) return;
-  jobStamps.set(job.id, { epoch: job.epoch, revision: job.revision });
+  const stamp = dictationJobStamp(job);
+  if (stamp === undefined || jobStamps.has(job.id)) return;
+  jobStamps.set(job.id, stamp);
 }
 
 function forgetVanishedLastJob(
@@ -946,15 +948,6 @@ function forgetVanishedLastJob(
     vanishedJobIds.set(lastJob.jobId, environmentId);
     useDictationSessionStore.setState({ lastJob: null });
   }
-}
-
-function listProvesJobGone(
-  stamp: { readonly epoch: string; readonly revision: number } | undefined,
-  cursor: DictationJobsCursor,
-): boolean {
-  // A server older than the stamps: only a job seen listed can be judged.
-  if (stamp === undefined || cursor.epoch === null || cursor.revision === null) return false;
-  return cursor.epoch !== stamp.epoch || cursor.revision >= stamp.revision;
 }
 
 function reclaimReappearedJob(environmentId: EnvironmentId, jobs: ReadonlyArray<DictationJob>) {

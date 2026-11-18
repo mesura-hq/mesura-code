@@ -1,3 +1,4 @@
+import type { DictationJobsCursor } from "@t3tools/client-runtime/dictation";
 import { DictationJobId, type DictationJob, type EnvironmentId } from "@t3tools/contracts";
 import { insertDictationSlotAt } from "@t3tools/shared/dictationSlots";
 import { create } from "zustand";
@@ -6,6 +7,7 @@ import { toastManager } from "~/components/ui/toast";
 import { openTranscriptionsList } from "~/components/dictation/TranscriptionsList";
 import { randomUUID } from "~/lib/utils";
 import { claimMicrophone, microphoneBlocker } from "../voice/microphoneClaim";
+import { dictationJobStamp, listProvesJobGone, type DictationJobStamp } from "./dictationJobStamps";
 import { startDictationTranscription, uploadDictationAudio } from "./dictationTransport";
 import {
   DICTATION_MAX_RECORDING_MS,
@@ -37,6 +39,8 @@ interface FieldDictationState {
   readonly failed: ReadonlySet<string>;
   /** Editors whose submission waits for their transcripts. */
   readonly submitQueued: ReadonlySet<string>;
+  /** Accepted pending jobs by id, so a later job list can prove one gone before it was listed. */
+  readonly stamps: Readonly<Record<string, DictationJobStamp>>;
 }
 
 export const useFieldDictationStore = create<FieldDictationState>(() => ({
@@ -44,6 +48,7 @@ export const useFieldDictationStore = create<FieldDictationState>(() => ({
   pending: {},
   failed: new Set(),
   submitQueued: new Set(),
+  stamps: {},
 }));
 
 /** A held submission and the jobs whose text has to land before it may run. */
@@ -209,13 +214,19 @@ export async function stopFieldDictation(options?: { readonly detached?: boolean
   try {
     const audio = await recording.stop().finally(release);
     const attachmentId = await uploadDictationAudio(current.environmentId, audio, jobId);
-    await startDictationTranscription(current.environmentId, {
+    const accepted = await startDictationTranscription(current.environmentId, {
       jobId,
       attachmentId,
       durationMs,
       mode: "inject",
       target: null,
     });
+    const stamp = dictationJobStamp(accepted);
+    if (stamp && !options?.detached) {
+      useFieldDictationStore.setState((state) => ({
+        stamps: { ...state.stamps, [jobId]: stamp },
+      }));
+    }
   } catch (cause) {
     cancelSubmitAwaiting(current.ownerKey, jobId);
     removePending(current.ownerKey, [jobId]);
@@ -263,8 +274,12 @@ function removePending(ownerKey: string, jobIds: ReadonlyArray<string>) {
     const rest = (state.pending[ownerKey] ?? []).filter((id) => !jobIds.includes(id));
     const { [ownerKey]: _removed, ...others } = state.pending;
     const failed = new Set(state.failed);
-    for (const jobId of jobIds) failed.delete(jobId);
-    return { pending: rest.length > 0 ? { ...others, [ownerKey]: rest } : others, failed };
+    const stamps = { ...state.stamps };
+    for (const jobId of jobIds) {
+      failed.delete(jobId);
+      delete stamps[jobId];
+    }
+    return { pending: rest.length > 0 ? { ...others, [ownerKey]: rest } : others, failed, stamps };
   });
 }
 
@@ -301,19 +316,26 @@ export function deliverFieldDictationJobs(input: {
   readonly ownerKey: string;
   readonly environmentId: EnvironmentId;
   readonly jobs: ReadonlyArray<DictationJob>;
+  readonly cursor: DictationJobsCursor;
+  /** The store's `stamps`, passed in so a stamp that lands after the list re-runs delivery. */
+  readonly stamps: FieldDictationState["stamps"];
   readonly insert: (transcripts: ReadonlyArray<string>) => void;
 }): ((text: string) => void) | null {
   const state = useFieldDictationStore.getState();
   const settled: string[] = [];
   const inserted: string[] = [];
   const transcripts: string[] = [];
+  let lost = false;
   for (const jobId of state.pending[input.ownerKey] ?? []) {
     const job = input.jobs.find((candidate) => candidate.id === jobId);
     if (!job) {
-      // Not listed yet while it uploads; gone once a list that showed it lacks it.
-      if (listedJobs.delete(jobId)) {
+      // Not listed yet while it uploads; gone once a list that showed it lacks it, or a list
+      // from a later change or another server run (a restart) lacks it.
+      const gone = listedJobs.delete(jobId) || listProvesJobGone(input.stamps[jobId], input.cursor);
+      if (gone) {
         settled.push(jobId);
         cancelSubmitAwaiting(input.ownerKey, jobId);
+        lost = true;
       }
       continue;
     }
@@ -351,6 +373,14 @@ export function deliverFieldDictationJobs(input: {
   }
   if (transcripts.length > 0) input.insert(transcripts);
   removePending(input.ownerKey, settled);
+  if (lost) {
+    toastManager.add({
+      type: "error",
+      title: "A dictation was lost",
+      description:
+        "The environment no longer has it, so its text will not arrive. Nothing was sent.",
+    });
+  }
   const queued = queuedSubmits.get(input.ownerKey);
   if (!queued) return null;
   for (const jobId of inserted) queued.awaiting.delete(jobId);

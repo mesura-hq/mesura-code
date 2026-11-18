@@ -49,7 +49,9 @@ export function useFieldDictation(input: {
     if (input.disabled) detachFieldDictation(ownerKey, environmentId);
   }, [environmentId, input.disabled, ownerKey]);
 
-  const { jobs, loaded } = useDictationJobs(pending > 0 ? environmentId : null);
+  const { jobs, cursor, loaded } = useDictationJobs(pending > 0 ? environmentId : null);
+  // A stamp that arrives after the list still has to be judged against it.
+  const stamps = useFieldDictationStore((state) => state.stamps);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- inserts transcripts as the server's job subscription reports them, then runs a submission held for them
   useEffect(() => {
     if (!loaded || pending === 0) return;
@@ -57,6 +59,8 @@ export function useFieldDictation(input: {
       ownerKey,
       environmentId,
       jobs,
+      cursor,
+      stamps,
       insert: (transcripts) => {
         const field = latest.current.textareaRef.current;
         // At the caret of a focused field, else at the end; a late transcript never takes focus.
@@ -77,7 +81,7 @@ export function useFieldDictation(input: {
       },
     });
     if (submit && !latest.current.disabled) submit(latest.current.text);
-  }, [environmentId, jobs, loaded, ownerKey, pending]);
+  }, [cursor, environmentId, jobs, loaded, ownerKey, pending, stamps]);
 
   /** Holds `submit` until the recording and its transcript are in the draft; stops a recording. */
   const submitWhenTranscribed = (submit: (text: string) => void) => {

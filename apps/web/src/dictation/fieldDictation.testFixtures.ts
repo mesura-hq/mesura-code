@@ -18,6 +18,7 @@ export function setupFieldDictation() {
     pending: {},
     failed: new Set(),
     submitQueued: new Set(),
+    stamps: {},
   });
   resetMicrophoneClaimForTest();
   vi.mocked(transport.startDictationTranscription).mockClear();
