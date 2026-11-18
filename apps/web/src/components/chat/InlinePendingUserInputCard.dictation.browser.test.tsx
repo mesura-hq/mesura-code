@@ -140,3 +140,19 @@ it("keeps the answer editor out of the composer's keys", async () => {
   expect(resolveKeyScope()).toBe("insert");
   expect(composerEditorElement()).toBeNull();
 });
+
+it("keeps an answer literal around its markers, inside display math and brackets", async () => {
+  setup();
+  await using screen = await renderCard();
+  const second = formatDictationSlot(DictationJobId.make("job-card-math"));
+  editAnswer(() => `\\[ x ${marker} y \\] and [draft notes ${second}] @README.md`);
+  const field = screen.getByRole("textbox", { name: "Anything to add?" });
+  await vi.waitFor(() =>
+    expect(field.getByRole("img", { name: "Transcribing" }).elements()).toHaveLength(2),
+  );
+  const text = field.element().textContent ?? "";
+  expect(text).not.toContain("t3-context");
+  expect(text).toContain("\\[ x");
+  expect(text).toContain("[draft notes");
+  expect(text).toContain("@README.md");
+});

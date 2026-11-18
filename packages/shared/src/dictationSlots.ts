@@ -14,7 +14,7 @@ import {
 
 const DICTATION_SLOT_LABEL = "Transcribing";
 const VOICED_PREFIX = "[voiced] ";
-const NO_SPACE_BEFORE = /[\s.,;:!?)]/;
+const NO_SPACE_BEFORE = /[\s.,;:!?)\]}]/;
 const WHITESPACE = /\s/;
 
 export interface DictationSlotOccurrence {
@@ -37,9 +37,15 @@ export function formatDictationSlot(jobId: DictationJobId): string {
   });
 }
 
+/** Only the exact text `formatDictationSlot` writes counts, so nothing around it is ever taken. */
 export function findDictationSlots(text: string): DictationSlotOccurrence[] {
   return collectComposerContextReferences(text)
-    .filter((occurrence) => isDictationContextKind(occurrence.kind))
+    .filter(
+      (occurrence) =>
+        isDictationContextKind(occurrence.kind) &&
+        !occurrence.image &&
+        occurrence.source === formatDictationSlot(occurrence.contextId as DictationJobId),
+    )
     .map(({ contextId, source, start, end }) => ({ jobId: contextId, source, start, end }));
 }
 

@@ -20,8 +20,8 @@ export interface QuestionAnswerFieldHandle {
 const NO_SKILLS: never[] = [];
 
 /**
- * A question card's answer, edited in the composer's editor without rich text so a dictation
- * marker draws as its chip. A plain textarea can only show the marker's link text.
+ * A question card's answer, edited in the composer's editor as literal text: only dictation
+ * markers draw as chips. A plain textarea can only show a marker's link text.
  */
 export function QuestionAnswerEditor(props: {
   readonly value: string;
@@ -59,6 +59,7 @@ export function QuestionAnswerEditor(props: {
       <ComposerPromptEditorTiptap
         ariaLabel={props.ariaLabel}
         editorTestId="question-answer-editor"
+        literalText
         editorRef={editorRef}
         value={props.value}
         cursor={cursor}

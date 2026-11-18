@@ -189,3 +189,20 @@ describe("dictation send readiness", () => {
     expect(countPendingDictationSlots(text)).toBeGreaterThan(0);
   });
 });
+
+describe("dictation slot inside bracketed answer text", () => {
+  it("fills only the marker, never the bracketed words before it", () => {
+    const text = `Keep [draft notes ${marker("job-bracket")}] exactly`;
+    expect(findDictationSlots(text).map((slot) => slot.source)).toEqual([marker("job-bracket")]);
+    expect(fillDictationSlot(text, "job-bracket", "speech")).toEqual({
+      text: "Keep [draft notes speech] exactly",
+    });
+  });
+
+  it("is a separate context reference from the bracket around it", () => {
+    const text = `Keep [draft notes ${marker("job-bracket")}] exactly`;
+    expect(collectComposerContextReferences(text).map((reference) => reference.source)).toEqual([
+      marker("job-bracket"),
+    ]);
+  });
+});

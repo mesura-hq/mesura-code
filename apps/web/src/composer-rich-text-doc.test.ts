@@ -252,6 +252,20 @@ describe("literal editor answers", () => {
     }
   });
 
+  it("draws dictation markers as chips and keeps every other character literal", () => {
+    const marker = "[Transcribing](t3-context://v1/dictation/job-literal)";
+    const value = `\\[ x ${marker} y \\] and [draft ${marker.replace("literal", "two")}] @README.md`;
+    const doc = makeDoc(value);
+    doc.check();
+    const atoms: Array<{ kind: unknown; contextId: unknown }> = [];
+    doc.descendants((node) => {
+      if (node.type.name === "composer-context-reference") atoms.push(node.attrs as never);
+    });
+    expect(atoms.map((atom) => atom.contextId)).toEqual(["job-literal", "job-two"]);
+    expect(doc.textContent).toBe("\\[ x  y \\] and [draft ] @README.md");
+    expect(serializeEditorDoc(doc).value).toBe(value);
+  });
+
   it("edits literal Markdown, inserts a newline, and preserves an explicitly cleared answer", () => {
     const value = "  - [X] done €my-skill @README.md  ";
     const doc = makeDoc(value);
