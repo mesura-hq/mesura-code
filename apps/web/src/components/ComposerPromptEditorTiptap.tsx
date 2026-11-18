@@ -187,6 +187,9 @@ export interface ComposerPromptEditorProps {
   ariaLabel?: string | undefined;
   /** Mesura: another surface's id, so it never matches the composer's keys and focus lookups. */
   editorTestId?: string | undefined;
+  /** Mesura: validation state for a form field such as a question answer. */
+  ariaInvalid?: boolean | undefined;
+  ariaDescribedBy?: string | undefined;
   suggestionListId?: string | undefined;
   activeSuggestionId?: string | undefined;
   isPathQueryActive?: () => boolean;
@@ -1112,6 +1115,8 @@ function ComposerPromptEditorTiptapInner(
     role: "textbox",
     "aria-multiline": "true",
     ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
+    ...(props.ariaInvalid ? { "aria-invalid": "true" } : {}),
+    ...(props.ariaDescribedBy ? { "aria-describedby": props.ariaDescribedBy } : {}),
     ...(disabled ? { "aria-readonly": "true" } : {}),
     ...(!disabled && suggestionListId
       ? {

@@ -708,10 +708,13 @@ it("phase two rework clears missing-answer feedback as soon as a choice answers 
 
   await using _screen = await mountApp();
   await act(async () => button("Submit").click());
-  expect(questionField("scope")?.closest("[data-question-id]")?.textContent).toContain(
+  const field = questionField("scope")!;
+  expect(field.getAttribute("aria-invalid")).toBe("true");
+  expect(document.getElementById(field.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
     "Answer this question before submitting.",
   );
   await act(async () => button("Workspace").click());
+  expect(questionField("scope")?.getAttribute("aria-invalid")).toBeNull();
   expect(questionField("scope")?.closest("[data-question-id]")?.textContent).not.toContain(
     "Answer this question before submitting.",
   );
@@ -780,7 +783,7 @@ it("phase two regression long request keeps answers across virtual scrolling", a
     publishFenceThreadProjection(fixture.projection!, environmentId);
     for (const listener of fixture.threadListeners) listener();
   });
-  expect(questionField("long-11")).not.toBeNull();
+  await expect.element(questionField("long-11")!).toHaveTextContent("Last answerWith more detail");
   expect(answerText("long-11")).toBe("Last answer\nWith more detail");
   expect(fixture.respond).not.toHaveBeenCalled();
   expect(fixture.startTurn).not.toHaveBeenCalled();

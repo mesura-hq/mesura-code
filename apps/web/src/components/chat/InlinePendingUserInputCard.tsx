@@ -366,6 +366,7 @@ function QuestionField({
   request: PendingUserInput;
 }) {
   const id = useId();
+  const answerField = useRef<QuestionAnswerFieldHandle | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const target = questionAttachmentDraftId(
     context.environmentId,
@@ -510,9 +511,12 @@ function QuestionField({
         })}
       </div>
       <div className="mb-1.5 mt-3 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">
+        <label
+          className="text-xs font-medium text-muted-foreground"
+          onClick={() => answerField.current?.focus()}
+        >
           {question.options.length ? "Additional detail" : "Your answer"}
-        </span>
+        </label>
         {question.allowCustomAnswer !== false ? (
           <div className="flex items-center gap-1">
             {context.supportsAttachments ? (
@@ -543,7 +547,17 @@ function QuestionField({
       </div>
       <div>
         <QuestionAnswerEditor
-          handleRef={fieldRef}
+          handleRef={(handle) => {
+            answerField.current = handle;
+            fieldRef(handle);
+          }}
+          describedBy={
+            invalid
+              ? `${id}-missing`
+              : question.allowCustomAnswer === false
+                ? `${id}-choice-only`
+                : undefined
+          }
           value={answer?.customAnswer ?? ""}
           disabled={disabled || question.allowCustomAnswer === false}
           ariaLabel={question.question}

@@ -156,3 +156,10 @@ it("keeps an answer literal around its markers, inside display math and brackets
   expect(text).toContain("[draft notes");
   expect(text).toContain("@README.md");
 });
+
+it("focuses the answer from its label", async () => {
+  setup();
+  await using screen = await renderCard();
+  await screen.getByText("Additional detail").click();
+  await expect.element(screen.getByRole("textbox", { name: "Anything to add?" })).toHaveFocus();
+});

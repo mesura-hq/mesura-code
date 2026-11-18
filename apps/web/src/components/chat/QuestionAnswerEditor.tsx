@@ -29,6 +29,7 @@ export function QuestionAnswerEditor(props: {
   readonly ariaLabel: string;
   readonly placeholder: string;
   readonly invalid: boolean;
+  readonly describedBy?: string | undefined;
   readonly onChange: (text: string) => void;
   readonly onPaste: (event: ClipboardEvent<HTMLElement>) => void;
   readonly handleRef: Ref<QuestionAnswerFieldHandle>;
@@ -59,6 +60,8 @@ export function QuestionAnswerEditor(props: {
       <ComposerPromptEditorTiptap
         ariaLabel={props.ariaLabel}
         editorTestId="question-answer-editor"
+        ariaInvalid={props.invalid}
+        ariaDescribedBy={props.describedBy}
         literalText
         editorRef={editorRef}
         value={props.value}
