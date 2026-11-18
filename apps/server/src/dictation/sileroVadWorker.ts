@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - native inference runs in a killable child process, outside the Effect runtime.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeSea from "node:sea";
 
 import { loaderEntry } from "../speech/native.ts";
 
@@ -10,23 +11,52 @@ export const VAD_FRAME_SAMPLES = 512;
 // The same isolated-process rule as the speech worker: native inference can crash, and
 // disposing it mid-call segfaults, so the parent only ever kills the child.
 const workerEntry = `
-const speech = await loadSpeechModule(moduleUrl);
-const model = await speech.TranscribeModel.load(vadPath, { backend: "cpu" });
-if (model.vadInfo.sampleRate !== 16000 || model.vadInfo.frameSamples !== 512)
-  throw new Error("Unsupported Silero model frames.");
-const vad = model.createVadSession({ nThreads: 1 });
-await vad.streamReset();
-process.on("message", async (message) => {
-  try {
-    const result = message.kind === "flush" ? await vad.streamFlush() : await vad.streamFeed(message.pcm);
-    process.send({ ok: true, firstFrame: result.firstFrame, probs: Array.from(result.probs) });
-  } catch (error) {
-    process.send({ ok: false, error: error instanceof Error ? error.message : String(error) });
-  }
-});
-process.on("disconnect", () => process.kill(process.pid, "SIGKILL"));
-process.send({ ok: true, ready: true });
+const describe = (error) => (error instanceof Error ? error.message : String(error));
+const start = async () => {
+  const speech = await loadSpeechModule(moduleUrl);
+  const model = await speech.TranscribeModel.load(vadPath, { backend: "cpu" });
+  if (model.vadInfo.sampleRate !== 16000 || model.vadInfo.frameSamples !== 512)
+    throw new Error("Unsupported Silero model frames.");
+  const vad = model.createVadSession({ nThreads: 1 });
+  await vad.streamReset();
+  process.on("message", async (message) => {
+    try {
+      const result = message.kind === "flush" ? await vad.streamFlush() : await vad.streamFeed(message.pcm);
+      process.send({ ok: true, firstFrame: result.firstFrame, probs: Array.from(result.probs) });
+    } catch (error) {
+      process.send({ ok: false, error: describe(error) });
+    }
+  });
+  process.on("disconnect", () => process.kill(process.pid, "SIGKILL"));
+  process.send({ ok: true, ready: true });
+};
+await start().catch((error) =>
+  process.send({ ok: false, error: "Silero could not load: " + describe(error) }, () => process.exit(1)),
+);
 `;
+
+/** The CLI fast path a standalone executable re-runs itself with, since it cannot evaluate code. */
+export const SILERO_VAD_WORKER_COMMAND = "__dictation-vad-worker";
+
+/** How a host starts the worker: the CLI fast path in a standalone executable, else `-e`. */
+export function sileroVadWorkerArgs(vadPath: string, standalone = NodeSea.isSea()): string[] {
+  if (standalone) return [SILERO_VAD_WORKER_COMMAND, vadPath];
+  const loader = `const baseUrl = ${JSON.stringify(import.meta.url)};
+    const moduleUrl = undefined; const vadPath = process.argv[1];${loaderEntry}`;
+  return ["--input-type=module", "-e", loader + workerEntry, vadPath];
+}
+
+/** The worker body, run by the CLI fast path. */
+export async function runSileroVadWorker(vadPath: string): Promise<void> {
+  if (!process.send) throw new Error("The Silero worker requires an IPC channel.");
+  const run = new Function(
+    "baseUrl",
+    "moduleUrl",
+    "vadPath",
+    `return (async () => {${loaderEntry}${workerEntry}})();`,
+  ) as (baseUrl: string, moduleUrl: undefined, vadPath: string) => Promise<void>;
+  await run(import.meta.url, undefined, vadPath);
+}
 
 type Reply = {
   readonly ok: boolean;
@@ -55,17 +85,11 @@ export async function openSileroVad(
   signal: AbortSignal,
 ): Promise<SileroVadSession> {
   signal.throwIfAborted();
-  const loader = `const baseUrl = ${JSON.stringify(import.meta.url)};
-    const moduleUrl = undefined; const vadPath = process.argv[1];${loaderEntry}`;
-  const child = NodeChildProcess.spawn(
-    process.execPath,
-    ["--input-type=module", "-e", loader + workerEntry, vadPath],
-    {
-      stdio: ["ignore", "ignore", "inherit", "ipc"],
-      serialization: "advanced",
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", TRANSCRIBE_BACKENDS: "cpu" },
-    },
-  );
+  const child = NodeChildProcess.spawn(process.execPath, sileroVadWorkerArgs(vadPath), {
+    stdio: ["ignore", "ignore", "inherit", "ipc"],
+    serialization: "advanced",
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", TRANSCRIBE_BACKENDS: "cpu" },
+  });
   let pending: ReturnType<typeof Promise.withResolvers<Reply>> | undefined;
   let stopped: Error | undefined;
   const fail = (error: Error) => {
