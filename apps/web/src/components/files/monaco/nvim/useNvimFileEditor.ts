@@ -66,6 +66,11 @@ export interface NvimFileEditorInput {
   };
   /** Writes the pending save now, which is what `:w` means. */
   readonly flushSave: () => void;
+  /**
+   * Leave insert, visual or a pending command after each open. The scratchpad's session outlives
+   * the overlay, so it would otherwise reopen in whatever mode it was left in.
+   */
+  readonly startInNormalMode?: boolean | undefined;
 }
 
 export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorResult {
@@ -202,6 +207,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     "editor session replace text",
   );
 
+  const startInNormalMode = input.startInNormalMode === true;
   const openFile = useCallback(
     (lines: ReadonlyArray<string>) => {
       opensInFlightRef.current += 1;
@@ -213,7 +219,10 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
         opensInFlightRef.current -= 1;
         // The lane belongs to the thread, not this view, so the answer is
         // taken even if the view went away meanwhile.
-        if (result._tag === "Success") keyLane.takeOpenAnswer(openMark, result.value.escape);
+        if (result._tag === "Success") {
+          keyLane.takeOpenAnswer(openMark, result.value.escape);
+          if (startInNormalMode) keyLane.keys("<Esc>");
+        }
         if (!mountedRef.current) return null;
         // After the open, not alongside it: an attachment that reaches the
         // server first finds no session and fails again. Refreshed whether or
@@ -231,7 +240,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
         return null;
       });
     },
-    [openCommand, keyLane, environmentId, threadId, cwd, relativePath],
+    [openCommand, keyLane, environmentId, threadId, cwd, relativePath, startInNormalMode],
   );
 
   const retry = useCallback(() => {

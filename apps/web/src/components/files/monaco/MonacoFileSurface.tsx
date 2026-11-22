@@ -51,6 +51,19 @@ export interface MonacoFileSurfaceProps {
   readonly threadRef: ScopedThreadRef;
   readonly modalEditing: boolean;
   readonly onPendingChange: (relativePath: string, pending: boolean) => void;
+  /** For a host that routes keys around the editor, such as the scratchpad's scope Tab. */
+  readonly controlRef?: RefObject<MonacoFileSurfaceControl | null>;
+  /** Escape released the editor (Neovim at rest in normal mode); the scratchpad closes on it. */
+  readonly onDismiss?: () => void;
+  /** Each open leaves Neovim in normal mode, whatever mode its session was left in. */
+  readonly startInNormalMode?: boolean;
+}
+
+export interface MonacoFileSurfaceControl {
+  readonly focus: () => void;
+  readonly hasTextFocus: () => boolean;
+  /** True only while Neovim drives the editor and rests in plain normal mode, as for Escape. */
+  readonly restsInNormalMode: () => boolean;
 }
 
 /**
@@ -75,6 +88,9 @@ export function MonacoFileSurface({
   threadRef,
   modalEditing,
   onPendingChange,
+  controlRef,
+  onDismiss,
+  startInNormalMode,
 }: MonacoFileSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -339,6 +355,7 @@ export function MonacoFileSurface({
     cwd,
     relativePath,
     enabled: modalEditing,
+    startInNormalMode,
     // Shared with the effect below rather than duplicated: the driver has to
     // know an agent's write from a browser composition, and the difference is
     // this ref being set.
@@ -439,6 +456,12 @@ export function MonacoFileSurface({
     nvimEscapeRef.current = nvim.escapeGoesToNeovim;
   }, [nvim.escapeGoesToNeovim]);
 
+  const onDismissRef = useRef(onDismiss);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref read by the once-installed dismissal listener
+  useLayoutEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
+
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: installs the Escape dismissal listener on the host for its lifetime
   useEffect(() => {
     const host = hostRef.current;
@@ -465,9 +488,22 @@ export function MonacoFileSurface({
       // strands the developer in insert or visual mode. See `escapeGoesToNeovim`.
       isBlocked: () =>
         hasOpenDraftRef.current || (nvimActiveRef.current && nvimEscapeRef.current()),
-      onDismiss: () => {},
+      onDismiss: () => onDismissRef.current?.(),
     });
   }, []);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: publishes an imperative handle; its closures read the latest refs
+  useLayoutEffect(() => {
+    if (controlRef === undefined) return;
+    controlRef.current = {
+      focus: () => editorRef.current?.focus(),
+      hasTextFocus: () => editorRef.current?.hasTextFocus() === true,
+      restsInNormalMode: () => nvimActiveRef.current && !nvimEscapeRef.current(),
+    };
+    return () => {
+      controlRef.current = null;
+    };
+  }, [controlRef]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

@@ -215,6 +215,8 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "usage.period.week",
   "usage.period.month",
   "usage.period.quarter",
+  // Fork: the scratchpad overlay (apps/web/src/scratchpad).
+  "scratchpad.toggle",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
   ...DICTATION_KEYBINDING_COMMANDS,

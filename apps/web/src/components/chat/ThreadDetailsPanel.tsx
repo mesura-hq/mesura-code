@@ -36,6 +36,7 @@ import {
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "./threadDetailsPanelStyles";
 import { Menu, MenuPopup } from "../ui/menu";
+import { ScratchpadPreviewCard } from "~/scratchpad/ScratchpadPreviewCard";
 
 const GitActionsControl = memo(BaseGitActionsControl);
 
@@ -129,6 +130,15 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       threadRef={{ environmentId: props.environmentId, threadId: props.threadId }}
       anchor={props.anchor}
       handle={props.handle}
+      belowInline={
+        <ScratchpadPreviewCard
+          environmentId={props.environmentId}
+          owner={{
+            projectId: props.projectId,
+            threadId: props.isServerThread ? props.threadId : null,
+          }}
+        />
+      }
       contentKey={THREAD_DETAILS_ITEMS.filter((item) => visible[item.id])
         .map((item) => item.id)
         .join(",")}

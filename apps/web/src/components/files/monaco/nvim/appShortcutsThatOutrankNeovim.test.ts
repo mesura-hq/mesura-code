@@ -6,12 +6,13 @@ import { resolveShortcutCommand } from "~/keybindings";
 import { APP_SHORTCUTS_THAT_OUTRANK_NEOVIM } from "./appShortcutsThatOutrankNeovim";
 
 describe("app shortcuts that outrank Neovim", () => {
-  it("is exactly the file picker, the file tree toggle, the file manager, Tree diff and the Diff mode menu", () => {
+  it("is exactly the file picker, the file tree toggle, the file manager, Tree diff, the Diff mode menu and the scratchpad", () => {
     expect([...APP_SHORTCUTS_THAT_OUTRANK_NEOVIM].toSorted()).toEqual([
       "diff.modeMenu",
       "filePicker.toggle",
       "fileTree.miller",
       "fileTree.toggle",
+      "scratchpad.toggle",
       "treeDiff.toggle",
     ]);
   });

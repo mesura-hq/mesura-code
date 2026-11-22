@@ -26,6 +26,7 @@ export function ThreadDetailsCard({
   contentKey,
   onContextMenu,
   children,
+  belowInline,
 }: {
   threadRef: ScopedThreadRef;
   anchor: RefObject<Element | null>;
@@ -34,6 +35,8 @@ export function ThreadDetailsCard({
   contentKey: string;
   onContextMenu?: MouseEventHandler<HTMLDivElement>;
   children: (density: "full" | "compact" | "essential") => ReactNode;
+  /** Fork: a card stacked under the inline card, such as the scratchpad preview. */
+  belowInline?: ReactNode;
 }) {
   const detailsArea = workspaceAreaProps("details", 3, "Thread details");
   const canvas = useChatCanvas();
@@ -152,7 +155,7 @@ export function ThreadDetailsCard({
           data-workspace-focus-key={`details:${threadRef.environmentId}:${threadRef.threadId}`}
           // Skip the return transition to avoid overlapping the rising preview.
           className={cn(
-            "absolute z-20",
+            "absolute z-20 flex flex-col gap-2",
             topInset > 0 && "transition-[top] duration-150 ease-out motion-reduce:transition-none",
           )}
           style={{
@@ -165,6 +168,7 @@ export function ThreadDetailsCard({
           data-thread-details-panel="inline"
         >
           {card}
+          {belowInline}
         </aside>
       ) : null}
       {/* Rendered in both modes: base-ui keeps a popup that unmounts mid-open

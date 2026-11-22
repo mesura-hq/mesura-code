@@ -217,6 +217,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // A new command on a free chord, so the per-command startup backfill
   // installs it, as with alt+q above.
   { key: "mod+alt+r", command: "thread.rename", when: "!terminalFocus" },
+  // Fork: a new command on a chord free in the app and in the developer's
+  // Hyprland binds; it also closes the scratchpad from inside its Neovim.
+  { key: "alt+shift+n", command: "scratchpad.toggle", when: "!terminalFocus" },
   // Directional pane focus, deliberately unconditional: the chord has one
   // meaning in every pane, which is what stops two surfaces claiming a key.
   // New commands, so the per-command startup backfill installs them and no

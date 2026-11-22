@@ -105,6 +105,7 @@ import {
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
+  NotebookPenIcon,
   PaletteIcon,
   RotateCcwIcon,
   SettingsIcon,
@@ -1879,6 +1880,19 @@ function OpenCommandPaletteDialog(props: {
         runRegisteredCommand("sidebar.toggleWorking");
       },
     });
+
+  // Fork: the scratchpad overlay (src/scratchpad), registered by the chat view.
+  actionItems.push({
+    kind: "action",
+    value: "action:scratchpad",
+    searchTerms: ["scratchpad", "notes", "notas", "scratch", "pad"],
+    title: "Scratchpad",
+    icon: <NotebookPenIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "scratchpad.toggle",
+    run: async () => {
+      runRegisteredCommand("scratchpad.toggle");
+    },
+  });
 
   actionItems.push(changeThemeItem);
   actionItems.push(changeAppearanceItem);
