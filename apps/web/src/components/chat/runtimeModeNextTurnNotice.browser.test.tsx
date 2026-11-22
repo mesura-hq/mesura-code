@@ -66,7 +66,7 @@ function PermissionsPicker(props: {
   );
 }
 
-it("tells the user a pick made during a turn starts with the next turn", async () => {
+it("tells the user a pick made during a turn does not change it", async () => {
   setup();
   await using _screen = await render(
     <PermissionsPicker
@@ -80,7 +80,7 @@ it("tells the user a pick made during a turn starts with the next turn", async (
 
   await vi.waitFor(() =>
     expect(mocks.toast).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Full access is saved when you send" }),
+      expect.objectContaining({ title: "Full access does not change the running turn" }),
     ),
   );
 });
@@ -100,7 +100,7 @@ it("tells the user again when the pick returns to the saved mode during a turn",
 
   await vi.waitFor(() =>
     expect(mocks.toast).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Supervised is saved when you send" }),
+      expect.objectContaining({ title: "Supervised does not change the running turn" }),
     ),
   );
 });
