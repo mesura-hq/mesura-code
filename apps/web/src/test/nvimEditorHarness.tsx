@@ -190,6 +190,8 @@ function makeTransport() {
   const openedInNormalMode: Array<boolean> = [];
   /** While set, an attachment opens with no snapshot: Neovim has not answered yet. */
   let snapshotHeld = false;
+  /** Attachments opened since the last reset, live or ended. */
+  let attachmentsOpened = 0;
   /** One queue per live attachment, fed by `emit`. */
   const attachments = new Set<Queue.Queue<EditorSessionEvent>>();
   const attach = () =>
@@ -197,6 +199,7 @@ function makeTransport() {
       Effect.gen(function* () {
         const queue = yield* Queue.unbounded<EditorSessionEvent>();
         attachments.add(queue);
+        attachmentsOpened += 1;
         const opening: ReadonlyArray<EditorSessionEvent> = snapshotHeld
           ? []
           : [{ type: "snapshot", snapshot }];
@@ -308,6 +311,7 @@ function makeTransport() {
     /** The lines every `open` handed Neovim, in order: the text the client had. */
     openedLines: () => openedLines as ReadonlyArray<ReadonlyArray<string>>,
     openedInNormalMode: () => openedInNormalMode as ReadonlyArray<boolean>,
+    attachmentsOpened: () => attachmentsOpened,
     /** What the next attachment's snapshot says the file holds. */
     setSnapshot: (next: Partial<EditorSessionSnapshot>) => {
       snapshot = { ...snapshot, ...next };
@@ -391,6 +395,7 @@ function makeTransport() {
       requests.length = 0;
       openedLines.length = 0;
       openedInNormalMode.length = 0;
+      attachmentsOpened = 0;
       snapshot = DEFAULT_SNAPSHOT;
       snapshotHeld = false;
       neovimMode = RESTING_IN_NORMAL;

@@ -62,8 +62,3 @@ export const useScratchpadStore = create<ScratchpadState>((set) => ({
     }),
   setScope: (scope) => set({ scope }),
 }));
-
-/** For the command palette: while the scratchpad is open, it owns the keyboard. */
-export function scratchpadOwnsFocus(): boolean {
-  return useScratchpadStore.getState().phase === "open";
-}

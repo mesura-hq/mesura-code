@@ -49,8 +49,11 @@ export interface NvimFileEditorResult extends NvimDriverResult {
    * mode: the stream alone lags a round trip, so `A x Escape` on a remote host left Neovim in insert.
    */
   readonly escapeGoesToNeovim: () => boolean;
-  /** Resolves once every key sent to Neovim was answered (or given up). */
-  readonly whenKeysSettled: () => Promise<void>;
+  /**
+   * Resolves once every key sent to Neovim was answered (or given up) and, when keys went out
+   * since the last call, the model holds Neovim's text for them. `signal` abandons the wait.
+   */
+  readonly whenKeysSettled: (signal?: AbortSignal) => Promise<void>;
 }
 
 export interface NvimFileEditorInput {
@@ -70,6 +73,26 @@ export interface NvimFileEditorInput {
   readonly flushSave: () => void;
   /** Each open leaves insert, visual or a pending command first; see the open contract. */
   readonly startInNormalMode?: boolean | undefined;
+}
+
+/** Past the host's own one-second hold on text, plus a round trip; a lost session gives up here. */
+const RESYNC_LIMIT_MS = 2_500;
+
+/** `promise`, or earlier when `signal` aborts or `limitMs` passes. Never rejects. */
+function untilAborted(
+  promise: Promise<void>,
+  signal: AbortSignal | undefined,
+  limitMs?: number,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = limitMs === undefined ? undefined : setTimeout(resolve, limitMs);
+    const finish = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal?.addEventListener("abort", finish, { once: true });
+    promise.then(finish, finish);
+  });
 }
 
 export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorResult {
@@ -252,7 +275,15 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     setOpenGeneration((generation) => generation + 1);
   }, []);
 
-  const sendKeys = useCallback((keys: string) => keyLane.keys(keys), [keyLane]);
+  /** Keys sent since `whenKeysSettled` last brought the model up to Neovim's text. */
+  const keysSinceSyncRef = useRef(0);
+  const sendKeys = useCallback(
+    (keys: string) => {
+      keysSinceSyncRef.current += 1;
+      keyLane.keys(keys);
+    },
+    [keyLane],
+  );
 
   const setCursor = useCallback(
     (line: number, col: number) => {
@@ -337,20 +368,31 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   // The host holds Neovim's text until a cursor read (up to a second), so an answered key can
   // still lack its text here. A fresh attachment starts with a snapshot that already holds it,
   // and the driver applies that snapshot to the model before this resolves.
-  const whenKeysSettled = useCallback(async () => {
-    await keyLane.whenIdle();
-    if (!enabled) return;
-    const before = stateSource.get();
-    await new Promise<void>((resolve) => {
-      const unsubscribe = stateSource.subscribe((next) => {
-        // A refresh can repeat the old state while it waits; only the new attachment's counts.
-        if (next === before || next.latestEvent?.type !== "snapshot") return;
-        unsubscribe();
-        resolve();
+  const whenKeysSettled = useCallback(
+    async (signal?: AbortSignal) => {
+      await untilAborted(keyLane.whenIdle(), signal);
+      if (!enabled || signal?.aborted === true || keysSinceSyncRef.current === 0) return;
+      keysSinceSyncRef.current = 0;
+      const before = stateSource.get();
+      // Ends the subscription however the wait ends: snapshot, abort or the limit.
+      const stopWaiting = new AbortController();
+      signal?.addEventListener("abort", () => stopWaiting.abort(), { once: true });
+      const snapshotArrived = new Promise<void>((resolve) => {
+        const unsubscribe = stateSource.subscribe((next) => {
+          // A refresh can repeat the old state while it waits; only the new attachment's counts.
+          if (next === before) return;
+          const event = next.latestEvent;
+          if (event?.type !== "snapshot" || event.snapshot.relativePath !== relativePath) return;
+          resolve();
+        });
+        stopWaiting.signal.addEventListener("abort", unsubscribe, { once: true });
+        refreshAttachRef.current();
       });
-      refreshAttachRef.current();
-    });
-  }, [keyLane, enabled, stateSource]);
+      await untilAborted(snapshotArrived, stopWaiting.signal, RESYNC_LIMIT_MS);
+      stopWaiting.abort();
+    },
+    [keyLane, enabled, stateSource, relativePath],
+  );
 
   return { ...driver, fallback, retry, keysDelivery, escapeGoesToNeovim, whenKeysSettled };
 }

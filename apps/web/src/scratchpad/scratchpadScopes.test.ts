@@ -17,8 +17,8 @@ const draft = { projectId: ProjectId.make("p1"), threadId: null };
 describe("scratchpad scopes", () => {
   it("names one file per scope", () => {
     expect(scratchpadRelativePath("general", owner)).toBe("general.md");
-    expect(scratchpadRelativePath("project", owner)).toBe("projects/p1.md");
-    expect(scratchpadRelativePath("thread", owner)).toBe("threads/t1.md");
+    expect(scratchpadRelativePath("project", owner)).toBe("projects/id-p1.md");
+    expect(scratchpadRelativePath("thread", owner)).toBe("threads/id-t1.md");
   });
 
   it("drops the project scope for a thread without a project and starts elsewhere", () => {
@@ -48,15 +48,25 @@ describe("scratchpad scopes", () => {
       projectId: ProjectId.make("p1"),
       threadId: ThreadId.make("thread:project:p1:abc"),
     };
-    expect(scratchpadRelativePath("thread", owner)).toBe("threads/thread_3aproject_3ap1_3aabc.md");
+    expect(scratchpadRelativePath("thread", owner)).toBe(
+      "threads/id-thread_00003aproject_00003ap1_00003aabc.md",
+    );
   });
 
   it("never gives two ids the same file, whatever their case or punctuation", () => {
     const pathFor = (id: string) =>
       scratchpadRelativePath("thread", { projectId: null, threadId: ThreadId.make(id) });
-    const ids = ["a:b", "a_b", "A_b", "a_3ab", "Ab", "ab"];
+    const ids = ["a:b", "a_b", "A_b", "a_3ab", "Ab", "ab", "é1", "ຑ", "a😀", "a_01f600"];
     const paths = ids.map(pathFor);
     expect(new Set(paths.map((path) => path?.toLowerCase())).size).toBe(ids.length);
+  });
+
+  it("keeps Windows device names out of the file names", () => {
+    const path = scratchpadRelativePath("thread", {
+      projectId: null,
+      threadId: ThreadId.make("con"),
+    });
+    expect(path).toBe("threads/id-con.md");
   });
 
   it("offers no thread scope to a draft, whose id can change when it is sent", () => {

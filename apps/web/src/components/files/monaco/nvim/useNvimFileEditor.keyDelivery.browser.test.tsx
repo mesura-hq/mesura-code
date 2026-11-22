@@ -600,4 +600,37 @@ describe("waiting for the keys to settle (the scratchpad closes only after its l
     await waiting;
     expect(settled).toBe(true);
   });
+
+  it("settles at once without re-attaching when no keys went out", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await mount();
+    await flushHarness();
+    const attached = editorTransport.attachmentsOpened();
+    await latestEditor.current?.whenKeysSettled();
+
+    expect(editorTransport.attachmentsOpened(), "re-attached with nothing to bring back").toBe(
+      attached,
+    );
+  });
+
+  it("ends the wait when aborted, even while a key is still in flight", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const { press } = await mount();
+    editorTransport.holdReplies();
+    await press(printable("a"));
+    await settleUntil(() => editorTransport.inputs().length === 1, "the key was sent");
+
+    const abandon = new AbortController();
+    let settled = false;
+    const waiting = latestEditor.current?.whenKeysSettled(abandon.signal).then(() => {
+      settled = true;
+    });
+    await flushHarness();
+    expect(settled).toBe(false);
+    abandon.abort();
+    await waiting;
+    expect(settled).toBe(true);
+  });
 });

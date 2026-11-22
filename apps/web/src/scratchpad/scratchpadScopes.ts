@@ -20,15 +20,17 @@ export interface ScratchpadOwner {
 }
 
 /**
- * An id as a file name that every host filesystem accepts. Ids may carry `:`, which Windows
- * refuses. One-to-one: `_` is escaped too, so `a:b` and `a_b` never share a file. Lowercase hex,
- * so a case-insensitive filesystem cannot merge two names either.
+ * An id as a file name that every host filesystem accepts. One-to-one: every character outside
+ * `[a-z0-9.-]` becomes `_` and six hex digits (fixed width, so no two escapes run together), `_`
+ * included. Lowercase only, so a case-insensitive filesystem cannot merge two names. The `id-`
+ * prefix keeps names such as `con` clear of Windows' reserved device names.
  */
 function fileNameFor(id: string): string {
-  return id.replace(
-    /[^a-z0-9.-]/g,
-    (character) => `_${character.codePointAt(0)?.toString(16).padStart(2, "0")}`,
+  const escaped = id.replace(
+    /[^a-z0-9.-]/gu,
+    (character) => `_${(character.codePointAt(0) ?? 0).toString(16).padStart(6, "0")}`,
   );
+  return `id-${escaped}`;
 }
 
 /**

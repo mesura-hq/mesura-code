@@ -62,8 +62,11 @@ export interface MonacoFileSurfaceControl {
   readonly hasTextFocus: () => boolean;
   /** True only while Neovim drives the editor and rests in plain normal mode, as for Escape. */
   readonly restsInNormalMode: () => boolean;
-  /** Resolves once the keys sent to Neovim were answered and the pending save was written. */
-  readonly settle: () => Promise<void>;
+  /**
+   * Resolves once the keys sent to Neovim were answered, their text reached the model, and the
+   * pending save was written. `signal` abandons the wait for Neovim; the save is still flushed.
+   */
+  readonly settle: (signal?: AbortSignal) => Promise<void>;
 }
 
 /**
@@ -498,8 +501,8 @@ export function MonacoFileSurface({
       focus: () => editorRef.current?.focus(),
       hasTextFocus: () => editorRef.current?.hasTextFocus() === true,
       restsInNormalMode: () => nvimActiveRef.current && !nvimEscapeRef.current(),
-      settle: async () => {
-        await nvimSettleRef.current();
+      settle: async (signal) => {
+        await nvimSettleRef.current(signal);
         await saveRef.current.flush();
       },
     };

@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { type EnvironmentId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 
@@ -17,25 +17,28 @@ export type ScratchpadFile =
   | { readonly status: "failed" };
 
 /**
- * One scratchpad file's text: the editor's unsaved text first, then what the host has. A file that
- * was never written reads as empty, because the first save creates it. A failed read is never
- * empty: an editor opened on it would save over the notes it could not read.
+ * One scratchpad file's text for the preview card: the editor's unsaved text first, then what the
+ * host has. A file that was never written reads as empty, because the first save creates it.
+ * The overlay does not use this cached read: it reads the host afresh on every open.
  */
 export function useScratchpadFile(
   environmentId: EnvironmentId,
   root: string,
   relativePath: string,
-): ScratchpadFile {
-  const read = useAtomValue(
-    projectEnvironment.readFile({
-      environmentId,
-      input: { cwd: root, relativePath, allowMissing: true },
-    }),
-  );
+): { readonly file: ScratchpadFile; readonly refresh: () => void } {
+  const atom = projectEnvironment.readFile({
+    environmentId,
+    input: { cwd: root, relativePath, allowMissing: true },
+  });
+  const read = useAtomValue(atom);
+  const refresh = useAtomRefresh(atom);
   const optimistic = useAtomValue(optimisticFileAtom(environmentId, root, relativePath));
-  if (optimistic?.data) return { status: "ready", contents: optimistic.data.contents };
-  if (AsyncResult.isFailure(read)) return { status: "failed" };
-  const data = AsyncResult.getOrElse(read, () => null);
-  if (data === null) return { status: "loading" };
-  return { status: "ready", contents: data.exists === false ? "" : data.contents };
+  const file: ScratchpadFile = (() => {
+    if (optimistic?.data) return { status: "ready", contents: optimistic.data.contents };
+    if (AsyncResult.isFailure(read)) return { status: "failed" };
+    const data = AsyncResult.getOrElse(read, () => null);
+    if (data === null) return { status: "loading" };
+    return { status: "ready", contents: data.exists === false ? "" : data.contents };
+  })();
+  return { file, refresh };
 }

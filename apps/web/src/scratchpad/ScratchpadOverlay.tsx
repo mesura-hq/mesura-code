@@ -1,13 +1,15 @@
 import { type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
 import { NotebookPenIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
+import { FileEditorRetention } from "~/components/files/fileEditorRetention";
 import { optimisticFileAtom } from "~/components/files/projectFilesQueryState";
 import {
   MonacoFileSurface,
   type MonacoFileSurfaceControl,
 } from "~/components/files/monaco/MonacoFileSurface";
-import { useProjectEditorModels } from "~/components/files/monaco/useProjectEditorModels";
+import { relativePathFromModelKey } from "~/components/files/monaco/monacoFileModels";
+import { createMonacoFileModels } from "~/components/files/monaco/monacoFileModelStore";
 import { type DraftId } from "~/composerDraftStore";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { useTheme } from "~/hooks/useTheme";
@@ -16,7 +18,8 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
-import { SCRATCHPAD_EDITOR_THREAD_ID } from "./scratchpadEditorSession";
+import { scratchpadEditorThreadId } from "./scratchpadEditorSession";
+import { registerScratchpadFocus } from "./scratchpadFocus";
 import {
   availableScratchpadScopes,
   cycleScratchpadScope,
@@ -29,8 +32,12 @@ import {
 } from "./scratchpadScopes";
 import { useScratchpadStore } from "./scratchpadStore";
 
-/** How long a close waits for keys and the save before unmounting anyway (a lost connection). */
-const CLOSE_SETTLE_LIMIT_MS = 3000;
+/**
+ * A backstop only: the key lane gives keys up after its own outage limit (a minute), and the close
+ * normally settles in well under a second. Until it settles, a reopen waits and the preview card
+ * says "Saving…", so pending keys can never replay into another scope's buffer.
+ */
+const CLOSE_SETTLE_BACKSTOP_MS = 75_000;
 
 type LoadedFile =
   | { readonly relativePath: string; readonly status: "ready"; readonly contents: string }
@@ -51,7 +58,23 @@ export function ScratchpadOverlay({
   owner,
   composerDraftTarget,
 }: ScratchpadOverlayProps) {
-  const { models, retention } = useProjectEditorModels(environmentId, root);
+  // Models of this open only, thrown away when it closes: a model kept from an earlier open holds
+  // that open's text, and the editor's echo guard could then take it over the fresh read.
+  const [{ models, retention }] = useState(() => {
+    const created = { models: createMonacoFileModels(), retention: new FileEditorRetention() };
+    created.models.onEvict((key) => created.retention.forget(relativePathFromModelKey(key)));
+    return created;
+  });
+  // After the editor's own layout-effect teardown, which hands its model back first.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- disposes this open's Monaco models on unmount
+  useEffect(
+    () => () => {
+      models.disposeAll();
+      retention.clear();
+    },
+    [models, retention],
+  );
+  const [editorThreadId] = useState(scratchpadEditorThreadId);
   const { resolvedTheme } = useTheme();
   const phase = useScratchpadStore((state) => state.phase);
   const closeScratchpad = useScratchpadStore((state) => state.closeScratchpad);
@@ -156,19 +179,42 @@ export function ScratchpadOverlay({
     if (phase !== "closing") return;
     if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
     else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    let cancelled = false;
-    const settled = controlRef.current?.settle() ?? Promise.resolve();
-    const limit = new Promise<void>((resolve) => setTimeout(resolve, CLOSE_SETTLE_LIMIT_MS));
-    void Promise.race([settled.catch(() => {}), limit]).then(() => {
-      if (!cancelled) finishClosing();
-    });
+    const abandon = new AbortController();
+    const backstop = setTimeout(() => abandon.abort(), CLOSE_SETTLE_BACKSTOP_MS);
+    let unmounted = false;
+    const settled = controlRef.current?.settle(abandon.signal) ?? Promise.resolve();
+    void settled
+      .catch(() => {})
+      .then(() => {
+        clearTimeout(backstop);
+        if (!unmounted) finishClosing();
+      });
     return () => {
-      cancelled = true;
+      unmounted = true;
+      clearTimeout(backstop);
+      abandon.abort();
     };
   }, [phase, finishClosing, previousFocus]);
 
+  // A scope change first settles the outgoing buffer: switching the model before Neovim's last
+  // text arrives would drop that text from the save. Tabs pressed meanwhile retarget the switch.
+  const switchTargetRef = useRef<ScratchpadScope | null>(null);
   const switchScope = (next: ScratchpadScope) => {
-    if (next !== scope) setScope(next);
+    if (switchTargetRef.current === null && next === scope) {
+      if (showsRequestedFile) controlRef.current?.focus();
+      return;
+    }
+    const inFlight = switchTargetRef.current !== null;
+    switchTargetRef.current = next;
+    if (inFlight) return;
+    const settled = controlRef.current?.settle() ?? Promise.resolve();
+    void settled
+      .catch(() => {})
+      .then(() => {
+        const target = switchTargetRef.current;
+        switchTargetRef.current = null;
+        if (target !== null) setScope(target);
+      });
   };
 
   // On the window in the capture phase: ahead of the file editor's document-level Escape
@@ -186,8 +232,21 @@ export function ScratchpadOverlay({
     event.preventDefault();
     event.stopImmediatePropagation();
     if (action === "close") closeScratchpad();
-    else switchScope(cycleScratchpadScope(scope, available, action === "next-scope" ? 1 : -1));
+    else {
+      const from = switchTargetRef.current ?? scope;
+      switchScope(cycleScratchpadScope(from, available, action === "next-scope" ? 1 : -1));
+    }
   });
+  const focusOverlay = useEffectEvent(() => {
+    if (focusedFile !== null) controlRef.current?.focus();
+    else shellRef.current?.focus({ preventScroll: true });
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- lets the command palette hand the keyboard back to the open overlay
+  useLayoutEffect(() => {
+    if (phase !== "open") return;
+    return registerScratchpadFocus(() => focusOverlay());
+  }, [phase]);
+
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window keydown listener for Tab and Escape while the overlay is open
   useEffect(() => {
     if (phase !== "open") return;
@@ -219,9 +278,13 @@ export function ScratchpadOverlay({
         if (event.target === event.currentTarget) closeScratchpad();
       }}
     >
+      {/* `role="application"` keeps the chat's type-to-focus off this shell, and the marker keeps
+          the app's Vim keys off it, while a read is pending and the shell holds the keyboard. */}
       <section
         ref={shellRef}
+        role="application"
         aria-label="Scratchpad"
+        data-mesura-owns-keys
         tabIndex={-1}
         className="dropdown-glass flex h-[90%] w-[90%] min-w-0 flex-col overflow-hidden rounded-2xl shadow-2xl outline-none"
       >
@@ -271,7 +334,7 @@ export function ScratchpadOverlay({
               retention={retention}
               models={models}
               composerDraftTarget={composerDraftTarget}
-              threadRef={{ environmentId, threadId: SCRATCHPAD_EDITOR_THREAD_ID }}
+              threadRef={{ environmentId, threadId: editorThreadId }}
               // Always Neovim, whatever the file panel's modal editing setting says: the scratchpad
               // is a Neovim buffer by design.
               modalEditing

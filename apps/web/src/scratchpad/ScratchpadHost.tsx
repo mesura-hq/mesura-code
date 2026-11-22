@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
-import { useEffect } from "react";
+import { useEffect, useEffectEvent } from "react";
 
 import { useCommandHandlers } from "~/commands/commandRegistry";
 import { type DraftId } from "~/composerDraftStore";
@@ -28,10 +28,14 @@ export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: Sc
   const root = useScratchpadRoot(environmentId);
   const mounted = useScratchpadStore((state) => state.phase !== "closed");
   const openCount = useScratchpadStore((state) => state.openCount);
-  const toggleScratchpad = useScratchpadStore((state) => state.toggleScratchpad);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  // Nothing to open on a host without the scratchpad folder; a store left "open" there would
+  // have no overlay to close it again.
+  const toggle = useEffectEvent(() => {
+    if (root !== undefined) useScratchpadStore.getState().toggleScratchpad();
+  });
   // The key engine's leader row and the palette run the command through the registry.
-  useCommandHandlers({ "scratchpad.toggle": toggleScratchpad });
+  useCommandHandlers({ "scratchpad.toggle": () => toggle() });
 
   // The chord itself: each command owner listens on the window, as the sidebar's host does. The
   // scratchpad's Neovim lets it through because the command outranks Neovim.
@@ -45,7 +49,7 @@ export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: Sc
       if (command !== "scratchpad.toggle") return;
       event.preventDefault();
       event.stopPropagation();
-      if (!event.repeat) useScratchpadStore.getState().toggleScratchpad();
+      if (!event.repeat) toggle();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
