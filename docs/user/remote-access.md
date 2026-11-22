@@ -400,8 +400,9 @@ not know for one of your machines also needs a pasted code. Paste one only for
 an address you trust: the code is sent there.
 
 - The access you pick is the most agents from this machine may do there. It
-  starts at full access. An agent also never gets more there than its own mode
-  here.
+  starts at full access unless the agent's request suggests another level, and
+  you can change it before you approve. An agent also never gets more there
+  than its own mode here.
 - Threads a link starts are marked **From** and this machine's name there.
 - A full-access link works there like that machine's own agents. Below full
   access, the link's agents can change only threads it started, not that

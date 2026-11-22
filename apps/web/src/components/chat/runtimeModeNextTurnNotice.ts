@@ -5,25 +5,25 @@ import { runtimeModeConfig } from "./runtimeModeConfig";
 
 interface RuntimeModeChangeDuringTurn {
   readonly activeRunId: string | null | undefined;
-  /** The thread's saved mode, which the running turn started with. */
-  readonly runningMode: RuntimeMode | undefined;
+  readonly savedMode: RuntimeMode | undefined;
   readonly nextMode: RuntimeMode;
 }
 
-/** The provider takes its permissions when a turn starts, so a change made mid-turn waits for the next message. */
+/**
+ * The provider takes its permissions when a turn starts, so a pick made mid-turn waits for the next one.
+ * The saved mode can already differ from the running turn's (a queued send saves it), so the notice names neither.
+ */
 export function runtimeModeChangeWaitsForNextTurn(input: RuntimeModeChangeDuringTurn): boolean {
   return (
-    input.activeRunId != null &&
-    input.runningMode !== undefined &&
-    input.nextMode !== input.runningMode
+    input.activeRunId != null && input.savedMode !== undefined && input.nextMode !== input.savedMode
   );
 }
 
 export function noticeRuntimeModeChangeDuringTurn(input: RuntimeModeChangeDuringTurn): void {
-  if (!runtimeModeChangeWaitsForNextTurn(input) || input.runningMode === undefined) return;
+  if (!runtimeModeChangeWaitsForNextTurn(input)) return;
   toastManager.add({
     type: "info",
-    title: `${runtimeModeConfig[input.nextMode].label} applies from your next message`,
-    description: `The running turn keeps ${runtimeModeConfig[input.runningMode].label}.`,
+    title: `${runtimeModeConfig[input.nextMode].label} starts with the next turn`,
+    description: "The running turn keeps its permissions, including messages you steer into it.",
   });
 }

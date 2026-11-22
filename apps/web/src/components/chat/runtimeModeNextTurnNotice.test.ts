@@ -3,11 +3,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { runtimeModeChangeWaitsForNextTurn } from "./runtimeModeNextTurnNotice";
 
 describe("runtimeModeChangeWaitsForNextTurn", () => {
-  it("waits when a turn runs with a different mode", () => {
+  it("waits when a turn runs and the pick differs from the saved mode", () => {
     expect(
       runtimeModeChangeWaitsForNextTurn({
         activeRunId: "run-1",
-        runningMode: "approval-required",
+        savedMode: "approval-required",
         nextMode: "full-access",
       }),
     ).toBe(true);
@@ -17,17 +17,17 @@ describe("runtimeModeChangeWaitsForNextTurn", () => {
     expect(
       runtimeModeChangeWaitsForNextTurn({
         activeRunId: null,
-        runningMode: "approval-required",
+        savedMode: "approval-required",
         nextMode: "full-access",
       }),
     ).toBe(false);
   });
 
-  it("does not wait when the pick returns to the running mode", () => {
+  it("does not wait when the pick equals the saved mode", () => {
     expect(
       runtimeModeChangeWaitsForNextTurn({
         activeRunId: "run-1",
-        runningMode: "full-access",
+        savedMode: "full-access",
         nextMode: "full-access",
       }),
     ).toBe(false);
@@ -37,7 +37,7 @@ describe("runtimeModeChangeWaitsForNextTurn", () => {
     expect(
       runtimeModeChangeWaitsForNextTurn({
         activeRunId: "run-1",
-        runningMode: undefined,
+        savedMode: undefined,
         nextMode: "full-access",
       }),
     ).toBe(false);
