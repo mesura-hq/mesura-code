@@ -2,9 +2,9 @@
 
 Choose **Thread order** in Settings → General to organize active, unpinned threads in the default
 thread list by **Last activity** or **Created at**. **Last activity** is the default. It orders
-threads by the time each row shows, so a thread moves to the top when its turn finishes or when a
-message starts a new turn. A finished thread you have not opened yet shows a green check beside that
-time. Each web, desktop, or mobile client stores its own choice. The legacy thread list keeps
+threads by the time each row shows, so a thread returns to the top of the list when its turn
+finishes. A green check beside that time marks a turn that finished after you last opened the
+thread. Each web, desktop, or mobile client stores its own choice. The legacy thread list keeps
 its existing order selector.
 
 This preference does not change the order of pinned threads, snoozed threads, or settled threads.
