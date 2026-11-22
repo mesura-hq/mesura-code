@@ -18,7 +18,7 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
-import { scratchpadEditorThreadId } from "./scratchpadEditorSession";
+import { retireScratchpadSession, scratchpadEditorThreadId } from "./scratchpadEditorSession";
 import { registerScratchpadFocus } from "./scratchpadFocus";
 import {
   availableScratchpadScopes,
@@ -55,12 +55,12 @@ interface ScratchpadOverlayProps {
 export function ScratchpadOverlay({
   environmentId,
   root,
-  owner: ownerAtOpen,
+  owner: currentOwner,
   composerDraftTarget,
 }: ScratchpadOverlayProps) {
-  // The thread it was opened from, for its whole life: navigating to another thread meanwhile
-  // must not swap the note under the editor without the settle a scope change goes through.
-  const [owner] = useState(ownerAtOpen);
+  // The thread it was opened from: navigating elsewhere closes the overlay (below), which
+  // settles this note, rather than swapping the note under the editor or writing to the old one.
+  const [owner] = useState(currentOwner);
   // Models of this open only, and only the scope on screen (limit 1): a kept model holds the text
   // it last had, and the editor's echo guard could take it over the fresh read of a scope that
   // another device saved meanwhile. Every scope change and every open start from the host.
@@ -94,6 +94,12 @@ export function ScratchpadOverlay({
   const phase = useScratchpadStore((state) => state.phase);
   const closeScratchpad = useScratchpadStore((state) => state.closeScratchpad);
   const finishClosing = useScratchpadStore((state) => state.finishClosing);
+  const ownerMoved =
+    currentOwner.projectId !== owner.projectId || currentOwner.threadId !== owner.threadId;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- closes the overlay when the chat navigates to another thread
+  useEffect(() => {
+    if (ownerMoved && phase === "open") closeScratchpad();
+  }, [ownerMoved, phase, closeScratchpad]);
   const setScope = useScratchpadStore((state) => state.setScope);
   const storedScope = useScratchpadStore((state) => state.scope);
   const available = availableScratchpadScopes(owner);
@@ -106,6 +112,19 @@ export function ScratchpadOverlay({
   /** Where a scope change still settling is headed, and the settle itself. */
   const switchTargetRef = useRef<ScratchpadScope | null>(null);
   const switchingRef = useRef<Promise<void> | null>(null);
+  /** Shown state of the same: the outgoing editor is inert while it settles. */
+  const [switching, setSwitching] = useState(false);
+  /** False once unmounted, so a settle finishing late never acts on a replacement overlay. */
+  const aliveRef = useRef(true);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- marks the overlay unmounted for settles that finish after it
+  useEffect(() => {
+    // Set on every mount: development runs effects twice, and a false left by the first cleanup
+    // stranded every scope change half-way (editor inert, scope unchanged).
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const shellRef = useRef<HTMLElement | null>(null);
   const [pendingPaths, setPendingPaths] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -205,17 +224,22 @@ export function ScratchpadOverlay({
     const settled = (pendingSwitch() ?? Promise.resolve()).then(
       () => controlRef.current?.settle(abandon.signal) ?? Promise.resolve(),
     );
-    const backstop = new Promise<void>((resolve) =>
-      setTimeout(() => {
+    let backstopTimer: ReturnType<typeof setTimeout> | undefined;
+    const backstop = new Promise<void>((resolve) => {
+      backstopTimer = setTimeout(() => {
         abandon.abort();
+        // Keys may still be queued for this session; the next open must not receive them.
+        retireScratchpadSession();
         resolve();
-      }, CLOSE_SETTLE_BACKSTOP_MS),
-    );
+      }, CLOSE_SETTLE_BACKSTOP_MS);
+    });
     void Promise.race([settled.catch(() => {}), backstop]).then(() => {
+      clearTimeout(backstopTimer);
       if (!unmounted) finishClosing();
     });
     return () => {
       unmounted = true;
+      clearTimeout(backstopTimer);
       abandon.abort();
     };
   }, [phase, finishClosing, previousFocus]);
@@ -230,15 +254,19 @@ export function ScratchpadOverlay({
     const inFlight = switchTargetRef.current !== null;
     switchTargetRef.current = next;
     if (inFlight) return;
-    // The shell holds the keyboard while the outgoing buffer settles, so no key joins it late.
+    // The shell holds the keyboard and the outgoing editor is inert while it settles, so no key
+    // or click joins that buffer late.
     shellRef.current?.focus({ preventScroll: true });
+    setSwitching(true);
     const settled = controlRef.current?.settle() ?? Promise.resolve();
     switchingRef.current = settled
       .catch(() => {})
       .then(() => {
+        if (!aliveRef.current) return;
         const target = switchTargetRef.current;
         switchTargetRef.current = null;
         switchingRef.current = null;
+        setSwitching(false);
         // A close that started meanwhile ends this open; it keeps the scope it settled.
         if (target === null || useScratchpadStore.getState().phase !== "open") return;
         if (target === scope) controlRef.current?.focus();
@@ -267,7 +295,7 @@ export function ScratchpadOverlay({
     }
   });
   const focusOverlay = useEffectEvent(() => {
-    if (focusedFile !== null) controlRef.current?.focus();
+    if (focusedFile !== null && !switching) controlRef.current?.focus();
     else shellRef.current?.focus({ preventScroll: true });
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- lets the command palette hand the keyboard back to the open overlay
@@ -349,7 +377,7 @@ export function ScratchpadOverlay({
             {saving ? "Saving…" : "Saved"}
           </span>
         </header>
-        <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className="relative flex min-h-0 flex-1 flex-col" inert={switching}>
           {editorFile !== null && editorThreadId !== null ? (
             <MonacoFileSurface
               environmentId={environmentId}

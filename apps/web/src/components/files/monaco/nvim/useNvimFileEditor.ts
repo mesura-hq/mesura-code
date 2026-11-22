@@ -380,11 +380,14 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
       const stopWaiting = new AbortController();
       signal?.addEventListener("abort", () => stopWaiting.abort(), { once: true });
       const snapshotArrived = new Promise<void>((resolve) => {
+        let matched = false;
         const unsubscribe = stateSource.subscribe((next) => {
           // A refresh can repeat the old state while it waits; only the new attachment's counts.
-          if (next === before) return;
+          if (matched || next === before) return;
           const event = next.latestEvent;
           if (event?.type !== "snapshot" || event.snapshot.relativePath !== relativePath) return;
+          matched = true;
+          unsubscribe();
           // Only now are those keys' text in the model; a settle that gives up keeps them owed.
           keysSinceSyncRef.current -= sent;
           resolve();

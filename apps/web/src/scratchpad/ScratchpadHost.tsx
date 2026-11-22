@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
-import { useContext, useEffect, useEffectEvent } from "react";
+import { useContext, useEffect, useEffectEvent, useState } from "react";
 
 import { useCommandHandlers } from "~/commands/commandRegistry";
 import { BackgroundThreadContext } from "~/components/chat/backgroundThread";
@@ -22,28 +22,35 @@ interface ScratchpadHostProps {
 }
 
 /**
- * Mounted once per chat view, inside its positioned canvas: the overlay covers the thread, not the
- * window, so the sidebar and right panel stay visible around it. A side chat or a thread kept
- * mounted in the background stands down, so one action never mounts two editors.
+ * One per chat view; the overlay covers the thread, not the window. A background view (side chat,
+ * thread kept behind Settings) takes no command and mounts no overlay; one that goes to the
+ * background with its overlay open closes it and keeps it mounted until the close settles.
  */
-export function ScratchpadHost(props: ScratchpadHostProps) {
+export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: ScratchpadHostProps) {
   const background = useContext(BackgroundThreadContext);
-  return background ? null : <ActiveScratchpadHost {...props} />;
-}
-
-function ActiveScratchpadHost({ environmentId, owner, composerDraftTarget }: ScratchpadHostProps) {
   const root = useScratchpadRoot(environmentId);
-  const mounted = useScratchpadStore((state) => state.phase !== "closed");
+  const phase = useScratchpadStore((state) => state.phase);
+  const mounted = phase !== "closed";
+  // Whether this host's overlay is the one on screen; derived during render, not synced.
+  const [ownsOverlay, setOwnsOverlay] = useState(false);
+  if (mounted && !background && root !== undefined && !ownsOverlay) setOwnsOverlay(true);
+  if (!mounted && ownsOverlay) setOwnsOverlay(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts the settling close when this chat view goes to the background
+  useEffect(() => {
+    if (background && ownsOverlay && phase === "open") {
+      useScratchpadStore.getState().closeScratchpad();
+    }
+  }, [background, ownsOverlay, phase]);
   const openCount = useScratchpadStore((state) => state.openCount);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   // Nothing to open on a host without the scratchpad folder; a store left "open" there would
   // have no overlay to close it again.
   const toggle = useEffectEvent(() => {
-    if (root !== undefined) useScratchpadStore.getState().toggleScratchpad();
+    if (!background && root !== undefined) useScratchpadStore.getState().toggleScratchpad();
   });
-  const canOpen = useEffectEvent(() => root !== undefined);
+  const canOpen = useEffectEvent(() => !background && root !== undefined);
   // The key engine's leader row and the palette run the command through the registry.
-  useCommandHandlers({ "scratchpad.toggle": () => toggle() });
+  useCommandHandlers(background ? {} : { "scratchpad.toggle": () => toggle() });
 
   // The chord itself: each command owner listens on the window, as the sidebar's host does. The
   // scratchpad's Neovim lets it through because the command outranks Neovim.
@@ -63,7 +70,7 @@ function ActiveScratchpadHost({ environmentId, owner, composerDraftTarget }: Scr
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [keybindings]);
 
-  if (!mounted || root === undefined) return null;
+  if (!mounted || !ownsOverlay || root === undefined) return null;
   return (
     <ScratchpadOverlay
       key={`${environmentId}:${root}:${openCount}`}

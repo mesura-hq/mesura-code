@@ -32,7 +32,7 @@ usual.
 Every scope is a Markdown file on the host, saved as you type, without `:w`, about half a second
 after you stop. The files are in the `scratchpads` folder of the host's data directory
 (`~/.mesura-code/userdata/scratchpads` by default): `general.md`, `projects/id-<project id>.md`
-and `threads/id-<thread id>.md`, with characters outside letters, digits, `.` and `-` escaped.
+and `threads/id-<thread id>.md`, with every character other than lowercase ASCII letters, digits, `.` and `-` escaped.
 Once saved, a note survives a closed browser and a restarted host. Text typed in the last moment
 before the browser closes, or while the host cannot be reached, may not be saved yet.
 
