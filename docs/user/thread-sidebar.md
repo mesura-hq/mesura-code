@@ -1,9 +1,10 @@
 # Working with threads
 
 Choose **Thread order** in Settings → General to organize active, unpinned threads in the default
-thread list by **Last user message** or **Created at**. **Last user message** is the default. It moves
-a thread when you send a new message; agent responses and completion do not change that thread's
-position. Each web, desktop, or mobile client stores its own choice. The legacy thread list keeps
+thread list by **Last activity** or **Created at**. **Last activity** is the default. It orders
+threads by the time each row shows, so a thread returns to the top of the list when its turn
+finishes. A green check beside that time marks a turn that finished after you last opened the
+thread. Each web, desktop, or mobile client stores its own choice. The legacy thread list keeps
 its existing order selector.
 
 This preference does not change the order of pinned threads, snoozed threads, or settled threads.

@@ -1,6 +1,6 @@
 import type { SidebarThreadSortOrder } from "@t3tools/contracts";
 
 export const SIDEBAR_THREAD_SORT_LABELS: Record<SidebarThreadSortOrder, string> = {
-  updated_at: "Last user message",
+  updated_at: "Last activity",
   created_at: "Created at",
 };

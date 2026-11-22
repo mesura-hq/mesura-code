@@ -147,6 +147,14 @@ const LOOK_BY_KIND: Readonly<Record<SidebarThreadAttentionKind, SidebarThreadAtt
   done: { className: "font-medium text-success", icon: "done", rowEdgeClassName: "" },
 };
 
+/**
+ * The labels that read as their icon beside the row's time instead of their text: Needs input
+ * (developer, 2026-10-27) and Done (developer, 2026-11-22).
+ */
+export function sidebarThreadAttentionShowsTime(kind: SidebarThreadAttentionKind): boolean {
+  return kind === "input" || kind === "done";
+}
+
 /** The labels that carry the Working section's band. */
 export function sidebarThreadAttentionSweeps(kind: SidebarThreadAttentionKind): boolean {
   return kind === "working" || kind === "factory";

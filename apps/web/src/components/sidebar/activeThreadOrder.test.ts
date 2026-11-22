@@ -1,11 +1,11 @@
+import { RunId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { sortActiveThreadsForSidebar } from "./activeThreadOrder";
 
 /**
- * The setting chooses between two wanted orders: "Last user message" restores the fork's
- * recent-message order, and "Created at" keeps upstream's anchor exactly, including its
- * un-settle re-anchor.
+ * The setting chooses between two wanted orders: "Last activity" sorts by the time each row shows,
+ * and "Created at" keeps upstream's anchor exactly, including its un-settle re-anchor.
  */
 
 const thread = (input: {
@@ -13,12 +13,24 @@ const thread = (input: {
   createdAt: string;
   updatedAt?: string;
   latestUserMessageAt?: string | null;
+  completedAt?: string;
   unsettledAt?: string | null;
 }) => ({
   id: input.id,
   createdAt: input.createdAt,
   updatedAt: input.updatedAt ?? input.createdAt,
   latestUserMessageAt: input.latestUserMessageAt ?? null,
+  latestRun:
+    input.completedAt === undefined
+      ? null
+      : {
+          runId: RunId.make(`${input.id}-run`),
+          status: "completed" as const,
+          requestedAt: input.latestUserMessageAt ?? input.createdAt,
+          startedAt: input.latestUserMessageAt ?? input.createdAt,
+          completedAt: input.completedAt,
+          assistantMessageId: null,
+        },
   unsettledAt: input.unsettledAt ?? null,
 });
 
@@ -41,10 +53,32 @@ describe("sortActiveThreadsForSidebar", () => {
     latestUserMessageAt: "2026-01-05T00:00:00.000Z",
   });
 
-  it("puts the most recently messaged thread first for 'Last user message'", () => {
+  it("puts the most recently messaged thread first for 'Last activity'", () => {
     expect(ids(sortActiveThreadsForSidebar([middle, newestCreated, oldestCreated], "updated_at")))
       // a-oldest was created first but messaged last, so it rises to the top.
       .toEqual(["a-oldest", "c-newest", "b-middle"]);
+  });
+
+  it("puts the thread whose turn ended last first for 'Last activity', as its row's time reads", () => {
+    // The user wrote in b-sent last, but a-finished's turn ended after that: the rows read
+    // "a-finished 5m, b-sent 20m", so the list must too.
+    const finishedLast = thread({
+      id: "a-finished",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      latestUserMessageAt: "2026-01-09T10:00:00.000Z",
+      completedAt: "2026-01-09T12:55:00.000Z",
+    });
+    const sentLast = thread({
+      id: "b-sent",
+      createdAt: "2026-01-02T00:00:00.000Z",
+      latestUserMessageAt: "2026-01-09T12:30:00.000Z",
+      completedAt: "2026-01-09T12:40:00.000Z",
+    });
+
+    expect(ids(sortActiveThreadsForSidebar([sentLast, finishedLast], "updated_at"))).toEqual([
+      "a-finished",
+      "b-sent",
+    ]);
   });
 
   it("keeps upstream's creation anchor for 'Created at'", () => {
