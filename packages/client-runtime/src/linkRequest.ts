@@ -46,10 +46,10 @@ export function linkedEnvironmentNames(input: {
   );
 }
 
-/** The access a request opens with: the agent's suggestion, else supervised. */
+/** The access a request opens with: the agent's suggestion, else full access. */
 export const linkRequestDefaultAccess = (
   item: Pick<LinkRequestItem, "requestedAccess">,
-): AuthMcpClientAccess => item.requestedAccess ?? "approval-required";
+): AuthMcpClientAccess => item.requestedAccess ?? "full-access";
 
 const parsedUrl = (url: string) => {
   try {

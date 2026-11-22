@@ -4,6 +4,7 @@ import type { Dispatch } from "react";
 import type { ComposerThreadTarget, DraftSessionState } from "../../composerDraftStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { useApplyThreadModelPick } from "./useApplyThreadModelPick";
+import { noticeRuntimeModeChangeDuringTurn } from "./runtimeModeNextTurnNotice";
 import {
   type EnvironmentId,
   type ModelSelection,
@@ -93,6 +94,11 @@ export function useComposerSelection(input: ComposerSelectionInput) {
     setComposerDraftRuntimeMode(composerDraftTarget, mode);
     if (isLocalDraftThread) {
       setDraftThreadContext(composerDraftTarget, { runtimeMode: mode });
+    } else {
+      noticeRuntimeModeChangeDuringTurn({
+        activeRunId: activeRuntime?.activeRunId,
+        nextMode: mode,
+      });
     }
     scheduleComposerFocus();
   };

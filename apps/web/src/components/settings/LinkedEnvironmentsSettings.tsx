@@ -188,7 +188,7 @@ function LinkEnvironmentAction({ environmentId }: { readonly environmentId: Envi
   const [choice, setChoice] = useState<string | null>(null);
   const [address, setAddress] = useState("");
   const [pairingCode, setPairingCode] = useState("");
-  const [access, setAccess] = useState<AuthMcpClientAccess>("approval-required");
+  const [access, setAccess] = useState<AuthMcpClientAccess>("full-access");
   const [busy, setBusy] = useState(false);
   // Machines whose minting already failed, so the dialog asks for a code instead.
   const [mintFailed, setMintFailed] = useState<ReadonlySet<EnvironmentId>>(new Set());
@@ -222,7 +222,7 @@ function LinkEnvironmentAction({ environmentId }: { readonly environmentId: Envi
       setChoice(null);
       setAddress("");
       setPairingCode("");
-      setAccess("approval-required");
+      setAccess("full-access");
       setMintFailed(new Set());
     }
   };

@@ -1536,7 +1536,10 @@ it.effect("hides tools for links and refuses another environment while the beta 
           failureMode: "return",
         }),
       );
-      const settingsContext = yield* Layer.build(ServerSettings.layerTest());
+      // Mesura: the beta defaults on here, so the test starts it off.
+      const settingsContext = yield* Layer.build(
+        ServerSettings.layerTest({ linkedEnvironmentsEnabled: false }),
+      );
       const settings = Context.get(settingsContext, ServerSettings.ServerSettingsService);
       const serverLayer = McpHttpServer.layerMcpTransport(
         McpHttpServer.toolkitRegistration(
