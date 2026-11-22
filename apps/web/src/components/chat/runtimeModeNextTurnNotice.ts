@@ -3,27 +3,19 @@ import type { RuntimeMode } from "@t3tools/contracts";
 import { toastManager } from "../ui/toast";
 import { runtimeModeConfig } from "./runtimeModeConfig";
 
-interface RuntimeModeChangeDuringTurn {
-  readonly activeRunId: string | null | undefined;
-  readonly savedMode: RuntimeMode | undefined;
-  readonly nextMode: RuntimeMode;
-}
-
 /**
- * The provider takes its permissions when a turn starts, so a pick made mid-turn waits for the next one.
- * The saved mode can already differ from the running turn's (a queued send saves it), so the notice names neither.
+ * A pick is saved on send and the provider takes its permissions when a turn starts, so a pick made
+ * mid-turn never reaches the running turn, its steered messages or queued ones. The caller skips re-picks.
  */
-export function runtimeModeChangeWaitsForNextTurn(input: RuntimeModeChangeDuringTurn): boolean {
-  return (
-    input.activeRunId != null && input.savedMode !== undefined && input.nextMode !== input.savedMode
-  );
-}
-
-export function noticeRuntimeModeChangeDuringTurn(input: RuntimeModeChangeDuringTurn): void {
-  if (!runtimeModeChangeWaitsForNextTurn(input)) return;
+export function noticeRuntimeModeChangeDuringTurn(input: {
+  readonly activeRunId: string | null | undefined;
+  readonly nextMode: RuntimeMode;
+}): void {
+  if (input.activeRunId == null) return;
   toastManager.add({
     type: "info",
-    title: `${runtimeModeConfig[input.nextMode].label} starts with the next turn`,
-    description: "The running turn keeps its permissions, including messages you steer into it.",
+    title: `${runtimeModeConfig[input.nextMode].label} is saved when you send`,
+    description:
+      "It applies to the next turn that starts after that. The running turn and messages already queued keep their permissions.",
   });
 }

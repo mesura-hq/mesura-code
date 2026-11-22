@@ -97,7 +97,6 @@ export function useComposerSelection(input: ComposerSelectionInput) {
     } else {
       noticeRuntimeModeChangeDuringTurn({
         activeRunId: activeRuntime?.activeRunId,
-        savedMode: activeThread?.runtimeMode,
         nextMode: mode,
       });
     }

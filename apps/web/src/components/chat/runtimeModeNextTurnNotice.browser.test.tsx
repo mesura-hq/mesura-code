@@ -80,12 +80,13 @@ it("tells the user a pick made during a turn starts with the next turn", async (
 
   await vi.waitFor(() =>
     expect(mocks.toast).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Full access starts with the next turn" }),
+      expect.objectContaining({ title: "Full access is saved when you send" }),
     ),
   );
 });
 
-it("stays quiet when the pick returns to the saved mode during a turn", async () => {
+it("tells the user again when the pick returns to the saved mode during a turn", async () => {
+  // A queued send can save a mode the running turn does not use, so every real change notifies.
   setup();
   await using _screen = await render(
     <PermissionsPicker
@@ -97,7 +98,11 @@ it("stays quiet when the pick returns to the saved mode during a turn", async ()
   );
   await page.getByRole("button", { name: "Supervised" }).click();
 
-  expect(mocks.toast).not.toHaveBeenCalled();
+  await vi.waitFor(() =>
+    expect(mocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Supervised is saved when you send" }),
+    ),
+  );
 });
 
 it("stays quiet without a running turn and on a local draft", async () => {
