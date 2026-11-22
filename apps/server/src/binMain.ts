@@ -25,6 +25,10 @@ export async function runCliCommand() {
   } else if (command === "acp-mcp-bridge" || command === "acp-mcp-call") {
     const { runAcpMcpCliFastPath } = await import("./mcp/AcpMcpStdioBridge.ts");
     await runAcpMcpCliFastPath(command, process.argv.slice(3));
+  } else if (command === "__dictation-vad-worker") {
+    // Mesura: a standalone executable cannot evaluate the Silero worker, so it runs it from here.
+    const { runSileroVadWorker } = await import("./dictation/sileroVadWorker.ts");
+    await runSileroVadWorker(process.argv[3]!);
   } else if (command === "__speech-worker") {
     const mode = process.argv[3];
     if (mode !== "discover" && mode !== "model") throw new Error("Unknown speech worker mode.");

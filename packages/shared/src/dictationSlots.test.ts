@@ -9,6 +9,8 @@ import {
   fillDictationSlot,
   findDictationSlots,
   formatDictationSlot,
+  insertDictationSlotAt,
+  removeDictationSlot,
   withVoicedPrefix,
 } from "@t3tools/shared/dictationSlots";
 
@@ -187,5 +189,60 @@ describe("dictation send readiness", () => {
     { label: "after a filled marker", text: `filled text ${marker("job-2")}` },
   ])("a prompt holding a dictation marker $label is never ready to send", ({ text }) => {
     expect(countPendingDictationSlots(text)).toBeGreaterThan(0);
+  });
+});
+
+describe("dictation slot inside bracketed answer text", () => {
+  it("fills only the marker, never the bracketed words before it", () => {
+    const text = `Keep [draft notes ${marker("job-bracket")}] exactly`;
+    expect(findDictationSlots(text).map((slot) => slot.source)).toEqual([marker("job-bracket")]);
+    expect(fillDictationSlot(text, "job-bracket", "speech")).toEqual({
+      text: "Keep [draft notes speech] exactly",
+    });
+  });
+
+  it("is a separate context reference from the bracket around it", () => {
+    const text = `Keep [draft notes ${marker("job-bracket")}] exactly`;
+    expect(collectComposerContextReferences(text).map((reference) => reference.source)).toEqual([
+      marker("job-bracket"),
+    ]);
+  });
+});
+
+describe("dictation slot beside an exclamation point", () => {
+  const text = `Keep !${marker("job-bang")} going`;
+
+  it("still counts as pending, so a send waits for it", () => {
+    expect(countPendingDictationSlots(text)).toBe(1);
+    expect(findDictationSlots(text)).toEqual([
+      {
+        jobId: "job-bang",
+        source: marker("job-bang"),
+        start: "Keep !".length,
+        end: "Keep !".length + marker("job-bang").length,
+      },
+    ]);
+  });
+
+  it("fills and removes the marker alone, keeping the exclamation point", () => {
+    expect(fillDictationSlot(text, "job-bang", "speech")).toEqual({ text: "Keep ! speech going" });
+    expect(removeDictationSlot(text, "job-bang")).toEqual({ text: "Keep ! going" });
+  });
+
+  it("is found again after an edit that removes the space before it", () => {
+    const inserted = insertDictationSlotAt("Wow! done", 4, marker("job-typed"));
+    const edited = inserted.replace("! ", "!");
+    expect(countPendingDictationSlots(edited)).toBe(1);
+    expect(fillDictationSlot(edited, "job-typed", "yes")).toEqual({ text: "Wow! yes done" });
+  });
+});
+
+describe("dictation slot inserted before a closing bracket", () => {
+  it("adds no space before the bracket, so the fill reads as one bracketed phrase", () => {
+    const inserted = insertDictationSlotAt("[draft notes]", 12, marker("job-close"));
+    expect(inserted).toBe(`[draft notes ${marker("job-close")}]`);
+    expect(fillDictationSlot(inserted, "job-close", "speech")).toEqual({
+      text: "[draft notes speech]",
+    });
   });
 });

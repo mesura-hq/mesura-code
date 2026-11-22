@@ -258,18 +258,27 @@ const make = Effect.gen(function* () {
           if (!hashed || !(yield* digestMatches(model, file))) continue;
           // Staged then renamed, so a failed link never removes the file already installed.
           const staged = `${finalPath}.${yield* random.uuidV4()}.part`;
-          // Windows grants symlinks only to privileged accounts; a hard link also shares the bytes.
-          const hardLinked = yield* fs.symlink(file, staged).pipe(
-            Effect.as(false),
-            Effect.catch(() => fs.link(file, staged).pipe(Effect.as(true))),
-          );
-          const current = yield* expectedFile(model, staged);
           const marker = identity(model, hashed);
-          if (!current || identity(model, current) !== marker) {
-            yield* fs.remove(staged, { force: true });
-            continue;
-          }
-          yield* fs.rename(staged, finalPath);
+          const installed = yield* Effect.gen(function* () {
+            // Windows grants symlinks only to privileged accounts; a hard link also shares the bytes.
+            const hardLinked = yield* fs.symlink(file, staged).pipe(
+              Effect.as(false),
+              Effect.catch(() => fs.link(file, staged).pipe(Effect.as(true))),
+            );
+            const current = yield* expectedFile(model, staged);
+            if (!current || identity(model, current) !== marker) return null;
+            yield* fs.rename(staged, finalPath);
+            return { hardLinked };
+          }).pipe(
+            // Mesura: a cancelled or failed install leaves no staged link behind.
+            Effect.onExit((exit) =>
+              Exit.isSuccess(exit) && exit.value !== null
+                ? Effect.void
+                : fs.remove(staged, { force: true }).pipe(Effect.ignore),
+            ),
+          );
+          if (installed === null) continue;
+          const { hardLinked } = installed;
           // A hard link cannot be read back, so its origin is recorded beside it.
           yield* (
             hardLinked

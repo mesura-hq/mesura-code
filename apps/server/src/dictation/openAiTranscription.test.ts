@@ -33,8 +33,11 @@ interface CapturedRequest {
   readonly sentAt: number;
 }
 
+/** `body` is the transcript; it is wrapped the way OpenAI answers the requested format. */
 type Reply =
   | { readonly status: number; readonly body: string }
+  /** Sent exactly as written, whatever format was requested. */
+  | { readonly status: number; readonly raw: string }
   | { readonly transport: true }
   | { readonly hang: true };
 
@@ -72,11 +75,18 @@ function fakeOpenAi(replies: ReadonlyArray<Reply>) {
           reason: new HttpClientError.TransportError({ request, description: "ECONNRESET" }),
         });
       }
+      const json = fields.get("response_format") === "json";
+      const body =
+        "raw" in reply
+          ? reply.raw
+          : reply.status === 200 && json
+            ? JSON.stringify({ text: reply.body })
+            : reply.body;
       return HttpClientResponse.fromWeb(
         request,
-        new Response(reply.body, {
+        new Response(body, {
           status: reply.status,
-          headers: { "content-type": "text/plain" },
+          headers: { "content-type": json ? "application/json" : "text/plain" },
         }),
       );
     }),
@@ -146,7 +156,7 @@ describe("openAiTranscription phase 1 fence", () => {
         assert.strictEqual(request.authorization, "Bearer sk-test-dictation");
         assert.strictEqual(fieldText(request, "model"), "gpt-4o-transcribe");
         assert.strictEqual(fieldText(request, "temperature"), "0");
-        assert.strictEqual(fieldText(request, "response_format"), "text");
+        assert.strictEqual(fieldText(request, "response_format"), "json");
         assert.isFalse(request.fields.has("language"), "no language field is sent");
         const file = request.fields.get("file");
         assert.isObject(file);
@@ -307,13 +317,123 @@ describe("openAiTranscription phase 1 fence", () => {
     }),
   );
 
-  it.effect("dictation phase 1 AC3: an empty 200 body fails at once as No speech detected", () =>
+  const openAiError = (param: string | null, message: string, code: string | null = null) =>
+    JSON.stringify({ error: { message, type: "invalid_request_error", param, code } });
+
+  it.effect.each([
+    {
+      origin: "a 400 about the file",
+      status: 400,
+      raw: openAiError("file", "Invalid file format."),
+      audioRejected: true,
+    },
+    {
+      origin: "a 400 with an audio error code",
+      status: 400,
+      raw: openAiError(null, "Audio file is too short.", "audio_too_short"),
+      audioRejected: true,
+    },
+    {
+      origin: "GPT-4o's corrupted-file 400",
+      status: 400,
+      raw: openAiError("file", "Audio file might be corrupted or unsupported", "invalid_value"),
+      audioRejected: true,
+    },
+    {
+      origin: "Whisper's invalid-format 400 with no param or code",
+      status: 400,
+      raw: openAiError(
+        null,
+        "Invalid file format. Supported formats: ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm']",
+      ),
+      audioRejected: true,
+    },
+    // The whole recording is larger than the cut, so it cannot pass a size limit the cut failed.
+    { origin: "a 413", status: 413, raw: "Request Entity Too Large", audioRejected: false },
+    { origin: "a bare 415", status: 415, raw: "", audioRejected: false },
+    {
+      origin: "a 400 about another field",
+      status: 400,
+      raw: openAiError(null, "Invalid value for 'temperature'."),
+      audioRejected: false,
+    },
+    {
+      origin: "a 400 about the model",
+      status: 400,
+      raw: openAiError("model", "Invalid model."),
+      audioRejected: false,
+    },
+    {
+      origin: "a 403",
+      status: 403,
+      raw: openAiError(null, "Project lacks access.", "unsupported_country_region_territory"),
+      audioRejected: false,
+    },
+    {
+      origin: "a 404",
+      status: 404,
+      raw: openAiError(null, "The model does not exist.", "model_not_found"),
+      audioRejected: false,
+    },
+  ])("marks $origin as a rejected recording: $audioRejected", ({ status, raw, audioRejected }) =>
     Effect.gen(function* () {
-      for (const body of ["", "  \n"]) {
-        const { exit, requests } = yield* transcribeWith([{ status: 200, body }]);
-        assert.strictEqual(failureReason(exit), "No speech detected");
-        assert.lengthOf(requests, 1);
-      }
+      const { exit, requests } = yield* transcribeWith([{ status, raw }]);
+      assert.lengthOf(requests, 1);
+      assert.include(failureReason(exit), String(status));
+      const error = Exit.isFailure(exit) ? exit.cause.reasons[0] : undefined;
+      const failure = error?._tag === "Fail" ? (error.error as { audioRejected?: boolean }) : {};
+      assert.strictEqual(failure.audioRejected === true, audioRejected);
+    }),
+  );
+
+  it.effect(
+    "dictation phase 1 AC3: an empty 200 transcript fails at once as No speech detected",
+    () =>
+      Effect.gen(function* () {
+        for (const body of ["", "  \n"]) {
+          const { exit, requests } = yield* transcribeWith([{ status: 200, body }]);
+          assert.strictEqual(failureReason(exit), "No speech detected");
+          assert.lengthOf(requests, 1);
+        }
+      }),
+  );
+});
+
+describe("openAiTranscription response format", () => {
+  // The shape OpenAI documents for `json`: gpt-4o-transcribe supports only this format.
+  const OPENAI_JSON = JSON.stringify({
+    text: "Hola, ship it.",
+    usage: { type: "tokens", input_tokens: 41, output_tokens: 6, total_tokens: 47 },
+  });
+
+  it.effect.each([
+    { model: "gpt-4o-transcribe", durationMs: 60_000 },
+    { model: "whisper-1", durationMs: LONG_RECORDING_THRESHOLD_MS + 1 },
+  ])("asks $model for json and reads the transcript out of it", ({ model, durationMs }) =>
+    Effect.gen(function* () {
+      const { exit, requests } = yield* transcribeWith([{ status: 200, raw: OPENAI_JSON }], {
+        durationMs,
+      });
+      assert.strictEqual(fieldText(requests[0], "model"), model);
+      assert.strictEqual(fieldText(requests[0], "response_format"), "json");
+      assert.deepStrictEqual(exit, Exit.succeed("Hola, ship it."));
+    }),
+  );
+
+  it.effect("reads an empty json transcript as No speech detected", () =>
+    Effect.gen(function* () {
+      const { exit } = yield* transcribeWith([{ status: 200, raw: '{"text":"  "}' }]);
+      assert.strictEqual(failureReason(exit), "No speech detected");
+    }),
+  );
+
+  it.effect("fails readably on a body that is not the documented json", () =>
+    Effect.gen(function* () {
+      const { exit, requests } = yield* transcribeWith([
+        { status: 200, raw: "<html>proxy</html>" },
+      ]);
+      assert.include(failureReason(exit), "unexpected");
+      assert.lengthOf(requests, 1);
     }),
   );
 });
@@ -346,5 +466,14 @@ describe("openAiTranscription phase 4 fence", () => {
           "https://api.openai.com/v1/audio/transcriptions",
         );
       }),
+  );
+});
+
+describe("openAiTranscription size refusal", () => {
+  it.effect("names a 413 as too large", () =>
+    Effect.gen(function* () {
+      const { exit } = yield* transcribeWith([{ status: 413, raw: "" }]);
+      assert.include(failureReason(exit), "too large");
+    }),
   );
 });

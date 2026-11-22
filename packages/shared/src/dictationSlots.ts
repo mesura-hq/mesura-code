@@ -14,7 +14,7 @@ import {
 
 const DICTATION_SLOT_LABEL = "Transcribing";
 const VOICED_PREFIX = "[voiced] ";
-const NO_SPACE_BEFORE = /[\s.,;:!?)]/;
+const NO_SPACE_BEFORE = /[\s.,;:!?)\]}]/;
 const WHITESPACE = /\s/;
 
 export interface DictationSlotOccurrence {
@@ -37,10 +37,19 @@ export function formatDictationSlot(jobId: DictationJobId): string {
   });
 }
 
+/**
+ * Only the exact text `formatDictationSlot` writes counts, so nothing around it is ever taken. A
+ * typed `!` before it reads to the context parser as an image prefix; it stays outside the slot.
+ */
 export function findDictationSlots(text: string): DictationSlotOccurrence[] {
-  return collectComposerContextReferences(text)
-    .filter((occurrence) => isDictationContextKind(occurrence.kind))
-    .map(({ contextId, source, start, end }) => ({ jobId: contextId, source, start, end }));
+  return collectComposerContextReferences(text).flatMap((occurrence) => {
+    if (!isDictationContextKind(occurrence.kind)) return [];
+    const prefix = occurrence.image ? 1 : 0;
+    const source = occurrence.source.slice(prefix);
+    if (source !== formatDictationSlot(occurrence.contextId as DictationJobId)) return [];
+    const start = occurrence.start + prefix;
+    return [{ jobId: occurrence.contextId, source, start, end: occurrence.end }];
+  });
 }
 
 function isWordBoundary(previous: string | undefined, next: string | undefined): boolean {
@@ -160,7 +169,7 @@ export function insertDictationSlotAt(text: string, offset: number, slot: string
   const before = text.slice(0, at);
   const after = text.slice(at);
   const leading = before.length > 0 && !/\s$/.test(before) ? " " : "";
-  const trailing = after.length > 0 && !/^\s/.test(after) ? " " : "";
+  const trailing = after.length > 0 && !NO_SPACE_BEFORE.test(after[0]!) ? " " : "";
   return `${before}${leading}${slot}${trailing}${after}`;
 }
 

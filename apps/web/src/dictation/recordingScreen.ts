@@ -1,3 +1,4 @@
+import { toastManager } from "~/components/ui/toast";
 import { isElectron } from "~/env";
 
 /**
@@ -122,4 +123,16 @@ export function formatHiddenDuration(hiddenMs: number): string {
   const seconds = Math.round(hiddenMs / 1000);
   if (seconds < 90) return `${seconds} s`;
   return `${Math.round(seconds / 60)} min`;
+}
+
+/** Warns once per recording that a long hide may have silenced what came after it. */
+export function warnRecordingMayBeSilent(recordingId: string, hiddenMs: number): void {
+  toastManager.add({
+    // One warning per recording: base-ui updates an open toast with this id, else adds it again.
+    id: `dictation-silence-${recordingId}`,
+    type: "warning",
+    title: "Part of this recording may be silent",
+    description: `The screen was off or Mesura Code was in the background for ${formatHiddenDuration(hiddenMs)}. Android cuts the microphone about a minute after that, so what you said later was probably not recorded.`,
+    timeout: 0,
+  });
 }

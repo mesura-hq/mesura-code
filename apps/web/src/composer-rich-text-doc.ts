@@ -1,4 +1,5 @@
 import { joinTextblockBackward, joinTextblockForward } from "@tiptap/pm/commands";
+import { literalLineContent } from "~/dictation/literalDictationContent";
 import {
   Fragment,
   Mark,
@@ -921,7 +922,8 @@ export function buildTiptapContent(
   if (options?.literalText) {
     return value.split("\n").map((line) => ({
       type: "paragraph",
-      ...(line ? { content: [{ type: "text", text: line }] } : {}),
+      // Mesura: a dictation marker is never literal text, so it draws as its chip.
+      ...(line ? { content: literalLineContent(line) } : {}),
     }));
   }
   const styling = options?.styling ?? true;

@@ -220,3 +220,35 @@ it.effect("installs from a Hugging Face cache copy instead of downloading", () =
     expect(h.requests).toHaveLength(0);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
+
+it.effect("removes a staged cache link when acquisition is cancelled before it is installed", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const path = yield* Path.Path;
+    const home = yield* h.fs.makeTempDirectoryScoped({ prefix: "speech-home-" });
+    const snapshot = path.join(
+      home,
+      ".cache/huggingface/hub/models--fixture--speech-model/snapshots",
+      h.model.revision,
+    );
+    yield* h.fs.makeDirectory(snapshot, { recursive: true });
+    yield* h.fs.writeFile(path.join(snapshot, h.model.filename), bytes);
+    // The staged link exists; the rename that would install it never finishes.
+    const renaming = yield* Deferred.make<void>();
+    const fs: FileSystem.FileSystem = {
+      ...h.fs,
+      rename: (from, to) =>
+        from.endsWith(".part")
+          ? Deferred.succeed(renaming, undefined).pipe(Effect.andThen(Effect.never))
+          : h.fs.rename(from, to),
+    };
+    const store = yield* h.openStore.pipe(
+      Effect.provideService(HostProcess.HomeDirectory, home),
+      Effect.provideService(FileSystem.FileSystem, fs),
+    );
+    const fiber = yield* store.download(h.model).pipe(Effect.forkChild);
+    yield* Deferred.await(renaming);
+    yield* Fiber.interrupt(fiber);
+    expect(yield* h.fs.readDirectory(h.directory)).toEqual(["model.gguf"]);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);

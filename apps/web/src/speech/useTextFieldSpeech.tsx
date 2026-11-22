@@ -2,11 +2,9 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 
-import {
-  ComposerSpeechButton,
-  ComposerSpeechRecordingPill,
-} from "~/components/chat/ComposerSpeechButton";
+import { ComposerSpeechRecordingPill } from "~/components/chat/ComposerSpeechButton";
 import { VoiceInputSetup } from "~/components/chat/VoiceInputSetup";
+import { FieldDictationControls, useFieldDictation } from "~/dictation/FieldDictationControls";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useDictationShortcut } from "./useDictationShortcut";
 import { useEnvironmentSpeechInput } from "./useEnvironmentSpeechInput";
@@ -59,7 +57,19 @@ export function useTextFieldSpeech(input: {
     modelPickerOpen: false,
     targetRef: input.textareaRef,
   });
-  return { ...speech, shortcutLabel };
+  // Mesura: the editor's microphone is Mesura dictation; upstream's stays reachable by its shortcut.
+  const mesuraDictation = useFieldDictation(input);
+  return {
+    ...speech,
+    shortcutLabel,
+    mesuraDictation,
+    blocksSubmission: speech.blocksSubmission || mesuraDictation.busy,
+    submitAfterDictation: (submit: (text: string) => void) => {
+      if (mesuraDictation.busy) return mesuraDictation.submitWhenTranscribed(submit);
+      mesuraDictation.releaseDraft();
+      return speech.submitAfterDictation(submit);
+    },
+  };
 }
 
 export type TextFieldSpeech = ReturnType<typeof useTextFieldSpeech>;
@@ -95,14 +105,8 @@ export function TextFieldSpeechControls({
         onCancel={speech.cancel}
         onSkipPostProcessing={speech.skipPostProcessing}
       />
-      {speech.available ? (
-        <ComposerSpeechButton
-          state={speech.state}
-          size="compact"
-          shortcutLabel={speech.shortcutLabel}
-          disabled={disabled}
-          onStart={() => void speech.start()}
-        />
+      {speech.state.phase === "idle" || speech.mesuraDictation.busy ? (
+        <FieldDictationControls dictation={speech.mesuraDictation} disabled={disabled} />
       ) : null}
       <VoiceInputSetup
         environmentId={speech.transcriptionEnvironmentId}
