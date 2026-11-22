@@ -16,19 +16,33 @@ import { useScratchpadFile, useScratchpadRoot } from "./useScratchpadFile";
 interface ScratchpadPreviewCardProps {
   readonly environmentId: EnvironmentId;
   readonly owner: ScratchpadOwner;
+  /** The chat view the open belongs to (`scratchpadOwnerKey`). */
+  readonly ownerKey: string;
 }
 
 /** The small card under the thread details: the default scope's first lines, a click to open. */
-export function ScratchpadPreviewCard({ environmentId, owner }: ScratchpadPreviewCardProps) {
+export function ScratchpadPreviewCard({
+  environmentId,
+  owner,
+  ownerKey,
+}: ScratchpadPreviewCardProps) {
   const root = useScratchpadRoot(environmentId);
   if (root === undefined) return null;
-  return <ScratchpadPreviewCardBody environmentId={environmentId} root={root} owner={owner} />;
+  return (
+    <ScratchpadPreviewCardBody
+      environmentId={environmentId}
+      root={root}
+      owner={owner}
+      ownerKey={ownerKey}
+    />
+  );
 }
 
 function ScratchpadPreviewCardBody({
   environmentId,
   root,
   owner,
+  ownerKey,
 }: ScratchpadPreviewCardProps & { readonly root: string }) {
   const openScratchpad = useScratchpadStore((state) => state.openScratchpad);
   const phase = useScratchpadStore((state) => state.phase);
@@ -47,7 +61,7 @@ function ScratchpadPreviewCardBody({
     <button
       type="button"
       data-scratchpad-preview
-      onClick={() => openScratchpad(scope)}
+      onClick={() => openScratchpad(ownerKey, scope)}
       className="dropdown-glass flex w-full min-w-0 shrink-0 flex-col gap-1 rounded-2xl px-3 py-2 text-left transition-colors hover:bg-foreground/5"
     >
       <span className="flex items-center gap-2 text-xs text-muted-foreground">

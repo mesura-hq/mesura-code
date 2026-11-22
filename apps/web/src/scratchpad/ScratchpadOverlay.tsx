@@ -114,6 +114,12 @@ export function ScratchpadOverlay({
   const switchingRef = useRef<Promise<void> | null>(null);
   /** Shown state of the same: the outgoing editor is inert while it settles. */
   const [switching, setSwitching] = useState(false);
+  /** Bumped when a switch ends back on the scope it left, to refocus that editor. */
+  const [refocusAfterSwitch, setRefocusAfterSwitch] = useState(0);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- refocuses the editor once the commit that lifts inert has happened
+  useEffect(() => {
+    if (refocusAfterSwitch > 0) controlRef.current?.focus();
+  }, [refocusAfterSwitch]);
   /** False once unmounted, so a settle finishing late never acts on a replacement overlay. */
   const aliveRef = useRef(true);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- marks the overlay unmounted for settles that finish after it
@@ -269,7 +275,8 @@ export function ScratchpadOverlay({
         setSwitching(false);
         // A close that started meanwhile ends this open; it keeps the scope it settled.
         if (target === null || useScratchpadStore.getState().phase !== "open") return;
-        if (target === scope) controlRef.current?.focus();
+        // After the commit that lifts `inert`: focusing an inert editor is refused.
+        if (target === scope) setRefocusAfterSwitch((count) => count + 1);
         else setScope(target);
       });
   };

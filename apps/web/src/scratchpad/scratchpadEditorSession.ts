@@ -63,6 +63,8 @@ async function claimSessionKey(): Promise<string> {
 }
 
 let claimed: Promise<ThreadId> | null = null;
+/** The key this page claimed, so retiring it can also stop a reload from claiming it again. */
+let claimedKey: string | null = null;
 /** Set when a close gave up on keys still queued for this session; see `retireScratchpadSession`. */
 let retired = false;
 
@@ -77,7 +79,10 @@ export function scratchpadEditorThreadId(): Promise<ThreadId> {
     retired = false;
     claimed = Promise.resolve(ThreadId.make(`mesura-scratchpad-${newSessionKey()}`));
   }
-  claimed ??= claimSessionKey().then((key) => ThreadId.make(`mesura-scratchpad-${key}`));
+  claimed ??= claimSessionKey().then((key) => {
+    claimedKey = key;
+    return ThreadId.make(`mesura-scratchpad-${key}`);
+  });
   return claimed;
 }
 
@@ -87,4 +92,13 @@ export function scratchpadEditorThreadId(): Promise<ThreadId> {
  */
 export function retireScratchpadSession(): void {
   retired = true;
+  // The lock stays held until the page goes, so no duplicate claims the key meanwhile; a reload
+  // must not take it back either.
+  try {
+    if (claimedKey !== null && sessionStorage.getItem(STORAGE_KEY) === claimedKey) {
+      sessionStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {
+    // Without storage there is nothing a reload could reclaim.
+  }
 }

@@ -12,7 +12,7 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
 
 import { ScratchpadOverlay } from "./ScratchpadOverlay";
 import { type ScratchpadOwner } from "./scratchpadScopes";
-import { useScratchpadStore } from "./scratchpadStore";
+import { scratchpadOwnerKey, useScratchpadStore } from "./scratchpadStore";
 import { useScratchpadRoot } from "./useScratchpadFile";
 
 interface ScratchpadHostProps {
@@ -30,11 +30,25 @@ export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: Sc
   const background = useContext(BackgroundThreadContext);
   const root = useScratchpadRoot(environmentId);
   const phase = useScratchpadStore((state) => state.phase);
+  const openOwner = useScratchpadStore((state) => state.owner);
+  const ownerKey = scratchpadOwnerKey(composerDraftTarget);
   const mounted = phase !== "closed";
-  // Whether this host's overlay is the one on screen; derived during render, not synced.
-  const [ownsOverlay, setOwnsOverlay] = useState(false);
-  if (mounted && !background && root !== undefined && !ownsOverlay) setOwnsOverlay(true);
-  if (!mounted && ownsOverlay) setOwnsOverlay(false);
+  // Whether this host's overlay is the one on screen; derived during render, not synced. Claimed
+  // only for an open made for this view, then kept until the close ends, even if the view's
+  // thread changes meanwhile (the overlay closes itself then, settling its note).
+  const [claimedOwner, setClaimedOwner] = useState<string | null>(null);
+  if (mounted && openOwner === ownerKey && !background && root !== undefined && !claimedOwner) {
+    setClaimedOwner(ownerKey);
+  }
+  if (!mounted && claimedOwner !== null) setClaimedOwner(null);
+  const ownsOverlay = claimedOwner !== null;
+  // A view replaced outright (a draft route is keyed) unmounts with its overlay: the open ends
+  // with it rather than passing to the next view. A no-op after an ordinary close.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases this view's open in the global store when the view unmounts
+  useEffect(() => {
+    if (claimedOwner === null) return;
+    return () => useScratchpadStore.getState().abandonScratchpad(claimedOwner);
+  }, [claimedOwner]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts the settling close when this chat view goes to the background
   useEffect(() => {
     if (background && ownsOverlay && phase === "open") {
@@ -46,7 +60,9 @@ export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: Sc
   // Nothing to open on a host without the scratchpad folder; a store left "open" there would
   // have no overlay to close it again.
   const toggle = useEffectEvent(() => {
-    if (!background && root !== undefined) useScratchpadStore.getState().toggleScratchpad();
+    if (!background && root !== undefined) {
+      useScratchpadStore.getState().toggleScratchpad(scratchpadOwnerKey(composerDraftTarget));
+    }
   });
   const canOpen = useEffectEvent(() => !background && root !== undefined);
   // The key engine's leader row and the palette run the command through the registry.

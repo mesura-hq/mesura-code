@@ -1,4 +1,7 @@
+import { type ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";
+
+import { type DraftId } from "~/composerDraftStore";
 
 import { type ScratchpadScope } from "./scratchpadScopes";
 
@@ -17,48 +20,71 @@ interface ScratchpadState {
    * host and asks Neovim for normal mode again, even right after a close that is still settling.
    */
   readonly openCount: number;
+  /** The chat view (environment and thread) an open belongs to; no other view mounts it. */
+  readonly owner: string | null;
   /** An open asked for while a close settles; it happens once the close finishes. */
-  readonly reopen: { readonly scope: ScratchpadScope | null } | null;
-  readonly openScratchpad: (scope?: ScratchpadScope) => void;
+  readonly reopen: { readonly scope: ScratchpadScope | null; readonly owner: string } | null;
+  readonly openScratchpad: (owner: string, scope?: ScratchpadScope) => void;
   readonly closeScratchpad: () => void;
   readonly finishClosing: () => void;
-  readonly toggleScratchpad: () => void;
+  readonly toggleScratchpad: (owner: string) => void;
+  /** The owning view went away without its close: nothing else may take the open over. */
+  readonly abandonScratchpad: (owner: string) => void;
   readonly setScope: (scope: ScratchpadScope) => void;
 }
 
-const opened = (state: ScratchpadState, scope: ScratchpadScope | null) =>
+const opened = (state: ScratchpadState, owner: string, scope: ScratchpadScope | null) =>
   state.phase === "closing"
-    ? { reopen: { scope } }
-    : { phase: "open" as const, scope, openCount: state.openCount + 1 };
+    ? { reopen: { scope, owner } }
+    : { phase: "open" as const, scope, owner, openCount: state.openCount + 1 };
 
 /** Client-only view state. The notes themselves are files on the host; nothing here persists. */
 export const useScratchpadStore = create<ScratchpadState>((set) => ({
   phase: "closed",
   scope: null,
   openCount: 0,
+  owner: null,
   reopen: null,
-  openScratchpad: (scope) =>
+  openScratchpad: (owner, scope) =>
     set((state) =>
-      state.phase === "open" ? { scope: scope ?? null } : opened(state, scope ?? null),
+      state.phase === "open" && state.owner === owner
+        ? { scope: scope ?? null }
+        : state.phase === "open"
+          ? {}
+          : opened(state, owner, scope ?? null),
     ),
   closeScratchpad: () => set((state) => (state.phase === "open" ? { phase: "closing" } : {})),
   finishClosing: () =>
     set((state) => {
       if (state.phase !== "closing") return {};
-      if (state.reopen === null) return { phase: "closed" };
+      if (state.reopen === null) return { phase: "closed", owner: null };
       return {
         phase: "open",
         scope: state.reopen.scope,
+        owner: state.reopen.owner,
         reopen: null,
         openCount: state.openCount + 1,
       };
     }),
-  toggleScratchpad: () =>
+  toggleScratchpad: (owner) =>
     set((state) => {
       if (state.phase === "open") return { phase: "closing" };
       // A second toggle while a reopen waits cancels it, as a second press of the chord means.
       if (state.phase === "closing" && state.reopen !== null) return { reopen: null };
-      return opened(state, null);
+      return opened(state, owner, null);
     }),
+  abandonScratchpad: (owner) =>
+    set((state) =>
+      state.owner === owner && state.phase !== "closed"
+        ? { phase: "closed", owner: null, reopen: null }
+        : {},
+    ),
   setScope: (scope) => set({ scope }),
 }));
+
+/** Names the chat view an open belongs to: its composer target is unique per view. */
+export function scratchpadOwnerKey(target: ScopedThreadRef | DraftId): string {
+  return typeof target === "string"
+    ? `draft:${target}`
+    : `${target.environmentId}:${target.threadId}`;
+}

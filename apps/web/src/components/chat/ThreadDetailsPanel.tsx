@@ -37,6 +37,7 @@ import {
 } from "./threadDetailsPanelStyles";
 import { Menu, MenuPopup } from "../ui/menu";
 import { ScratchpadPreviewCard } from "~/scratchpad/ScratchpadPreviewCard";
+import { scratchpadOwnerKey } from "~/scratchpad/scratchpadStore";
 
 const GitActionsControl = memo(BaseGitActionsControl);
 
@@ -133,6 +134,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       belowInline={
         <ScratchpadPreviewCard
           environmentId={props.environmentId}
+          ownerKey={scratchpadOwnerKey(props.composerDraftTarget)}
           owner={{
             projectId: props.projectId,
             threadId: props.isServerThread ? props.threadId : null,
