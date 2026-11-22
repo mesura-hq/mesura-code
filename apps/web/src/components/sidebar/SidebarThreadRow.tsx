@@ -102,6 +102,7 @@ import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-i
 import {
   resolveSidebarThreadAttention,
   sidebarThreadAttentionLook,
+  sidebarThreadAttentionShowsTime,
   sidebarThreadAttentionSweeps,
 } from "../sidebarThreadAttention";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
@@ -155,10 +156,6 @@ function compactSidebarTimeLabel(label: string): string {
 
 // Subscribes to the minute tick itself, so only the label re-renders each
 // minute. The minute is passed as the clock so it is the formatter's input.
-function threadTimeTimestamp(thread: SidebarThreadSummary): string {
-  return thread.latestUserMessageAt ?? thread.updatedAt;
-}
-
 function RelativeTimeLabel(props: { timestamp: string | null }) {
   const nowMinute = useNowMinute();
   return props.timestamp === null
@@ -1534,15 +1531,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           />
                           <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
                         </Tooltip>
-                      ) : topStatus.kind === "input" ? (
-                        // Needs input reads as its icon beside the row's time (developer, 2026-10-27).
+                      ) : sidebarThreadAttentionShowsTime(topStatus.kind) ? (
                         <span className="inline-flex items-center gap-1">
-                          <MessageCircleQuestionIcon
-                            aria-hidden
-                            className="size-4 shrink-0 text-needs-input"
+                          <TopStatusIcon
+                            icon={topStatus.icon}
+                            className={cn("size-4", topStatus.className)}
                           />
                           <span className="sr-only">{topStatus.label}</span>
-                          <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
+                          <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
                         </span>
                       ) : (
                         <span className={cn("inline-flex items-center gap-1", topStatus.className)}>
