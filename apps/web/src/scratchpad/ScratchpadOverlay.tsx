@@ -1,4 +1,4 @@
-import { type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
+import { type EnvironmentId, type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
 import { NotebookPenIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
@@ -55,13 +55,17 @@ interface ScratchpadOverlayProps {
 export function ScratchpadOverlay({
   environmentId,
   root,
-  owner,
+  owner: ownerAtOpen,
   composerDraftTarget,
 }: ScratchpadOverlayProps) {
-  // Models of this open only, thrown away when it closes: a model kept from an earlier open holds
-  // that open's text, and the editor's echo guard could then take it over the fresh read.
+  // The thread it was opened from, for its whole life: navigating to another thread meanwhile
+  // must not swap the note under the editor without the settle a scope change goes through.
+  const [owner] = useState(ownerAtOpen);
+  // Models of this open only, and only the scope on screen (limit 1): a kept model holds the text
+  // it last had, and the editor's echo guard could take it over the fresh read of a scope that
+  // another device saved meanwhile. Every scope change and every open start from the host.
   const [{ models, retention }] = useState(() => {
-    const created = { models: createMonacoFileModels(), retention: new FileEditorRetention() };
+    const created = { models: createMonacoFileModels(1), retention: new FileEditorRetention() };
     created.models.onEvict((key) => created.retention.forget(relativePathFromModelKey(key)));
     return created;
   });
@@ -74,7 +78,18 @@ export function ScratchpadOverlay({
     },
     [models, retention],
   );
-  const [editorThreadId] = useState(scratchpadEditorThreadId);
+  // This tab's own Neovim session, claimed before the editor mounts (see the session module).
+  const [editorThreadId, setEditorThreadId] = useState<ThreadId | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- waits for this tab's claim on its Neovim session key
+  useEffect(() => {
+    let live = true;
+    void scratchpadEditorThreadId().then((threadId) => {
+      if (live) setEditorThreadId(threadId);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const { resolvedTheme } = useTheme();
   const phase = useScratchpadStore((state) => state.phase);
   const closeScratchpad = useScratchpadStore((state) => state.closeScratchpad);
@@ -88,6 +103,9 @@ export function ScratchpadOverlay({
       : initialScratchpadScope(available);
   const relativePath = scratchpadRelativePath(scope, owner) ?? "general.md";
   const controlRef = useRef<MonacoFileSurfaceControl | null>(null);
+  /** Where a scope change still settling is headed, and the settle itself. */
+  const switchTargetRef = useRef<ScratchpadScope | null>(null);
+  const switchingRef = useRef<Promise<void> | null>(null);
   const shellRef = useRef<HTMLElement | null>(null);
   const [pendingPaths, setPendingPaths] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -153,6 +171,7 @@ export function ScratchpadOverlay({
     setEditorFile({ relativePath: loaded.relativePath, contents: loaded.contents });
   }
   const showsRequestedFile =
+    editorThreadId !== null &&
     editorFile?.relativePath === relativePath &&
     loaded?.relativePath === relativePath &&
     loaded.status === "ready";
@@ -174,31 +193,35 @@ export function ScratchpadOverlay({
   const [previousFocus] = useState<Element | null>(() =>
     typeof document === "undefined" ? null : document.activeElement,
   );
+  const pendingSwitch = useEffectEvent(() => switchingRef.current);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- waits for Neovim's answers and the save before the closing overlay unmounts
   useEffect(() => {
     if (phase !== "closing") return;
     if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
     else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const abandon = new AbortController();
-    const backstop = setTimeout(() => abandon.abort(), CLOSE_SETTLE_BACKSTOP_MS);
     let unmounted = false;
-    const settled = controlRef.current?.settle(abandon.signal) ?? Promise.resolve();
-    void settled
-      .catch(() => {})
-      .then(() => {
-        clearTimeout(backstop);
-        if (!unmounted) finishClosing();
-      });
+    // A scope change still settling owns the outgoing buffer; the close settles after it.
+    const settled = (pendingSwitch() ?? Promise.resolve()).then(
+      () => controlRef.current?.settle(abandon.signal) ?? Promise.resolve(),
+    );
+    const backstop = new Promise<void>((resolve) =>
+      setTimeout(() => {
+        abandon.abort();
+        resolve();
+      }, CLOSE_SETTLE_BACKSTOP_MS),
+    );
+    void Promise.race([settled.catch(() => {}), backstop]).then(() => {
+      if (!unmounted) finishClosing();
+    });
     return () => {
       unmounted = true;
-      clearTimeout(backstop);
       abandon.abort();
     };
   }, [phase, finishClosing, previousFocus]);
 
   // A scope change first settles the outgoing buffer: switching the model before Neovim's last
   // text arrives would drop that text from the save. Tabs pressed meanwhile retarget the switch.
-  const switchTargetRef = useRef<ScratchpadScope | null>(null);
   const switchScope = (next: ScratchpadScope) => {
     if (switchTargetRef.current === null && next === scope) {
       if (showsRequestedFile) controlRef.current?.focus();
@@ -207,13 +230,19 @@ export function ScratchpadOverlay({
     const inFlight = switchTargetRef.current !== null;
     switchTargetRef.current = next;
     if (inFlight) return;
+    // The shell holds the keyboard while the outgoing buffer settles, so no key joins it late.
+    shellRef.current?.focus({ preventScroll: true });
     const settled = controlRef.current?.settle() ?? Promise.resolve();
-    void settled
+    switchingRef.current = settled
       .catch(() => {})
       .then(() => {
         const target = switchTargetRef.current;
         switchTargetRef.current = null;
-        if (target !== null) setScope(target);
+        switchingRef.current = null;
+        // A close that started meanwhile ends this open; it keeps the scope it settled.
+        if (target === null || useScratchpadStore.getState().phase !== "open") return;
+        if (target === scope) controlRef.current?.focus();
+        else setScope(target);
       });
   };
 
@@ -321,7 +350,7 @@ export function ScratchpadOverlay({
           </span>
         </header>
         <div className="relative flex min-h-0 flex-1 flex-col">
-          {editorFile !== null ? (
+          {editorFile !== null && editorThreadId !== null ? (
             <MonacoFileSurface
               environmentId={environmentId}
               cwd={root}

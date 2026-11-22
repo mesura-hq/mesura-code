@@ -1,8 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import { type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
-import { useEffect, useEffectEvent } from "react";
+import { useContext, useEffect, useEffectEvent } from "react";
 
 import { useCommandHandlers } from "~/commands/commandRegistry";
+import { BackgroundThreadContext } from "~/components/chat/backgroundThread";
 import { type DraftId } from "~/composerDraftStore";
 import { resolveShortcutCommand } from "~/keybindings";
 import { isPreviewFocused } from "~/lib/previewFocus";
@@ -22,9 +23,15 @@ interface ScratchpadHostProps {
 
 /**
  * Mounted once per chat view, inside its positioned canvas: the overlay covers the thread, not the
- * window, so the sidebar and right panel stay visible around it.
+ * window, so the sidebar and right panel stay visible around it. A side chat or a thread kept
+ * mounted in the background stands down, so one action never mounts two editors.
  */
-export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: ScratchpadHostProps) {
+export function ScratchpadHost(props: ScratchpadHostProps) {
+  const background = useContext(BackgroundThreadContext);
+  return background ? null : <ActiveScratchpadHost {...props} />;
+}
+
+function ActiveScratchpadHost({ environmentId, owner, composerDraftTarget }: ScratchpadHostProps) {
   const root = useScratchpadRoot(environmentId);
   const mounted = useScratchpadStore((state) => state.phase !== "closed");
   const openCount = useScratchpadStore((state) => state.openCount);
@@ -34,6 +41,7 @@ export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: Sc
   const toggle = useEffectEvent(() => {
     if (root !== undefined) useScratchpadStore.getState().toggleScratchpad();
   });
+  const canOpen = useEffectEvent(() => root !== undefined);
   // The key engine's leader row and the palette run the command through the registry.
   useCommandHandlers({ "scratchpad.toggle": () => toggle() });
 
@@ -42,7 +50,7 @@ export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: Sc
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window keydown listener for the scratchpad chord while the chat view is mounted
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
+      if (event.defaultPrevented || !canOpen()) return;
       const command = resolveShortcutCommand(event, keybindings, {
         context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
       });

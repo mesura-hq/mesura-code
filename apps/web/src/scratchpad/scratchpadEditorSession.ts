@@ -1,11 +1,18 @@
 import { ThreadId } from "@t3tools/contracts";
 
 const STORAGE_KEY = "mesura-scratchpad-editor-session";
-const CHANNEL_NAME = "mesura-scratchpad-editor-session";
 
 function newSessionKey(): string {
   // Not `crypto.randomUUID`: a phone reaching the host over plain HTTP lacks it.
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function storedSessionKey(): string | null {
+  try {
+    return sessionStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 function remember(key: string): void {
@@ -16,52 +23,45 @@ function remember(key: string): void {
   }
 }
 
-function storedSessionKey(): string {
-  try {
-    const stored = sessionStorage.getItem(STORAGE_KEY);
-    if (stored !== null) return stored;
-  } catch {
-    // Fall through to a new key.
-  }
-  const created = newSessionKey();
-  remember(created);
-  return created;
-}
-
-let sessionKey = storedSessionKey();
-
-/**
- * A duplicated tab inherits `sessionStorage`, and with it the key. Each tab asks whether another
- * live tab holds its key; one that hears "mine" takes a new key. A reload keeps its key, so the
- * host's Neovim for this tab is reused rather than one more started per reload.
- */
-function claimSessionKey(): void {
-  if (typeof BroadcastChannel === "undefined") return;
-  const channel = new BroadcastChannel(CHANNEL_NAME);
-  const tab = newSessionKey();
-  channel.addEventListener("message", (event: MessageEvent<unknown>) => {
-    const message = event.data as { type?: string; key?: string; from?: string; to?: string };
-    if (message.key !== sessionKey) return;
-    if (message.type === "who" && message.from !== tab) {
-      // oxlint-disable-next-line unicorn/require-post-message-target-origin -- BroadcastChannel.postMessage takes no target origin; the channel is same-origin by definition
-      channel.postMessage({ type: "mine", key: sessionKey, to: message.from });
-    } else if (message.type === "mine" && message.to === tab) {
-      sessionKey = newSessionKey();
-      remember(sessionKey);
-    }
+/** Holds the key's lock for the page's life; false when another tab already holds it. */
+function holdForPageLife(locks: LockManager, key: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    void locks.request(`mesura-scratchpad-editor-${key}`, { ifAvailable: true }, (lock) => {
+      resolve(lock !== null);
+      // Never settles, so the lock is released only when the page goes away.
+      return lock === null ? undefined : new Promise<never>(() => {});
+    });
   });
-  // oxlint-disable-next-line unicorn/require-post-message-target-origin -- BroadcastChannel.postMessage takes no target origin; the channel is same-origin by definition
-  channel.postMessage({ type: "who", key: sessionKey, from: tab });
 }
 
-claimSessionKey();
+/**
+ * One key per tab, owned through a Web Lock: a reload takes the same key back (its Neovim is
+ * reused), a duplicated tab finds the inherited key locked and makes a new one. Without Web Locks
+ * (plain HTTP is no secure context) every page takes a new key, never shared.
+ */
+async function claimSessionKey(): Promise<string> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (locks === undefined) return newSessionKey();
+  const stored = storedSessionKey();
+  if (stored !== null && (await holdForPageLife(locks, stored))) return stored;
+  for (;;) {
+    const created = newSessionKey();
+    if (await holdForPageLife(locks, created)) {
+      remember(created);
+      return created;
+    }
+  }
+}
+
+let claimed: Promise<ThreadId> | null = null;
 
 /**
- * The thread id the scratchpad's Neovim session is keyed by: one per browser tab. Neovim input
- * names only the session, so two tabs sharing one would type into whichever buffer the other
- * opened last. Separate from every real thread, so the file panel's session is never replaced.
- * Read when the overlay mounts, after a duplicated tab has had the chance to take a new key.
+ * The thread id the scratchpad's Neovim session is keyed by: one per browser tab, held for the
+ * tab's life. Neovim input names only the session, so two tabs sharing one would type into
+ * whichever buffer the other opened last. Separate from every real thread, so the file panel's
+ * session is never replaced. The overlay mounts its editor only once this resolves.
  */
-export function scratchpadEditorThreadId(): ThreadId {
-  return ThreadId.make(`mesura-scratchpad-${sessionKey}`);
+export function scratchpadEditorThreadId(): Promise<ThreadId> {
+  claimed ??= claimSessionKey().then((key) => ThreadId.make(`mesura-scratchpad-${key}`));
+  return claimed;
 }

@@ -310,6 +310,8 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
 
   const replaceText = useCallback(
     (edits: ReadonlyArray<EditorTextEdit>) => {
+      // Text Neovim changes, which the model learns only from the stream, as for keys.
+      keysSinceSyncRef.current += 1;
       keyLane.call(() =>
         replaceTextCommand({ environmentId, input: { threadId, edits: [...edits] } }),
       );
@@ -371,8 +373,8 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   const whenKeysSettled = useCallback(
     async (signal?: AbortSignal) => {
       await untilAborted(keyLane.whenIdle(), signal);
-      if (!enabled || signal?.aborted === true || keysSinceSyncRef.current === 0) return;
-      keysSinceSyncRef.current = 0;
+      const sent = keysSinceSyncRef.current;
+      if (!enabled || signal?.aborted === true || sent === 0) return;
       const before = stateSource.get();
       // Ends the subscription however the wait ends: snapshot, abort or the limit.
       const stopWaiting = new AbortController();
@@ -383,6 +385,8 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
           if (next === before) return;
           const event = next.latestEvent;
           if (event?.type !== "snapshot" || event.snapshot.relativePath !== relativePath) return;
+          // Only now are those keys' text in the model; a settle that gives up keeps them owed.
+          keysSinceSyncRef.current -= sent;
           resolve();
         });
         stopWaiting.signal.addEventListener("abort", unsubscribe, { once: true });
