@@ -4,8 +4,8 @@ import { toastManager } from "../ui/toast";
 import { runtimeModeConfig } from "./runtimeModeConfig";
 
 /**
- * The provider takes its permissions when a turn starts, so a pick made mid-turn never reaches the
- * running turn. When it applies later depends on queue and send paths, so the notice claims only that.
+ * Providers take permissions when a turn starts, so a mid-turn pick mostly misses the running turn.
+ * MCP calls and steer restarts can read the saved mode sooner, so the notice does not promise more.
  */
 export function noticeRuntimeModeChangeDuringTurn(input: {
   readonly activeRunId: string | null | undefined;
@@ -14,7 +14,7 @@ export function noticeRuntimeModeChangeDuringTurn(input: {
   if (input.activeRunId == null) return;
   toastManager.add({
     type: "info",
-    title: `${runtimeModeConfig[input.nextMode].label} does not change the running turn`,
-    description: "The running turn keeps its permissions until it ends.",
+    title: `${runtimeModeConfig[input.nextMode].label} may not reach the running turn`,
+    description: "A turn usually keeps the permissions it started with until it ends.",
   });
 }
