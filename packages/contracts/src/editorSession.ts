@@ -51,6 +51,12 @@ export const EditorSessionOpenInput = Schema.Struct({
    */
   relativePath: TrimmedNonEmptyString,
   lines: EditorLinesSchema,
+  /**
+   * Leave insert, visual, command-line or a pending command before the buffer opens. A session
+   * that outlives its view (the scratchpad's) would otherwise reopen in the mode it was left in.
+   * Done under the session lock, so a key typed during the open lands after the reset.
+   */
+  startInNormalMode: Schema.optionalKey(Schema.Boolean),
 });
 export type EditorSessionOpenInput = Schema.Codec.Encoded<typeof EditorSessionOpenInput>;
 

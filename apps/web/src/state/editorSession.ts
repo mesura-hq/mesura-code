@@ -214,6 +214,8 @@ export interface EditorKeyLane {
    */
   readonly openBegins: () => OpenMark;
   readonly takeOpenAnswer: (mark: OpenMark, escape: EditorSessionInputResult | undefined) => void;
+  /** Resolves once nothing is queued or in flight: every key was answered or given up. */
+  readonly whenIdle: () => Promise<void>;
 }
 
 /** What `openBegins` saw: the lane's activity count, or null when it was busy. */
@@ -271,6 +273,7 @@ function makeKeyLane(
   let activity = 0;
 
   const pending = () => busy || waitingForSession || unacknowledged !== null || queue.length > 0;
+  const idleWaiters: Array<() => void> = [];
 
   const setDelivery = (delivery: EditorKeysDelivery) => {
     if (registry.get(deliveryAtom) !== delivery) registry.set(deliveryAtom, delivery);
@@ -387,7 +390,10 @@ function makeKeyLane(
       return;
     }
     const head = queue[0];
-    if (head === undefined) return;
+    if (head === undefined) {
+      for (const resolve of idleWaiters.splice(0)) resolve();
+      return;
+    }
     if (head.kind === "call") {
       queue.shift();
       busy = true;
@@ -428,6 +434,8 @@ function makeKeyLane(
       if (activity !== mark || pending()) return;
       confirmed = escape;
     },
+    whenIdle: () =>
+      pending() ? new Promise<void>((resolve) => idleWaiters.push(resolve)) : Promise.resolve(),
     restsInNormalMode: () =>
       !pending() &&
       confirmed !== null &&

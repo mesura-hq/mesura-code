@@ -13,6 +13,7 @@ import {
 } from "./files/mesuraFileManager/fileManagerToggle";
 import { restorePaletteOrigin } from "../keys/keyEngine";
 import { runRegisteredCommand } from "../commands/commandRegistry";
+import { scratchpadOwnsFocus } from "../scratchpad/scratchpadStore";
 import {
   onSidebarRequestClosesPalette,
   serveSidebarFocusRequest,
@@ -451,6 +452,8 @@ function CommandPaletteDialog(props: {
           if (keepFocusInFileManager()) return;
           // Fork: a row that asked for the sidebar Search or project filter hands it the keyboard.
           if (serveSidebarFocusRequest()) return;
+          // Fork: the scratchpad row hands the keyboard to the scratchpad (src/scratchpad).
+          if (scratchpadOwnsFocus()) return;
           if (returnFocus === false) return;
           // Fork: Vim mode returns to the chat, or to the composer's mode, it left.
           if (restorePaletteOrigin()) return;

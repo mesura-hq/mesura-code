@@ -559,3 +559,45 @@ describe("modal editor keys that cannot be delivered", () => {
     expect(editorTransport.inputs(), "nothing was re-sent").toHaveLength(1);
   });
 });
+
+describe("waiting for the keys to settle (the scratchpad closes only after its last keys)", () => {
+  it("resolves only once every key in flight was answered", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const { press } = await mount();
+    editorTransport.holdReplies();
+    await press(printable("a"));
+    await settleUntil(() => editorTransport.inputs().length === 1, "the key was sent");
+
+    let settled = false;
+    const waiting = latestEditor.current?.whenKeysSettled().then(() => {
+      settled = true;
+    });
+    await flushHarness();
+    expect(settled, "settled while a key was still in flight").toBe(false);
+
+    // Answered, yet its text may still be held on the host: settling waits for the snapshot a
+    // fresh attachment starts with.
+    editorTransport.holdSnapshot();
+    editorTransport.replyNext({ kind: "ok" });
+    await flushHarness();
+    expect(settled, "settled before the fresh attachment's snapshot").toBe(false);
+
+    await act(async () => {
+      editorTransport.emit({
+        type: "snapshot",
+        snapshot: {
+          relativePath: HARNESS_RELATIVE_PATH,
+          lines: ["a"],
+          cursor: { line: 1, col: 2 },
+          mode: "i",
+          jumping: false,
+          topline: 1,
+          hlDefs: {},
+        },
+      } as never);
+    });
+    await waiting;
+    expect(settled).toBe(true);
+  });
+});

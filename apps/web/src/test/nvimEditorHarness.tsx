@@ -186,6 +186,8 @@ function makeTransport() {
   let snapshot = DEFAULT_SNAPSHOT;
   /** The lines every `open` handed Neovim, in order. */
   const openedLines: Array<ReadonlyArray<string>> = [];
+  /** Whether each `open` asked Neovim to start in normal mode, in order. */
+  const openedInNormalMode: Array<boolean> = [];
   /** While set, an attachment opens with no snapshot: Neovim has not answered yet. */
   let snapshotHeld = false;
   /** One queue per live attachment, fed by `emit`. */
@@ -212,8 +214,10 @@ function makeTransport() {
           threadId: string;
           relativePath: string;
           lines: ReadonlyArray<string>;
+          startInNormalMode?: boolean;
         }) => {
           openedLines.push(input.lines);
+          openedInNormalMode.push(input.startInNormalMode === true);
           // As the server does: the file opens with the text the client handed
           // over, and every attachment hears a snapshot of it before the open
           // answers, with the escape state an `input` answers too.
@@ -303,6 +307,7 @@ function makeTransport() {
         }),
     /** The lines every `open` handed Neovim, in order: the text the client had. */
     openedLines: () => openedLines as ReadonlyArray<ReadonlyArray<string>>,
+    openedInNormalMode: () => openedInNormalMode as ReadonlyArray<boolean>,
     /** What the next attachment's snapshot says the file holds. */
     setSnapshot: (next: Partial<EditorSessionSnapshot>) => {
       snapshot = { ...snapshot, ...next };
@@ -385,6 +390,7 @@ function makeTransport() {
     reset: () => {
       requests.length = 0;
       openedLines.length = 0;
+      openedInNormalMode.length = 0;
       snapshot = DEFAULT_SNAPSHOT;
       snapshotHeld = false;
       neovimMode = RESTING_IN_NORMAL;

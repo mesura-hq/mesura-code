@@ -19,9 +19,16 @@ export interface ScratchpadOwner {
   readonly threadId: ThreadId | null;
 }
 
-/** Ids may carry `:` (draft-derived thread ids), which Windows refuses in a file name. */
+/**
+ * An id as a file name that every host filesystem accepts. Ids may carry `:`, which Windows
+ * refuses. One-to-one: `_` is escaped too, so `a:b` and `a_b` never share a file. Lowercase hex,
+ * so a case-insensitive filesystem cannot merge two names either.
+ */
 function fileNameFor(id: string): string {
-  return id.replace(/[^A-Za-z0-9._-]/g, "_");
+  return id.replace(
+    /[^a-z0-9.-]/g,
+    (character) => `_${character.codePointAt(0)?.toString(16).padStart(2, "0")}`,
+  );
 }
 
 /**

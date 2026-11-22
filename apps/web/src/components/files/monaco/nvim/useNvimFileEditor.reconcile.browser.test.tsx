@@ -361,17 +361,14 @@ describe("opening a file whose session already holds older text", () => {
 });
 
 describe("an open that starts in normal mode (the scratchpad's session outlives its overlay)", () => {
-  it("sends Escape once the open answers, so a session left in insert mode reopens in normal", async () => {
+  it("asks the host to reset the mode inside the open, and sends no Escape of its own", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountReconciled(LINES, { startInNormalMode: true });
-    await waitForReal(
-      () => editorTransport.inputs().length > 0,
-      2000,
-      "the client leaves insert mode after the open",
-    );
 
-    expect(editorTransport.inputs().map((request) => request.payload)).toEqual(["<Esc>"]);
+    expect(editorTransport.openedInNormalMode()).toEqual([true]);
+    // A client-side Escape after the answer raced keys typed during the open (verified twice).
+    expect(editorTransport.inputs()).toEqual([]);
   });
 
   it("leaves the mode alone by default, as the file panel needs", async () => {
@@ -379,6 +376,7 @@ describe("an open that starts in normal mode (the scratchpad's session outlives 
 
     await mountReconciled();
 
+    expect(editorTransport.openedInNormalMode()).toEqual([false]);
     expect(editorTransport.inputs()).toEqual([]);
   });
 });

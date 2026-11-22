@@ -33,3 +33,6 @@ Every scope is a Markdown file on the host, saved as you type, without `:w`. The
 `scratchpads` folder of the host's data directory (`~/.mesura-code/userdata/scratchpads`
 by default): `general.md`, `projects/<project id>.md` and `threads/<thread id>.md`. A closed
 browser, a lost connection or a restarted host does not lose them.
+
+Each browser tab edits through its own Neovim, and every opening reads the file from the host
+again. If two devices edit the same note at the same moment, the later save wins.

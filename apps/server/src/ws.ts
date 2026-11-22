@@ -1832,7 +1832,7 @@ export const layerWsRpc = (
         const environment = yield* serverEnvironment.getDescriptor;
         const auth = yield* serverAuth.getDescriptor();
         const scratchWorkspaceRoot = yield* managedFolders.scratchRoot;
-        const scratchpadRoot = yield* ensureScratchpadRoot().pipe(Effect.option);
+        const scratchpadRoot = yield* ensureScratchpadRoot();
         const lastEventLoopStall = yield* eventLoopMonitor.latestNoticeableStall;
         const discovery = yield* resolveOpenDiscoveryForConfig({
           editors: externalLauncher.resolveAvailableEditors(),
@@ -1901,10 +1901,7 @@ export const layerWsRpc = (
             onNone: () => ({}),
             onSome: (root) => ({ scratchWorkspaceRoot: root }),
           }),
-          ...Option.match(scratchpadRoot, {
-            onNone: () => ({}),
-            onSome: (root) => ({ scratchpadRoot: root }),
-          }),
+          ...(scratchpadRoot === null ? {} : { scratchpadRoot }),
           newProjectsRoot: managedFolders.namedProjectsRoot,
           ...(lastEventLoopStall === undefined ? {} : { lastEventLoopStall }),
           serverTime: DateTime.formatIso(yield* DateTime.now),

@@ -49,6 +49,8 @@ export interface NvimFileEditorResult extends NvimDriverResult {
    * mode: the stream alone lags a round trip, so `A x Escape` on a remote host left Neovim in insert.
    */
   readonly escapeGoesToNeovim: () => boolean;
+  /** Resolves once every key sent to Neovim was answered (or given up). */
+  readonly whenKeysSettled: () => Promise<void>;
 }
 
 export interface NvimFileEditorInput {
@@ -66,10 +68,7 @@ export interface NvimFileEditorInput {
   };
   /** Writes the pending save now, which is what `:w` means. */
   readonly flushSave: () => void;
-  /**
-   * Leave insert, visual or a pending command after each open. The scratchpad's session outlives
-   * the overlay, so it would otherwise reopen in whatever mode it was left in.
-   */
+  /** Each open leaves insert, visual or a pending command first; see the open contract. */
   readonly startInNormalMode?: boolean | undefined;
 }
 
@@ -214,15 +213,18 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
       const openMark = keyLane.openBegins();
       return openCommand({
         environmentId,
-        input: { threadId, cwd, relativePath, lines: [...lines] },
+        input: {
+          threadId,
+          cwd,
+          relativePath,
+          lines: [...lines],
+          ...(startInNormalMode ? { startInNormalMode: true } : {}),
+        },
       }).then((result) => {
         opensInFlightRef.current -= 1;
         // The lane belongs to the thread, not this view, so the answer is
         // taken even if the view went away meanwhile.
-        if (result._tag === "Success") {
-          keyLane.takeOpenAnswer(openMark, result.value.escape);
-          if (startInNormalMode) keyLane.keys("<Esc>");
-        }
+        if (result._tag === "Success") keyLane.takeOpenAnswer(openMark, result.value.escape);
         if (!mountedRef.current) return null;
         // After the open, not alongside it: an attachment that reaches the
         // server first finds no session and fails again. Refreshed whether or
@@ -332,7 +334,25 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     [keyLane, driver.mode, driver.jumping],
   );
 
-  return { ...driver, fallback, retry, keysDelivery, escapeGoesToNeovim };
+  // The host holds Neovim's text until a cursor read (up to a second), so an answered key can
+  // still lack its text here. A fresh attachment starts with a snapshot that already holds it,
+  // and the driver applies that snapshot to the model before this resolves.
+  const whenKeysSettled = useCallback(async () => {
+    await keyLane.whenIdle();
+    if (!enabled) return;
+    const before = stateSource.get();
+    await new Promise<void>((resolve) => {
+      const unsubscribe = stateSource.subscribe((next) => {
+        // A refresh can repeat the old state while it waits; only the new attachment's counts.
+        if (next === before || next.latestEvent?.type !== "snapshot") return;
+        unsubscribe();
+        resolve();
+      });
+      refreshAttachRef.current();
+    });
+  }, [keyLane, enabled, stateSource]);
+
+  return { ...driver, fallback, retry, keysDelivery, escapeGoesToNeovim, whenKeysSettled };
 }
 
 function sessionStateOf(

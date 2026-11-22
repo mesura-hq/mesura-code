@@ -48,7 +48,15 @@ describe("scratchpad scopes", () => {
       projectId: ProjectId.make("p1"),
       threadId: ThreadId.make("thread:project:p1:abc"),
     };
-    expect(scratchpadRelativePath("thread", owner)).toBe("threads/thread_project_p1_abc.md");
+    expect(scratchpadRelativePath("thread", owner)).toBe("threads/thread_3aproject_3ap1_3aabc.md");
+  });
+
+  it("never gives two ids the same file, whatever their case or punctuation", () => {
+    const pathFor = (id: string) =>
+      scratchpadRelativePath("thread", { projectId: null, threadId: ThreadId.make(id) });
+    const ids = ["a:b", "a_b", "A_b", "a_3ab", "Ab", "ab"];
+    const paths = ids.map(pathFor);
+    expect(new Set(paths.map((path) => path?.toLowerCase())).size).toBe(ids.length);
   });
 
   it("offers no thread scope to a draft, whose id can change when it is sent", () => {

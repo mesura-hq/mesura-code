@@ -26,7 +26,8 @@ interface ScratchpadHostProps {
  */
 export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: ScratchpadHostProps) {
   const root = useScratchpadRoot(environmentId);
-  const open = useScratchpadStore((state) => state.open);
+  const mounted = useScratchpadStore((state) => state.phase !== "closed");
+  const openCount = useScratchpadStore((state) => state.openCount);
   const toggleScratchpad = useScratchpadStore((state) => state.toggleScratchpad);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   // The key engine's leader row and the palette run the command through the registry.
@@ -50,10 +51,10 @@ export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: Sc
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [keybindings]);
 
-  if (!open || root === undefined) return null;
+  if (!mounted || root === undefined) return null;
   return (
     <ScratchpadOverlay
-      key={`${environmentId}:${root}`}
+      key={`${environmentId}:${root}:${openCount}`}
       environmentId={environmentId}
       root={root}
       owner={owner}

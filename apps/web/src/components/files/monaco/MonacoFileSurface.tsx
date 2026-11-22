@@ -53,8 +53,6 @@ export interface MonacoFileSurfaceProps {
   readonly onPendingChange: (relativePath: string, pending: boolean) => void;
   /** For a host that routes keys around the editor, such as the scratchpad's scope Tab. */
   readonly controlRef?: RefObject<MonacoFileSurfaceControl | null>;
-  /** Escape released the editor (Neovim at rest in normal mode); the scratchpad closes on it. */
-  readonly onDismiss?: () => void;
   /** Each open leaves Neovim in normal mode, whatever mode its session was left in. */
   readonly startInNormalMode?: boolean;
 }
@@ -64,6 +62,8 @@ export interface MonacoFileSurfaceControl {
   readonly hasTextFocus: () => boolean;
   /** True only while Neovim drives the editor and rests in plain normal mode, as for Escape. */
   readonly restsInNormalMode: () => boolean;
+  /** Resolves once the keys sent to Neovim were answered and the pending save was written. */
+  readonly settle: () => Promise<void>;
 }
 
 /**
@@ -89,7 +89,6 @@ export function MonacoFileSurface({
   modalEditing,
   onPendingChange,
   controlRef,
-  onDismiss,
   startInNormalMode,
 }: MonacoFileSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -456,12 +455,6 @@ export function MonacoFileSurface({
     nvimEscapeRef.current = nvim.escapeGoesToNeovim;
   }, [nvim.escapeGoesToNeovim]);
 
-  const onDismissRef = useRef(onDismiss);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref read by the once-installed dismissal listener
-  useLayoutEffect(() => {
-    onDismissRef.current = onDismiss;
-  }, [onDismiss]);
-
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: installs the Escape dismissal listener on the host for its lifetime
   useEffect(() => {
     const host = hostRef.current;
@@ -488,9 +481,15 @@ export function MonacoFileSurface({
       // strands the developer in insert or visual mode. See `escapeGoesToNeovim`.
       isBlocked: () =>
         hasOpenDraftRef.current || (nvimActiveRef.current && nvimEscapeRef.current()),
-      onDismiss: () => onDismissRef.current?.(),
+      onDismiss: () => {},
     });
   }, []);
+
+  const nvimSettleRef = useRef(nvim.whenKeysSettled);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref read by the imperative handle
+  useLayoutEffect(() => {
+    nvimSettleRef.current = nvim.whenKeysSettled;
+  }, [nvim.whenKeysSettled]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: publishes an imperative handle; its closures read the latest refs
   useLayoutEffect(() => {
@@ -499,6 +498,10 @@ export function MonacoFileSurface({
       focus: () => editorRef.current?.focus(),
       hasTextFocus: () => editorRef.current?.hasTextFocus() === true,
       restsInNormalMode: () => nvimActiveRef.current && !nvimEscapeRef.current(),
+      settle: async () => {
+        await nvimSettleRef.current();
+        await saveRef.current.flush();
+      },
     };
     return () => {
       controlRef.current = null;
