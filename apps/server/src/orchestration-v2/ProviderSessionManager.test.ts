@@ -4730,7 +4730,8 @@ it.effect.each([
         yield* resumeSecondThread;
         assert.equal((yield* Ref.get(state)).resumeCount, ++resumeCount);
         // regression: #26722 a Linked environments change reloads only the idle thread's tools.
-        yield* settings.updateSettings({ linkedEnvironmentsEnabled: true });
+        // Mesura: the beta defaults on here, so the change turns it off.
+        yield* settings.updateSettings({ linkedEnvironmentsEnabled: false });
         yield* resumeSecondThread;
         assert.equal((yield* Ref.get(state)).resumeCount, ++resumeCount);
         assert.deepEqual((yield* Ref.get(state)).unloadedNativeThreadIds, ["native-thread"]);
@@ -5447,7 +5448,8 @@ it.effect(
         assert.equal((yield* Ref.get(state)).openCount, 1);
 
         // regression: #26722 an exclusive runtime configures MCP at open, so it reopens.
-        yield* settings.updateSettings({ linkedEnvironmentsEnabled: true });
+        // Mesura: the beta defaults on here, so the change turns it off.
+        yield* settings.updateSettings({ linkedEnvironmentsEnabled: false });
         yield* manager.open({
           threadId: firstThreadId,
           providerSessionId,

@@ -100,7 +100,7 @@ const environmentLinkCommand = Command.make("link", {
     Flag.withDescription(
       "What this environment's agents may do there: read-only, or the broadest runtime mode.",
     ),
-    Flag.withDefault("approval-required" as const),
+    Flag.withDefault("full-access" as const),
   ),
 }).pipe(
   Command.withDescription(

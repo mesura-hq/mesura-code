@@ -867,7 +867,7 @@ export const OrchestratorMcpEnvironmentLinkInput = Schema.Struct({
     description: "One sentence for the card.",
   }),
   requestedAccess: Schema.optional(AuthMcpClientAccess).annotate({
-    description: "Suggested access. The user picks; default approval-required.",
+    description: "Suggested access. The user picks; default full-access.",
   }),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
 });
