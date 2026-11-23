@@ -12,6 +12,7 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
 
 import { ScratchpadOverlay } from "./ScratchpadOverlay";
 import { type ScratchpadOwner } from "./scratchpadScopes";
+import { retireScratchpadSession } from "./scratchpadEditorSession";
 import { scratchpadOwnerKey, useScratchpadStore } from "./scratchpadStore";
 import { useScratchpadRoot } from "./useScratchpadFile";
 
@@ -43,12 +44,27 @@ export function ScratchpadHost({ environmentId, owner, composerDraftTarget }: Sc
   if (!mounted && claimedOwner !== null) setClaimedOwner(null);
   const ownsOverlay = claimedOwner !== null;
   // A view replaced outright (a draft route is keyed) unmounts with its overlay: the open ends
-  // with it rather than passing to the next view. A no-op after an ordinary close.
+  // with it rather than passing to the next view, and its Neovim session is retired, so keys
+  // still queued for it can never reach the next note. A no-op after an ordinary close.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases this view's open in the global store when the view unmounts
   useEffect(() => {
     if (claimedOwner === null) return;
-    return () => useScratchpadStore.getState().abandonScratchpad(claimedOwner);
+    return () => {
+      const store = useScratchpadStore.getState();
+      if (store.owner !== claimedOwner || store.phase === "closed") return;
+      store.abandonScratchpad(claimedOwner);
+      retireScratchpadSession();
+    };
   }, [claimedOwner]);
+  // A reopen queued behind a settling close belongs to the view that asked; if this view has
+  // moved to another thread since, it is dropped rather than opened over the wrong thread.
+  const reopenOwner = useScratchpadStore((state) => state.reopen?.owner ?? null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drops a queued reopen in the global store once this view moved past its owner
+  useEffect(() => {
+    if (claimedOwner !== null && reopenOwner !== null && reopenOwner !== ownerKey) {
+      useScratchpadStore.getState().dropReopenUnless(ownerKey);
+    }
+  }, [claimedOwner, reopenOwner, ownerKey]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts the settling close when this chat view goes to the background
   useEffect(() => {
     if (background && ownsOverlay && phase === "open") {

@@ -58,4 +58,14 @@ describe("scratchpad open and close", () => {
     state().openScratchpad("view-b", "general");
     expect(state()).toMatchObject({ owner: "view-a", scope: "project" });
   });
+
+  it("drops a reopen whose view moved to another thread before the close settled", () => {
+    reset();
+    state().toggleScratchpad("view-a");
+    state().closeScratchpad();
+    state().openScratchpad("view-b", "general");
+    state().dropReopenUnless("view-c");
+    state().finishClosing();
+    expect(state()).toMatchObject({ phase: "closed", owner: null });
+  });
 });

@@ -30,6 +30,8 @@ interface ScratchpadState {
   readonly toggleScratchpad: (owner: string) => void;
   /** The owning view went away without its close: nothing else may take the open over. */
   readonly abandonScratchpad: (owner: string) => void;
+  /** A reopen asked for by a view that has since moved on (another thread) is dropped. */
+  readonly dropReopenUnless: (owner: string) => void;
   readonly setScope: (scope: ScratchpadScope) => void;
 }
 
@@ -79,6 +81,8 @@ export const useScratchpadStore = create<ScratchpadState>((set) => ({
         ? { phase: "closed", owner: null, reopen: null }
         : {},
     ),
+  dropReopenUnless: (owner) =>
+    set((state) => (state.reopen !== null && state.reopen.owner !== owner ? { reopen: null } : {})),
   setScope: (scope) => set({ scope }),
 }));
 
