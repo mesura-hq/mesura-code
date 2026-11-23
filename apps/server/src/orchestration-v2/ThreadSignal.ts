@@ -4,11 +4,14 @@
  */
 import {
   EventId,
+  factoryReportActivityId,
+  isFactoryRunFinished,
   type OrchestrationV2AppThread,
   type OrchestrationV2Command,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2TurnItem,
   type RunId,
   type ThreadAgentSignal,
   type ThreadId,
@@ -51,6 +54,38 @@ export function decideAgentSignalCommand(input: {
       setAt: DateTime.formatIso(input.now),
     },
   });
+}
+
+/**
+ * Why the thread's agent may not mark it `ready_to_close`, or null when it may: an attached
+ * Factory run whose record has no `run.finished` is unfinished work, however complete its phases
+ * look. `turnItems` are the thread's `factory_card` items; a run card records the run's status,
+ * and a report card records that `report.written` was folded.
+ */
+export function readyToCloseRefusal(
+  turnItems: ReadonlyArray<OrchestrationV2TurnItem>,
+): string | null {
+  const cards = new Map<string, Extract<OrchestrationV2TurnItem, { type: "factory_card" }>>();
+  for (const item of turnItems) if (item.type === "factory_card") cards.set(item.id, item);
+  const unfinished = [...cards.values()].flatMap((item) => {
+    if (item.card.kind !== "run" || isFactoryRunFinished(item.card.payload.status)) return [];
+    const run = item.card.payload;
+    const reportWritten = cards.has(factoryReportActivityId(run.threadId, run.runId));
+    const missing = [...(reportWritten ? [] : ["report.written"]), "run.finished"];
+    const openPhases = (run.phaseStatuses ?? []).filter(
+      (status) => status !== "clean" && status !== "degraded",
+    ).length;
+    const phases = openPhases > 0 ? `; ${openPhases} of ${run.phaseCount} phases still open` : "";
+    return [`${run.runDir}/events.jsonl has no ${missing.join(" and no ")}${phases}`];
+  });
+  if (unfinished.length === 0) return null;
+  return [
+    "Refused: this thread has an attached Factory run that is not finished.",
+    ...unfinished.map((line) => `- ${line}`),
+    "Finish the run's Report steps first: sf-record.mjs report-check on report.md, then append " +
+      "report.written and run.finished. A run that was abandoned ends with run.finished and " +
+      'status "stopped". Then signal ready_to_close again.',
+  ].join("\n");
 }
 
 /** An open question for the user blocks auto-settle and ends a snooze early. */

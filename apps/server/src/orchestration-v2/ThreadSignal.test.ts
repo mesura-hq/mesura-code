@@ -7,6 +7,9 @@ import {
   CommandId,
   EnvironmentId,
   EventId,
+  factoryReportActivityId,
+  factoryRunActivityId,
+  type FactoryRunStatus,
   MessageId,
   type OrchestrationV2Run,
   ProjectId,
@@ -17,6 +20,7 @@ import {
   RuntimeRequestId,
   THREAD_AGENT_SIGNAL_NOTE_MAX_LENGTH,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -680,6 +684,117 @@ describe("thread signal guards", () => {
           nowMs,
         ),
       );
+    }).pipe(Effect.provide(layerTest)),
+  );
+});
+
+const FACTORY_RUN_DIR = "/srv/factory-runs/reenvio-etapa2";
+
+/** Records the run card the Factory run tracker would record for a run in `status`. */
+const recordRunCard = Effect.fn(function* (threadId: ThreadId, status: FactoryRunStatus) {
+  yield* (yield* Orchestrator.OrchestratorV2).dispatch({
+    type: "factory_card.record",
+    commandId: CommandId.make(`factory-run:${threadId}:${status}`),
+    threadId,
+    turnItemId: TurnItemId.make(factoryRunActivityId(threadId, "reenvio-etapa2")),
+    card: {
+      kind: "run",
+      payload: {
+        threadId,
+        runId: "reenvio-etapa2",
+        runDir: FACTORY_RUN_DIR,
+        status,
+        startedAt: "2026-11-22T10:00:00.000Z",
+        lastEventAt: "2026-11-22T13:00:00.000Z",
+        phaseCount: 3,
+        phase: { index: 3, title: "Commit the chatbot core" },
+        node: "commit",
+        returns: { used: 0, budget: 3 },
+        verdicts: [],
+        cost: { usd: 0, tokens: {} },
+        phaseStatuses:
+          status === "running" ? ["clean", "clean", "running"] : ["clean", "clean", "clean"],
+      },
+    },
+  });
+});
+
+const recordReportCard = Effect.fn(function* (threadId: ThreadId) {
+  yield* (yield* Orchestrator.OrchestratorV2).dispatch({
+    type: "factory_card.record",
+    commandId: CommandId.make(`factory-report:${threadId}`),
+    threadId,
+    turnItemId: TurnItemId.make(factoryReportActivityId(threadId, "reenvio-etapa2")),
+    card: {
+      kind: "report",
+      payload: {
+        runId: "reenvio-etapa2",
+        digest: "d".repeat(64),
+        path: `${FACTORY_RUN_DIR}/report.md`,
+        title: "Report: reenvio etapa 2",
+        headings: [],
+        writtenAt: "2026-11-22T13:05:00.000Z",
+      },
+    },
+  });
+});
+
+const resultText = (result: { readonly content: ReadonlyArray<unknown> }) =>
+  JSON.stringify(result.content);
+
+// 2026-11-22: a coordinator closed every phase, skipped `report.written` and `run.finished`, and
+// marked its thread ready_to_close while the attached run still read as in progress.
+describe("t3_thread_signal and an attached Factory run", () => {
+  it.effect(
+    "refuses ready_to_close while the run has no run.finished, naming the run and the missing events",
+    () =>
+      Effect.gen(function* () {
+        const threadId = yield* createThread("unfinished-factory-run");
+        yield* userMessage(threadId, "unfinished-factory-run");
+        yield* recordRunCard(threadId, "unclosed");
+
+        const refused = yield* signal(threadId, "ready_to_close");
+        assert.isTrue(refused.isError === true, resultText(refused));
+        assert.include(resultText(refused), `${FACTORY_RUN_DIR}/events.jsonl`);
+        assert.include(resultText(refused), "no report.written and no run.finished");
+        assert.notInclude(resultText(refused), "phases still open");
+        assert.isNull(yield* readSignal(threadId));
+
+        // needs_input and clear are unaffected.
+        const asked = yield* signal(threadId, "needs_input", "Finish the report?");
+        assert.isFalse(asked.isError === true, resultText(asked));
+        assert.equal((yield* readSignal(threadId))?.kind, "needs_input");
+        const cleared = yield* signal(threadId, "clear");
+        assert.isFalse(cleared.isError === true, resultText(cleared));
+        assert.isNull(yield* readSignal(threadId));
+
+        // Once report.written is folded, only run.finished is missing.
+        yield* recordReportCard(threadId);
+        const stillRefused = yield* signal(threadId, "ready_to_close");
+        assert.isTrue(stillRefused.isError === true, resultText(stillRefused));
+        assert.include(resultText(stillRefused), "has no run.finished");
+        assert.notInclude(resultText(stillRefused), "no report.written");
+
+        yield* recordRunCard(threadId, "done");
+        const accepted = yield* signal(threadId, "ready_to_close");
+        assert.isFalse(accepted.isError === true, resultText(accepted));
+        assert.equal((yield* readSignal(threadId))?.kind, "ready_to_close");
+      }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("refuses ready_to_close mid-run and names the phases still open", () =>
+    Effect.gen(function* () {
+      const threadId = yield* createThread("running-factory-run");
+      yield* userMessage(threadId, "running-factory-run");
+      yield* recordRunCard(threadId, "running");
+      const refused = yield* signal(threadId, "ready_to_close");
+      assert.isTrue(refused.isError === true, resultText(refused));
+      assert.include(resultText(refused), "1 of 3 phases still open");
+
+      // A run that ended stopped is finished: the thread may be marked ready to close.
+      yield* recordRunCard(threadId, "stopped");
+      const accepted = yield* signal(threadId, "ready_to_close");
+      assert.isFalse(accepted.isError === true, resultText(accepted));
     }).pipe(Effect.provide(layerTest)),
   );
 });

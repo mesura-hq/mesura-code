@@ -540,3 +540,67 @@ describe("factory run turn spend", () => {
     );
   });
 });
+
+// 2026-11-22: two sf-team runs closed phase 3/3 and never appended `run.finished`; their card
+// kept reading the last step as work in progress.
+describe("factory run status once every phase closed", () => {
+  const line = (minute: number, type: string, fields: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      v: 1,
+      at: `2026-11-22T10:${String(minute).padStart(2, "0")}:00.000Z`,
+      type,
+      ...fields,
+    });
+  const started = line(0, "run.started", {
+    runId: "reenvio-etapa2",
+    request: "Reenvío, etapa 2",
+    phases: [
+      { index: 1, title: "One", acceptance: ["It works."] },
+      { index: 2, title: "Two", acceptance: ["It works too."] },
+    ],
+  });
+  const closePhase = (minute: number, phase: number, close: unknown = "clean") => [
+    line(minute, "phase.started", { phase }),
+    line(minute + 1, "node.entered", { phase, node: "commit" }),
+    line(minute + 2, "phase.closed", { phase, close }),
+  ];
+
+  it("reads unclosed, not running, once every phase closed and no run.finished was recorded", () => {
+    const halfway = foldLines([started, ...closePhase(1, 1)]);
+    expect(halfway.status).toBe("running");
+
+    const unclosed = foldLines([started, ...closePhase(1, 1), ...closePhase(4, 2)]);
+    expect(unclosed.status).toBe("unclosed");
+    expect(summarizeFactoryRun(unclosed).status).toBe("unclosed");
+    expect(toFactoryRunShellSummary(unclosed)).toEqual({
+      status: "unclosed",
+      phaseIndex: 2,
+      phaseCount: 2,
+      node: "commit",
+    });
+
+    const reported = foldFactoryRunLine(
+      unclosed,
+      line(10, "report.written", { path: "/srv/factory-runs/reenvio-etapa2/report.md" }),
+    );
+    expect(reported.status).toBe("unclosed");
+    expect(foldFactoryRunLine(reported, line(11, "run.finished", { status: "done" })).status).toBe(
+      "done",
+    );
+  });
+
+  it("counts a skipped phase as closed, and an open stop still reads waiting", () => {
+    const skipped = foldLines([
+      started,
+      ...closePhase(1, 1),
+      ...closePhase(4, 2, { degraded: ["skipped: depends on phase 1"] }),
+    ]);
+    expect(skipped.status).toBe("unclosed");
+    const asked = foldFactoryRunLine(
+      skipped,
+      line(10, "stop.raised", { question: "Ship it?", options: ["yes", "no"] }),
+    );
+    expect(asked.status).toBe("waiting");
+    expect(foldLines([line(0, "note", { text: "no phases yet" })]).status).toBe("running");
+  });
+});

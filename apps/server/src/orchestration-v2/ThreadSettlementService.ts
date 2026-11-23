@@ -8,6 +8,7 @@ import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
   CommandId,
   factoryRunHoldsCompletion,
+  factoryRunIsUnclosed,
   isOrchestrationV2WorkActive,
   type ThreadId,
   type OrchestrationV2DomainEvent,
@@ -179,6 +180,8 @@ export function isAutoSettlementCandidate(
   // Settling ends a watch, which would silently drop a reviewer's later comments.
   if (pendingTasks.some(isPullRequestWatchTask)) return false;
   if (factoryRunHoldsCompletion(thread.factoryRun)) return false;
+  // Mesura: settling would hide a Factory run whose phases closed without `run.finished`.
+  if (factoryRunIsUnclosed(thread.factoryRun)) return false;
   if (threadHasQueuedTurnStart(thread, nowMs)) return false;
   // Interrupted runs must keep the same snooze protection the sidebar shows.
   return !isSnoozed(thread, nowMs);

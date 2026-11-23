@@ -62,9 +62,15 @@ const TONE_BY_FINISHED_STATUS = {
 } as const satisfies Record<string, FactoryRunTone>;
 
 /**
+ * What an unclosed run reads: every phase closed, no `run.finished`. The last step's label
+ * would read as work in progress.
+ */
+export const FACTORY_RUN_UNCLOSED_TEXT = "not closed";
+
+/**
  * The label a thread row shows for its run: `phase 5/11 · Review` while
- * running, then `waiting`, `done`, `degraded` or `stopped`. Null for a
- * thread without a run.
+ * running, then `waiting`, `not closed`, `done`, `degraded` or `stopped`.
+ * Null for a thread without a run.
  */
 export function factoryRunLabel(
   run: FactoryRunShellSummary | null | undefined,
@@ -73,6 +79,8 @@ export function factoryRunLabel(
   switch (run.status) {
     case "waiting":
       return { text: "waiting", tone: "warning" };
+    case "unclosed":
+      return { text: FACTORY_RUN_UNCLOSED_TEXT, tone: "warning" };
     case "done":
     case "degraded":
     case "stopped":

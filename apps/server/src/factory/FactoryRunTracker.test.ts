@@ -403,6 +403,50 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
       );
     });
 
+    // 2026-11-22: two coordinators closed every phase and skipped `run.finished`; the thread's
+    // card kept reading "3/3 Commit" as work in progress.
+    it.effect(
+      "a run whose every phase closed without run.finished reads unclosed, stays followed, and reads done once it finishes",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeHarness();
+          const runDir = yield* harness.makeRunDir(RUN_ID, [
+            runStartedLine(),
+            eventLine(1, "phase.started", { phase: 1 }),
+            eventLine(2, "node.entered", { phase: 1, node: "commit" }),
+            eventLine(3, "phase.closed", { phase: 1, close: "clean" }),
+            eventLine(4, "phase.started", { phase: 2 }),
+            eventLine(5, "node.entered", { phase: 2, node: "commit" }),
+            eventLine(6, "phase.closed", { phase: 2, close: "clean" }),
+          ]);
+          const eventsPath = harness.path.join(runDir, "events.jsonl");
+          yield* harness.attachRun(runDir);
+
+          expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toMatchObject({
+            status: "unclosed",
+            phaseStatuses: ["clean", "clean"],
+          });
+          expect(harness.summaries.get(THREAD_ID)).toMatchObject({ status: "unclosed" });
+          // Not finished: the events file stays followed, so a late run.finished still lands.
+          expect(yield* harness.tracker.tailedFiles).toContain(eventsPath);
+
+          const reportPath = harness.path.join(runDir, "report.md");
+          yield* harness.fileSystem.writeFileString(reportPath, "# Report\n\n## Context\n");
+          yield* harness.append(eventsPath, eventLine(7, "report.written", { path: reportPath }));
+          yield* harness.tracker.drain(THREAD_ID, RUN_ID);
+          expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toMatchObject({
+            status: "unclosed",
+          });
+
+          yield* harness.append(eventsPath, eventLine(8, "run.finished", { status: "done" }));
+          yield* harness.tracker.drain(THREAD_ID, RUN_ID);
+          expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toMatchObject({
+            status: "done",
+          });
+          expect(harness.summaries.get(THREAD_ID)).toMatchObject({ status: "done" });
+        }),
+    );
+
     it.effect(
       "a run event replaces the factory.run activity in place only when its compact summary changes",
       () =>

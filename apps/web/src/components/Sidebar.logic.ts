@@ -960,7 +960,7 @@ export function shouldRecedeSidebarThread(input: {
   ) {
     return false;
   }
-  if (input.attentionKind === "input") return false;
+  if (input.attentionKind === "input" || input.attentionKind === "unclosed") return false;
   if (input.status === "preparing" || input.status === "working" || input.status === "waiting") {
     return true;
   }

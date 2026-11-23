@@ -163,6 +163,25 @@ describe("sidebar thread attention mapping", () => {
     ).toBe("done");
   });
 
+  // 2026-11-22: two sf-team coordinators closed every phase, skipped `run.finished`, and the row
+  // read "3/3 Commit" until the developer opened the thread.
+  it("sidebar attention: an unclosed Factory run reads a loud Not closed once the agent stops working", () => {
+    const unclosed = factoryRunAt("unclosed", "commit");
+    expect(attention({ factoryRun: unclosed })).toEqual({
+      kind: "unclosed",
+      text: "Not closed",
+      emphasis: "loud",
+    });
+    expect(attention({ factoryRun: unclosed, isUnread: true })?.kind).toBe("unclosed");
+    // While the coordinator still executes it is writing the report: the row reads Working.
+    expect(attention({ status: "working", factoryRun: unclosed })?.kind).toBe("working");
+    expect(attention({ status: "input", factoryRun: unclosed })?.kind).toBe("input");
+    const row = { isWoke: false, isActive: false, isSelected: false, isUnread: false };
+    expect(shouldRecedeSidebarThread({ ...row, status: "ready", attentionKind: "unclosed" })).toBe(
+      false,
+    );
+  });
+
   it("sidebar attention AC8: approval and failure stay loud; quiet kinds never take the loud emphasis", () => {
     expect(attention({ status: "approval" })).toEqual({
       kind: "approval",

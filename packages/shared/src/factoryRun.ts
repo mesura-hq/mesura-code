@@ -146,7 +146,19 @@ function deriveStatus(
   if (finished === "done") {
     return state.phases.some((phase) => phase.status === "degraded") ? "degraded" : "done";
   }
-  return state.stops.some((stop) => stop.answeredAt === null) ? "waiting" : "running";
+  if (state.stops.some((stop) => stop.answeredAt === null)) return "waiting";
+  return allPhasesClosed(state) ? "unclosed" : "running";
+}
+
+/**
+ * Every phase the run planned or recorded closed, clean or degraded. A parked or skipped phase
+ * closes degraded, so it counts as closed. A run with no phases has nothing closed.
+ */
+function allPhasesClosed(state: FactoryRunState): boolean {
+  return (
+    state.phases.length > 0 &&
+    state.phases.every((phase) => phase.status === "clean" || phase.status === "degraded")
+  );
 }
 
 function deriveClock(state: FactoryRunState): FactoryRunState["clock"] {
