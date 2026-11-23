@@ -9,7 +9,11 @@ import {
   type LinuxPasswordStoreSwitch,
   type LinuxPasswordStorePreference,
 } from "../linuxSecretStorage.ts";
-import { resolveDesktopLinuxIdentity } from "../../../../scripts/lib/brand-assets.ts";
+import {
+  MESURA_DESKTOP_CHANNEL_IDENTITY,
+  resolveDesktopLinuxIdentity,
+  type MesuraDesktopChannelIdentity,
+} from "../../../../scripts/lib/brand-assets.ts";
 import {
   resolveDesktopBaseDir,
   resolveDesktopStateDir,
@@ -21,6 +25,8 @@ interface EarlyDesktopSettingsInput {
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
   readonly readFileString: (path: string) => string;
+  /** Mesura: the packaged channel from `mesuraChannel.ts`; stable when absent. */
+  readonly channel?: MesuraDesktopChannelIdentity;
 }
 
 type EarlyLinuxElectronOptionsInput = EarlyDesktopSettingsInput;
@@ -33,8 +39,10 @@ export interface EarlyLinuxElectronOptions {
   readonly passwordStore: LinuxPasswordStoreSwitch | null;
 }
 
-export const resolveLinuxDesktopEntryName = (isDevelopment: boolean): string =>
-  resolveDesktopLinuxIdentity(isDevelopment).desktopEntryName;
+export const resolveLinuxDesktopEntryName = (
+  isDevelopment: boolean,
+  channel: MesuraDesktopChannelIdentity = MESURA_DESKTOP_CHANNEL_IDENTITY.stable,
+): string => resolveDesktopLinuxIdentity(isDevelopment, channel.channel).desktopEntryName;
 
 const trimNonEmpty = (value: string | undefined): string | null => {
   const trimmed = value?.trim();
@@ -55,12 +63,14 @@ function resolveEarlyDesktopSettingsPath(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
+  readonly channel?: MesuraDesktopChannelIdentity;
 }): string {
   const t3Home = Option.fromUndefinedOr(input.env.T3CODE_HOME);
   const baseDir = resolveDesktopBaseDir({
     homeDirectory: input.homeDirectory,
     joinPath: input.joinPath,
     t3Home,
+    ...(input.channel ? { homeDirName: input.channel.homeDirName } : {}),
   });
   const stateDir = resolveDesktopStateDir({
     baseDir,
@@ -146,10 +156,11 @@ export function resolveEarlyLinuxElectronOptions(
 ): EarlyLinuxElectronOptions {
   const preference = resolveEarlyLinuxPasswordStorePreference(input);
   const isDevelopment = isDevelopmentEnvironment(input.env);
+  const channel = input.channel ?? MESURA_DESKTOP_CHANNEL_IDENTITY.stable;
   return {
     isDevelopment,
-    linuxWmClass: resolveDesktopLinuxIdentity(isDevelopment).wmClass,
-    linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
+    linuxWmClass: resolveDesktopLinuxIdentity(isDevelopment, channel.channel).wmClass,
+    linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment, channel),
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

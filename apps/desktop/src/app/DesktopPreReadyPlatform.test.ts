@@ -17,6 +17,7 @@ const {
   execFileSyncMock,
   readFileSyncMock,
   symlinkSyncMock,
+  electronApp,
 } = vi.hoisted(() => ({
   appendSwitchMock: vi.fn(),
   getSwitchValueMock: vi.fn(),
@@ -29,6 +30,8 @@ const {
   execFileSyncMock: vi.fn(),
   readFileSyncMock: vi.fn(),
   symlinkSyncMock: vi.fn(),
+  // Mesura: the channel resolver caches per app path, so a channel test uses its own path.
+  electronApp: { appPath: "/tmp/.mount_T3/resources/app.asar" },
 }));
 
 vi.mock("electron", () => ({
@@ -36,7 +39,7 @@ vi.mock("electron", () => ({
     setDesktopName: setDesktopNameMock,
     getVersion: () => "0.0.37",
     isPackaged: true,
-    getAppPath: () => "/tmp/.mount_T3/resources/app.asar",
+    getAppPath: () => electronApp.appPath,
     commandLine: {
       appendSwitch: appendSwitchMock,
       getSwitchValue: getSwitchValueMock,
@@ -76,6 +79,49 @@ describe("DesktopPreReadyPlatform", () => {
     execFileSyncMock.mockReset();
     readFileSyncMock.mockReset().mockReturnValue("{}");
     symlinkSyncMock.mockReset();
+    electronApp.appPath = "/tmp/.mount_T3/resources/app.asar";
+  });
+
+  it.effect("prepares the packaged Lab channel's own desktop entry and settings home", () => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "");
+    vi.stubEnv("T3CODE_HOME", "");
+    getSwitchValueMock.mockReturnValue("");
+    electronApp.appPath = "/tmp/.mount_Lab/resources/app.asar";
+    const files = new Map([
+      ["/tmp/.mount_Lab/resources/app.asar/package.json", '{"mesuraChannel":"lab"}'],
+    ]);
+    const readPaths: Array<string> = [];
+    readFileSyncMock.mockImplementation((path: string) => {
+      readPaths.push(path);
+      const contents = files.get(path);
+      if (contents === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return contents;
+    });
+    writeFileSyncMock.mockImplementation((path: string, contents: string | Buffer) => {
+      files.set(path, String(contents));
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* Layer.build(
+          DesktopPreReadyPlatform.layer.pipe(
+            Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+            Layer.provide(Layer.succeed(HostProcess.HomeDirectory, "/home/alice")),
+            Layer.provide(DesktopConfig.layerTest({ XDG_DATA_HOME: "/xdg" })),
+          ),
+        );
+        assert.deepEqual(setDesktopNameMock.mock.calls, [["mesura-code-channel-lab.desktop"]]);
+        assert.include(
+          files.get("/xdg/applications/mesura-code-channel-lab.desktop"),
+          "Name=Mesura Code Lab",
+        );
+        assert.isFalse(files.has("/xdg/applications/mesura-code.desktop"));
+        assert.include(
+          readPaths,
+          "/home/alice/.mesura-code-channel-lab/userdata/desktop-settings.json",
+        );
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
 
   it.effect("persists Linux scaling synchronously across relaunches and settings rewrites", () => {
@@ -86,7 +132,7 @@ describe("DesktopPreReadyPlatform", () => {
     const commandLine = new Map<string, string>();
     readFileSyncMock.mockImplementation((path: string) => {
       const contents = files.get(path);
-      if (contents === undefined) throw new Error("ENOENT");
+      if (contents === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       return contents;
     });
     writeFileSyncMock.mockImplementation((path: string, contents: string) => {
