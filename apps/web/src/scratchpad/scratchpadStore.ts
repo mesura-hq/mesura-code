@@ -22,6 +22,9 @@ interface ScratchpadState {
   readonly openCount: number;
   /** The chat view (environment and thread) an open belongs to; no other view mounts it. */
   readonly owner: string | null;
+  /** Bumped when an abandoned note's save lands, so the preview card reads it again. */
+  readonly savedRevision: number;
+  readonly noteSaved: () => void;
   /** An open asked for while a close settles; it happens once the close finishes. */
   readonly reopen: { readonly scope: ScratchpadScope | null; readonly owner: string } | null;
   readonly openScratchpad: (owner: string, scope?: ScratchpadScope) => void;
@@ -46,6 +49,8 @@ export const useScratchpadStore = create<ScratchpadState>((set) => ({
   scope: null,
   openCount: 0,
   owner: null,
+  savedRevision: 0,
+  noteSaved: () => set((state) => ({ savedRevision: state.savedRevision + 1 })),
   reopen: null,
   openScratchpad: (owner, scope) =>
     set((state) =>

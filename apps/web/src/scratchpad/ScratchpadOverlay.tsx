@@ -18,6 +18,7 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
+import { saveAbandonedScratchpadNote, settledSaves } from "./scratchpadDetachedSave";
 import { retireScratchpadSession, scratchpadEditorThreadId } from "./scratchpadEditorSession";
 import { registerScratchpadFocus } from "./scratchpadFocus";
 import {
@@ -122,6 +123,10 @@ export function ScratchpadOverlay({
   }, [refocusAfterSwitch]);
   /** False once unmounted, so a settle finishing late never acts on a replacement overlay. */
   const aliveRef = useRef(true);
+  /** True once this overlay's own close finished; an unmount without it hands the note over. */
+  const closedRef = useRef(false);
+  /** The note Neovim holds now, for that hand-over (read in the unmount cleanup). */
+  const openNoteRef = useRef<Parameters<typeof saveAbandonedScratchpadNote>[0] | null>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- marks the overlay unmounted for settles that finish after it
   useEffect(() => {
     // Set on every mount: development runs effects twice, and a false left by the first cleanup
@@ -129,6 +134,10 @@ export function ScratchpadOverlay({
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;
+      // Unmounted before its close finished (a keyed chat view replaced outright): the note is
+      // saved from the tab's Neovim session, which still holds every key it took.
+      const open = openNoteRef.current;
+      if (!closedRef.current && open !== null) saveAbandonedScratchpadNote(open);
     };
   }, []);
   const shellRef = useRef<HTMLElement | null>(null);
@@ -146,32 +155,38 @@ export function ScratchpadOverlay({
     // Edits this client could not save yet are newer than the host's copy.
     const unsaved = appAtomRegistry.get(optimisticFileAtom(environmentId, root, path));
     const unsavedContents = unsaved?.saved === false ? unsaved.data?.contents : undefined;
-    const read =
-      unsavedContents === undefined
-        ? readFresh({ environmentId, input: { cwd: root, relativePath: path, allowMissing: true } })
-        : null;
-    void Promise.resolve(read).then((result) => {
-      if (!isCurrent()) return;
-      if (result === null) {
-        setLoaded({ relativePath: path, status: "ready", contents: unsavedContents ?? "" });
-        return;
-      }
-      if (result._tag !== "Success") {
-        setLoaded({ relativePath: path, status: "failed" });
-        return;
-      }
-      const data = result.value;
-      // The read stops at a megabyte; editing that prefix would save away the rest.
-      if (data.exists !== false && data.truncated) {
-        setLoaded({ relativePath: path, status: "too-large" });
-        return;
-      }
-      setLoaded({
-        relativePath: path,
-        status: "ready",
-        contents: data.exists === false ? "" : data.contents,
+    // After any note an earlier overlay left behind is saved, so this read includes it.
+    void settledSaves()
+      .then(() =>
+        unsavedContents === undefined
+          ? readFresh({
+              environmentId,
+              input: { cwd: root, relativePath: path, allowMissing: true },
+            })
+          : null,
+      )
+      .then((result) => {
+        if (!isCurrent()) return;
+        if (result === null) {
+          setLoaded({ relativePath: path, status: "ready", contents: unsavedContents ?? "" });
+          return;
+        }
+        if (result._tag !== "Success") {
+          setLoaded({ relativePath: path, status: "failed" });
+          return;
+        }
+        const data = result.value;
+        // The read stops at a megabyte; editing that prefix would save away the rest.
+        if (data.exists !== false && data.truncated) {
+          setLoaded({ relativePath: path, status: "too-large" });
+          return;
+        }
+        setLoaded({
+          relativePath: path,
+          status: "ready",
+          contents: data.exists === false ? "" : data.contents,
+        });
       });
-    });
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the scope's file from the host each time the scope opens
   useEffect(() => {
@@ -195,6 +210,18 @@ export function ScratchpadOverlay({
   ) {
     setEditorFile({ relativePath: loaded.relativePath, contents: loaded.contents });
   }
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- latest-value ref read by the unmount cleanup that hands an unsettled note over
+  useLayoutEffect(() => {
+    openNoteRef.current =
+      editorThreadId !== null && editorFile !== null
+        ? {
+            environmentId,
+            sessionThreadId: editorThreadId,
+            cwd: root,
+            relativePath: editorFile.relativePath,
+          }
+        : null;
+  }, [editorThreadId, editorFile, environmentId, root]);
   const showsRequestedFile =
     editorThreadId !== null &&
     editorFile?.relativePath === relativePath &&
@@ -241,7 +268,9 @@ export function ScratchpadOverlay({
     });
     void Promise.race([settled.catch(() => {}), backstop]).then(() => {
       clearTimeout(backstopTimer);
-      if (!unmounted) finishClosing();
+      if (unmounted) return;
+      closedRef.current = true;
+      finishClosing();
     });
     return () => {
       unmounted = true;

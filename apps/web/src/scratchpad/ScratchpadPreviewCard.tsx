@@ -46,6 +46,7 @@ function ScratchpadPreviewCardBody({
 }: ScratchpadPreviewCardProps & { readonly root: string }) {
   const openScratchpad = useScratchpadStore((state) => state.openScratchpad);
   const phase = useScratchpadStore((state) => state.phase);
+  const savedRevision = useScratchpadStore((state) => state.savedRevision);
   const scope = initialScratchpadScope(availableScratchpadScopes(owner));
   const relativePath = scratchpadRelativePath(scope, owner) ?? "general.md";
   const { file, refresh } = useScratchpadFile(environmentId, root, relativePath);
@@ -55,6 +56,10 @@ function ScratchpadPreviewCardBody({
   useEffect(() => {
     if (phase === "closed") refresh();
   }, [phase, refresh]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- re-reads the host file after a note an unmounted overlay left behind is saved
+  useEffect(() => {
+    if (savedRevision > 0) refresh();
+  }, [savedRevision, refresh]);
   const lines = file.status === "ready" ? scratchpadPreviewLines(file.contents) : [];
 
   return (
