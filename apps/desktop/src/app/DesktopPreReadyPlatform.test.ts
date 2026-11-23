@@ -125,6 +125,46 @@ describe("DesktopPreReadyPlatform", () => {
     ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
 
+  it.effect("starts the packaged Lab channel's entry through the staged channel launcher", () => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "");
+    vi.stubEnv("T3CODE_HOME", "");
+    getSwitchValueMock.mockReturnValue("");
+    electronApp.appPath = "/tmp/.mount_LabLauncher/resources/app.asar";
+    const files = new Map([
+      ["/tmp/.mount_LabLauncher/resources/app.asar/package.json", '{"mesuraChannel":"lab"}'],
+    ]);
+    readFileSyncMock.mockImplementation((path: string) => {
+      const contents = files.get(path);
+      if (contents === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return contents;
+    });
+    writeFileSyncMock.mockImplementation((path: string, contents: string | Buffer) => {
+      files.set(path, String(contents));
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* Layer.build(
+          DesktopPreReadyPlatform.layer.pipe(
+            Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+            Layer.provide(Layer.succeed(HostProcess.HomeDirectory, "/home/alice")),
+            Layer.provide(
+              DesktopConfig.layerTest({
+                XDG_DATA_HOME: "/xdg",
+                APPIMAGE: "/home/alice/Applications/Mesura-Code-Lab.AppImage",
+                T3CODE_DESKTOP_LAUNCHER_PATH: "/home/alice/.local/bin/mesura-code-lab",
+              }),
+            ),
+          ),
+        );
+        assert.include(
+          files.get("/xdg/applications/mesura-code-channel-lab.desktop"),
+          "Exec=/home/alice/.local/bin/mesura-code-lab %U",
+        );
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+  });
+
   it.effect.each([
     { channel: "dev", name: "Mesura Code Dev" },
     { channel: "lab", name: "Mesura Code Lab" },

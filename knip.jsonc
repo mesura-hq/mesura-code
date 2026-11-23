@@ -39,6 +39,7 @@
         "fixtures/*/*.js",
         "knip-schemas.ts",
         "remove-native-mobile.ts",
+        "mesura-channel/channel.ts",
         "mesura-checks.ts",
         "mesura-browser.ts",
         "linux-after-pack.ts",
