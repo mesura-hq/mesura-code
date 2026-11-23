@@ -13,6 +13,7 @@ import * as Electron from "electron";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
+import { ownsSharedDesktopIntegrations } from "../app/mesuraChannel.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
 import {
@@ -78,8 +79,10 @@ export const make = Effect.gen(function* () {
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
 
+  const ownsSharedKeys = ownsSharedDesktopIntegrations(environment);
   const widgetRules = createHyprlandWidgetRules({
     env: process.env,
+    ownsSharedDesktopIntegrations: ownsSharedKeys,
     execute: executeHyprctl,
     onError: (cause) =>
       runFork(
@@ -128,6 +131,7 @@ export const make = Effect.gen(function* () {
   const commandSocket = yield* makeDictationCommandSocket({ socketPath });
   const binds = createHyprlandSessionBinds({
     env: process.env,
+    ownsSharedDesktopIntegrations: ownsSharedKeys,
     launcher,
     socketPath,
     resolveCommand: resolveCommandPath,

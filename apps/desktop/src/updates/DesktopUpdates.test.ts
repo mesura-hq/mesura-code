@@ -1,5 +1,7 @@
+// Entry point: DesktopUpdates.configure publishes the packaged app update state.
 import * as NodeModule from "node:module";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { DESKTOP_UPDATE_RESTART_MARKER_FILE } from "@t3tools/contracts";
 import { computeReleaseNotes } from "electron-updater/out/providers/GitHubProvider.js";
@@ -8,9 +10,11 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as References from "effect/References";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
@@ -76,7 +80,67 @@ const stableUpdateInfo = (
   };
 };
 
+const configuredAppImageUpdates = Effect.fn("test.configuredAppImageUpdates")(function* (
+  channel: "stable" | "dev" | "lab",
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const appPath = yield* fs.makeTempDirectoryScoped({ prefix: "mesura-update-channel-" });
+  yield* fs.writeFileString(
+    path.join(appPath, "package.json"),
+    JSON.stringify({ mesuraChannel: channel }),
+  );
+  const harness = makeHarness({
+    appPath,
+    platform: "linux",
+    env: {
+      APPIMAGE: "/Applications/Mesura-Code.AppImage",
+      T3CODE_DESKTOP_MOCK_UPDATES: undefined,
+    },
+    appUpdateYml: "provider: github\nowner: mesura\nrepo: mesura-code\n",
+  });
+  return yield* Effect.gen(function* () {
+    const updates = yield* DesktopUpdates.DesktopUpdates;
+    const desktopState = yield* DesktopState.DesktopState;
+    yield* updates.configure;
+    return {
+      state: yield* updates.getState,
+      canInstall: yield* Ref.get(desktopState.canInstallUpdates),
+    };
+  }).pipe(Effect.provide(harness.layer));
+});
+
 describe("DesktopUpdates", () => {
+  it.effect.each(["dev", "lab"] as const)(
+    "desktop channels AC5: packaged %s reports updates disabled even with a configured feed",
+    (channel) =>
+      Effect.gen(function* () {
+        const { state, canInstall } = yield* configuredAppImageUpdates(channel);
+        assert.include(state, { enabled: false, status: "disabled" });
+        assert.isFalse(canInstall);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect.each(["dev", "lab"] as const)(
+    "desktop channels regression: packaged %s names the stable app as the one that updates",
+    (channel) =>
+      Effect.gen(function* () {
+        const { state } = yield* configuredAppImageUpdates(channel);
+        assert.equal(
+          state.message,
+          "Automatic updates are only available in the stable Mesura Code app.",
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("desktop channels guard: stable AppImage reports updates enabled with a feed", () =>
+    Effect.gen(function* () {
+      const { state, canInstall } = yield* configuredAppImageUpdates("stable");
+      assert.include(state, { enabled: true, status: "idle" });
+      assert.isTrue(canInstall);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("updates Linux .deb installs and leaves other non-AppImage installs off", () =>
     Effect.gen(function* () {
       const linuxState = (packageType: string | undefined) =>

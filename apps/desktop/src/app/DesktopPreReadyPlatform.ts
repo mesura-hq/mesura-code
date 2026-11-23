@@ -14,9 +14,9 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
 import { trimmedString } from "./DesktopConfig.ts";
 import { resolveDesktopAppBranding } from "./DesktopEnvironment.ts";
-import { resolveMesuraChannel } from "./mesuraChannel.ts";
+import { ownsSharedDesktopIntegrations, resolveMesuraChannel } from "./mesuraChannel.ts";
 import {
-  renderUrlHandlerDesktopEntry,
+  renderLinuxDesktopEntry,
   replacedVersionedAppImagePath,
 } from "./DesktopLinuxUrlHandler.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
@@ -147,7 +147,12 @@ export const make = Effect.gen(function* () {
         }
         NodeFS.writeFileSync(
           desktopEntryPath,
-          renderUrlHandlerDesktopEntry({
+          renderLinuxDesktopEntry({
+            ownsUrlScheme: ownsSharedDesktopIntegrations({
+              isDevelopment: linux.isDevelopment,
+              mesuraChannel: resolveProcessMesuraChannel(),
+            }),
+            wmClass: linux.linuxWmClass,
             displayName: resolveDesktopAppBranding({
               isDevelopment: linux.isDevelopment,
               appVersion: Electron.app.getVersion(),

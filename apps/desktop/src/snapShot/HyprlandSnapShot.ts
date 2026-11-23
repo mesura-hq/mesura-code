@@ -13,7 +13,12 @@ import { HYPRLAND_CAPTURE_ACTION } from "./linuxCaptureSession.ts";
 export { isHyprlandCaptureSession } from "./linuxCaptureSession.ts";
 
 export const HYPRLAND_CAPTURE_EXECUTABLE = "t3-hyprland-snap-shot";
-export type HyprlandCapturePaths = { readonly bundle: string; readonly dataHome: string };
+export type HyprlandCapturePaths = {
+  readonly bundle: string;
+  readonly dataHome: string;
+  /** False for a Dev or Lab app: the installed helper is the stable app's to replace. */
+  readonly refreshInstalled?: boolean;
+};
 export function hyprlandCaptureExecutable(paths: HyprlandCapturePaths) {
   return NodePath.join(paths.dataHome, "t3code", "hyprland-capture", HYPRLAND_CAPTURE_EXECUTABLE);
 }
@@ -169,7 +174,7 @@ export async function captureHyprlandWindow(
 ): Promise<LinuxWindowSnapshot> {
   const setup = new HyprlandCaptureSetup(paths);
   let state = await setup.state();
-  if (state.status === "update-required") {
+  if (state.status === "update-required" && paths.refreshInstalled !== false) {
     await setup.perform("install-hyprland-helper").catch((cause: unknown) => {
       throw new CaptureSetupRequiredError({ state: state.message, cause });
     });

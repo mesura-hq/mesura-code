@@ -805,6 +805,33 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
+  it.effect(
+    "desktop channels AC1: only the stable AppImage advertises the shared URL schemes",
+    () =>
+      Effect.gen(function* () {
+        const linuxProtocols = (channel: "stable" | "dev" | "lab") =>
+          createBuildConfig(
+            "linux",
+            "AppImage",
+            "0.0.37",
+            false,
+            false,
+            undefined,
+            undefined,
+            false,
+            "x64",
+            channel,
+          ).pipe(Effect.map((config) => (config.linux as { protocols: unknown }).protocols));
+
+        assert.deepStrictEqual(yield* linuxProtocols("stable"), [
+          { name: "Mesura Code", schemes: ["t3code", "t3code-dev"] },
+        ]);
+        // electron-builder writes no MimeType line into the embedded entry for an empty list.
+        assert.deepStrictEqual(yield* linuxProtocols("dev"), []);
+        assert.deepStrictEqual(yield* linuxProtocols("lab"), []);
+      }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
   it.effect("refuses Dev and Lab builds other than the Linux AppImage", () =>
     Effect.gen(function* () {
       for (const [platform, target] of [

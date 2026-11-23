@@ -1,3 +1,4 @@
+// Entry points: DesktopCliCommand at first launch and from Settings, and DesktopCliShim.install at backend startup.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -9,18 +10,29 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
+import { MESURA_DESKTOP_CHANNEL_IDENTITY } from "../../../../scripts/lib/brand-assets.ts";
+import type { MesuraDesktopChannelIdentity } from "./mesuraChannel.ts";
+
 import * as DesktopCliCommand from "./DesktopCliCommand.ts";
 import * as DesktopCliShim from "./DesktopCliShim.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
 const environmentFor = (
   path: Path.Path,
-  input: { home: string; baseDir: string; platform?: NodeJS.Platform; isPackaged?: boolean },
+  input: {
+    home: string;
+    baseDir: string;
+    platform?: NodeJS.Platform;
+    isPackaged?: boolean;
+    channel?: MesuraDesktopChannelIdentity["channel"];
+  },
 ) =>
   DesktopEnvironment.DesktopEnvironment.of({
     path,
     platform: input.platform ?? "linux",
     isPackaged: input.isPackaged ?? true,
+    isDevelopment: false,
+    mesuraChannel: MESURA_DESKTOP_CHANNEL_IDENTITY[input.channel ?? "stable"],
     homeDirectory: input.home,
     baseDir: input.baseDir,
     stateDir: path.join(input.baseDir, "userdata"),
@@ -36,6 +48,7 @@ const commandIn = (
     platform?: NodeJS.Platform;
     isPackaged?: boolean;
     env?: NodeJS.ProcessEnv;
+    channel?: MesuraDesktopChannelIdentity["channel"];
   },
   spawner?: ChildProcessSpawner.ChildProcessSpawner["Service"],
 ) =>
@@ -161,6 +174,85 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
         expect((yield* upgraded.install).installedPath).toBe(upgradedLink);
       }
     }),
+  );
+
+  it.effect.each(["dev", "lab"] as const)(
+    "desktop channels AC2: packaged %s writes its own t3 shim without installing a shared link",
+    (channel) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const home = yield* fs.makeTempDirectoryScoped();
+        const baseDir = path.join(home, `.mesura-code-channel-${channel}`);
+        const localLink = path.join(home, ".local", "bin", "t3");
+        const binLink = path.join(home, "bin", "t3");
+        const env: NodeJS.ProcessEnv = { PATH: "", SHELL: "/bin/zsh" };
+        const command = yield* commandIn({ home, baseDir, channel, env });
+
+        yield* command.installOnFirstLaunch;
+        expect
+          .soft(yield* fs.exists(localLink), "first launch created ~/.local/bin/t3")
+          .toBe(false);
+        expect.soft(yield* fs.exists(binLink), "first launch created ~/bin/t3").toBe(false);
+
+        yield* DesktopCliShim.install.pipe(
+          Effect.provideService(
+            DesktopEnvironment.DesktopEnvironment,
+            environmentFor(path, { home, baseDir, channel }),
+          ),
+        );
+        const shim = path.join(baseDir, "bin", "t3");
+        expect(yield* fs.readFileString(shim)).toContain(DesktopCliShim.MARKER);
+
+        // Settings has its own install path and can replace a stable link on PATH today.
+        const sharedHome = yield* fs.makeTempDirectoryScoped();
+        const sharedBin = path.join(sharedHome, "bin");
+        const sharedLink = path.join(sharedBin, "t3");
+        const stableBaseDir = path.join(sharedHome, ".mesura-code");
+        const sharedEnv = { ...env, PATH: sharedBin };
+        const stable = yield* commandIn({
+          home: sharedHome,
+          baseDir: stableBaseDir,
+          env: sharedEnv,
+        });
+        yield* stable.install;
+        const stableShim = path.join(stableBaseDir, "bin", "t3");
+        expect(yield* fs.readLink(sharedLink)).toBe(stableShim);
+
+        const sideBySide = yield* commandIn({
+          home: sharedHome,
+          baseDir: path.join(sharedHome, `.mesura-code-channel-${channel}`),
+          channel,
+          env: sharedEnv,
+        });
+        yield* Effect.result(sideBySide.install);
+        expect.soft(yield* fs.readLink(sharedLink)).toBe(stableShim);
+        expect.soft(yield* fs.exists(path.join(sharedHome, ".local", "bin", "t3"))).toBe(false);
+      }),
+  );
+
+  it.effect.each(["dev", "lab"] as const)(
+    "desktop channels AC2: packaged %s reports the shared t3 command unavailable and keeps PATH",
+    (channel) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const home = yield* fs.makeTempDirectoryScoped();
+        const baseDir = path.join(home, `.mesura-code-channel-${channel}`);
+        const env: NodeJS.ProcessEnv = { PATH: "", SHELL: "/bin/zsh" };
+        const command = yield* commandIn({ home, baseDir, channel, env });
+        yield* Effect.result(command.install);
+
+        expect(yield* command.state).toEqual({
+          supported: false,
+          installedPath: null,
+          onPath: false,
+          launcherPath: path.join(baseDir, "bin", "t3"),
+        });
+        const addToPath = yield* Effect.flip(command.addToPath);
+        expect(addToPath.message).toContain("does not install the shared t3 command");
+        expect(yield* fs.exists(path.join(home, ".zshrc"))).toBe(false);
+      }),
   );
 
   it.effect("never replaces or removes a t3 it did not create", () =>

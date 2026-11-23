@@ -20,6 +20,7 @@ import { pathSetup, readUserLoginShell } from "@t3tools/shared/shell";
 import * as DesktopCliShim from "./DesktopCliShim.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
+import { ownsSharedDesktopIntegrations } from "./mesuraChannel.ts";
 
 const { logInfo, logWarning } = makeComponentLogger("desktop-cli-command");
 
@@ -90,6 +91,12 @@ export const make = Effect.gen(function* () {
   const binDirectory = path.dirname(launcher);
   const ownedPathMarker = path.join(environment.stateDir, "cli-command-path-entry");
   const firstLaunchMarker = path.join(environment.stateDir, "cli-command-first-launch");
+  // A Dev or Lab app keeps its t3 at its own launcher; the shared t3 on PATH is the stable app's.
+  const ownsSharedCommand = ownsSharedDesktopIntegrations(environment);
+  const sharedCommandUnavailable = () =>
+    fail(
+      `${environment.displayName} does not install the shared t3 command. Run its launcher directly at ${launcher}.`,
+    );
 
   const fail = (message: string) => new DesktopCliCommandError({ message });
   const exists = (target: string) => fs.exists(target).pipe(Effect.orElseSucceed(() => false));
@@ -239,6 +246,10 @@ export const make = Effect.gen(function* () {
       return { supported: false, installedPath: null, onPath: false, launcherPath: null } as const;
     }
     const launcherPath = (yield* exists(launcher)) ? launcher : null;
+    // Settings hides what it cannot manage; the boot error still names the channel's own launcher.
+    if (!ownsSharedCommand) {
+      return { supported: false, installedPath: null, onPath: false, launcherPath } as const;
+    }
     const found = yield* installedAt;
     // Our link into another T3 home is not this app's command; Install updates it in place.
     const installed =
@@ -295,6 +306,7 @@ export const make = Effect.gen(function* () {
   const install: DesktopCliCommand["Service"]["install"] = Effect.gen(function* () {
     if (!environment.isPackaged) return yield* fail("The t3 command needs an installed app.");
     yield* ensureLauncher;
+    if (!ownsSharedCommand) return yield* sharedCommandUnavailable();
     if (windows) {
       // PATH would split the folder at the `;`, leaving two wrong entries behind.
       if (binDirectory.includes(";")) {
@@ -372,6 +384,7 @@ export const make = Effect.gen(function* () {
   const uninstall: DesktopCliCommand["Service"]["uninstall"] = Effect.gen(function* () {
     // A first launch put off for the shell PATH must not bring back what the user removed.
     yield* fs.writeFileString(firstLaunchMarker, "").pipe(Effect.ignore);
+    if (!ownsSharedCommand) return yield* state;
     if (windows) {
       if (yield* exists(ownedPathMarker)) {
         const entries = pathEntries(yield* readUserPath, ";");
@@ -393,6 +406,7 @@ export const make = Effect.gen(function* () {
   // One at a time, so Settings and onboarding cannot both append the line.
   const addToPathPermit = yield* Semaphore.make(1);
   const addToPath: DesktopCliCommand["Service"]["addToPath"] = Effect.gen(function* () {
+    if (!ownsSharedCommand) return yield* sharedCommandUnavailable();
     const installed = yield* installedAt;
     if (Option.isNone(installed) || !(yield* leadsHere(installed.value))) {
       return yield* fail("Install the t3 command first.");
@@ -418,7 +432,9 @@ export const make = Effect.gen(function* () {
 
   const installOnFirstLaunch: DesktopCliCommand["Service"]["installOnFirstLaunch"] = Effect.gen(
     function* () {
-      if (!environment.isPackaged || (yield* exists(firstLaunchMarker))) return;
+      if (!environment.isPackaged || !ownsSharedCommand || (yield* exists(firstLaunchMarker))) {
+        return;
+      }
       // Mark first so a failed or removed install is never retried behind the user's back.
       yield* fs.writeFileString(firstLaunchMarker, "");
       if (!freshInstall) {

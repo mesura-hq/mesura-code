@@ -350,3 +350,18 @@ describe("dictation widget rules under a Lua config", () => {
     expect(evals()).toHaveLength(2);
   });
 });
+
+describe("desktop channels: widget rules of an app that does not own the shared integrations", () => {
+  it("desktop channels regression: a Dev or Lab app sends no dictation widget rules to Hyprland", async () => {
+    const execute = vi.fn(async () => ({ stdout: "ok" }));
+    const rules = createHyprlandWidgetRules({
+      env: HYPRLAND,
+      ownsSharedDesktopIntegrations: false,
+      execute,
+    });
+    expect(rules.enabled).toBe(false);
+    await rules.apply();
+    await rules.reapply();
+    expect(execute).not.toHaveBeenCalled();
+  });
+});

@@ -2979,12 +2979,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
       // in the .desktop entry (Exec already gets %U), so browsers can hand
       // t3code:// OAuth callbacks to the app.
-      protocols: [
-        {
-          name: "Mesura Code",
-          schemes: ["t3code", "t3code-dev"],
-        },
-      ],
+      // Mesura: only stable owns the shared schemes; Dev and Lab never advertise them.
+      protocols:
+        channel === "stable" ? [{ name: "Mesura Code", schemes: ["t3code", "t3code-dev"] }] : [],
       desktop: {
         entry: {
           StartupWMClass: linuxIdentity.wmClass,

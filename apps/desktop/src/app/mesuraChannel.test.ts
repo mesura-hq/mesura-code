@@ -12,6 +12,8 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { resolveUserDataPath } from "./DesktopUserData.ts";
+import { MESURA_DESKTOP_CHANNEL_IDENTITY } from "../../../../scripts/lib/brand-assets.ts";
+import { withSharedUrlSchemeOwnership } from "./mesuraChannel.ts";
 
 const makePackagedFixture = Effect.fn("test.makePackagedChannelFixture")(function* (
   mesuraChannel?: "stable" | "dev" | "lab",
@@ -243,5 +245,37 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
         assert.equal(resolveMesuraChannel(fixture).channel, "lab");
       }),
     );
+  },
+);
+
+it.each(["own", "inherited"] as const)(
+  "desktop channels regression: a Lab app gets its %s setAsDefaultProtocolClient back when the bridge throws",
+  (shape) => {
+    const original = (_protocol: string) => true;
+    class FakeApp {
+      setAsDefaultProtocolClient(protocol: string) {
+        return original(protocol);
+      }
+    }
+    const app = new FakeApp();
+    if (shape === "own") app.setAsDefaultProtocolClient = original;
+    const before = app.setAsDefaultProtocolClient;
+    let claimedDuringRegister: boolean | undefined;
+
+    assert.throws(
+      () =>
+        withSharedUrlSchemeOwnership(
+          { isDevelopment: false, mesuraChannel: MESURA_DESKTOP_CHANNEL_IDENTITY.lab },
+          app,
+          () => {
+            claimedDuringRegister = app.setAsDefaultProtocolClient("t3code");
+            throw new Error("bridge failed");
+          },
+        ),
+      "bridge failed",
+    );
+    assert.isFalse(claimedDuringRegister);
+    assert.strictEqual(app.setAsDefaultProtocolClient, before);
+    assert.equal(Object.hasOwn(app, "setAsDefaultProtocolClient"), shape === "own");
   },
 );

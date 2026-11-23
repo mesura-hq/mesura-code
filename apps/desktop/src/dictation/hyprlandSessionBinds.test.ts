@@ -1055,3 +1055,22 @@ describe("dictation session binds whose bind reply failed", () => {
     ]);
   });
 });
+
+describe("desktop channels: session binds of an app that does not own the shared integrations", () => {
+  it("desktop channels regression: a Dev or Lab app sends no dictation binds to Hyprland", async () => {
+    const execute = vi.fn(async () => ({ stdout: "[]" }));
+    const binds = createHyprlandSessionBinds({
+      env: HYPRLAND,
+      ownsSharedDesktopIntegrations: false,
+      launcher: LAUNCHER,
+      socketPath: SOCKET_PATH,
+      resolveCommand: async () => null,
+      execute,
+    });
+    expect(binds.enabled).toBe(false);
+    await binds.setSessionActive(true);
+    await binds.reapply();
+    await binds.dispose();
+    expect(execute).not.toHaveBeenCalled();
+  });
+});

@@ -39,6 +39,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Electron from "electron";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { ownsSharedDesktopIntegrations } from "../app/mesuraChannel.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import { startGlobalShiftShortcutProcess } from "./GlobalShiftShortcutProcess.ts";
@@ -740,6 +741,32 @@ function observedPairMessage(
   return base;
 }
 
+const SHARED_CAPTURE_SHORTCUT_MESSAGE =
+  "The capture shortcut belongs to the stable Mesura Code app.";
+
+// The extension, the helpers and the compositor binding live at per-user paths every app shares.
+const SHARED_CAPTURE_SETUP_MESSAGE =
+  "Capture setup belongs to the stable Mesura Code app. Set it up there.";
+const SHARED_CAPTURE_SETUP_ACTIONS: ReadonlySet<DesktopSnapShotSetupAction> = new Set([
+  "install-extension",
+  "enable-extension",
+  "disable-extension",
+  "install-kde-helper",
+  "remove-kde-helper",
+  "install-hyprland-helper",
+  "remove-hyprland-helper",
+]);
+
+/** A Dev or Lab app sees a setup step it may not take as an error that names the stable app. */
+const visibleSetupState = <State extends { readonly status: string; readonly message: string }>(
+  ownsSetup: boolean,
+  state: State | undefined,
+  readyStatus: State["status"],
+): State | undefined =>
+  ownsSetup || state === undefined || state.status === readyStatus
+    ? state
+    : { ...state, status: "error", message: SHARED_CAPTURE_SETUP_MESSAGE };
+
 function probeGlobalShortcut(accelerator: string): DesktopSnapShotShortcutAvailability {
   try {
     if (!Electron.globalShortcut.register(accelerator, () => undefined)) {
@@ -778,6 +805,7 @@ export const make = Effect.gen(function* () {
   >();
   const runPromise = Effect.runPromiseWith(context);
   const captureDirectory = path.join(environment.stateDir, "snap-shots");
+  const ownsCaptureShortcut = ownsSharedDesktopIntegrations(environment);
   const linuxAppId = environment.linuxDesktopEntryName.replace(/\.desktop$/, "");
   const home = yield* HostProcess.HomeDirectory;
   // Shell discovery can replace XDG_CURRENT_DESKTOP after startup, so read the live env per state.
@@ -810,6 +838,7 @@ export const make = Effect.gen(function* () {
           HYPRLAND_CAPTURE_EXECUTABLE,
         ),
     dataHome: path.dirname(environment.linuxApplicationsDir),
+    refreshInstalled: ownsCaptureShortcut,
   };
   const shiftShortcutWorkerPath = path.join(__dirname, "snapShot", "GlobalShiftShortcutWorker.cjs");
   const shortcutConfig = new CaptureShortcutConfig(home);
@@ -1064,6 +1093,7 @@ export const make = Effect.gen(function* () {
     if (mode === "unavailable") {
       return { available: false, message: "SnapShots are not supported on this platform." };
     }
+    if (!ownsCaptureShortcut) return { available: false, message: SHARED_CAPTURE_SHORTCUT_MESSAGE };
     if (mode === "portal" && niriSocketPath()) {
       return {
         available: false,
@@ -1212,6 +1242,16 @@ export const make = Effect.gen(function* () {
         shortcutRegistered: false,
         shortcutMessage: null,
         message: permissionMessage,
+      });
+      return;
+    }
+    if (!ownsCaptureShortcut) {
+      yield* Ref.set(stateRef, {
+        mode,
+        shortcut,
+        shortcutRegistered: false,
+        shortcutMessage: SHARED_CAPTURE_SHORTCUT_MESSAGE,
+        message: null,
       });
       return;
     }
@@ -1389,6 +1429,9 @@ export const make = Effect.gen(function* () {
   }, configurationMutex.withPermits(1));
 
   const setup = Effect.fn("desktop.snapShot.setup")(function* (action: DesktopSnapShotSetupAction) {
+    if (!ownsCaptureShortcut && SHARED_CAPTURE_SETUP_ACTIONS.has(action)) {
+      return yield* new DesktopSnapShotSetupError({ action, reason: "unsupported-session" });
+    }
     if (action === "test-mac-capture") {
       if (environment.platform !== "darwin")
         return yield* new DesktopSnapShotSetupError({ action, reason: "unsupported-session" });
@@ -1549,7 +1592,7 @@ export const make = Effect.gen(function* () {
   const configDesktop = Effect.fn("desktop.snapShot.configDesktop")(function* (
     action: "preview-config" | "apply-config",
   ) {
-    if (captureMode(environment.platform) === "portal") {
+    if (ownsCaptureShortcut && captureMode(environment.platform) === "portal") {
       if (niriSocketPath()) return "niri" as const;
       if (isHyprlandCaptureSession()) return "hyprland" as const;
     }
@@ -1666,27 +1709,37 @@ export const make = Effect.gen(function* () {
                       name === "gnome" || name === "kde" || name === "niri" || name === "hyprland",
                   )
               : undefined;
-          const gnomeExtension = hasGnomeSetup()
-            ? yield* Effect.promise(async () => {
-                const { GnomeCaptureSetup } = await import("./GnomeCaptureSetup.ts");
-                const setup = new GnomeCaptureSetup(gnomeSetupPaths);
-                try {
-                  return await setup.state();
-                } finally {
-                  setup.close();
-                }
-              })
-            : undefined;
-          const kdeHelper =
+          const gnomeExtension = visibleSetupState(
+            ownsCaptureShortcut,
+            hasGnomeSetup()
+              ? yield* Effect.promise(async () => {
+                  const { GnomeCaptureSetup } = await import("./GnomeCaptureSetup.ts");
+                  const setup = new GnomeCaptureSetup(gnomeSetupPaths);
+                  try {
+                    return await setup.state();
+                  } finally {
+                    setup.close();
+                  }
+                })
+              : undefined,
+            "enabled",
+          );
+          const kdeHelper = visibleSetupState(
+            ownsCaptureShortcut,
             state.linuxBackend === "kde"
               ? yield* Effect.promise(() => new KdeCaptureSetup(kdeCapturePaths).state())
-              : undefined;
-          const hyprlandHelper =
+              : undefined,
+            "ready",
+          );
+          const hyprlandHelper = visibleSetupState(
+            ownsCaptureShortcut,
             state.linuxBackend === "hyprland"
               ? yield* Effect.promise(() => new HyprlandCaptureSetup(hyprlandCapturePaths).state())
-              : undefined;
+              : undefined,
+            "ready",
+          );
           const hyprlandShortcut =
-            state.linuxBackend === "hyprland"
+            state.linuxBackend === "hyprland" && ownsCaptureShortcut
               ? yield* Effect.promise(() => hyprlandCaptureShortcut(linuxAppId, home))
               : undefined;
           return {
@@ -1702,7 +1755,7 @@ export const make = Effect.gen(function* () {
                 }
               : {}),
             ...hyprlandShortcut,
-            ...(state.linuxBackend === "niri"
+            ...(state.linuxBackend === "niri" && ownsCaptureShortcut
               ? { shortcutConfigPath: niriCaptureConfigPath(home) }
               : {}),
             ...(kdeHelper

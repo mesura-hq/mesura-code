@@ -61,3 +61,43 @@ export function resolveMesuraChannelBackendPort(
 ): Option.Option<number> {
   return channel.channel === "stable" ? Option.none() : Option.some(channel.backendPort);
 }
+
+/**
+ * The URL handler, the shared `t3` link, the dictation keys and widget rules, the capture shortcut
+ * and the updater are per machine, not per app: only the stable app (or development mode) takes
+ * them, so a Dev or Lab app never changes how the stable app behaves.
+ */
+export function ownsSharedDesktopIntegrations(input: {
+  readonly isDevelopment: boolean;
+  readonly mesuraChannel: MesuraDesktopChannelIdentity;
+}): boolean {
+  return input.isDevelopment || input.mesuraChannel.channel === "stable";
+}
+
+interface DefaultProtocolClientApp {
+  setAsDefaultProtocolClient: (protocol: string, ...rest: never[]) => boolean;
+}
+
+/**
+ * WORKAROUND: a Dev or Lab app runs `register` with `app.setAsDefaultProtocolClient` as a no-op.
+ * `@clerk/electron` 0.1.10 `createClerkBridge` claims the scheme unconditionally, which on Linux
+ * writes mimeapps.list. Patching the package changes the lockfile; remove once the bridge can skip it.
+ */
+export function withSharedUrlSchemeOwnership<A>(
+  input: Parameters<typeof ownsSharedDesktopIntegrations>[0],
+  app: DefaultProtocolClientApp,
+  register: () => A,
+): A {
+  if (ownsSharedDesktopIntegrations(input)) return register();
+  const own = Object.getOwnPropertyDescriptor(app, "setAsDefaultProtocolClient");
+  app.setAsDefaultProtocolClient = () => false;
+  try {
+    return register();
+  } finally {
+    if (own === undefined) {
+      Reflect.deleteProperty(app, "setAsDefaultProtocolClient");
+    } else {
+      Object.defineProperty(app, "setAsDefaultProtocolClient", own);
+    }
+  }
+}

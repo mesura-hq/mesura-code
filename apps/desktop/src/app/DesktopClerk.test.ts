@@ -17,17 +17,23 @@ afterAll(() => {
   NodeFS.rmSync(clerkStateDir, { recursive: true, force: true });
 });
 
-const { createClerkBridgeMock, requestSingleInstanceLockMock, storageAdapter, storageMock } =
-  vi.hoisted(() => ({
-    createClerkBridgeMock: vi.fn(),
-    requestSingleInstanceLockMock: vi.fn(() => true),
-    storageAdapter: {
-      getItem: vi.fn(),
-      setItem: vi.fn(),
-      removeItem: vi.fn(),
-    },
-    storageMock: vi.fn(),
-  }));
+const {
+  createClerkBridgeMock,
+  electronAppMock,
+  requestSingleInstanceLockMock,
+  storageAdapter,
+  storageMock,
+} = vi.hoisted(() => ({
+  createClerkBridgeMock: vi.fn(),
+  electronAppMock: { setAsDefaultProtocolClient: vi.fn((_protocol: string) => true) },
+  requestSingleInstanceLockMock: vi.fn(() => true),
+  storageAdapter: {
+    getItem: vi.fn(),
+    setItem: vi.fn(),
+    removeItem: vi.fn(),
+  },
+  storageMock: vi.fn(),
+}));
 
 vi.mock("@clerk/electron", () => ({
   createClerkBridge: createClerkBridgeMock,
@@ -36,6 +42,8 @@ vi.mock("@clerk/electron", () => ({
 vi.mock("@clerk/electron/storage", () => ({
   storage: storageMock,
 }));
+
+vi.mock("electron", () => ({ app: electronAppMock }));
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as ElectronApp from "../electron/ElectronApp.ts";
@@ -46,6 +54,8 @@ import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopWebLinks from "./DesktopWebLinks.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopPreReadyFileSystem from "./DesktopPreReadyFileSystem.ts";
+import { MESURA_DESKTOP_CHANNEL_IDENTITY } from "../../../../scripts/lib/brand-assets.ts";
+import type { MesuraDesktopChannelIdentity } from "./mesuraChannel.ts";
 
 const ignoreWebLinks = DesktopWebLinks.DesktopWebLinks.of({
   receive: () => Effect.void,
@@ -65,10 +75,12 @@ const layerDesktopClerk = (
     copyText: () => Effect.void,
   },
   listeners = new Map<string, (...args: unknown[]) => void>(),
+  channel: MesuraDesktopChannelIdentity["channel"] = "stable",
 ) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
     stateDir: clerkStateDir,
     isDevelopment,
+    mesuraChannel: MESURA_DESKTOP_CHANNEL_IDENTITY[channel],
     appDataDirectory: "/tmp/app-data",
     platform,
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
@@ -172,6 +184,36 @@ describe("DesktopClerk", () => {
         [{ path: NodePath.join(NodePath.resolve(clerkStateDir), "clerk") }],
       ]);
       assert.notStrictEqual(createClerkBridgeMock.mock.calls[0]?.[0]?.storage, storageAdapter);
+    },
+  );
+
+  it.effect.each([
+    { channel: "stable", claims: ["t3code"] },
+    { channel: "dev", claims: [] },
+    { channel: "lab", claims: [] },
+  ] as const)(
+    "desktop channels AC1: the Clerk bridge of packaged $channel claims the URL scheme only on stable",
+    ({ channel, claims }) => {
+      storageMock.mockReturnValue(storageAdapter);
+      electronAppMock.setAsDefaultProtocolClient.mockClear();
+      // @clerk/electron 0.1.10 calls this unconditionally while it builds the bridge.
+      createClerkBridgeMock.mockImplementation(
+        (options: { readonly renderer: { readonly scheme: string } }) => {
+          electronAppMock.setAsDefaultProtocolClient(options.renderer.scheme);
+          return { cleanup: vi.fn(), isPrimaryInstance: true };
+        },
+      );
+      const claimed = electronAppMock.setAsDefaultProtocolClient;
+      return Effect.gen(function* () {
+        yield* Layer.build(
+          layerDesktopClerk(false, [], "linux", undefined, undefined, undefined, channel),
+        );
+        assert.deepEqual(
+          claimed.mock.calls.map(([scheme]) => scheme),
+          [...claims],
+        );
+        assert.strictEqual(electronAppMock.setAsDefaultProtocolClient, claimed);
+      }).pipe(Effect.scoped);
     },
   );
 

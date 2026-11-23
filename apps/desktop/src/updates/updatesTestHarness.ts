@@ -36,6 +36,8 @@ export interface UpdatesHarnessOptions {
   readonly backendInstances?: ReadonlyArray<DesktopBackendPool.DesktopBackendInstance>;
   readonly env?: Record<string, string | undefined>;
   readonly platform?: NodeJS.Platform;
+  readonly appPath?: string;
+  readonly appUpdateYml?: string;
   readonly packageType?: string | undefined;
   readonly installRecord?: string | undefined;
   readonly policy?: DesktopUpdatePolicy.UpdatePolicy;
@@ -185,7 +187,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     platform: options.platform ?? "darwin",
     processArch: "x64",
     appVersion: options.appVersion ?? "1.2.3",
-    appPath: "/repo",
+    appPath: options.appPath ?? "/repo",
     isPackaged: true,
     resourcesPath: "/missing/resources",
     runningUnderArm64Translation: false,
@@ -255,6 +257,9 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
         ? (installRecords.get(path) ?? previousInstallRecord)
         : undefined;
       if (installRecord !== undefined) return Effect.succeed(installRecord);
+      if (path === "/missing/resources/app-update.yml" && options.appUpdateYml !== undefined) {
+        return Effect.succeed(options.appUpdateYml);
+      }
       return path === "/missing/resources/package-type" && options.packageType !== undefined
         ? Effect.succeed(options.packageType)
         : Effect.fail(

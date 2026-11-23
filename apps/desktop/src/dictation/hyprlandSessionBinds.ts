@@ -269,6 +269,8 @@ async function resolveBindTransport(
 
 export function createHyprlandSessionBinds(input: {
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** False for a Dev or Lab app: the compositor's dictation binds stay the stable app's. Omitted means true. */
+  readonly ownsSharedDesktopIntegrations?: boolean;
   readonly launcher: ReadonlyArray<string>;
   /** The command socket the keys write to while it listens. */
   readonly socketPath: string;
@@ -285,7 +287,7 @@ export function createHyprlandSessionBinds(input: {
   readonly reapply: () => Promise<void>;
   readonly dispose: () => Promise<void>;
 } {
-  const enabled = isHyprlandSession(input.env);
+  const enabled = input.ownsSharedDesktopIntegrations !== false && isHyprlandSession(input.env);
   const readConfigProvider = createHyprlandConfigProviderReader(input.execute);
   /** Whether a session wants the binds; what Hyprland holds can differ after a reload. */
   let active = false;
