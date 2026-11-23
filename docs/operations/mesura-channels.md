@@ -56,6 +56,66 @@ The launcher also drops an inherited `T3CODE_HOME` and `T3CODE_PORT`, so a chann
 another channel's home, and sets `T3CODE_DESKTOP_LAUNCHER_PATH` to itself, so the menu entry the
 app writes starts the launcher and a menu start activates a staged build.
 
+## Follow dev
+
+```bash
+node scripts/mesura-channel/channel.ts follow-dev
+```
+
+One tick of the Dev follower: it fetches `origin/dev` in `/opt/dev/repos/mesura-code`, builds Dev
+when that SHA differs from the last built one, fetches again after the build, and stages the newest
+build when `ssh -o BatchMode=yes -o ConnectTimeout=8 jc@arch-laptop true` answers. Dev runs the
+staged build after its next cold start. The record is `~/.local/state/mesura-channel/dev-follow.json`:
+`lastBuiltSha`, `lastStagedSha`, `pendingAppImage` (the newest build not yet staged) and
+`lastError` (with the build log path for a failed build).
+
+- A failed build leaves `lastBuiltSha` as it was, so the next tick builds the same SHA again.
+- While the laptop is offline the build stays pending, build cleanup keeps it, and a later tick
+  stages it without rebuilding.
+- A newer merge replaces a pending build, also one that lands during a build, so only the newest
+  Dev build is staged.
+- A tick holds `~/.local/state/mesura-channel/dev-follow.lock` from its first read of the record to
+  its last write. A manual tick that finds the timer's tick running skips, and the reverse.
+
+The timer runs one tick every 15 minutes and catches up after vigilia was down. The follower runs in
+`mesura-agents.slice` with `MemoryMax=1G`; the build is still the 6G workload.
+
+### The pinned follower checkout
+
+The units run the follower from `/opt/dev/deploy/mesura-channel-follower`, a detached worktree at a
+commit you choose, so a branch switch or a dirty tree in `/opt/dev/repos/mesura-code` never changes
+the unattended code. `/opt/dev/repos/mesura-code` stays the git source and
+`/opt/dev/deploy/mesura-code-channels` the build worktree. Create it, or move it to a new commit,
+with the same commands; the install restores the lockfile as the build does:
+
+```bash
+git -C /opt/dev/repos/mesura-code fetch origin
+[ -e /opt/dev/deploy/mesura-channel-follower/.git ] ||
+  git -C /opt/dev/repos/mesura-code worktree add --detach /opt/dev/deploy/mesura-channel-follower origin/dev
+cd /opt/dev/deploy/mesura-channel-follower
+git checkout -q --detach <commit>
+source ~/.nvm/nvm.sh && nvm use && . ~/.config/vite-plus/env
+pnpm install --frozen-lockfile; git checkout -q -- pnpm-lock.yaml
+```
+
+### Install and remove the timer
+
+Install on vigilia (a machine change; do it only with the developer's go-ahead):
+
+```bash
+systemctl --user link /opt/dev/deploy/mesura-channel-follower/scripts/mesura-channel/systemd/mesura-channel-dev.service \
+  /opt/dev/deploy/mesura-channel-follower/scripts/mesura-channel/systemd/mesura-channel-dev.timer
+systemctl --user enable --now mesura-channel-dev.timer
+```
+
+Watch it with `systemctl --user list-timers mesura-channel-dev.timer` and
+`journalctl --user -u mesura-channel-dev.service`. Remove it, links included:
+
+```bash
+systemctl --user disable --now mesura-channel-dev.timer mesura-channel-dev.service
+systemctl --user daemon-reload
+```
+
 ## Put a branch in Lab
 
 ```bash

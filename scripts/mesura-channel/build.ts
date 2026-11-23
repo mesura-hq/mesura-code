@@ -15,7 +15,8 @@ import {
   type SideBySideChannel,
   vigiliaChannelState,
 } from "./config.ts";
-import { run, sha256File, shellCommand } from "./shell.ts";
+import { readFollowDevState } from "./follow-record.ts";
+import { run, sha256File, shellCommand, writeJsonAtomic } from "./shell.ts";
 
 export interface BuildInput {
   readonly channel: SideBySideChannel;
@@ -100,6 +101,7 @@ export function planBuild(input: BuildInput) {
     workloadName: CHANNEL_BUILD_WORKLOAD_NAME,
     lockPath: CHANNEL_BUILD_LOCK,
     log: state.buildLog(input.channel),
+    followRecord: state.followState(input.channel),
     failureRecord: state.lastFailure(input.channel),
     steps,
     outputRoot,
@@ -146,21 +148,39 @@ export function assertInBuildWorkload(
   }
 }
 
-/** Publishes the record with a rename, then drops run directories other than it and the previous one. */
-export function publishArtifact(outputRoot: string, record: string, artifact: BuildArtifact) {
+/**
+ * Publishes the record with a rename, then drops run directories other than it, the previous one and
+ * any `retained` path (the follower's build still waiting for the laptop).
+ */
+export function publishArtifact(
+  outputRoot: string,
+  record: string,
+  artifact: BuildArtifact,
+  retained: ReadonlyArray<string> = [],
+) {
   const previous = NodeFS.existsSync(record)
     ? (JSON.parse(NodeFS.readFileSync(record, "utf8")) as BuildArtifact).path
     : undefined;
-  NodeFS.mkdirSync(NodePath.dirname(record), { recursive: true });
-  NodeFS.writeFileSync(`${record}.tmp`, `${JSON.stringify(artifact, null, 2)}\n`);
-  NodeFS.renameSync(`${record}.tmp`, record);
+  writeJsonAtomic(record, artifact);
   const keep = new Set(
-    [artifact.path, previous].flatMap((path) => (path ? [NodePath.dirname(path)] : [])),
+    [artifact.path, previous, ...retained].flatMap((path) =>
+      path ? [NodePath.dirname(path)] : [],
+    ),
   );
   for (const entry of NodeFS.readdirSync(outputRoot)) {
     const directory = NodePath.join(outputRoot, entry);
     if (!keep.has(directory)) NodeFS.rmSync(directory, { recursive: true, force: true });
   }
+}
+
+/** Publishes a finished build; cleanup keeps the follower's build that still waits for the laptop. */
+export function publishBuildArtifact(
+  plan: Pick<BuildPlan, "outputRoot" | "followRecord">,
+  record: string,
+  artifact: BuildArtifact,
+) {
+  const pending = readFollowDevState(plan.followRecord).pendingAppImage;
+  publishArtifact(plan.outputRoot, record, artifact, pending ? [pending.path] : []);
 }
 
 /** The install can leave the host @pnpm/exe artifact in the lockfile, also when it fails. */
@@ -295,7 +315,7 @@ export function executeBuild(plan: BuildPlan, runId: string): BuildArtifact {
             electron,
             runId,
           };
-          publishArtifact(plan.outputRoot, step.record, artifact);
+          publishBuildArtifact(plan, step.record, artifact);
           log(`AppImage ${artifact.path}`);
           log(`sha256 ${artifact.sha256}`);
           return artifact;

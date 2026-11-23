@@ -1,0 +1,21 @@
+# Installed by symlink from the pinned follower checkout; see docs/operations/mesura-channels.md.
+# It runs from that checkout, never from /opt/dev/repos/mesura-code, whose branch changes under it.
+[Unit]
+Description=Mesura Code Dev channel: build origin/dev after each merge and stage it on the laptop
+Documentation=file:///opt/dev/deploy/mesura-channel-follower/docs/operations/mesura-channels.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/dev/deploy/mesura-channel-follower
+# The pinned checkout's .nvmrc Node; the build workload selects the built revision's own Node.
+ExecStart=/bin/bash -c 'source %h/.nvm/nvm.sh >/dev/null && nvm use --silent >/dev/null && exec node scripts/mesura-channel/channel.ts follow-dev'
+# Counted in the agents' budget. The build itself runs as mesura-workload-mesura-channel-build
+# (MemoryHigh 6G) in the same slice; this unit holds only the follower, git, ssh and rsync.
+Slice=mesura-agents.slice
+MemoryMax=1G
+OOMPolicy=continue
+# A build waits up to an hour for the build lock, then takes minutes (1.5 with a warm store).
+TimeoutStartSec=2h
+Nice=10

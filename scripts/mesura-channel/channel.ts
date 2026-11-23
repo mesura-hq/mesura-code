@@ -20,13 +20,15 @@ import {
 import { executeConnect, parseSuppliedPairingUrls, readPrivateInput } from "./connect.ts";
 import { labResetRemoteScript, planLabReset } from "./lab-reset.ts";
 import { redactSecrets, run, runRemote, shellQuote } from "./shell.ts";
-import { executeStage, planStage } from "./stage.ts";
+import { runFollowDevTick } from "./follow-dev.ts";
+import { stageBuildArtifact } from "./stage.ts";
 
 const USAGE = `Usage:
   channel.ts build --channel <dev|lab> --rev <rev>
   channel.ts stage --channel <dev|lab>
   channel.ts lab --rev <branch>
-  channel.ts connect [--pairing-urls <mode-0600 file | ->]`;
+  channel.ts connect [--pairing-urls <mode-0600 file | ->]
+  channel.ts follow-dev`;
 
 export type ChannelCommand =
   | {
@@ -42,7 +44,8 @@ export type ChannelCommand =
       readonly command: "connect";
       /** A mode-0600 file, or `-` for stdin, with `stable=<url>` / `vigilia=<url>` lines. */
       readonly pairingUrlsFile?: string;
-    };
+    }
+  | { readonly command: "follow-dev" };
 
 function usageError(message: string): Error {
   return new Error(`${message}\n${USAGE}`);
@@ -111,6 +114,9 @@ export function parseChannelArgs(argv: ReadonlyArray<string>): ChannelCommand {
       const pairingUrlsFile = readFlags(rest, ["--pairing-urls"]).single("--pairing-urls");
       return { command, ...(pairingUrlsFile === undefined ? {} : { pairingUrlsFile }) };
     }
+    case "follow-dev":
+      readFlags(rest, []);
+      return { command };
     default:
       throw usageError(`Unknown command ${command ?? "(none)"}.`);
   }
@@ -124,15 +130,7 @@ function stageLatest(
   if (artifact === undefined) {
     throw new Error(`No ${channel} build yet; run build --channel ${channel} --rev <rev> first.`);
   }
-  executeStage(
-    planStage({
-      channel,
-      appImagePath: artifact.path,
-      sha256: artifact.sha256,
-      laptopHome: laptop.home,
-      laptopTarget: laptop.target,
-    }),
-  );
+  stageBuildArtifact(artifact, laptop);
   return artifact;
 }
 
@@ -214,6 +212,9 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
             ? new Map()
             : parseSuppliedPairingUrls(readPrivateInput(parsed.pairingUrlsFile)),
       });
+      return;
+    case "follow-dev":
+      await runFollowDevTick({ deployHome: NodeOS.homedir() });
       return;
   }
 }

@@ -2,6 +2,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
@@ -54,13 +55,58 @@ export function run(
   return result.stdout ?? "";
 }
 
+function sshArgs(target: string, connectTimeoutSeconds: number): Array<string> {
+  return [
+    ...[
+      "BatchMode=yes",
+      `ConnectTimeout=${connectTimeoutSeconds}`,
+      "ServerAliveInterval=15",
+    ].flatMap((option) => ["-o", option]),
+    target,
+  ];
+}
+
 /** Runs a POSIX sh script on the SSH target through stdin, so values need one quoting layer. */
 export function runRemote(target: string, script: string, options: RunOptions = {}): string {
-  const sshOptions = ["BatchMode=yes", "ConnectTimeout=10", "ServerAliveInterval=15"];
-  return run("ssh", [...sshOptions.flatMap((option) => ["-o", option]), target, "sh", "-s"], {
+  return run("ssh", [...sshArgs(target, 10), "sh", "-s"], {
     ...options,
     input: `set -eu\n${script}\n`,
   });
+}
+
+/** Whether the SSH target answers within a short connect timeout, without a password prompt. */
+export function isSshReachable(target: string): boolean {
+  try {
+    run("ssh", [...sshArgs(target, 8), "true"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Takes an exclusive `flock` on `path` without waiting, or returns undefined when another process
+ * holds it. The lock belongs to the open file, so it lasts until the returned handle is disposed.
+ */
+export function tryHoldFileLock(path: string): Disposable | undefined {
+  NodeFS.mkdirSync(NodePath.dirname(path), { recursive: true });
+  const fd = NodeFS.openSync(path, "a", 0o600);
+  const busyExit = 75;
+  const result = NodeChildProcess.spawnSync("flock", ["-n", "-E", String(busyExit), "3"], {
+    stdio: ["ignore", "ignore", "pipe", fd],
+    encoding: "utf8",
+  });
+  if (result.status === 0) return { [Symbol.dispose]: () => NodeFS.closeSync(fd) };
+  NodeFS.closeSync(fd);
+  if (result.status === busyExit) return undefined;
+  throw result.error ?? new Error(`flock ${path} exited with ${result.status}: ${result.stderr}`);
+}
+
+/** Writes JSON under a temporary name and renames it, so a reader never sees a partial file. */
+export function writeJsonAtomic(path: string, value: unknown): void {
+  NodeFS.mkdirSync(NodePath.dirname(path), { recursive: true });
+  NodeFS.writeFileSync(`${path}.tmp`, `${JSON.stringify(value, null, 2)}\n`);
+  NodeFS.renameSync(`${path}.tmp`, path);
 }
 
 /**

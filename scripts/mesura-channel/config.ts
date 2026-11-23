@@ -110,12 +110,20 @@ export function vigiliaChannelState(deployHome: string) {
     buildOutput: (channel: SideBySideChannel) =>
       NodePath.join(deployHome, "builds", `mesura-channel-${channel}`),
     buildLog: (channel: SideBySideChannel) => NodePath.join(root, `${channel}-build.log`),
+    /** `follow-dev`'s record: the last built and staged SHA, the unstaged build, the last error. */
+    followState: (channel: SideBySideChannel) => NodePath.join(root, `${channel}-follow.json`),
+    /** Held for a whole `follow-dev` tick, so a manual tick and the timer never overlap. */
+    followLock: (channel: SideBySideChannel) => NodePath.join(root, `${channel}-follow.lock`),
   };
+}
+
+export function laptopSshTarget(): string {
+  return process.env[LAPTOP_SSH_TARGET_ENV] ?? DEFAULT_LAPTOP_SSH_TARGET;
 }
 
 /** The laptop SSH target and its absolute home; the home is read over SSH unless overridden. */
 export function resolveLaptopTarget(): { readonly target: string; readonly home: string } {
-  const target = process.env[LAPTOP_SSH_TARGET_ENV] ?? DEFAULT_LAPTOP_SSH_TARGET;
+  const target = laptopSshTarget();
   const home = process.env[LAPTOP_HOME_ENV] ?? runRemote(target, 'printf %s "$HOME"');
   return { target, home };
 }

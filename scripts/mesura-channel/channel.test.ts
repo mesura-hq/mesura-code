@@ -1,13 +1,16 @@
 // Entry points: channel.ts CLI dispatch and the staged launcher.sh (substitute @CHANNEL@ with dev or lab).
 // Expected exports: parseChannelArgs (channel.ts), planBuild (build.ts), planStage (stage.ts),
 // planLabReset and copyLabAuthRows (lab-reset.ts), planConnect and formatPairingUrl (connect.ts).
+// Phase 4 expects decideFollowDevTick(state, observations) and runFollowDevTick(options) from follow-dev.ts.
 // @effect-diagnostics nodeBuiltinImport:off - The launcher subprocess and SQLite tests use disposable host files.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
-import { expect, it } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
+
+import type { BuildArtifact, BuildInput } from "./build.ts";
 
 const deployHome = "/fixture/vigilia";
 const laptopHome = "/fixture/laptop";
@@ -759,4 +762,428 @@ it("phase 3 regression: the readiness wait is one wall-clock deadline, so a spen
   );
   expect(result.status).toBe(1);
   expect(result.stderr).toMatch(/did not answer in time/u);
+});
+
+function followDevArtifact(home: string, commit: string): BuildArtifact {
+  const path = NodePath.join(home, commit, "Mesura-Code-Dev.AppImage");
+  NodeFS.mkdirSync(NodePath.dirname(path), { recursive: true });
+  NodeFS.writeFileSync(path, commit);
+  return {
+    channel: "dev",
+    revision: commit,
+    commit,
+    path,
+    sha256: "d".repeat(64),
+    electron: "44.10.1",
+    runId: commit,
+  };
+}
+
+async function followDevFixture(home: string, initialSha: string) {
+  const { runFollowDevTick } = await import("./follow-dev.ts");
+  const fetchOriginDev = vi.fn(async () => initialSha);
+  const build = vi.fn(async ({ revision }: BuildInput) => followDevArtifact(home, revision));
+  const isLaptopReachable = vi.fn(async () => true);
+  const stage = vi.fn(async (artifact: BuildArtifact) => {
+    expect(NodeFS.readFileSync(artifact.path, "utf8")).toBe(artifact.commit);
+  });
+  return {
+    fetchOriginDev,
+    build,
+    isLaptopReachable,
+    stage,
+    tick: () =>
+      runFollowDevTick({ deployHome: home, fetchOriginDev, build, isLaptopReachable, stage }),
+  };
+}
+
+function readFollowDevRecord(home: string) {
+  const directory = NodePath.join(home, ".local/state/mesura-channel");
+  for (const name of NodeFS.readdirSync(directory)) {
+    if (!name.endsWith(".json")) continue;
+    const record = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(directory, name), "utf8"),
+    ) as Record<string, unknown>;
+    if ("lastBuiltSha" in record) return record;
+  }
+  throw new Error(`No follow-dev state record in ${directory}.`);
+}
+
+const firstDevSha = "a".repeat(40);
+const nextDevSha = "b".repeat(40);
+
+it("phase 4 follow-dev fetches on every tick and builds the fetched Dev revision only when the recorded SHA changes", async () => {
+  const { parseChannelArgs } = await import("./channel.ts");
+  expect(parseChannelArgs(["follow-dev"])).toMatchObject({ command: "follow-dev" });
+
+  const { decideFollowDevTick } = await import("./follow-dev.ts");
+  const state = { lastBuiltSha: firstDevSha, lastStagedSha: firstDevSha };
+  expect(decideFollowDevTick(state, { originDevSha: firstDevSha })).toMatchObject({ kind: "idle" });
+  expect(decideFollowDevTick(state, { originDevSha: nextDevSha })).toMatchObject({
+    kind: "build",
+    sha: nextDevSha,
+  });
+
+  using home = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-dev-"));
+  const first = await followDevFixture(home.path, firstDevSha);
+  await first.tick();
+  // Once before deciding and once after the build, since dev can move while it packages.
+  expect(first.fetchOriginDev).toHaveBeenCalledTimes(2);
+  expect(first.build).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ channel: "dev", revision: firstDevSha }),
+  );
+  expect(readFollowDevRecord(home.path)).toMatchObject({ lastBuiltSha: firstDevSha });
+
+  const next = await followDevFixture(home.path, firstDevSha);
+  await next.tick();
+  expect(next.fetchOriginDev).toHaveBeenCalledTimes(1);
+  expect(next.build).not.toHaveBeenCalled();
+  next.fetchOriginDev.mockResolvedValue(nextDevSha);
+  await next.tick();
+  expect(next.fetchOriginDev).toHaveBeenCalledTimes(3);
+  expect(next.build).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ channel: "dev", revision: nextDevSha }),
+  );
+  expect(readFollowDevRecord(home.path)).toMatchObject({ lastBuiltSha: nextDevSha });
+});
+
+it("phase 4 follow-dev records a failed build and its log and retries the same Dev SHA", async () => {
+  using home = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-dev-"));
+  const fixture = await followDevFixture(home.path, firstDevSha);
+  await fixture.tick();
+
+  const logPath = NodePath.join(home.path, ".local/state/mesura-channel/dev-build.log");
+  const failure = "Fixture packaging failed";
+  fixture.fetchOriginDev.mockResolvedValue(nextDevSha);
+  fixture.build.mockRejectedValueOnce(new Error(failure));
+  await fixture.tick().catch((error: unknown) => expect(String(error)).toContain(failure));
+
+  const record = readFollowDevRecord(home.path);
+  expect(record).toMatchObject({ lastBuiltSha: firstDevSha, lastStagedSha: firstDevSha });
+  expect(JSON.stringify(record.lastError)).toContain(failure);
+  expect(JSON.stringify(record.lastError)).toContain(logPath);
+  expect(fixture.stage).toHaveBeenCalledTimes(1);
+
+  await fixture.tick();
+  expect(fixture.build.mock.calls.map(([input]) => input.revision)).toEqual([
+    firstDevSha,
+    nextDevSha,
+    nextDevSha,
+  ]);
+  expect(readFollowDevRecord(home.path)).toMatchObject({ lastBuiltSha: nextDevSha });
+});
+
+it("phase 4 follow-dev keeps the Dev AppImage while the laptop is offline and stages it without rebuilding", async () => {
+  using home = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-dev-"));
+  const offline = await followDevFixture(home.path, firstDevSha);
+  offline.isLaptopReachable.mockResolvedValue(false);
+  await offline.tick();
+
+  const appImage = NodePath.join(home.path, firstDevSha, "Mesura-Code-Dev.AppImage");
+  const offlineRecord = readFollowDevRecord(home.path);
+  expect(offline.isLaptopReachable).toHaveBeenCalledOnce();
+  expect(offline.stage).not.toHaveBeenCalled();
+  expect(offlineRecord.lastBuiltSha).toBe(firstDevSha);
+  expect(offlineRecord.lastStagedSha).not.toBe(firstDevSha);
+  expect(JSON.stringify(offlineRecord.pendingAppImage)).toContain(appImage);
+  expect(NodeFS.readFileSync(appImage, "utf8")).toBe(firstDevSha);
+
+  const online = await followDevFixture(home.path, firstDevSha);
+  await online.tick();
+  expect(online.build).not.toHaveBeenCalled();
+  expect(online.stage).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ commit: firstDevSha, path: appImage }),
+  );
+  expect(readFollowDevRecord(home.path)).toMatchObject({ lastStagedSha: firstDevSha });
+});
+
+it("phase 4 follow-dev stages only the newest Dev SHA when a newer merge replaces a pending build", async () => {
+  using home = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-dev-"));
+  const fixture = await followDevFixture(home.path, firstDevSha);
+  fixture.isLaptopReachable.mockResolvedValueOnce(false);
+  await fixture.tick();
+  expect(fixture.stage).not.toHaveBeenCalled();
+
+  fixture.fetchOriginDev.mockResolvedValue(nextDevSha);
+  await fixture.tick();
+
+  expect(fixture.build.mock.calls.map(([input]) => input.revision)).toEqual([
+    firstDevSha,
+    nextDevSha,
+  ]);
+  expect(fixture.stage).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      commit: nextDevSha,
+      path: NodePath.join(home.path, nextDevSha, "Mesura-Code-Dev.AppImage"),
+    }),
+  );
+  expect(readFollowDevRecord(home.path)).toMatchObject({
+    lastBuiltSha: nextDevSha,
+    lastStagedSha: nextDevSha,
+  });
+});
+
+it("phase 4 follow-dev ships a persistent quarter-hour timer, a memory-limited service, and installation and removal commands", () => {
+  const timer = NodeFS.readFileSync(
+    new URL("./systemd/mesura-channel-dev.timer", import.meta.url),
+    "utf8",
+  );
+  const service = NodeFS.readFileSync(
+    new URL("./systemd/mesura-channel-dev.service", import.meta.url),
+    "utf8",
+  );
+  const docs = NodeFS.readFileSync(
+    new URL("../../docs/operations/mesura-channels.md", import.meta.url),
+    "utf8",
+  );
+
+  // Persistent= catches up only for OnCalendar= timers, so a monotonic schedule does not qualify.
+  expect(timer).toMatch(/^OnCalendar=.*[ *]:(?:00?\/15|00?,15,30,45)(?::00)?$/mu);
+  expect(timer).not.toMatch(/^On(?:Unit|Boot|Startup|Active)\w*Sec=/mu);
+  expect(timer).toMatch(/^Persistent=true$/mu);
+  expect(service).toMatch(/^WorkingDirectory=\/opt\/dev\/deploy\/mesura-channel-follower$/mu);
+  expect(service).toMatch(/^Slice=(?!app\.slice$)[\w.-]+\.slice$/mu);
+  expect(service).toMatch(/^MemoryMax=[1-9]\d*[KMGT]?$/mu);
+  expect(service).toMatch(
+    /^ExecStart=.*\bnode\b[^\n]*scripts\/mesura-channel\/channel\.ts\s+follow-dev\b/mu,
+  );
+  expect(docs).toContain("mesura-channel-dev.service");
+  expect(docs).toMatch(/systemctl --user enable[^\n]*mesura-channel-dev\.timer/u);
+  expect(docs).toMatch(/systemctl --user disable[^\n]*mesura-channel-dev\.timer/u);
+});
+
+it("phase 4 rework: a merge that lands during a Dev build is built in the same tick and only it is staged", async () => {
+  using home = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-dev-"));
+  const fixture = await followDevFixture(home.path, firstDevSha);
+  fixture.build.mockImplementationOnce(async ({ revision }: BuildInput) => {
+    fixture.fetchOriginDev.mockResolvedValue(nextDevSha);
+    return followDevArtifact(home.path, revision);
+  });
+  await fixture.tick();
+
+  expect(fixture.build.mock.calls.map(([input]) => input.revision)).toEqual([
+    firstDevSha,
+    nextDevSha,
+  ]);
+  expect(fixture.stage).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ commit: nextDevSha }),
+  );
+  expect(readFollowDevRecord(home.path)).toMatchObject({
+    lastBuiltSha: nextDevSha,
+    lastStagedSha: nextDevSha,
+    pendingAppImage: null,
+  });
+});
+
+it("phase 4 rework: a follow-dev tick skips while another tick holds the follower lock", async () => {
+  const { tryHoldFileLock } = await import("./shell.ts");
+  using home = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-dev-"));
+  const fixture = await followDevFixture(home.path, firstDevSha);
+  {
+    using held = tryHoldFileLock(
+      NodePath.join(home.path, ".local/state/mesura-channel/dev-follow.lock"),
+    );
+    expect(held).toBeDefined();
+    await fixture.tick();
+    expect(fixture.fetchOriginDev).not.toHaveBeenCalled();
+    expect(fixture.build).not.toHaveBeenCalled();
+    expect(
+      NodeFS.existsSync(NodePath.join(home.path, ".local/state/mesura-channel/dev-follow.json")),
+    ).toBe(false);
+  }
+  await fixture.tick();
+  expect(fixture.build).toHaveBeenCalledOnce();
+  expect(readFollowDevRecord(home.path)).toMatchObject({ lastStagedSha: firstDevSha });
+});
+
+it("phase 4 rework: build cleanup keeps the follower's unstaged Dev build through later manual builds", async () => {
+  const { planBuild, publishBuildArtifact } = await import("./build.ts");
+  using home = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-dev-"));
+  const plan = planBuild({ channel: "dev", revision: "dev", deployHome: home.path });
+  const record = NodePath.join(home.path, ".local/state/mesura-channel/dev-latest.json");
+  const publish = (runId: string) =>
+    publishBuildArtifact(plan, record, followDevArtifact(plan.outputRoot, runId));
+  const pending = followDevArtifact(plan.outputRoot, "r1");
+  publishBuildArtifact(plan, record, pending);
+  NodeFS.writeFileSync(
+    plan.followRecord,
+    JSON.stringify({ lastBuiltSha: "r1", lastStagedSha: null, pendingAppImage: pending }),
+  );
+
+  publish("r2");
+  publish("r3");
+  expect(NodeFS.readdirSync(plan.outputRoot).sort()).toEqual(["r1", "r2", "r3"]);
+  publish("r4");
+  expect(NodeFS.readdirSync(plan.outputRoot).sort()).toEqual(["r1", "r3", "r4"]);
+  expect(NodeFS.readFileSync(pending.path, "utf8")).toBe("r1");
+});
+
+/** Fake `git`, `ssh` and `rsync` on PATH; the fake laptop runs remote scripts locally in a scratch home. */
+function fakeLaptopCommands(root: string) {
+  const home = NodePath.join(root, "vigilia");
+  const laptop = NodePath.join(root, "laptop");
+  const bin = NodePath.join(root, "bin");
+  const calls = NodePath.join(root, "calls.log");
+  const failRemote = NodePath.join(root, "fail-remote");
+  NodeFS.mkdirSync(bin);
+  NodeFS.mkdirSync(laptop);
+  const fake = (name: string, body: string) =>
+    NodeFS.writeFileSync(
+      NodePath.join(bin, name),
+      `#!/bin/sh\nprintf '%s\\n' "${name} $*" >> '${calls}'\n${body}\n`,
+      { mode: 0o755 },
+    );
+  fake("git", `case "$*" in *rev-parse*) echo ${firstDevSha} ;; esac`);
+  fake(
+    "ssh",
+    `while [ "$1" = -o ]; do shift 2; done; shift
+[ "$*" = true ] && exit 0
+[ -e '${failRemote}' ] && exit 1
+exec sh -s`,
+  );
+  fake(
+    "rsync",
+    `for last; do :; done
+eval "src=\\\${$(($# - 1))}"
+cp "$src" "\${last#*:}"`,
+  );
+  return {
+    home,
+    laptop,
+    calls,
+    failRemote,
+    async withFakeCommands<T>(body: () => Promise<T>): Promise<T> {
+      vi.stubEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
+      vi.stubEnv("MESURA_CHANNEL_LAPTOP_TARGET", "fixture@laptop");
+      vi.stubEnv("MESURA_CHANNEL_LAPTOP_HOME", laptop);
+      try {
+        return await body();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  };
+}
+
+it("phase 4 rework: follow-dev's production fetch, probe and stage adapters send the right ref and file and advance the record only on success", async () => {
+  const { runFollowDevTick } = await import("./follow-dev.ts");
+  const { planStage } = await import("./stage.ts");
+  const { sha256File } = await import("./shell.ts");
+  using scratch = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-io-"));
+  const { home, laptop, calls, failRemote, withFakeCommands } = fakeLaptopCommands(scratch.path);
+  const artifact = followDevArtifact(NodePath.join(scratch.path, "builds"), firstDevSha);
+  const builtArtifact = { ...artifact, sha256: sha256File(artifact.path) };
+  const build = vi.fn(async () => builtArtifact);
+  const record = () => readFollowDevRecord(home);
+
+  await withFakeCommands(async () => {
+    NodeFS.writeFileSync(failRemote, "");
+    await expect(runFollowDevTick({ deployHome: home, build })).rejects.toThrow();
+    expect(record()).toMatchObject({ lastBuiltSha: firstDevSha, lastStagedSha: null });
+    expect(record().lastError).toMatchObject({ step: "stage", sha: firstDevSha });
+
+    NodeFS.rmSync(failRemote);
+    await runFollowDevTick({ deployHome: home, build });
+  });
+
+  const log = NodeFS.readFileSync(calls, "utf8");
+  expect(log).toContain("git -C /opt/dev/repos/mesura-code fetch -q origin dev\n");
+  expect(log).toContain(
+    "git -C /opt/dev/repos/mesura-code rev-parse --verify -q origin/dev^{commit}\n",
+  );
+  expect(log).toContain(
+    "ssh -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=15 fixture@laptop true\n",
+  );
+  const next = NodePath.join(laptop, "Applications/Mesura-Code-Dev.next.AppImage");
+  expect(log).toMatch(
+    new RegExp(
+      `rsync -t --partial ${artifact.path} fixture@laptop:${next}\\.incoming-[0-9a-f]+\\n`,
+      "u",
+    ),
+  );
+  expect(build).toHaveBeenCalledOnce();
+  expect(NodeFS.readFileSync(next, "utf8")).toBe(firstDevSha);
+  expect(NodeFS.readdirSync(NodePath.dirname(next))).toEqual(["Mesura-Code-Dev.next.AppImage"]);
+  expect(record()).toMatchObject({ lastStagedSha: firstDevSha, lastError: null });
+
+  const stageInputFor = { ...stageInput, channel: "dev" as const };
+  expect(planStage(stageInputFor).appImage.incoming).not.toBe(
+    planStage(stageInputFor).appImage.incoming,
+  );
+});
+
+it("phase 4 regression: a tick builds at most three Dev SHAs while dev keeps moving and leaves the newest for the next tick unstaged", async () => {
+  using home = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-dev-"));
+  const shas = ["1", "2", "3", "4", "5"].map((digit) => digit.repeat(40));
+  const fixture = await followDevFixture(home.path, shas[0] ?? "");
+  let moves = 0;
+  fixture.build.mockImplementation(async ({ revision }: BuildInput) => {
+    moves += 1;
+    fixture.fetchOriginDev.mockResolvedValue(shas[moves] ?? "");
+    return followDevArtifact(home.path, revision);
+  });
+  await fixture.tick();
+
+  expect(fixture.build.mock.calls.map(([input]) => input.revision)).toEqual(shas.slice(0, 3));
+  expect(fixture.stage).not.toHaveBeenCalled();
+  const record = readFollowDevRecord(home.path);
+  expect(record).toMatchObject({ lastBuiltSha: shas[2], lastStagedSha: null, lastError: null });
+  expect(JSON.stringify(record.pendingAppImage)).toContain(shas[2]);
+
+  fixture.build.mockImplementation(async ({ revision }: BuildInput) =>
+    followDevArtifact(home.path, revision),
+  );
+  await fixture.tick();
+  expect(fixture.build.mock.calls.map(([input]) => input.revision)).toEqual(shas.slice(0, 4));
+  expect(fixture.stage).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ commit: shas[3] }),
+  );
+});
+
+it("phase 4 regression: follow-dev refuses an origin/dev value that is not a commit SHA before building", async () => {
+  using home = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-dev-"));
+  for (const value of ["", "dev", "a".repeat(39), "A".repeat(40)]) {
+    const fixture = await followDevFixture(home.path, value);
+    await expect(fixture.tick()).rejects.toThrow(/not a commit SHA/u);
+    expect(fixture.build).not.toHaveBeenCalled();
+  }
+  const sha256Fixture = await followDevFixture(home.path, "c".repeat(64));
+  await sha256Fixture.tick();
+  expect(sha256Fixture.build).toHaveBeenCalledOnce();
+});
+
+it("phase 4 regression: follow-dev builds the recorded SHA again when its unstaged AppImage was removed", async () => {
+  using home = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-dev-"));
+  const offline = await followDevFixture(home.path, firstDevSha);
+  offline.isLaptopReachable.mockResolvedValue(false);
+  await offline.tick();
+  NodeFS.rmSync(NodePath.join(home.path, firstDevSha), { recursive: true });
+
+  const online = await followDevFixture(home.path, firstDevSha);
+  await online.tick();
+  expect(online.build).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ revision: firstDevSha }),
+  );
+  expect(online.stage).toHaveBeenCalledOnce();
+  expect(readFollowDevRecord(home.path)).toMatchObject({ lastStagedSha: firstDevSha });
+});
+
+it("phase 4 regression: a copy that fails the locked hash check is removed and nothing is staged", async () => {
+  const { executeStage, planStage } = await import("./stage.ts");
+  using scratch = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "mesura-follow-io-"));
+  const { laptop, withFakeCommands } = fakeLaptopCommands(scratch.path);
+  const artifact = followDevArtifact(NodePath.join(scratch.path, "builds"), firstDevSha);
+  const plan = planStage({
+    channel: "dev",
+    appImagePath: artifact.path,
+    sha256: "0".repeat(64),
+    laptopHome: laptop,
+    laptopTarget: "fixture@laptop",
+  });
+
+  await withFakeCommands(async () => {
+    expect(() => executeStage(plan)).toThrow(/hashes to/u);
+  });
+  expect(NodeFS.readdirSync(NodePath.join(laptop, "Applications"))).toEqual([]);
+  expect(NodeFS.existsSync(plan.launcher.destination)).toBe(false);
 });
