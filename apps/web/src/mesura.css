@@ -511,3 +511,33 @@ html[data-theme-id]:not([data-theme-id=""]) {
     animation: none !important;
   }
 }
+
+/*
+ * Fork: the scratchpad overlay (src/scratchpad). One open transition, opacity and transform only,
+ * which ends; nothing repaints continuously. The editor draws no background of its own, so the
+ * card's glass shows through.
+ */
+@keyframes mesura-scratchpad-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes mesura-scratchpad-card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  [data-scratchpad-overlay] {
+    animation: mesura-scratchpad-backdrop-in 140ms ease-out;
+  }
+  [data-scratchpad-overlay] > section {
+    animation: mesura-scratchpad-card-in 160ms ease-out;
+  }
+}
+[data-scratchpad-overlay] .monaco-editor {
+  --vscode-editor-background: transparent;
+  --vscode-editorGutter-background: transparent;
+  --vscode-editorStickyScroll-background: transparent;
+}

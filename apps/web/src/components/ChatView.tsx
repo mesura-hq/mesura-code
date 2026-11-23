@@ -334,6 +334,7 @@ import {
 } from "./chat/PanelLayoutControls";
 import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { ThreadDetailsPanel } from "./chat/ThreadDetailsPanel";
+import { ScratchpadHost } from "~/scratchpad/ScratchpadHost";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import {
   resolveEffectiveEnvMode,
@@ -4306,6 +4307,16 @@ export default function ChatView(props: ChatViewProps) {
                     sources: serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES,
                     contextWindow: activeContextWindow,
                   }}
+                />
+
+                {/* Fork: the scratchpad overlay and its commands (src/scratchpad). */}
+                <ScratchpadHost
+                  environmentId={activeThread.environmentId}
+                  owner={{
+                    projectId: activeThread.projectId,
+                    threadId: isServerThread ? activeThread.id : null,
+                  }}
+                  composerDraftTarget={composerDraftTarget}
                 />
 
                 <PullRequestThreadDialogHost

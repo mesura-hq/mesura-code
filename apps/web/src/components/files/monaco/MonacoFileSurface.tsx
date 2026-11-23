@@ -51,6 +51,22 @@ export interface MonacoFileSurfaceProps {
   readonly threadRef: ScopedThreadRef;
   readonly modalEditing: boolean;
   readonly onPendingChange: (relativePath: string, pending: boolean) => void;
+  /** For a host that routes keys around the editor, such as the scratchpad's scope Tab. */
+  readonly controlRef?: RefObject<MonacoFileSurfaceControl | null>;
+  /** Each open leaves Neovim in normal mode, whatever mode its session was left in. */
+  readonly startInNormalMode?: boolean;
+}
+
+export interface MonacoFileSurfaceControl {
+  readonly focus: () => void;
+  readonly hasTextFocus: () => boolean;
+  /** True only while Neovim drives the editor and rests in plain normal mode, as for Escape. */
+  readonly restsInNormalMode: () => boolean;
+  /**
+   * Resolves once the keys sent to Neovim were answered, their text reached the model, and the
+   * pending save was written. `signal` abandons the wait for Neovim; the save is still flushed.
+   */
+  readonly settle: (signal?: AbortSignal) => Promise<void>;
 }
 
 /**
@@ -75,6 +91,8 @@ export function MonacoFileSurface({
   threadRef,
   modalEditing,
   onPendingChange,
+  controlRef,
+  startInNormalMode,
 }: MonacoFileSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -339,6 +357,7 @@ export function MonacoFileSurface({
     cwd,
     relativePath,
     enabled: modalEditing,
+    startInNormalMode,
     // Shared with the effect below rather than duplicated: the driver has to
     // know an agent's write from a browser composition, and the difference is
     // this ref being set.
@@ -468,6 +487,29 @@ export function MonacoFileSurface({
       onDismiss: () => {},
     });
   }, []);
+
+  const nvimSettleRef = useRef(nvim.whenKeysSettled);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: latest-value ref read by the imperative handle
+  useLayoutEffect(() => {
+    nvimSettleRef.current = nvim.whenKeysSettled;
+  }, [nvim.whenKeysSettled]);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fork: publishes an imperative handle; its closures read the latest refs
+  useLayoutEffect(() => {
+    if (controlRef === undefined) return;
+    controlRef.current = {
+      focus: () => editorRef.current?.focus(),
+      hasTextFocus: () => editorRef.current?.hasTextFocus() === true,
+      restsInNormalMode: () => nvimActiveRef.current && !nvimEscapeRef.current(),
+      settle: async (signal) => {
+        await nvimSettleRef.current(signal);
+        await saveRef.current.flush();
+      },
+    };
+    return () => {
+      controlRef.current = null;
+    };
+  }, [controlRef]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

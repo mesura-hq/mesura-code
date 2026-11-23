@@ -660,6 +660,12 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         });
         yield* trimBuffers(session);
 
+        // `nvim_input` is taken in every mode and queued ahead of later batches;
+        // `modeAfterKeys` below reads the mode behind it.
+        if (input.startInNormalMode === true) {
+          yield* request(session, "nvim_input", ["<C-\\><C-n>"]);
+        }
+
         // Follow the buffer `mesura.open` returns, not the `BufEnter` notification: that
         // can land after the snapshot, which then carries another buffer's text. Under a
         // config that opens a picker at start, the client saved the picker's one-line

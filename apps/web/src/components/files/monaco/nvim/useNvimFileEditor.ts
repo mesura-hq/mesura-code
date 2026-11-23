@@ -49,6 +49,11 @@ export interface NvimFileEditorResult extends NvimDriverResult {
    * mode: the stream alone lags a round trip, so `A x Escape` on a remote host left Neovim in insert.
    */
   readonly escapeGoesToNeovim: () => boolean;
+  /**
+   * Resolves once every key sent to Neovim was answered (or given up) and, when keys went out
+   * since the last call, the model holds Neovim's text for them. `signal` abandons the wait.
+   */
+  readonly whenKeysSettled: (signal?: AbortSignal) => Promise<void>;
 }
 
 export interface NvimFileEditorInput {
@@ -66,6 +71,28 @@ export interface NvimFileEditorInput {
   };
   /** Writes the pending save now, which is what `:w` means. */
   readonly flushSave: () => void;
+  /** Each open leaves insert, visual or a pending command first; see the open contract. */
+  readonly startInNormalMode?: boolean | undefined;
+}
+
+/** Past the host's own one-second hold on text, plus a round trip; a lost session gives up here. */
+const RESYNC_LIMIT_MS = 2_500;
+
+/** `promise`, or earlier when `signal` aborts or `limitMs` passes. Never rejects. */
+function untilAborted(
+  promise: Promise<void>,
+  signal: AbortSignal | undefined,
+  limitMs?: number,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = limitMs === undefined ? undefined : setTimeout(resolve, limitMs);
+    const finish = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal?.addEventListener("abort", finish, { once: true });
+    promise.then(finish, finish);
+  });
 }
 
 export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorResult {
@@ -202,13 +229,20 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     "editor session replace text",
   );
 
+  const startInNormalMode = input.startInNormalMode === true;
   const openFile = useCallback(
     (lines: ReadonlyArray<string>) => {
       opensInFlightRef.current += 1;
       const openMark = keyLane.openBegins();
       return openCommand({
         environmentId,
-        input: { threadId, cwd, relativePath, lines: [...lines] },
+        input: {
+          threadId,
+          cwd,
+          relativePath,
+          lines: [...lines],
+          ...(startInNormalMode ? { startInNormalMode: true } : {}),
+        },
       }).then((result) => {
         opensInFlightRef.current -= 1;
         // The lane belongs to the thread, not this view, so the answer is
@@ -231,7 +265,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
         return null;
       });
     },
-    [openCommand, keyLane, environmentId, threadId, cwd, relativePath],
+    [openCommand, keyLane, environmentId, threadId, cwd, relativePath, startInNormalMode],
   );
 
   const retry = useCallback(() => {
@@ -241,7 +275,15 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     setOpenGeneration((generation) => generation + 1);
   }, []);
 
-  const sendKeys = useCallback((keys: string) => keyLane.keys(keys), [keyLane]);
+  /** Keys sent since `whenKeysSettled` last brought the model up to Neovim's text. */
+  const keysSinceSyncRef = useRef(0);
+  const sendKeys = useCallback(
+    (keys: string) => {
+      keysSinceSyncRef.current += 1;
+      keyLane.keys(keys);
+    },
+    [keyLane],
+  );
 
   const setCursor = useCallback(
     (line: number, col: number) => {
@@ -268,6 +310,8 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
 
   const replaceText = useCallback(
     (edits: ReadonlyArray<EditorTextEdit>) => {
+      // Text Neovim changes, which the model learns only from the stream, as for keys.
+      keysSinceSyncRef.current += 1;
       keyLane.call(() =>
         replaceTextCommand({ environmentId, input: { threadId, edits: [...edits] } }),
       );
@@ -323,7 +367,41 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     [keyLane, driver.mode, driver.jumping],
   );
 
-  return { ...driver, fallback, retry, keysDelivery, escapeGoesToNeovim };
+  // The host holds Neovim's text until a cursor read (up to a second), so an answered key can
+  // still lack its text here. A fresh attachment starts with a snapshot that already holds it,
+  // and the driver applies that snapshot to the model before this resolves.
+  const whenKeysSettled = useCallback(
+    async (signal?: AbortSignal) => {
+      await untilAborted(keyLane.whenIdle(), signal);
+      const sent = keysSinceSyncRef.current;
+      if (!enabled || signal?.aborted === true || sent === 0) return;
+      const before = stateSource.get();
+      // Ends the subscription however the wait ends: snapshot, abort or the limit.
+      const stopWaiting = new AbortController();
+      signal?.addEventListener("abort", () => stopWaiting.abort(), { once: true });
+      const snapshotArrived = new Promise<void>((resolve) => {
+        let matched = false;
+        const unsubscribe = stateSource.subscribe((next) => {
+          // A refresh can repeat the old state while it waits; only the new attachment's counts.
+          if (matched || next === before) return;
+          const event = next.latestEvent;
+          if (event?.type !== "snapshot" || event.snapshot.relativePath !== relativePath) return;
+          matched = true;
+          unsubscribe();
+          // Only now are those keys' text in the model; a settle that gives up keeps them owed.
+          keysSinceSyncRef.current -= sent;
+          resolve();
+        });
+        stopWaiting.signal.addEventListener("abort", unsubscribe, { once: true });
+        refreshAttachRef.current();
+      });
+      await untilAborted(snapshotArrived, stopWaiting.signal, RESYNC_LIMIT_MS);
+      stopWaiting.abort();
+    },
+    [keyLane, enabled, stateSource, relativePath],
+  );
+
+  return { ...driver, fallback, retry, keysDelivery, escapeGoesToNeovim, whenKeysSettled };
 }
 
 function sessionStateOf(

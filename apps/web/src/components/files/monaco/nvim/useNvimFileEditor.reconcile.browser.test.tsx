@@ -41,6 +41,7 @@ function EditorUnderTest(props: {
   readonly editor: unknown;
   readonly model: EditableModel;
   readonly flushSave: () => void;
+  readonly startInNormalMode?: boolean | undefined;
 }) {
   useNvimFileEditor({
     editor: props.editor as Parameters<typeof useNvimFileEditor>[0]["editor"],
@@ -52,6 +53,7 @@ function EditorUnderTest(props: {
     enabled: true,
     externalEdits: EXTERNAL_EDITS,
     flushSave: props.flushSave,
+    startInNormalMode: props.startInNormalMode,
   });
   return null;
 }
@@ -72,7 +74,10 @@ async function setupBrowserFixture0() {
 }
 
 /** Mounts the hook over `LINES`, with the session agreeing, and waits for it to settle. */
-async function mountReconciled(lines: ReadonlyArray<string> = LINES) {
+async function mountReconciled(
+  lines: ReadonlyArray<string> = LINES,
+  options: { readonly startInNormalMode?: boolean } = {},
+) {
   const model = makeEditableHarnessModel(
     lines,
     monacoFileModelKey(HARNESS_ENVIRONMENT_ID, CWD, HARNESS_RELATIVE_PATH),
@@ -83,7 +88,14 @@ async function mountReconciled(lines: ReadonlyArray<string> = LINES) {
   mounted = await mountNvimEditor({
     renderEditor: (editor) => {
       recorder ??= recordEditorCalls(editor);
-      return <EditorUnderTest editor={recorder.editor} model={model} flushSave={flushSave} />;
+      return (
+        <EditorUnderTest
+          editor={recorder.editor}
+          model={model}
+          flushSave={flushSave}
+          startInNormalMode={options.startInNormalMode}
+        />
+      );
     },
     layout: { model: model as never, wrapColumn: 180, lineHeight: 20, height: 300 },
   });
@@ -345,5 +357,26 @@ describe("opening a file whose session already holds older text", () => {
 
     expect(editorTransport.openedLines()[0], "the text the open handed Neovim").toEqual(LOCAL);
     expect(model.getLinesContent(), "the text on screen after the open").toEqual(LOCAL);
+  });
+});
+
+describe("an open that starts in normal mode (the scratchpad's session outlives its overlay)", () => {
+  it("asks the host to reset the mode inside the open, and sends no Escape of its own", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await mountReconciled(LINES, { startInNormalMode: true });
+
+    expect(editorTransport.openedInNormalMode()).toEqual([true]);
+    // A client-side Escape after the answer raced keys typed during the open (verified twice).
+    expect(editorTransport.inputs()).toEqual([]);
+  });
+
+  it("leaves the mode alone by default, as the file panel needs", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await mountReconciled();
+
+    expect(editorTransport.openedInNormalMode()).toEqual([false]);
+    expect(editorTransport.inputs()).toEqual([]);
   });
 });

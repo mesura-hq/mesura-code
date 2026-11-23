@@ -13,6 +13,7 @@ import {
 } from "./files/mesuraFileManager/fileManagerToggle";
 import { restorePaletteOrigin } from "../keys/keyEngine";
 import { runRegisteredCommand } from "../commands/commandRegistry";
+import { handOffFocusToScratchpad } from "../scratchpad/scratchpadFocus";
 import {
   onSidebarRequestClosesPalette,
   serveSidebarFocusRequest,
@@ -105,6 +106,7 @@ import {
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
+  NotebookPenIcon,
   PaletteIcon,
   RotateCcwIcon,
   SettingsIcon,
@@ -450,6 +452,8 @@ function CommandPaletteDialog(props: {
           if (keepFocusInFileManager()) return;
           // Fork: a row that asked for the sidebar Search or project filter hands it the keyboard.
           if (serveSidebarFocusRequest()) return;
+          // Fork: an open scratchpad takes the keyboard back (src/scratchpad).
+          if (handOffFocusToScratchpad()) return;
           if (returnFocus === false) return;
           // Fork: Vim mode returns to the chat, or to the composer's mode, it left.
           if (restorePaletteOrigin()) return;
@@ -1879,6 +1883,19 @@ function OpenCommandPaletteDialog(props: {
         runRegisteredCommand("sidebar.toggleWorking");
       },
     });
+
+  // Fork: the scratchpad overlay (src/scratchpad), registered by the chat view.
+  actionItems.push({
+    kind: "action",
+    value: "action:scratchpad",
+    searchTerms: ["scratchpad", "notes", "notas", "scratch", "pad"],
+    title: "Scratchpad",
+    icon: <NotebookPenIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "scratchpad.toggle",
+    run: async () => {
+      runRegisteredCommand("scratchpad.toggle");
+    },
+  });
 
   actionItems.push(changeThemeItem);
   actionItems.push(changeAppearanceItem);

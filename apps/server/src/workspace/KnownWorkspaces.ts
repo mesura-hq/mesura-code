@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
+import { canonicalScratchpadRoot } from "../scratchpad/scratchpadRoot.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -85,6 +86,7 @@ export const make = Effect.gen(function* () {
         (root) => root !== null,
       );
       if (managed.some(within)) return true;
+      if (within(yield* canonicalScratchpadRoot(fileSystem, path, config.stateDir))) return true;
 
       const projects = yield* projectStore.listShells().pipe(Effect.orElseSucceed(() => []));
       for (const project of projects) {

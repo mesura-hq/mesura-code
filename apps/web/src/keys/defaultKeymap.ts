@@ -48,6 +48,7 @@ const BRIDGED: ReadonlyArray<CommandEntry & { readonly command: KeybindingComman
   // The panel's launcher: surfaces and panel actions by letter (`lib/panelLauncher.ts`).
   { keys: "<leader>p", command: "rightPanel.newTab", title: "Panel…" },
   { keys: "<leader>b", command: "sidebar.toggle", title: "Toggle sidebar" },
+  { keys: "<leader>n", command: "scratchpad.toggle", title: "Scratchpad" },
   { keys: "<leader>mm", command: "modelPicker.toggle", title: "Model" },
   { keys: "<leader>me", command: "traitsPicker.toggle", title: "Effort & traits" },
   { keys: "<leader>ma", command: "composer.mode", title: "Agent mode" },

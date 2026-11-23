@@ -136,6 +136,54 @@ if (nvimAvailable)
 
     // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Repeated key batches run through real Neovim and optional plugins; retain the existing subprocess budget.
     it.effect(
+      "starts an open in normal mode when asked, so the next key is a normal command",
+      () =>
+        Effect.gen(function* () {
+          const manager = yield* scratchManager;
+          const lane = makeSender(manager);
+          const root = NodeOS.tmpdir();
+          const seen: Array<string> = [];
+          // Insert, visual, a pending operator and the command line, each left behind on purpose.
+          for (const leftIn of ["i", "v", "d", ":"]) {
+            for (let repeat = 0; repeat < REPEATS; repeat += 1) {
+              yield* lane.reset;
+              yield* lane.send(leftIn);
+              const opened = yield* manager.open({
+                threadId: THREAD_ID,
+                cwd: root,
+                relativePath: `normal-${leftIn === ":" ? "colon" : leftIn}.txt`,
+                lines: ["one two"],
+                startInNormalMode: true,
+              });
+              const escape = opened.escape;
+              if (escape === undefined || describeAnswer(escape) !== "n") {
+                seen.push(`open after ${leftIn}: ${escape ? describeAnswer(escape) : "none"}`);
+              }
+              // `v` must start visual mode, not insert a letter (the scratchpad's report).
+              const next = yield* lane.send("v");
+              if (describeAnswer(next) !== "v") {
+                seen.push(`v after ${leftIn}: ${describeAnswer(next)} (try ${repeat + 1})`);
+              }
+            }
+          }
+          assert.deepStrictEqual(seen, [], "an open asked to start in normal mode did not");
+
+          // Without the flag the mode survives the open, as the file panel expects.
+          yield* lane.reset;
+          yield* lane.send("i");
+          const kept = yield* manager.open({
+            threadId: THREAD_ID,
+            cwd: root,
+            relativePath: "kept-mode.txt",
+            lines: ["one"],
+          });
+          assert.strictEqual(kept.escape ? describeAnswer(kept.escape) : "none", "i");
+        }).pipe(Effect.scoped),
+      120_000,
+    );
+
+    // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Repeated key batches run through real Neovim and optional plugins; retain the existing subprocess budget.
+    it.effect(
       "answers an open with the escape state Neovim is in",
       () =>
         Effect.gen(function* () {

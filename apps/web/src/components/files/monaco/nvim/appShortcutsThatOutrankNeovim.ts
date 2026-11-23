@@ -12,4 +12,6 @@ export const APP_SHORTCUTS_THAT_OUTRANK_NEOVIM: ReadonlySet<string> = new Set([
   // back to the list has to work from there.
   "treeDiff.toggle",
   "diff.modeMenu",
+  // The scratchpad's chord closes it from inside its own Neovim.
+  "scratchpad.toggle",
 ]);
