@@ -182,6 +182,19 @@ describe("sidebar thread attention mapping", () => {
     ).toEqual({ kind: "working", text: "Working", emphasis: "quiet", questionOpen: true });
   });
 
+  // Seal disposition check P1-2: Preparing has no busy label to carry the question's marker.
+  it("an open question reads Needs input while the thread prepares", () => {
+    for (const factoryRun of [factoryRunAt("stopped"), factoryRunAt("waiting")]) {
+      expect(attention({ status: "preparing", agentExecuting: true, factoryRun })?.kind).toBe(
+        "input",
+      );
+    }
+    expect(
+      attention({ status: "preparing", agentExecuting: true, agentSignal: needsInput })?.kind,
+    ).toBe("input");
+    expect(attention({ status: "preparing", agentExecuting: true })).toBeNull();
+  });
+
   it("sidebar attention AC5: a Factory run from a server without askedAt stays Needs input", () => {
     const { askedAt: _askedAt, ...undated } = factoryRunAt("stopped");
     expect(
