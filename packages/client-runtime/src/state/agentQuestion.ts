@@ -24,7 +24,13 @@ type AgentQuestionThread = Pick<
  * run that waits on a question or was stopped. The user's next message answers either one.
  */
 export function agentQuestionIsOpen(thread: AgentQuestionThread): boolean {
-  if (thread.agentSignal?.kind === "needs_input") return true;
+  return thread.agentSignal?.kind === "needs_input" || factoryQuestionIsOpen(thread);
+}
+
+/** A Factory run's question that the user has not answered by writing after `askedAt`. */
+export function factoryQuestionIsOpen(
+  thread: Pick<EnvironmentThreadShell, "factoryRun" | "latestUserAuthoredMessageAt">,
+): boolean {
   const repliedAt = thread.latestUserAuthoredMessageAt;
   return factoryRunQuestionOpen(
     thread.factoryRun,

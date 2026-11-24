@@ -7,6 +7,7 @@ import { agentQuestionAwaitsUser } from "./agentQuestion.ts";
 export {
   agentQuestionAwaitsUser,
   agentQuestionIsOpen,
+  factoryQuestionIsOpen,
   threadRuntimeIsExecuting,
 } from "./agentQuestion.ts";
 

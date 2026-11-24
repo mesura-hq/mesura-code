@@ -134,6 +134,13 @@ const thread = {
     runId: string | null;
     setAt: string;
   } | null,
+  factoryRun: null as {
+    status: "running" | "waiting" | "stopped";
+    phaseIndex: number;
+    phaseCount: number;
+    node: string | null;
+    askedAt: string | null;
+  } | null,
 };
 let focused = false;
 let visibility = "visible";
@@ -194,6 +201,7 @@ function toV2ThreadShell(input: typeof thread) {
     lastVisitedAt: null,
     deletedAt: null,
     agentSignal: input.agentSignal,
+    ...(input.factoryRun === null ? {} : { factoryRun: input.factoryRun }),
   };
 }
 
@@ -591,6 +599,33 @@ it("notifies a needs_input signal raised while preparing once, after the run com
     "one",
     shell({
       agentSignal,
+      latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:01:00.000Z" },
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Input needed"]);
+});
+
+// Seal confirm P1-4: a Factory question notifies as soon as the run asks, even while the agent
+// executes, as it did before; the agent's own signal waits for execution to end.
+it("notifies a Factory stop that arrives while the agent executes at once, and once", async () => {
+  await using app = setup();
+  app.start();
+  using _timers = fakeTimers();
+  const factoryRun = {
+    status: "stopped" as const,
+    phaseIndex: 2,
+    phaseCount: 13,
+    node: "fence",
+    askedAt: "2026-09-13T07:00:30.000Z",
+  };
+  state.shells.set("one", shell({ factoryRun }));
+  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Input needed"]);
+  state.shells.set(
+    "one",
+    shell({
+      factoryRun,
       latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:01:00.000Z" },
     }),
   );

@@ -47,6 +47,7 @@ import {
   resolveSidebarThreadAttention,
   sidebarThreadAttentionFacts,
 } from "./sidebarThreadAttention";
+import { factoryQuestionIsOpen } from "@t3tools/client-runtime/state/thread-inbox";
 import {
   createThreadNotificationGate,
   isSnoozedForNotification,
@@ -324,6 +325,8 @@ export function startThreadNotifications(
       if (status === "ready" && thread.latestRun?.status === "failed") status = "failed";
       // Mesura: the sidebar's label decides, so an agent's needs-input signal or a stopped
       // Factory run asks for the developer the way a structured question does.
+      // The coordinator keeps its own timing: an agent's signal notifies once the agent stops
+      // executing, a Factory question as soon as the run asks.
       const facts = sidebarThreadAttentionFacts(thread);
       const attentionKind =
         resolveSidebarThreadAttention({
@@ -331,8 +334,10 @@ export function startThreadNotifications(
           isUnread: false,
           isWoke: false,
           ...facts,
-          // An agent question notifies once it waits on the user, not while the agent executes.
-          agentQuestionOpen: facts.agentQuestionOpen && !facts.agentExecuting,
+          agentQuestionOpen:
+            (thread.agentSignal?.kind === "needs_input" && !facts.agentExecuting) ||
+            factoryQuestionIsOpen(thread),
+          agentExecuting: false,
         })?.kind ?? null;
       const loudKind: LoudKind | null =
         status === "request"
