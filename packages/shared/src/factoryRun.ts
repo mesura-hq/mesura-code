@@ -596,6 +596,7 @@ function unboundedSummary(state: FactoryRunState): FactoryRunSummary {
     request: state.request,
     phaseStatuses: state.phases.map((candidate) => candidate.status),
     question: state.stops.findLast((stop) => stop.answeredAt === null)?.question ?? null,
+    askedAt: factoryRunAskedAt(state),
     coverage: factoryRunCoverage(deriveFactoryRunVerification(state)),
     degradedPhases: state.phases.filter((candidate) => candidate.status === "degraded").length,
     ...summaryTrace(state),
@@ -719,6 +720,17 @@ export function factoryRunCoverage(verification: ReadonlyArray<FactoryPhaseVerif
   return { passed, total };
 }
 
+/**
+ * When the run began asking the developer: the open stop's `raisedAt` while it waits, its finish
+ * when stopped. Not `lastEventAt`: a later note would reopen a question the developer answered.
+ */
+export function factoryRunAskedAt(state: FactoryRunState): string | null {
+  if (state.status === "waiting") {
+    return state.stops.findLast((stop) => stop.answeredAt === null)?.raisedAt ?? null;
+  }
+  return state.status === "stopped" ? (state.finishedAt ?? state.lastEventAt) : null;
+}
+
 /** The label a thread row shows: status, `phase i/n`, node. */
 export function toFactoryRunShellSummary(state: FactoryRunState): FactoryRunShellSummary {
   return {
@@ -726,5 +738,6 @@ export function toFactoryRunShellSummary(state: FactoryRunState): FactoryRunShel
     phaseIndex: state.currentPhase ?? 0,
     phaseCount: state.phases.length,
     node: state.currentNode,
+    askedAt: factoryRunAskedAt(state),
   };
 }

@@ -11,8 +11,10 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import { makeThreadFixture } from "../test-fixtures";
-import { resolveSidebarThreadAttention } from "./sidebarThreadAttention";
-import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-inbox";
+import {
+  resolveSidebarThreadAttention,
+  sidebarThreadAttentionFacts,
+} from "./sidebarThreadAttention";
 import {
   hasUnseenCompletion,
   resolveSidebarThreadStatus,
@@ -60,9 +62,7 @@ function sidebarRow(shell: OrchestrationV2ThreadShell) {
         status,
         isUnread,
         isWoke: false,
-        agentSignal: thread.agentSignal,
-        agentExecuting: threadRuntimeIsExecuting(thread.runtime),
-        factoryRun: thread.factoryRun,
+        ...sidebarThreadAttentionFacts(thread),
       })?.kind ?? null,
   };
 }
@@ -78,6 +78,29 @@ describe("sidebar thread attention: Done only when nothing can wake the agent", 
     const row = sidebarRow({ ...completedUnread, factoryRun: runningFactoryRun });
     expect(row.status).toBe("waiting");
     expect(row.top).toBe("factory");
+  });
+
+  // The 2026-11-24 thread: a Factory run stopped on 11-23, the developer answered an async
+  // question at 18:12:15, and the agent kept running; the row read Needs input for ten minutes.
+  it("sidebar thread attention: a stopped Factory run the developer answered since shows Working", () => {
+    const stoppedRun = {
+      status: "stopped" as const,
+      phaseIndex: 2,
+      phaseCount: 13,
+      node: "fence",
+      askedAt: "2026-11-23T13:34:00.821Z",
+    };
+    const running: OrchestrationV2ThreadShell = {
+      ...completedUnread,
+      status: "running",
+      activeRunId: completedUnread.latestRunId,
+      latestRunCompletedAt: null,
+      factoryRun: stoppedRun,
+      latestUserAuthoredMessageAt: DateTime.makeUnsafe("2026-11-24T18:12:15.377Z"),
+    };
+    expect(sidebarRow(running).top).toBe("working");
+    // Unanswered, it still asks once the agent stops executing.
+    expect(sidebarRow({ ...completedUnread, factoryRun: stoppedRun }).top).toBe("input");
   });
 
   it("sidebar thread attention: Done follows the end of the last pending command", () => {

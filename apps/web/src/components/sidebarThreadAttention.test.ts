@@ -1,3 +1,4 @@
+import { agentQuestionIsOpen } from "@t3tools/client-runtime/state/thread-inbox";
 import { RunId, type FactoryRunShellSummary, type ThreadAgentSignal } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -14,10 +15,18 @@ const needsInput: ThreadAgentSignal = {
 
 const readyToClose: ThreadAgentSignal = { ...needsInput, kind: "ready_to_close", note: null };
 
+const FACTORY_ASKED_AT = "2026-11-23T13:34:00.821Z";
+
 const factoryRunAt = (
   status: FactoryRunShellSummary["status"],
   node: string | null = "review",
-): FactoryRunShellSummary => ({ status, phaseIndex: 5, phaseCount: 11, node });
+): FactoryRunShellSummary => ({
+  status,
+  phaseIndex: 5,
+  phaseCount: 11,
+  node,
+  askedAt: status === "waiting" || status === "stopped" ? FACTORY_ASKED_AT : null,
+});
 
 function attention(
   input: Partial<{
@@ -27,16 +36,22 @@ function attention(
     agentSignal: ThreadAgentSignal | null;
     agentExecuting: boolean;
     factoryRun: FactoryRunShellSummary | null;
+    latestUserAuthoredMessageAt: string | null;
   }> = {},
 ) {
+  const { agentSignal = null, latestUserAuthoredMessageAt = null, ...rest } = input;
   return resolveSidebarThreadAttention({
     status: "ready",
     isUnread: false,
     isWoke: false,
-    agentSignal: null,
     agentExecuting: false,
     factoryRun: null,
-    ...input,
+    ...rest,
+    agentQuestionOpen: agentQuestionIsOpen({
+      agentSignal,
+      factoryRun: rest.factoryRun ?? null,
+      latestUserAuthoredMessageAt,
+    }),
   });
 }
 
@@ -128,7 +143,7 @@ describe("sidebar thread attention mapping", () => {
   });
 
   it.each(["waiting", "stopped"] as const)(
-    "sidebar attention AC5: a Factory run in status %s reads a loud Needs input",
+    "sidebar attention AC5: a Factory run in status %s reads a loud Needs input until the user writes after it",
     (status) => {
       expect(attention({ factoryRun: factoryRunAt(status) })).toEqual({
         kind: "input",
@@ -138,8 +153,74 @@ describe("sidebar thread attention mapping", () => {
       expect(attention({ status: "working", factoryRun: factoryRunAt(status) })?.kind).toBe(
         "input",
       );
+      expect(
+        attention({
+          factoryRun: factoryRunAt(status),
+          latestUserAuthoredMessageAt: "2026-11-23T13:40:00.000Z",
+          isUnread: true,
+        })?.kind,
+      ).toBe("done");
     },
   );
+
+  // 2026-11-24: a run stopped on 11-23 kept "Needs input" on a thread whose agent worked for a
+  // day after the developer had answered in it.
+  it("sidebar attention AC5: an answered stopped Factory run lets the executing agent read Working", () => {
+    expect(
+      attention({
+        status: "working",
+        agentExecuting: true,
+        factoryRun: factoryRunAt("stopped"),
+        latestUserAuthoredMessageAt: "2026-11-24T18:12:15.377Z",
+      }),
+    ).toEqual({ kind: "working", text: "Working", emphasis: "quiet" });
+  });
+
+  it("sidebar attention AC5: an unanswered Factory question marks the busy label while the agent executes", () => {
+    expect(
+      attention({ status: "working", agentExecuting: true, factoryRun: factoryRunAt("waiting") }),
+    ).toEqual({ kind: "working", text: "Working", emphasis: "quiet", questionOpen: true });
+  });
+
+  // Seal disposition check P1-2: Preparing has no busy label to carry the question's marker.
+  it("an open question reads Needs input while the thread prepares", () => {
+    for (const factoryRun of [factoryRunAt("stopped"), factoryRunAt("waiting")]) {
+      expect(attention({ status: "preparing", agentExecuting: true, factoryRun })?.kind).toBe(
+        "input",
+      );
+    }
+    expect(
+      attention({ status: "preparing", agentExecuting: true, agentSignal: needsInput })?.kind,
+    ).toBe("input");
+    expect(attention({ status: "preparing", agentExecuting: true })).toBeNull();
+  });
+
+  // Seal confirm P1-5: the Preparing rule must not hide a guest's Request behind the question.
+  it("a guest request outranks an executing agent's open question, as before", () => {
+    expect(
+      attention({ status: "request", agentExecuting: true, agentSignal: needsInput })?.kind,
+    ).toBe("request");
+    expect(
+      attention({ status: "request", agentExecuting: true, factoryRun: factoryRunAt("stopped") })
+        ?.kind,
+    ).toBe("request");
+    expect(
+      attention({
+        status: "preparing",
+        agentExecuting: true,
+        agentSignal: needsInput,
+        factoryRun: factoryRunAt("running"),
+      }),
+    ).toMatchObject({ kind: "factory", questionOpen: true });
+  });
+
+  it("sidebar attention AC5: a Factory run from a server without askedAt stays Needs input", () => {
+    const { askedAt: _askedAt, ...undated } = factoryRunAt("stopped");
+    expect(
+      attention({ factoryRun: undated, latestUserAuthoredMessageAt: "2026-11-24T18:12:15.377Z" })
+        ?.kind,
+    ).toBe("input");
+  });
 
   // The developer, 2026-10-24: a run that finished degraded is finished; the degraded phases
   // belong in its report, not in a row label that never goes away.
