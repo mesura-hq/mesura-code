@@ -6,6 +6,7 @@
 import {
   FACTORY_RUN_RECORD_VERSION,
   FactoryRunEventSchemas,
+  factoryRunAskedAt,
   type FactoryRunEvent,
   type FactoryRunEventType,
   type FactoryRunPhase,
@@ -726,5 +727,6 @@ export function toFactoryRunShellSummary(state: FactoryRunState): FactoryRunShel
     phaseIndex: state.currentPhase ?? 0,
     phaseCount: state.phases.length,
     node: state.currentNode,
+    askedAt: factoryRunAskedAt(state),
   };
 }

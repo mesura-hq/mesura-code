@@ -124,7 +124,15 @@ describe("factory run fold over the record-version-1 fixture", () => {
       phaseIndex: 2,
       phaseCount: 2,
       node: "commit",
+      askedAt: null,
     });
+  });
+
+  it("dates the question of a run that waits on the developer, so the user's reply can end it", () => {
+    const state = foldLines(elevenPhaseRunLines({ phaseCount: 1, openQuestion: "Ship it?" }));
+    expect(state.status).toBe("waiting");
+    expect(state.lastEventAt).not.toBeNull();
+    expect(toFactoryRunShellSummary(state).askedAt).toBe(state.lastEventAt);
   });
 });
 

@@ -1,3 +1,5 @@
+import { factoryRunAsksDeveloper } from "@t3tools/contracts";
+
 import type { EnvironmentThreadShell } from "./models.ts";
 
 /** The runtime statuses in which the agent is executing a turn, not waiting on background work. */
@@ -12,14 +14,40 @@ export function threadRuntimeIsExecuting(runtime: EnvironmentThreadShell["runtim
   return runtime != null && EXECUTING_RUNTIME_STATUSES.has(runtime.status);
 }
 
+type AgentQuestionThread = Pick<
+  EnvironmentThreadShell,
+  "agentSignal" | "factoryRun" | "latestUserAuthoredMessageAt"
+>;
+
 /**
- * Mesura: an agent's `needs_input` signal waits on the developer once the agent stops executing,
- * even while background work or delegated tasks keep the thread's run alive. The Working section
- * then releases the thread, as it does for a structured question. While the agent executes a
- * later turn, the question stays open but the thread is working.
+ * Mesura: an agent's question outside a structured request — its `needs_input` signal, or a Factory
+ * run that waits on a question or was stopped. The user's next message answers either one: the
+ * server clears the signal, and a Factory question ends once the user writes after `askedAt`.
+ */
+export function agentQuestionIsOpen(thread: AgentQuestionThread): boolean {
+  if (thread.agentSignal?.kind === "needs_input") return true;
+  const run = thread.factoryRun;
+  if (run == null || !factoryRunAsksDeveloper(run.status)) return false;
+  return !userWroteAfter(thread.latestUserAuthoredMessageAt, run.askedAt);
+}
+
+/** A shell from a server without `askedAt` cannot date the question, so it stays open. */
+function userWroteAfter(
+  latestUserAuthoredMessageAt: string | null | undefined,
+  askedAt: string | null | undefined,
+): boolean {
+  if (latestUserAuthoredMessageAt == null || askedAt == null) return false;
+  return Date.parse(latestUserAuthoredMessageAt) > Date.parse(askedAt);
+}
+
+/**
+ * An open agent question waits on the developer once the agent stops executing, even while
+ * background work or delegated tasks keep the thread's run alive. The Working section then
+ * releases the thread, as it does for a structured question. While the agent executes a later
+ * turn, the question stays open but the thread is working.
  */
 export function agentQuestionAwaitsUser(
-  thread: Pick<EnvironmentThreadShell, "agentSignal" | "runtime">,
+  thread: AgentQuestionThread & Pick<EnvironmentThreadShell, "runtime">,
 ): boolean {
-  return thread.agentSignal?.kind === "needs_input" && !threadRuntimeIsExecuting(thread.runtime);
+  return agentQuestionIsOpen(thread) && !threadRuntimeIsExecuting(thread.runtime);
 }

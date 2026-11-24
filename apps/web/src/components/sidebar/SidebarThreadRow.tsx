@@ -98,9 +98,9 @@ import {
   useSidebarRowSubscriptionLease,
   setFileDragActive,
 } from "../Sidebar.logic";
-import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-inbox";
 import {
   resolveSidebarThreadAttention,
+  sidebarThreadAttentionFacts,
   sidebarThreadAttentionLook,
   sidebarThreadAttentionShowsTime,
   sidebarThreadAttentionSweeps,
@@ -780,10 +780,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     status,
     isUnread,
     isWoke,
-    agentSignal: thread.agentSignal,
-    agentExecuting: threadRuntimeIsExecuting(thread.runtime),
-    factoryRun: thread.factoryRun,
-    goalActive: thread.goal?.status === "active",
+    ...sidebarThreadAttentionFacts(thread),
   });
   const shouldRecede = shouldRecedeSidebarThread({
     status,

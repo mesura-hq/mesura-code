@@ -4,11 +4,17 @@ import { toSortableTimestamp } from "./threadSort.ts";
 import { effectiveSnoozed } from "./threadSettled.ts";
 import { agentQuestionAwaitsUser } from "./agentQuestion.ts";
 
-export { agentQuestionAwaitsUser, threadRuntimeIsExecuting } from "./agentQuestion.ts";
+export {
+  agentQuestionAwaitsUser,
+  agentQuestionIsOpen,
+  threadRuntimeIsExecuting,
+} from "./agentQuestion.ts";
 
 type WorkingThreadInput = Pick<
   EnvironmentThreadShell,
   | "agentSignal"
+  | "factoryRun"
+  | "latestUserAuthoredMessageAt"
   | "hasActionableProposedPlan"
   | "hasPendingApprovals"
   | "hasPendingUserInput"

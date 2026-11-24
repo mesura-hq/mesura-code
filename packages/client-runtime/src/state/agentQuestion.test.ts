@@ -8,6 +8,7 @@ import {
   ProviderInstanceId,
   RunId,
   ThreadId,
+  type FactoryRunShellSummary,
   type ThreadAgentSignal,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -21,11 +22,24 @@ const needsInput: ThreadAgentSignal = {
   setAt: "2026-11-01T05:16:37.006Z",
 };
 
+const stoppedFactoryRun: FactoryRunShellSummary = {
+  status: "stopped",
+  phaseIndex: 2,
+  phaseCount: 13,
+  node: "fence",
+  askedAt: "2026-11-23T13:34:00.821Z",
+};
+
 function thread(
   runtimeStatus: "running" | "waiting" | "queued" | "idle" | "completed",
   agentSignal: ThreadAgentSignal | null = needsInput,
+  factory: {
+    readonly factoryRun?: FactoryRunShellSummary | null;
+    readonly latestUserAuthoredMessageAt?: string | null;
+  } = {},
 ) {
   return {
+    ...factory,
     id: ThreadId.make("thread-question"),
     environmentId: EnvironmentId.make("environment-1"),
     createdAt: "2026-11-01T05:00:00.000Z",
@@ -63,6 +77,18 @@ describe("an agent's open question in the Working section", () => {
     expect(isThreadWorking(thread("waiting", { ...needsInput, kind: "ready_to_close" }))).toBe(
       true,
     );
+  });
+
+  it("treats a stopped Factory run as a question until the user writes after it", () => {
+    expect(isThreadWorking(thread("waiting", null, { factoryRun: stoppedFactoryRun }))).toBe(false);
+    expect(
+      isThreadWorking(
+        thread("waiting", null, {
+          factoryRun: stoppedFactoryRun,
+          latestUserAuthoredMessageAt: "2026-11-24T18:12:15.377Z",
+        }),
+      ),
+    ).toBe(true);
   });
 
   it("leaves the section at once when the question starts waiting, without the exit grace", () => {

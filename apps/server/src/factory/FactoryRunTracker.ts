@@ -9,6 +9,7 @@ import {
   FactoryRunActivityPayload,
   factoryReportActivityId,
   factoryRunActivityId,
+  factoryRunAskedAt,
   isFactoryRunFinished,
   type FactoryReportActivityPayload,
   type FactoryRoleProgress,
@@ -715,6 +716,7 @@ function shellSummaryOfRecord(payload: FactoryRunActivityPayload): FactoryRunShe
     phaseIndex: payload.phase?.index ?? 0,
     phaseCount: payload.phaseCount,
     node: payload.node,
+    askedAt: factoryRunAskedAt(payload),
   };
 }
 

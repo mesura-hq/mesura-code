@@ -512,8 +512,15 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
 
           // The label a client's shell refetch reads on the run card's event already carries it.
           expect(yield* Ref.get(harness.shellsSeenAtDispatch)).toEqual([
-            { status: "running", phaseIndex: 1, phaseCount: 2, node: "fence" },
-            { status: "waiting", phaseIndex: 1, phaseCount: 2, node: "fence" },
+            { status: "running", phaseIndex: 1, phaseCount: 2, node: "fence", askedAt: null },
+            {
+              status: "waiting",
+              phaseIndex: 1,
+              phaseCount: 2,
+              node: "fence",
+              // The stop's own time: the user's reply after it ends the question.
+              askedAt: "2026-09-28T09:05:00.000Z",
+            },
           ]);
 
           expect(harness.summaries.get(THREAD_ID)).toEqual({
@@ -521,6 +528,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
             phaseIndex: 1,
             phaseCount: 2,
             node: "fence",
+            askedAt: "2026-09-28T09:05:00.000Z",
           });
           expect(harness.summaries.get(PLAIN_THREAD_ID)).toBeNull();
         }),
@@ -883,6 +891,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
               phaseIndex: 2,
               phaseCount: 2,
               node: null,
+              askedAt: null,
             });
             expect(yield* after.tracker.tailedFiles).toEqual([]);
             expect(yield* after.activities(FACTORY_RUN_ACTIVITY_KIND)).toEqual([]);
@@ -1210,6 +1219,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
                   phaseIndex: fixture.expected.phaseIndex,
                   phaseCount,
                   node: fixture.expected.node,
+                  askedAt: null,
                 },
               });
               // The run card.
@@ -1262,6 +1272,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
               phaseIndex: 2,
               phaseCount: 3,
               node: "implement",
+              askedAt: expect.any(String),
             });
 
             yield* harness.append(
@@ -1275,6 +1286,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
               phaseIndex: 2,
               phaseCount: 3,
               node: "checks-build",
+              askedAt: null,
             });
 
             yield* harness.append(
@@ -1292,6 +1304,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
               phaseIndex: 2,
               phaseCount: 3,
               node: "checks-build",
+              askedAt: expect.any(String),
             });
             expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toMatchObject({
               status: "waiting",
@@ -1319,6 +1332,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
             phaseIndex: 1,
             phaseCount: 1,
             node: "commit",
+            askedAt: null,
           });
           expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toMatchObject({
             status: "done",
@@ -1434,6 +1448,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
               phaseIndex: 4,
               phaseCount: 6,
               node: "fence",
+              askedAt: null,
             });
             expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toEqual({
               threadId: THREAD_ID,

@@ -509,6 +509,11 @@ export const FactoryRunShellSummary = Schema.Struct({
   phaseIndex: NonNegativeInt,
   phaseCount: NonNegativeInt,
   node: Schema.NullOr(Schema.String),
+  /**
+   * When a `waiting` or `stopped` run began asking the developer; null in every other status.
+   * Optional: shells from servers that predate it still decode.
+   */
+  askedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 export type FactoryRunShellSummary = typeof FactoryRunShellSummary.Type;
 
@@ -516,6 +521,16 @@ export type FactoryRunShellSummary = typeof FactoryRunShellSummary.Type;
 export const factoryRunHoldsCompletion = (
   run: Pick<FactoryRunShellSummary, "status"> | null | undefined,
 ) => run?.status === "running";
+
+/** A run that waits on a question or was stopped asks the developer. */
+export const factoryRunAsksDeveloper = (status: FactoryRunStatus) =>
+  status === "waiting" || status === "stopped";
+
+/** `FactoryRunShellSummary.askedAt`: the run's last event, which is the question or the stop. */
+export const factoryRunAskedAt = (run: {
+  readonly status: FactoryRunStatus;
+  readonly lastEventAt: string | null;
+}): string | null => (factoryRunAsksDeveloper(run.status) ? run.lastEventAt : null);
 
 /** The compact state a run card draws; replaced in place, and under 4 KiB for an 11-phase run. */
 export const FactoryRunSummary = Schema.Struct({

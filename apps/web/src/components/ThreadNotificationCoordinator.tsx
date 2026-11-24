@@ -43,8 +43,10 @@ import {
 } from "../pushNotifications/pushRegistration";
 import { resolveBackgroundThreadRequest } from "./backgroundThreadAnnouncement";
 import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "./Sidebar.logic";
-import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-inbox";
-import { resolveSidebarThreadAttention } from "./sidebarThreadAttention";
+import {
+  resolveSidebarThreadAttention,
+  sidebarThreadAttentionFacts,
+} from "./sidebarThreadAttention";
 import {
   createThreadNotificationGate,
   isSnoozedForNotification,
@@ -327,9 +329,7 @@ export function startThreadNotifications(
           status,
           isUnread: false,
           isWoke: false,
-          agentSignal: thread.agentSignal,
-          agentExecuting: threadRuntimeIsExecuting(thread.runtime),
-          factoryRun: thread.factoryRun,
+          ...sidebarThreadAttentionFacts(thread),
         })?.kind ?? null;
       const loudKind: LoudKind | null =
         status === "request"
