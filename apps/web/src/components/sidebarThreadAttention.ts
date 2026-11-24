@@ -76,12 +76,10 @@ export function resolveSidebarThreadAttention(
 ): SidebarThreadAttention | null {
   const { status, agentQuestionOpen, factoryRun } = input;
   if (status === "approval") return { kind: "approval", text: "Approval", emphasis: "loud" };
-  // An open question yields only to a busy label that carries its marker; Preparing has none.
-  const busyLabelShown =
-    status === "working" || status === "waiting" || factoryRun?.status === "running";
-  if (status === "input" || (agentQuestionOpen && !(input.agentExecuting && busyLabelShown))) {
-    return NEEDS_INPUT;
-  }
+  // An open question yields to the executing agent's label; Preparing has none of its own.
+  const executingLabelShown =
+    input.agentExecuting && (status !== "preparing" || factoryRun?.status === "running");
+  if (status === "input" || (agentQuestionOpen && !executingLabelShown)) return NEEDS_INPUT;
   if (status === "request") return { kind: "request", text: "Request", emphasis: "loud" };
   if (status === "failed") return { kind: "failed", text: "Failed", emphasis: "loud" };
   if (status === "limited") return { kind: "limited", text: "Limited", emphasis: "loud" };

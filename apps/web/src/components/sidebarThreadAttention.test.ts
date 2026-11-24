@@ -195,6 +195,25 @@ describe("sidebar thread attention mapping", () => {
     expect(attention({ status: "preparing", agentExecuting: true })).toBeNull();
   });
 
+  // Seal confirm P1-5: the Preparing rule must not hide a guest's Request behind the question.
+  it("a guest request outranks an executing agent's open question, as before", () => {
+    expect(
+      attention({ status: "request", agentExecuting: true, agentSignal: needsInput })?.kind,
+    ).toBe("request");
+    expect(
+      attention({ status: "request", agentExecuting: true, factoryRun: factoryRunAt("stopped") })
+        ?.kind,
+    ).toBe("request");
+    expect(
+      attention({
+        status: "preparing",
+        agentExecuting: true,
+        agentSignal: needsInput,
+        factoryRun: factoryRunAt("running"),
+      }),
+    ).toMatchObject({ kind: "factory", questionOpen: true });
+  });
+
   it("sidebar attention AC5: a Factory run from a server without askedAt stays Needs input", () => {
     const { askedAt: _askedAt, ...undated } = factoryRunAt("stopped");
     expect(
