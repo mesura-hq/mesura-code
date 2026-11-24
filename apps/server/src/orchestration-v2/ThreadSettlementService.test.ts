@@ -2324,6 +2324,33 @@ describe("auto-settle with a Software Factory run", () => {
     ).toBe(false);
   });
 
+  // Seal review P1-3: the sidebar reads Needs input for an unanswered Factory question, so
+  // settling the thread would hide it.
+  it("auto-settle factory spec: an unanswered Factory question keeps a thread a non-candidate", () => {
+    const stopped = {
+      status: "stopped" as const,
+      phaseIndex: 2,
+      phaseCount: 13,
+      node: "fence",
+      askedAt: "2026-06-10T11:00:00.000Z",
+    };
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ factoryRun: stopped, latestUserAuthoredMessageAt: null }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({
+          factoryRun: stopped,
+          latestUserAuthoredMessageAt: DateTime.makeUnsafe("2026-06-10T11:30:00.000Z"),
+        }),
+        NOW_MS,
+      ),
+    ).toBe(true);
+  });
+
   it("auto-settle factory guard: a finished Factory run leaves a thread a candidate", () => {
     expect(
       ThreadSettlementService.isAutoSettlementCandidate(

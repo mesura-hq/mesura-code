@@ -1483,6 +1483,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, EffectNodeCrypto.layer))(
               request: "Sanitized sf-team run request",
               phaseStatuses: ["clean", "clean", "degraded", "running", "pending", "pending"],
               question: null,
+              askedAt: null,
               coverage: { passed: 23, total: 39 },
               degradedPhases: 1,
               // Drawn to the last event: the stop after phase 3 waited 6h 27m.

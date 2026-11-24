@@ -9,7 +9,7 @@ import {
   FactoryRunActivityPayload,
   factoryReportActivityId,
   factoryRunActivityId,
-  factoryRunAskedAt,
+  factoryRunAsksDeveloper,
   isFactoryRunFinished,
   type FactoryReportActivityPayload,
   type FactoryRoleProgress,
@@ -716,7 +716,9 @@ function shellSummaryOfRecord(payload: FactoryRunActivityPayload): FactoryRunShe
     phaseIndex: payload.phase?.index ?? 0,
     phaseCount: payload.phaseCount,
     node: payload.node,
-    askedAt: factoryRunAskedAt(payload),
+    // A card recorded before `askedAt` existed: a finished run's last event is its stop.
+    askedAt:
+      payload.askedAt ?? (factoryRunAsksDeveloper(payload.status) ? payload.lastEventAt : null),
   };
 }
 

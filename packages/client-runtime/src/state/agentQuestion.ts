@@ -1,4 +1,4 @@
-import { factoryRunAsksDeveloper } from "@t3tools/contracts";
+import { factoryRunQuestionOpen } from "@t3tools/contracts";
 
 import type { EnvironmentThreadShell } from "./models.ts";
 
@@ -21,23 +21,15 @@ type AgentQuestionThread = Pick<
 
 /**
  * Mesura: an agent's question outside a structured request — its `needs_input` signal, or a Factory
- * run that waits on a question or was stopped. The user's next message answers either one: the
- * server clears the signal, and a Factory question ends once the user writes after `askedAt`.
+ * run that waits on a question or was stopped. The user's next message answers either one.
  */
 export function agentQuestionIsOpen(thread: AgentQuestionThread): boolean {
   if (thread.agentSignal?.kind === "needs_input") return true;
-  const run = thread.factoryRun;
-  if (run == null || !factoryRunAsksDeveloper(run.status)) return false;
-  return !userWroteAfter(thread.latestUserAuthoredMessageAt, run.askedAt);
-}
-
-/** A shell from a server without `askedAt` cannot date the question, so it stays open. */
-function userWroteAfter(
-  latestUserAuthoredMessageAt: string | null | undefined,
-  askedAt: string | null | undefined,
-): boolean {
-  if (latestUserAuthoredMessageAt == null || askedAt == null) return false;
-  return Date.parse(latestUserAuthoredMessageAt) > Date.parse(askedAt);
+  const repliedAt = thread.latestUserAuthoredMessageAt;
+  return factoryRunQuestionOpen(
+    thread.factoryRun,
+    repliedAt == null ? null : Date.parse(repliedAt),
+  );
 }
 
 /**

@@ -510,8 +510,8 @@ export const FactoryRunShellSummary = Schema.Struct({
   phaseCount: NonNegativeInt,
   node: Schema.NullOr(Schema.String),
   /**
-   * When a `waiting` or `stopped` run began asking the developer; null in every other status.
-   * Optional: shells from servers that predate it still decode.
+   * When a `waiting` or `stopped` run began asking the developer: the open stop's `raisedAt`, or
+   * the stop of the run. Null in every other status. Optional: older shells still decode.
    */
   askedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
@@ -526,11 +526,19 @@ export const factoryRunHoldsCompletion = (
 export const factoryRunAsksDeveloper = (status: FactoryRunStatus) =>
   status === "waiting" || status === "stopped";
 
-/** `FactoryRunShellSummary.askedAt`: the run's last event, which is the question or the stop. */
-export const factoryRunAskedAt = (run: {
-  readonly status: FactoryRunStatus;
-  readonly lastEventAt: string | null;
-}): string | null => (factoryRunAsksDeveloper(run.status) ? run.lastEventAt : null);
+/**
+ * Mesura: whether a run's question still waits on the developer. The developer's next message
+ * after `askedAt` answers it, as it clears an agent's `needs_input` signal. A run without
+ * `askedAt` cannot be dated, so its question stays open.
+ */
+export const factoryRunQuestionOpen = (
+  run: Pick<FactoryRunShellSummary, "status" | "askedAt"> | null | undefined,
+  userRepliedAtMs: number | null,
+): boolean => {
+  if (run == null || !factoryRunAsksDeveloper(run.status)) return false;
+  if (run.askedAt == null || userRepliedAtMs === null) return true;
+  return !(userRepliedAtMs > Date.parse(run.askedAt));
+};
 
 /** The compact state a run card draws; replaced in place, and under 4 KiB for an 11-phase run. */
 export const FactoryRunSummary = Schema.Struct({
@@ -558,6 +566,8 @@ export const FactoryRunSummary = Schema.Struct({
   phaseStatuses: Schema.optional(Schema.Array(FactoryRunPhaseStatus)),
   /** The open stop question, shortened; null once answered. */
   question: Schema.optional(Schema.NullOr(Schema.String)),
+  /** `FactoryRunShellSummary.askedAt`, kept so a restart restores it. */
+  askedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   /**
    * Acceptance criteria whose latest verdict passed, over every criterion of
    * the run: the report card's coverage, without the full state.
