@@ -324,12 +324,15 @@ export function startThreadNotifications(
       if (status === "ready" && thread.latestRun?.status === "failed") status = "failed";
       // Mesura: the sidebar's label decides, so an agent's needs-input signal or a stopped
       // Factory run asks for the developer the way a structured question does.
+      const facts = sidebarThreadAttentionFacts(thread);
       const attentionKind =
         resolveSidebarThreadAttention({
           status,
           isUnread: false,
           isWoke: false,
-          ...sidebarThreadAttentionFacts(thread),
+          ...facts,
+          // An agent question notifies once it waits on the user, not while the agent executes.
+          agentQuestionOpen: facts.agentQuestionOpen && !facts.agentExecuting,
         })?.kind ?? null;
       const loudKind: LoudKind | null =
         status === "request"
