@@ -147,7 +147,7 @@ open.
 ### Fold working threads (beta)
 
 Threads that are working or waiting on work they will resume from move into a collapsed
-**Working** section directly under Search.
+**Working** section under Search, below any unsent drafts.
 That includes subagents, watched pull requests, a running Software Factory run, and background
 commands or monitors the agent says it is waiting on. A dev server or other process an agent leaves
 running does not keep a thread there. A thread returns to its place in the list when it finishes,
@@ -156,8 +156,8 @@ first. Pinned threads stay in the pinned section.
 
 Press **Alt+Z** (**Space t w** in Vim mode), click or tap the **Working** header, or run **Toggle
 Working section** from the command palette to open or close it; change the key in **Settings →
-Keybindings**. Down from the empty Search field reaches the header and then its threads; Left and
-Right on the header close and open it. While it is closed, the thread you have open still shows
+Keybindings**. Down from the empty Search field reaches any unsent drafts, then the header and its
+threads; Left and Right on the header close and open it. While it is closed, the thread you have open still shows
 under the header.
 
 This is on by default. Turn it off with **Settings → General → Working section** on web and desktop,

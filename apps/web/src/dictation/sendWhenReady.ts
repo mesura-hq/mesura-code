@@ -8,6 +8,7 @@ import { persist } from "zustand/middleware";
 import { toastManager } from "~/components/ui/toast";
 import { type ComposerThreadTarget, useComposerDraftStore } from "~/composerDraftStore";
 import { randomUUID } from "~/lib/utils";
+import { armedThreadAvailability, createArmedThreadHold } from "./armedThreadHold";
 import {
   submitDirectedDictation,
   type DirectedSubmissionContext,
@@ -263,6 +264,18 @@ function checkDraftsAfterChange() {
       forgetDraftSendState(key);
       continue;
     }
+    if (
+      entry.armed &&
+      !inFlight &&
+      typeof entry.target !== "string" &&
+      armedThreadAvailability(entry.target) === "gone"
+    ) {
+      reportUnsent(
+        entry.target,
+        "Its thread could not be reached. The text is still in the draft.",
+      );
+      continue;
+    }
     // Tracked while a send is in flight too: an edit then sends as `draft-changed` asks again.
     if (deletedByHand && entry.armed) {
       updateDraftSendState(entry.target, { armed: false, markers });
@@ -270,6 +283,10 @@ function checkDraftsAfterChange() {
     }
     if (!sameMarkers(entry.markers, markers)) updateDraftSendState(entry.target, { markers });
     if (inFlight || decision !== "send") continue;
+    // The hold looks again once the thread's detail has loaded.
+    if (typeof entry.target !== "string" && armedThreadAvailability(entry.target) === "loading") {
+      continue;
+    }
     sending.add(key);
     void sendArmedDraft(key, entry, prompt)
       .catch((cause: unknown) => {
@@ -294,3 +311,14 @@ function queueDraftCheck() {
   });
 }
 useComposerDraftStore.subscribe(queueDraftCheck);
+
+const armedThreads = createArmedThreadHold(queueDraftCheck, { need: "data", watchRequests: false });
+function holdArmedThreads({ drafts }: SendWhenReadyState) {
+  armedThreads.set(
+    Object.values(drafts).flatMap((entry) =>
+      entry.armed && typeof entry.target !== "string" ? [entry.target] : [],
+    ),
+  );
+}
+useSendWhenReadyStore.subscribe(holdArmedThreads);
+holdArmedThreads(useSendWhenReadyStore.getState());

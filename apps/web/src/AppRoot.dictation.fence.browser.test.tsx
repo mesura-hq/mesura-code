@@ -237,7 +237,9 @@ vi.mock("@legendapp/list/react", () => ({
   ),
 }));
 
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
+import * as Option from "effect/Option";
 import { AppRoot } from "./AppRoot";
 import { AppSidebarLayout } from "./components/AppSidebarLayout";
 import ChatView from "./components/ChatView";
@@ -254,6 +256,7 @@ import {
 } from "./pendingUserInputDraftStore";
 
 import { useDictationSessionStore } from "./dictation/dictationSessionStore";
+import { useSendWhenReadyStore } from "./dictation/sendWhenReady";
 import { useDictationWidgetActivityStore } from "./dictation/dictationWidgetState";
 import { createFakeMedia } from "./dictation/dictationMedia.testFixtures";
 import { setDictationMediaBackend } from "./dictation/recorder";
@@ -1299,6 +1302,33 @@ function respondCalls() {
   return fixture.dictationCalls.filter((call) => call.name === "respond");
 }
 
+/** Replaces the thread's detail state, as its stream would, and tells the subscribers. */
+async function setThreadState(
+  state: Partial<import("@t3tools/client-runtime/state/threads").EnvironmentThreadState>,
+) {
+  await act(async () => {
+    appRootFence.threadStates.set(threadId, { ...EMPTY_ENVIRONMENT_THREAD_STATE, ...state });
+    for (const listener of appRootFence.threadListeners) listener();
+  });
+  await settle();
+}
+
+function notSentToasts() {
+  return vi
+    .mocked(toastManager.add)
+    .mock.calls.filter(([toast]) => toast.title === "The dictated message was not sent");
+}
+
+/** Thread details load as the real stream does: empty when first subscribed, filled a moment later. */
+function detailsLoadLate(): Disposable {
+  appRootFence.threadDetailsLoadLate = true;
+  return {
+    [Symbol.dispose]: () => {
+      appRootFence.threadDetailsLoadLate = false;
+    },
+  };
+}
+
 const VOICED = "[voiced] ";
 
 function voicedCount(text: string): number {
@@ -1316,6 +1346,7 @@ function sendWhenReadyBannerShown(): boolean {
 
 const CANCEL_SEND = "Don't send when the transcription lands";
 const CANCEL_SUBMIT = "Don't submit when the transcription lands";
+const CANCEL_SUBMIT_UNTIL_SYNCED = "Don't submit when the thread is back in sync";
 
 /** The send glyph on an armed draft's marker, which also disarms it. */
 function sendGlyphShown(): boolean {
@@ -1752,6 +1783,61 @@ describe("dictation phase 5 fence", () => {
     expect(turnStarts()).toHaveLength(1);
   });
 
+  it("dictation send regression: an armed draft sends after the user leaves its thread, which nothing else holds", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _late = detailsLoadLate();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    await vi.waitFor(() => expect(turnStarts()).toHaveLength(1));
+    expect(turnStarts()[0]!.input.threadId).toBe(threadId);
+    expect(squash(turnStarts()[0]!.input.message.text)).toBe("[voiced] Read the notes y resume");
+    expect(squash(promptOf(onScreenTarget))).toBe("");
+    expect(notSentToasts()).toHaveLength(0);
+  });
+
+  it("dictation send regression: an armed draft whose thread is deleted is disarmed and reported, not held", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+    await setThreadState({ status: "deleted" });
+
+    await pushJobs([job(jobId, { status: "failed", mode: "submit", failure: "Network error" })]);
+    await vi.waitFor(() => expect(notSentToasts()).toHaveLength(1));
+    expect(turnStarts()).toHaveLength(0);
+    expect(
+      useSendWhenReadyStore.getState().drafts[scopedThreadKey(onScreenTarget)]?.armed,
+    ).not.toBe(true);
+  });
+
+  it("dictation send regression: an armed draft stays armed through a failed detail load and sends once it recovers", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+    await setThreadState({ status: "synchronizing", error: Option.some("socket closed") });
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(notSentToasts()).toHaveLength(0);
+
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await vi.waitFor(() => expect(turnStarts()).toHaveLength(1));
+    expect(squash(turnStarts()[0]!.input.message.text)).toBe("[voiced] Read the notes y resume");
+  });
+
   it("dictation phase 5 AC5: a message with dictated parts carries one [voiced] prefix, and a typed one carries none", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
@@ -2053,6 +2139,46 @@ describe("dictation phase 5 rework regressions", () => {
     });
   });
 
+  it("dictation send regression: a send-mode answer is submitted after the user leaves its thread, which nothing else holds", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _late = detailsLoadLate();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await focusQuestionAnswer();
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "lejos" })]);
+    await vi.waitFor(() => expect(respondCalls()).toHaveLength(1));
+    expect(respondCalls()[0]!.value).toMatchObject({
+      input: { threadId, requestId: questionRequestId, answers: { scope: "[voiced] lejos" } },
+    });
+  });
+
+  it("dictation send regression: a cached snapshot without the question waits for the live thread before judging the answer", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await focusQuestionAnswer();
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+    // A snapshot cached before the question opened, as a reload starts from.
+    await setThreadState({ status: "cached", data: Option.some(makeThreadProjection()) });
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "en cache" })]);
+    expect(respondCalls()).toHaveLength(0);
+
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await vi.waitFor(() => expect(respondCalls()).toHaveLength(1));
+    expect(respondCalls()[0]!.value).toMatchObject({
+      input: { threadId, requestId: questionRequestId, answers: { scope: "[voiced] en cache" } },
+    });
+  });
+
   it("dictation phase 5 regression: Submit with a pending answer marker arms the card without a banner, and its armed Submit keeps the answer unsent", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
@@ -2091,6 +2217,56 @@ describe("dictation phase 5 rework regressions", () => {
     await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "respuesta" })]);
     expect(respondCalls()).toHaveLength(0);
     expect(questionAnswerText()).toBe("respuesta");
+  });
+
+  it("send glyph: an answer whose last marker fills while its thread synchronizes keeps Submits when ready, and its cancel holds", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await setThreadState({ status: "synchronizing", data: Option.some(fixture.projection) });
+    await focusQuestionAnswer();
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "sincronizando" })]);
+    expect(respondCalls()).toHaveLength(0);
+    await click(requireButton(CANCEL_SUBMIT_UNTIL_SYNCED));
+    expect(buttonLabelled(CANCEL_SUBMIT_UNTIL_SYNCED)).toBeUndefined();
+
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await settle();
+    expect(respondCalls()).toHaveLength(0);
+  });
+
+  it("send glyph: an answer armed while its thread synchronizes, whose marker is then deleted by hand, is not submitted", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await setThreadState({ status: "synchronizing", data: Option.some(fixture.projection) });
+    const field = await focusQuestionAnswer();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Hello world",
+      );
+    });
+    await settle();
+    await placeAnswerCaretAfter(field, "Hello");
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+    expect(slotsIn(questionAnswerText())).toHaveLength(1);
+
+    await userEvent.fill(field, "Hello world");
+    await settle();
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await settle();
+    expect(respondCalls()).toHaveLength(0);
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "respuesta" })]);
+    expect(respondCalls()).toHaveLength(0);
   });
 
   it("send glyph: deleting an armed answer's marker by hand disarms it instead of submitting", async () => {

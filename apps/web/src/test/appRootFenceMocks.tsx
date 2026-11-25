@@ -31,6 +31,11 @@ export const appRootFence = {
   clientSettings: {} as Partial<ClientSettings>,
   empty: [] as never[],
   threadListeners: new Set<() => void>(),
+  /**
+   * A fresh thread detail subscription starts empty and gets its state a moment later, as the real
+   * stream does. Off, a thread's detail is there at once, even with nothing mounting it.
+   */
+  threadDetailsLoadLate: false,
   /** The ranges the key surfaces last painted, by highlight name. */
   highlights: new Map<string, ReadonlyArray<Range>>(),
   project: {
@@ -387,10 +392,18 @@ export async function mockThreads(
   };
   const stateAtom = Atom.family((key: string) =>
     Atom.make((get) => {
-      const listener = () => get.setSelf(AsyncResult.success(stateFor(key)));
+      let disposed = false;
+      const listener = () => {
+        if (!disposed) get.setSelf(AsyncResult.success(stateFor(key)));
+      };
       appRootFence.threadListeners.add(listener);
-      get.addFinalizer(() => appRootFence.threadListeners.delete(listener));
-      return AsyncResult.success(stateFor(key));
+      get.addFinalizer(() => {
+        disposed = true;
+        appRootFence.threadListeners.delete(listener);
+      });
+      if (!appRootFence.threadDetailsLoadLate) return AsyncResult.success(stateFor(key));
+      queueMicrotask(listener);
+      return AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE);
     }).pipe(Atom.setIdleTTL(0)),
   );
   const emptyAtom = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE));

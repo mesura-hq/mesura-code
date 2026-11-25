@@ -181,11 +181,16 @@ vi.mock("./components/files/mesuraFileManager/MesuraFileManagerLayer", async () 
 vi.mock("./keys/highlights", async () => (await fenceMocks()).mockHighlights());
 vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import { ProjectId, RunId, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
 import { THREAD_CONTEXT_DROP_EVENT } from "./components/chat/threadContextDrag";
+import { DraftId, useComposerDraftStore } from "./composerDraftStore";
 import { WORKING_SECTION_EXPANDED_KEY } from "./components/sidebar/workingSection";
 import { installKeyEngine } from "./keys/keyEngine";
 import { readViewportThreadKeys } from "./lib/sidebarThreadViewport";
@@ -772,6 +777,42 @@ describe("working section: the ways in and out", () => {
     await press({ key: "Enter", code: "Enter" });
     await vi.waitFor(() =>
       expect(router!.state.location.pathname).toBe(`/${environmentId}/working-a`),
+    );
+  });
+
+  it("working section spec: unsent drafts sit between Search and the header, and the arrow keys walk through them", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const drafts = useComposerDraftStore.getState();
+    const draftId = DraftId.make("working-fence-draft");
+    using _draft = {
+      [Symbol.dispose]: () => useComposerDraftStore.getState().clearDraftThread(draftId),
+    };
+    drafts.setProjectDraftThreadId(
+      scopeProjectRef(environmentId, ProjectId.make(ALPHA_PROJECT_ID)),
+      draftId,
+      { threadId: ThreadId.make("working-fence-draft-thread") },
+    );
+    drafts.setPrompt(draftId, "First line of the draft\nsecond line");
+    await mountWithThreads([workingThread("working-a", "Work A", 5)], { expanded: true });
+    const draftRow = document.querySelector<HTMLElement>('[data-testid="sidebar-draft-row"]');
+    expect(draftRow, "the draft row").not.toBeNull();
+    expect(draftRow!.textContent).toContain("First line of the draft");
+    expect(draftRow!.textContent).not.toContain("second line");
+    expect(
+      draftRow!.compareDocumentPosition(header()) & Node.DOCUMENT_POSITION_FOLLOWING,
+      "the draft row comes before the Working header",
+    ).toBeTruthy();
+    await act(async () => sidebarSearchField().focus());
+
+    await press(DOWN);
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(draftRow);
+    await press(DOWN);
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(header());
+    await press(UP);
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(draftRow);
+    await press(UP);
+    expect(document.activeElement, "Up from the first draft returns to Search").toBe(
+      sidebarSearchField(),
     );
   });
 

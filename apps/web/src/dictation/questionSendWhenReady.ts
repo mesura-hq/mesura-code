@@ -16,6 +16,8 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { readThread } from "~/state/entities";
 import { environmentServerConfigsAtom } from "~/state/server";
 import { threadEnvironment } from "~/state/threads";
+import { armedThreadAvailability, createArmedThreadHold } from "./armedThreadHold";
+import { onDictationEnvironmentForgotten } from "./dictationSessionStore";
 import {
   dictationMarkerDeletedByHand,
   dictationMarkerIds,
@@ -154,17 +156,25 @@ function checkArmedQuestions() {
   for (const [key, armed] of Object.entries(useSendWhenReadyStore.getState().questions)) {
     if (submitting.has(key)) continue;
     const ids = parseRequestKey(key);
-    const request = ids ? findOpenRequest(ids) : null;
-    if (!ids || !request) {
-      // Answered or dismissed elsewhere: nothing is left to send.
+    // The draft holds answers of this request only, so its markers need no live thread.
+    const answers = requests[key]?.answers ?? {};
+    const markers = dictationMarkerIds(
+      Object.values(answers)
+        .map((answer) => answer?.customAnswer ?? "")
+        .join("\n"),
+    );
+    if (dictationMarkerDeletedByHand(armed.markers, markers)) {
       disarmQuestionSendWhenReady(key);
       continue;
     }
-    const answers = requests[key]?.answers ?? {};
-    const markers = dictationMarkerIds(
-      request.questions.map((question) => answers[question.id]?.customAnswer ?? "").join("\n"),
-    );
-    if (dictationMarkerDeletedByHand(armed.markers, markers)) {
+    // The hold looks again once the thread's detail is live.
+    if (ids && armedThreadAvailability(ids, "live") === "loading") {
+      trackQuestionMarkers(key, markers);
+      continue;
+    }
+    const request = ids ? findOpenRequest(ids) : null;
+    if (!ids || !request) {
+      // Answered or dismissed elsewhere: nothing is left to send.
       disarmQuestionSendWhenReady(key);
       continue;
     }
@@ -177,6 +187,13 @@ function checkArmedQuestions() {
     void submitArmedQuestion(key, ids, request).finally(() => submitting.delete(key));
   }
 }
+
+// A removed environment never answers; its armed requests go with it.
+onDictationEnvironmentForgotten((environmentId) => {
+  for (const key of Object.keys(useSendWhenReadyStore.getState().questions)) {
+    if (parseRequestKey(key)?.environmentId === environmentId) disarmQuestionSendWhenReady(key);
+  }
+});
 
 /** Mounted once for the app, beside the dictation delivery. */
 export function useQuestionSendWhenReady(): void {
@@ -192,12 +209,23 @@ export function useQuestionSendWhenReady(): void {
         checkArmedQuestions();
       });
     };
+    const armedThreads = createArmedThreadHold(check, { need: "live", watchRequests: true });
+    const holdAndCheck = () => {
+      armedThreads.set(
+        Object.keys(useSendWhenReadyStore.getState().questions).flatMap((key) => {
+          const ids = parseRequestKey(key);
+          return ids ? [{ environmentId: ids.environmentId, threadId: ids.threadId }] : [];
+        }),
+      );
+      check();
+    };
     const unsubscribeAnswers = usePendingUserInputDraftStore.subscribe(check);
-    const unsubscribeArmed = useSendWhenReadyStore.subscribe(check);
-    check();
+    const unsubscribeArmed = useSendWhenReadyStore.subscribe(holdAndCheck);
+    holdAndCheck();
     return () => {
       unsubscribeAnswers();
       unsubscribeArmed();
+      armedThreads.releaseAll();
     };
   }, []);
 }

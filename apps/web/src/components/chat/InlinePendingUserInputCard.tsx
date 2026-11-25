@@ -49,6 +49,7 @@ import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
 import { insertDictationSlotAt } from "../../dictation/dictationSlotEdits";
 import { completeQuestionDraftAnswers } from "../../pendingUserInputResponse";
 import { cn } from "../../lib/utils";
+import { useThreadStatus } from "../../state/entities";
 
 export interface InlinePendingUserInputContext {
   environmentId: EnvironmentId;
@@ -203,7 +204,10 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
     0,
   );
   // Armed by send mode or by Submit: the answers go by themselves once the transcripts land.
-  const submitsWhenReady = useQuestionSendWhenReadyArmed(key) && pendingTranscriptions > 0;
+  // An armed answer also waits for the thread's live detail, and stays cancellable meanwhile.
+  const threadLive = useThreadStatus({ environmentId, threadId }) === "live";
+  const submitsWhenReady =
+    useQuestionSendWhenReadyArmed(key) && (pendingTranscriptions > 0 || !threadLive);
   const submit = async () => {
     if (responding || context.unavailable) return;
     // A transcription still pending in an answer: submit once it lands.
@@ -317,7 +321,11 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
         {submitsWhenReady ? (
           <button
             type="button"
-            aria-label="Don't submit when the transcription lands"
+            aria-label={
+              pendingTranscriptions > 0
+                ? "Don't submit when the transcription lands"
+                : "Don't submit when the thread is back in sync"
+            }
             onClick={() => disarmQuestionSendWhenReady(key)}
             className="inline-flex items-center gap-2 rounded-md border border-primary/45 bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/15"
           >
