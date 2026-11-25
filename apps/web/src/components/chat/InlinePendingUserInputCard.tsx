@@ -321,7 +321,11 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
         {submitsWhenReady ? (
           <button
             type="button"
-            aria-label="Don't submit when the transcription lands"
+            aria-label={
+              pendingTranscriptions > 0
+                ? "Don't submit when the transcription lands"
+                : "Don't submit when the thread is back in sync"
+            }
             onClick={() => disarmQuestionSendWhenReady(key)}
             className="inline-flex items-center gap-2 rounded-md border border-primary/45 bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/15"
           >

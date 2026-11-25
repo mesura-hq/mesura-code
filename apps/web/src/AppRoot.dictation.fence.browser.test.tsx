@@ -1346,6 +1346,7 @@ function sendWhenReadyBannerShown(): boolean {
 
 const CANCEL_SEND = "Don't send when the transcription lands";
 const CANCEL_SUBMIT = "Don't submit when the transcription lands";
+const CANCEL_SUBMIT_UNTIL_SYNCED = "Don't submit when the thread is back in sync";
 
 /** The send glyph on an armed draft's marker, which also disarms it. */
 function sendGlyphShown(): boolean {
@@ -2230,8 +2231,8 @@ describe("dictation phase 5 rework regressions", () => {
 
     await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "sincronizando" })]);
     expect(respondCalls()).toHaveLength(0);
-    await click(requireButton(CANCEL_SUBMIT));
-    expect(buttonLabelled(CANCEL_SUBMIT)).toBeUndefined();
+    await click(requireButton(CANCEL_SUBMIT_UNTIL_SYNCED));
+    expect(buttonLabelled(CANCEL_SUBMIT_UNTIL_SYNCED)).toBeUndefined();
 
     await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
     await settle();
