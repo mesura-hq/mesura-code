@@ -2218,6 +2218,26 @@ describe("dictation phase 5 rework regressions", () => {
     expect(questionAnswerText()).toBe("respuesta");
   });
 
+  it("send glyph: an answer whose last marker fills while its thread synchronizes keeps Submits when ready, and its cancel holds", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await setThreadState({ status: "synchronizing", data: Option.some(fixture.projection) });
+    await focusQuestionAnswer();
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "sincronizando" })]);
+    expect(respondCalls()).toHaveLength(0);
+    await click(requireButton(CANCEL_SUBMIT));
+    expect(buttonLabelled(CANCEL_SUBMIT)).toBeUndefined();
+
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await settle();
+    expect(respondCalls()).toHaveLength(0);
+  });
+
   it("send glyph: an answer armed while its thread synchronizes, whose marker is then deleted by hand, is not submitted", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
