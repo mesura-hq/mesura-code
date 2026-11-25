@@ -145,6 +145,8 @@ function parseWidgetMonitors(json: string): ReadonlyArray<WidgetMonitor> {
 
 export function createHyprlandWidgetRules(input: {
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** False for a Dev or Lab app: the compositor's dictation rules stay the stable app's. Omitted means true. */
+  readonly ownsSharedDesktopIntegrations?: boolean;
   readonly execute: HyprctlExecute;
   readonly onError?: (cause: unknown) => void;
 }): {
@@ -155,7 +157,7 @@ export function createHyprlandWidgetRules(input: {
   /** Sends the rules again, with the monitors read again: a config reload dropped them. */
   readonly reapply: () => Promise<void>;
 } {
-  const enabled = isHyprlandSession(input.env);
+  const enabled = input.ownsSharedDesktopIntegrations !== false && isHyprlandSession(input.env);
   const readConfigProvider = createHyprlandConfigProviderReader(input.execute);
   let applied: Promise<void> | null = null;
 

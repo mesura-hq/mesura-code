@@ -1,3 +1,7 @@
+// Entry points: DesktopSnapShot.layer configures and probes the system capture shortcut.
+import { MESURA_DESKTOP_CHANNEL_IDENTITY } from "../../../../scripts/lib/brand-assets.ts";
+import type { MesuraDesktopChannelIdentity } from "../app/mesuraChannel.ts";
+
 import * as MacPermissions from "../permissions/MacPermissions.ts";
 import { assert, it } from "@effect/vitest";
 import {
@@ -485,6 +489,7 @@ const layerTest = (
     Option.Option<ClientSettings>,
     DesktopClientSettings.DesktopClientSettingsReadError
   > = Effect.succeed(initialSettings),
+  channel: MesuraDesktopChannelIdentity["channel"] = "stable",
 ) =>
   MacPermissions.layer.pipe(
     Layer.provideMerge(
@@ -493,10 +498,14 @@ const layerTest = (
           DesktopEnvironment.DesktopEnvironment,
           DesktopEnvironment.DesktopEnvironment.of({
             platform,
+            isPackaged: true,
+            isDevelopment: false,
+            mesuraChannel: MESURA_DESKTOP_CHANNEL_IDENTITY[channel],
             displayName: "Mesura Code (Dev)",
             stateDir: "/state",
             linuxDesktopEntryName: "mesura-code.desktop",
             appRoot: "/repo",
+            resourcesPath: "/repo/resources",
             linuxApplicationsDir: "/test-data/applications",
           } as DesktopEnvironment.DesktopEnvironment["Service"]),
         ),
@@ -1851,6 +1860,165 @@ it.effect("an unrelated client-setting change keeps the registered shortcut", ()
     }),
   ).pipe(Effect.provide(layerTest("win32")));
 });
+
+it.effect.each(["dev", "lab"] as const)(
+  "desktop channels AC4: packaged %s leaves native capture shortcuts unregistered",
+  (channel) => {
+    registerShortcutMock.mockReset().mockReturnValue(true);
+    const settings = enabledSettings({
+      snapShotShortcut: {
+        key: "k",
+        metaKey: false,
+        ctrlKey: true,
+        shiftKey: false,
+        altKey: true,
+        modKey: false,
+      },
+    });
+    return Effect.gen(function* () {
+      const service = yield* DesktopSnapShot.DesktopSnapShot;
+      yield* service.configure(settings);
+      yield* service.checkShortcut({
+        ...settings.snapShotShortcut,
+        key: "j",
+      });
+      assert.deepEqual(
+        registerShortcutMock.mock.calls.map(([accelerator]) => accelerator),
+        [],
+      );
+      assert.isFalse((yield* service.state).shortcutRegistered);
+    }).pipe(
+      Effect.provide(
+        DesktopSnapShot.layer.pipe(
+          Layer.provide(layerTest("win32", {}, Option.none(), undefined, channel)),
+        ),
+      ),
+    );
+  },
+);
+
+it.effect.each(["dev", "lab"] as const)(
+  "desktop channels AC4: packaged %s leaves the Hyprland capture action unregistered",
+  (channel) => {
+    vi.stubEnv("XDG_SESSION_TYPE", "wayland");
+    vi.stubEnv("XDG_CURRENT_DESKTOP", "Hyprland");
+    vi.stubEnv("FLATPAK_ID", "");
+    vi.stubEnv("SNAP", "");
+    nextPortalState.value = {
+      shortcutRegistered: false,
+      shortcutActionRegistered: true,
+      shortcutPending: false,
+      shortcutMessage: "Managed by Hyprland",
+    };
+    return Effect.gen(function* () {
+      const service = yield* DesktopSnapShot.DesktopSnapShot;
+      yield* service.configure(enabledSettings());
+      assert.notEqual((yield* service.state).shortcutActionRegistered, true);
+    }).pipe(
+      Effect.provide(
+        DesktopSnapShot.layer.pipe(
+          Layer.provide(layerTest("linux", {}, Option.none(), undefined, channel)),
+        ),
+      ),
+      Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+    );
+  },
+);
+
+it.effect.each(["dev", "lab"] as const)(
+  "desktop channels AC4: packaged %s leaves the shared capture setup and compositor config alone",
+  (channel) => {
+    vi.stubEnv("XDG_SESSION_TYPE", "wayland");
+    vi.stubEnv("XDG_CURRENT_DESKTOP", "Hyprland");
+    vi.stubEnv("FLATPAK_ID", "");
+    vi.stubEnv("SNAP", "");
+    linuxBackendMock.mockResolvedValue("hyprland");
+    return Effect.gen(function* () {
+      const service = yield* DesktopSnapShot.DesktopSnapShot;
+      yield* service.configure(enabledSettings());
+      const state = yield* service.state;
+      assert.include(state.hyprlandHelper, {
+        status: "error",
+        message: "Capture setup belongs to the stable Mesura Code app. Set it up there.",
+      });
+      assert.isUndefined(state.shortcutBinding);
+      assert.isUndefined(state.shortcutConfigPath);
+      for (const action of [
+        "install-hyprland-helper",
+        "remove-hyprland-helper",
+        "install-kde-helper",
+        "remove-kde-helper",
+        "install-extension",
+        "enable-extension",
+        "disable-extension",
+      ] as const) {
+        const error = yield* Effect.flip(service.setup(action));
+        assert.equal(error.reason, "unsupported-session", action);
+      }
+      const preview = yield* Effect.flip(
+        service.previewConfig({ operation: "install", chooseFile: false }),
+      );
+      assert.include(preview, { action: "preview-config", reason: "unsupported-session" });
+      const apply = yield* Effect.flip(service.applyConfig("preview"));
+      assert.include(apply, { action: "apply-config", reason: "unsupported-session" });
+    }).pipe(
+      Effect.provide(
+        DesktopSnapShot.layer.pipe(
+          Layer.provide(layerTest("linux", {}, Option.none(), undefined, channel)),
+        ),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          linuxBackendMock.mockResolvedValue("picker");
+          vi.unstubAllEnvs();
+        }),
+      ),
+    );
+  },
+);
+
+it.effect.each([
+  { channel: "stable", kdeStatus: "not-installed", niriShared: true },
+  { channel: "dev", kdeStatus: "error", niriShared: false },
+  { channel: "lab", kdeStatus: "error", niriShared: false },
+] as const)(
+  "desktop channels regression: packaged $channel shows KDE and Niri setup only when it owns it",
+  ({ channel, kdeStatus, niriShared }) => {
+    vi.stubEnv("XDG_SESSION_TYPE", "wayland");
+    vi.stubEnv("FLATPAK_ID", "");
+    vi.stubEnv("SNAP", "");
+    niriShortcutMock.mockClear();
+    return Effect.gen(function* () {
+      const service = yield* DesktopSnapShot.DesktopSnapShot;
+
+      vi.stubEnv("XDG_CURRENT_DESKTOP", "KDE");
+      linuxBackendMock.mockResolvedValue("kde");
+      yield* service.configure(enabledSettings());
+      assert.equal((yield* service.state).kdeHelper?.status, kdeStatus);
+
+      vi.stubEnv("XDG_CURRENT_DESKTOP", "niri");
+      vi.stubEnv("NIRI_SOCKET", "/run/user/1000/niri.sock");
+      linuxBackendMock.mockResolvedValue("niri");
+      yield* service.setup("retry-shortcut");
+      const niri = yield* service.state;
+      assert.equal(Boolean(niri.shortcutConfigPath), niriShared);
+      assert.equal(Boolean(niri.shortcutBinding), niriShared);
+      assert.equal(niriShortcutMock.mock.calls.length > 0, niriShared);
+    }).pipe(
+      Effect.provide(
+        DesktopSnapShot.layer.pipe(
+          Layer.provide(layerTest("linux", {}, Option.none(), undefined, channel)),
+        ),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          linuxBackendMock.mockResolvedValue("picker");
+          vi.unstubAllEnvs();
+        }),
+      ),
+    );
+  },
+);
 
 it.effect("capture fails closed while snapshots are disabled", () => {
   activeWindowMock.mockClear();

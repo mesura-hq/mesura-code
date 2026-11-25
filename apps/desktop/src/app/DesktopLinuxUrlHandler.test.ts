@@ -1,3 +1,4 @@
+// Entry point: DesktopLinuxUrlHandler.register during desktop startup.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -16,6 +17,8 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+
+import { MESURA_DESKTOP_CHANNEL_IDENTITY } from "../../../../scripts/lib/brand-assets.ts";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
@@ -36,6 +39,7 @@ const makeEnvironment = (path: Path.Path, overrides: Record<string, unknown> = {
     platform: "linux",
     isPackaged: true,
     isDevelopment: false,
+    mesuraChannel: MESURA_DESKTOP_CHANNEL_IDENTITY.stable,
     displayName: "Mesura Code (Alpha)",
     linuxDesktopEntryName: "mesura-code.desktop",
     linuxWmClass: "t3code",
@@ -252,6 +256,7 @@ describe("DesktopLinuxUrlHandler", () => {
           recorded.files[0]?.content,
           "Exec=/home/alice/Applications/Mesura-Code.AppImage %U",
         );
+        assert.include(recorded.files[0]?.content, "NoDisplay=true");
         assert.include(recorded.files[0]?.content, "MimeType=x-scheme-handler/t3code;");
         assert.deepEqual(recorded.commands, [
           {
@@ -265,6 +270,37 @@ describe("DesktopLinuxUrlHandler", () => {
         ]);
       });
     },
+  );
+
+  it.effect.each(["dev", "lab"] as const)(
+    "desktop channels AC1: late startup leaves the scheme defaults alone for packaged %s",
+    (channel) =>
+      Effect.gen(function* () {
+        const recorded = emptyRecording();
+        const slug = `mesura-code-channel-${channel}`;
+        yield* runRegister(recorded, {
+          environment: {
+            mesuraChannel: MESURA_DESKTOP_CHANNEL_IDENTITY[channel],
+            displayName: channel === "dev" ? "Mesura Code Dev" : "Mesura Code Lab",
+            linuxDesktopEntryName: `${slug}.desktop`,
+            linuxWmClass: slug,
+          },
+        });
+
+        assert.deepEqual(
+          recorded.commands.filter(({ command }) => command === "xdg-mime"),
+          [],
+        );
+        const entries = recorded.files.filter((file) => file.path.endsWith(".desktop"));
+        assert.deepEqual(
+          entries.map((entry) => entry.path),
+          [`/home/alice/.local/share/applications/${slug}.desktop`],
+        );
+        const content = entries[0]!.content;
+        assert.notInclude(content, "NoDisplay=true");
+        assert.notInclude(content, "MimeType=");
+        assert.include(content, `StartupWMClass=${slug}\n`);
+      }),
   );
 
   it.effect("falls back to the process executable outside an AppImage", () => {

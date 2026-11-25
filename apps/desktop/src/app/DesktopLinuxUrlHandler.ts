@@ -10,6 +10,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import { ownsSharedDesktopIntegrations } from "./mesuraChannel.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
 
 // AppImage integrators choose the .desktop filename, so setDesktopName cannot identify it for protocol registration.
@@ -96,6 +97,40 @@ export function renderUrlHandlerDesktopEntry(input: {
   ].join("\n");
 }
 
+// A Dev or Lab app has no URL scheme to claim, so its entry is a visible launcher that owns its
+// own window class instead of the stable app's hidden handler.
+function renderChannelLauncherDesktopEntry(input: {
+  readonly displayName: string;
+  readonly execTarget: string;
+  readonly wmClass: string;
+  readonly iconPath?: string;
+}): string {
+  return [
+    "[Desktop Entry]",
+    "Type=Application",
+    `Name=${escapeDesktopEntryString(input.displayName)}`,
+    `Exec=${escapeUrlHandlerExecTarget(input.execTarget)} %U`,
+    ...(input.iconPath === undefined ? [] : [`Icon=${escapeDesktopEntryString(input.iconPath)}`]),
+    "Terminal=false",
+    "Categories=Development;",
+    `StartupWMClass=${escapeDesktopEntryString(input.wmClass)}`,
+    "",
+  ].join("\n");
+}
+
+export function renderLinuxDesktopEntry(input: {
+  readonly ownsUrlScheme: boolean;
+  readonly displayName: string;
+  readonly execTarget: string;
+  readonly scheme: string;
+  readonly wmClass: string;
+  readonly iconPath?: string;
+}): string {
+  return input.ownsUrlScheme
+    ? renderUrlHandlerDesktopEntry(input)
+    : renderChannelLauncherDesktopEntry(input);
+}
+
 function parseUrlHandlerExecTarget(entry: string): string | null {
   const exec = /^Exec=(.*) %U$/mu.exec(entry)?.[1];
   if (exec === undefined) return null;
@@ -154,6 +189,7 @@ export const make = Effect.gen(function* () {
   const assets = yield* DesktopAssets.DesktopAssets;
 
   const scheme = ElectronProtocol.getDesktopScheme(environment.isDevelopment);
+  const ownsUrlScheme = ownsSharedDesktopIntegrations(environment);
   const desktopEntryPath = environment.path.join(
     environment.linuxApplicationsDir,
     environment.linuxDesktopEntryName,
@@ -172,10 +208,12 @@ export const make = Effect.gen(function* () {
       Option.orElse(() => environment.appImagePath),
       Option.getOrElse(() => process.execPath),
     );
-    const content = renderUrlHandlerDesktopEntry({
+    const content = renderLinuxDesktopEntry({
+      ownsUrlScheme,
       displayName: environment.displayName,
       execTarget,
       scheme,
+      wmClass: environment.linuxWmClass,
       ...(environment.isPackaged ? { iconPath } : {}),
     });
     // Avoid truncating the pre-ready entry while the portal may be reading it.
@@ -351,6 +389,7 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+    if (!ownsUrlScheme) return;
     yield* setDefaultHandler;
     yield* logInfo("registered URL scheme handler", { scheme });
   }).pipe(

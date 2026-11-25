@@ -1,6 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - Tests use Node's glob matcher to verify electron-builder exclusions.
+// Packaging entry point: build-desktop-artifact.ts. Expected staging export: writeStagePackageJson(stageAppDir, manifest, channel).
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { createPackageWithOptions, extractFile } from "@electron/asar";
@@ -34,6 +36,7 @@ import {
   InvalidMacPasskeyRpDomainError,
   InvalidMacPasskeyPublishableKeyError,
   UnsupportedDesktopBuildArchitectureError,
+  UnsupportedDesktopChannelTargetError,
   MacPasskeySigningConfigurationResolutionError,
   MissingMacPasskeyProvisioningProfileError,
   packWindowsServerAsar,
@@ -44,6 +47,7 @@ import {
   resolveMacPasskeySigningConfiguration,
   resolveMergedStageDependencies,
   resolveBuildOptions,
+  resolveDesktopBuildIconAssets,
   stageWslRuntimeArchive,
   ancestorNodeModulesPaths,
   copyDirectoryPreservingSymlinks,
@@ -242,6 +246,129 @@ const makePackagedAppFixture = Effect.fn("test.makePackagedAppFixture")(function
   return { stageDistDir } as const;
 });
 
+const probeDesktopBuildChannel = Effect.fn("test.probeDesktopBuildChannel")(function* (
+  channel: string,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const child = yield* spawner.spawn(
+    ChildProcess.make(process.execPath, [
+      NodeURL.fileURLToPath(new URL("./build-desktop-artifact.ts", import.meta.url)),
+      "--platform",
+      "linux",
+      "--arch",
+      "universal",
+      "--channel",
+      channel,
+    ]),
+  );
+  const [stdout, stderr, exitCode] = yield* Effect.all(
+    [
+      child.stdout.pipe(Stream.decodeText, Stream.mkString),
+      child.stderr.pipe(Stream.decodeText, Stream.mkString),
+      child.exitCode,
+    ],
+    { concurrency: "unbounded" },
+  );
+  return { diagnostic: `${stdout}\n${stderr}`, exitCode: Number(exitCode) };
+});
+
+it.live("rejects an unknown packaged channel value at the desktop build CLI", () =>
+  Effect.gen(function* () {
+    const result = yield* probeDesktopBuildChannel("canary");
+
+    assert.notEqual(result.exitCode, 0);
+    assert.match(
+      result.diagnostic,
+      /(?:invalid|unsupported|unknown|expected)[^\n]*\bcanary\b|\bcanary\b[^\n]*(?:invalid|unsupported|unknown|expected)/i,
+    );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("stages the Lab desktop artifact identity and selects the Dev and Lab icon masters", () =>
+  Effect.gen(function* () {
+    // Universal Linux is rejected after argument parsing, before build or staging work.
+    for (const channel of ["lab", "dev"] as const) {
+      const result = yield* probeDesktopBuildChannel(channel);
+      assert.include(result.diagnostic, "Unsupported architecture 'universal' for linux.");
+    }
+
+    const { writeStagePackageJson } = yield* Effect.promise(
+      () => import("./build-desktop-artifact.ts"),
+    );
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const stageAppDir = yield* fs.makeTempDirectoryScoped({ prefix: "mesura-lab-stage-" });
+    const version = "1.2.3";
+    const build = yield* createBuildConfig(
+      "linux",
+      "AppImage",
+      version,
+      false,
+      false,
+      undefined,
+      undefined,
+      false,
+      "x64",
+      "lab",
+    );
+
+    yield* writeStagePackageJson(
+      stageAppDir,
+      {
+        name: "t3code",
+        version,
+        buildVersion: version,
+        t3codeCommitHash: "b2b14f0",
+        private: true,
+        packageManager: "pnpm@11.0.0",
+        description: "Mesura Code desktop build",
+        license: "MIT",
+        homepage: "https://github.com/mesura-hq/mesura-code",
+        author: "T3 Tools",
+        main: "apps/desktop/dist-electron/boot.cjs",
+        build,
+        dependencies: {},
+        devDependencies: { electron: "44.10.1" },
+      },
+      "lab",
+    );
+
+    const manifest = JSON.parse(yield* fs.readFileString(path.join(stageAppDir, "package.json")));
+    assert.propertyVal(manifest, "mesuraChannel", "lab");
+    assert.propertyVal(manifest, "t3codeCommitHash", "b2b14f0");
+    assert.nestedPropertyVal(manifest, "build.productName", "Mesura Code Lab");
+    assert.nestedPropertyVal(manifest, "build.linux.executableName", "mesura-code-channel-lab");
+    assert.nestedPropertyVal(
+      manifest,
+      "build.linux.desktop.entry.StartupWMClass",
+      "mesura-code-channel-lab",
+    );
+    assert.nestedPropertyVal(
+      manifest,
+      "build.artifactName",
+      "Mesura-Code-Lab-${version}-${arch}.${ext}",
+    );
+    const linux = manifest.build.linux;
+    const desktopEntry = linux.syncDesktopName
+      ? manifest.desktopName
+      : `${linux.executableName}.desktop`;
+    assert.equal(desktopEntry, "mesura-code-channel-lab.desktop");
+
+    assert.equal(
+      resolveDesktopBuildIconAssets(version, "lab").linuxIconPng,
+      "assets/mesura-code/development-master.png",
+    );
+    assert.equal(
+      resolveDesktopBuildIconAssets(version, "dev").linuxIconPng,
+      "assets/mesura-code/nightly-master.png",
+    );
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })), NodeServices.layer),
+    ),
+  ),
+);
+
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it.effect("keeps Mesura product and Linux identity separate from installed T3 Code", () =>
     Effect.gen(function* () {
@@ -264,9 +391,19 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
       );
       const linuxSettings = linux.linux as Record<string, unknown>;
+      assert.equal(linux.appId, "com.t3tools.t3code");
       assert.equal(linux.productName, "Mesura Code (Beta)");
       assert.equal(mac.productName, "Mesura Code (Nightly)");
       assert.equal(linuxSettings.executableName, "mesura-code");
+      assert.equal(linuxSettings.icon, "icons");
+      assert.equal(
+        resolveDesktopBuildIconAssets("1.2.3").linuxIconPng,
+        "assets/prod/black-linux-1024.png",
+      );
+      assert.equal(
+        resolveDesktopBuildIconAssets("1.2.3-nightly.20261024.1").linuxIconPng,
+        "assets/nightly/nightly-universal-1024.png",
+      );
       assert.equal(linux.artifactName, "Mesura-Code-${version}-${arch}.${ext}");
       assert.deepStrictEqual(linuxSettings.desktop, {
         entry: { StartupWMClass: "mesura-code" },
@@ -628,6 +765,99 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         ),
       ),
     ),
+  );
+
+  it.effect("keeps Dev and Lab AppImage-only with their own names under a publish config", () =>
+    Effect.gen(function* () {
+      const linuxBuild = (channel: "stable" | "dev" | "lab") =>
+        createBuildConfig(
+          "linux",
+          "AppImage",
+          "0.0.37",
+          false,
+          false,
+          undefined,
+          undefined,
+          false,
+          "x64",
+          channel,
+        );
+
+      const stable = yield* linuxBuild("stable");
+      assert.deepStrictEqual((stable.linux as { target: string[] }).target, ["AppImage", "deb"]);
+      assert.nestedPropertyVal(stable, "appImage.artifactName", "T3-Code-${arch}.${ext}");
+
+      for (const [channel, artifactName] of [
+        ["dev", "Mesura-Code-Dev-${version}-${arch}.${ext}"],
+        ["lab", "Mesura-Code-Lab-${version}-${arch}.${ext}"],
+      ] as const) {
+        const build = yield* linuxBuild(channel);
+        assert.deepStrictEqual((build.linux as { target: string[] }).target, ["AppImage"]);
+        assert.notProperty(build, "appImage");
+        assert.equal(build.artifactName, artifactName);
+      }
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({ env: { GITHUB_REPOSITORY: "pingdotgg/t3code" } }),
+        ),
+      ),
+    ),
+  );
+
+  it.effect(
+    "desktop channels AC1: only the stable AppImage advertises the shared URL schemes",
+    () =>
+      Effect.gen(function* () {
+        const linuxProtocols = (channel: "stable" | "dev" | "lab") =>
+          createBuildConfig(
+            "linux",
+            "AppImage",
+            "0.0.37",
+            false,
+            false,
+            undefined,
+            undefined,
+            false,
+            "x64",
+            channel,
+          ).pipe(Effect.map((config) => (config.linux as { protocols: unknown }).protocols));
+
+        assert.deepStrictEqual(yield* linuxProtocols("stable"), [
+          { name: "Mesura Code", schemes: ["t3code", "t3code-dev"] },
+        ]);
+        // electron-builder writes no MimeType line into the embedded entry for an empty list.
+        assert.deepStrictEqual(yield* linuxProtocols("dev"), []);
+        assert.deepStrictEqual(yield* linuxProtocols("lab"), []);
+      }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
+  it.effect("refuses Dev and Lab builds other than the Linux AppImage", () =>
+    Effect.gen(function* () {
+      for (const [platform, target] of [
+        ["linux", "deb"],
+        ["mac", "dmg"],
+      ] as const) {
+        const error = yield* Effect.flip(
+          resolveBuildOptions({
+            platform: Option.some(platform),
+            target: Option.some(target),
+            arch: Option.some(platform === "mac" ? "arm64" : "x64"),
+            buildVersion: Option.none(),
+            outputDir: Option.none(),
+            skipBuild: Option.none(),
+            keepStage: Option.none(),
+            signed: Option.none(),
+            verbose: Option.none(),
+            mockUpdates: Option.none(),
+            mockUpdateServerPort: Option.none(),
+            wslRuntime: Option.none(),
+            channel: Option.some("lab"),
+          }),
+        );
+        assert.instanceOf(error, UnsupportedDesktopChannelTargetError);
+      }
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
   it.effect("declares Calendar access for hosted commands in macOS builds", () =>

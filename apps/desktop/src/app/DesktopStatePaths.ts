@@ -15,9 +15,11 @@ export function resolveDesktopBaseDir(input: {
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
   readonly t3Home: Option.Option<string>;
+  /** Mesura: a packaged channel's own home directory name (`mesuraChannel.ts`). */
+  readonly homeDirName?: string;
 }): string {
   return Option.getOrElse(normalizeConfiguredBaseDir(input.t3Home), () =>
-    input.joinPath(input.homeDirectory, DEFAULT_STATE_HOME_DIR_NAME),
+    input.joinPath(input.homeDirectory, input.homeDirName ?? DEFAULT_STATE_HOME_DIR_NAME),
   );
 }
 

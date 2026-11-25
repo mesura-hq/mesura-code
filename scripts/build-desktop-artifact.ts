@@ -32,8 +32,11 @@ import {
 import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
 import {
   BRAND_ASSET_PATHS,
-  DESKTOP_LINUX_IDENTITY,
+  MESURA_DESKTOP_CHANNELS,
+  resolveDesktopLinuxIdentity,
+  resolveMesuraDesktopChannelIdentity,
   resolveWebAssetBrandForChannel,
+  type MesuraDesktopChannel,
   type WebAssetBrand,
 } from "./lib/brand-assets.ts";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
@@ -190,6 +193,7 @@ interface BuildCliInput {
   readonly mockUpdates: Option.Option<boolean>;
   readonly mockUpdateServerPort: Option.Option<number>;
   readonly wslRuntime: Option.Option<string>;
+  readonly channel?: Option.Option<MesuraDesktopChannel>;
 }
 
 function detectHostBuildPlatform(hostPlatform: string): typeof BuildPlatform.Type | undefined {
@@ -280,6 +284,19 @@ export class UnsupportedDesktopBuildArchitectureError extends Schema.TaggedError
 ) {
   override get message(): string {
     return `Unsupported architecture '${this.arch}' for ${this.platform}.`;
+  }
+}
+
+export class UnsupportedDesktopChannelTargetError extends Schema.TaggedError<UnsupportedDesktopChannelTargetError>()(
+  "UnsupportedDesktopChannelTargetError",
+  {
+    platform: BuildPlatform,
+    target: Schema.String,
+    channel: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Channel '${this.channel}' builds only the Linux AppImage, not '${this.target}' for ${this.platform}.`;
   }
 }
 
@@ -961,6 +978,7 @@ interface ResolvedBuildOptions {
   readonly mockUpdates: boolean;
   readonly mockUpdateServerPort: number | undefined;
   readonly wslRuntime: string | undefined;
+  readonly channel: MesuraDesktopChannel;
 }
 
 interface StagePackageJson {
@@ -982,6 +1000,18 @@ interface StagePackageJson {
     readonly electron: string;
   };
 }
+
+/** Mesura: `mesuraChannel` is read by apps/desktop/src/app/mesuraChannel.ts before Electron is ready. */
+export const writeStagePackageJson = Effect.fn("writeStagePackageJson")(function* (
+  stageAppDir: string,
+  manifest: StagePackageJson,
+  channel: MesuraDesktopChannel,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const json = yield* encodeJsonString({ ...manifest, mesuraChannel: channel });
+  yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${json}\n`);
+});
 
 export const STAGE_INSTALL_ARGS = ["install", "--prod"] as const;
 export const DESKTOP_ELECTRON_LANGUAGES = ["en-US"] as const;
@@ -1719,6 +1749,10 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
       supportedArchitectures: [...supportedArchitectures],
     });
   }
+  const channel = Option.getOrElse(input.channel ?? Option.none(), () => "stable" as const);
+  if (channel !== "stable" && (platform !== "linux" || target !== "AppImage")) {
+    return yield* new UnsupportedDesktopChannelTargetError({ platform, target, channel });
+  }
   const version = mergeOptions(input.buildVersion, env.version, undefined);
   const releaseDir = resolveBooleanFlag(input.mockUpdates, env.mockUpdates)
     ? "release-mock"
@@ -1761,6 +1795,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     mockUpdates,
     mockUpdateServerPort,
     wslRuntime,
+    channel,
   } satisfies ResolvedBuildOptions;
 });
 
@@ -2735,7 +2770,12 @@ export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
   return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
 }
 
-export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
+export function resolveDesktopBuildIconAssets(
+  version: string,
+  channel: MesuraDesktopChannel = "stable",
+): DesktopBuildIconAssets {
+  const channelIcons = resolveMesuraDesktopChannelIdentity(channel).icons;
+  if (channelIcons) return channelIcons;
   if (resolveDesktopUpdateChannel(version) === "nightly") {
     return {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
@@ -2766,7 +2806,12 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
   return `${trimmed.slice(0, versionSeparator)}/${trimmed.slice(versionSeparator + 1)}`;
 }
 
-export function resolveDesktopProductName(version: string): string {
+export function resolveDesktopProductName(
+  version: string,
+  channel: MesuraDesktopChannel = "stable",
+): string {
+  const { displayName } = resolveMesuraDesktopChannelIdentity(channel);
+  if (displayName) return displayName;
   return resolveDesktopUpdateChannel(version) === "nightly"
     ? "Mesura Code (Nightly)"
     : (desktopPackageJson.productName ?? "Mesura Code");
@@ -2787,14 +2832,16 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     | undefined,
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
+  channel: MesuraDesktopChannel = "stable",
 ) {
+  const { artifactBaseName } = resolveMesuraDesktopChannelIdentity(channel);
   const buildConfig: Record<string, unknown> = {
     afterPack: (yield* Path.Path).join(yield* RepoRoot, "scripts/prepare-server-compile-cache.cjs"),
     appId: DESKTOP_APP_ID,
-    productName: resolveDesktopProductName(version),
+    productName: resolveDesktopProductName(version, channel),
     artifactName:
       platform === "linux"
-        ? "Mesura-Code-${version}-${arch}.${ext}"
+        ? `${artifactBaseName}-\${version}-\${arch}.\${ext}`
         : "T3-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [
@@ -2896,7 +2943,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "mac" && target === "dmg") {
     buildConfig.dmg = {
       // Finder caches DMG backgrounds by volume name; give each installer its own.
-      title: `${resolveDesktopProductName(version)} ${version} Installer`,
+      title: `${resolveDesktopProductName(version, channel)} ${version} Installer`,
       background: `dmg/dmg-background-${updateChannel}.png`,
       window: {
         width: 640,
@@ -2913,14 +2960,15 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "linux") {
-    const linuxIdentity = DESKTOP_LINUX_IDENTITY.production;
+    const linuxIdentity = resolveDesktopLinuxIdentity(false, channel);
     // Pin the static AppImage runtime so hosts with only FUSE 3 do not need libfuse2.
     buildConfig.toolsets = { appimage: "1.0.3" };
     const path = yield* Path.Path;
     const repoRoot = yield* RepoRoot;
     buildConfig.afterPack = path.join(repoRoot, "scripts/linux-after-pack.ts");
     buildConfig.linux = {
-      target: target === "AppImage" ? [target, "deb"] : [target],
+      // Mesura: Dev and Lab ship only the AppImage; a .deb would replace the stable `t3code` package.
+      target: target === "AppImage" && channel === "stable" ? [target, "deb"] : [target],
       executableName: linuxIdentity.executableName,
       icon: "icons",
       category: "Development",
@@ -2931,12 +2979,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
       // in the .desktop entry (Exec already gets %U), so browsers can hand
       // t3code:// OAuth callbacks to the app.
-      protocols: [
-        {
-          name: "Mesura Code",
-          schemes: ["t3code", "t3code-dev"],
-        },
-      ],
+      // Mesura: only stable owns the shared schemes; Dev and Lab never advertise them.
+      protocols:
+        channel === "stable" ? [{ name: "Mesura Code", schemes: ["t3code", "t3code-dev"] }] : [],
       desktop: {
         entry: {
           StartupWMClass: linuxIdentity.wmClass,
@@ -2944,7 +2989,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       },
     };
     // electron-updater replaces an installed AppImage in place only when its name has no x.y.z version.
-    if (buildConfig.publish) {
+    // Mesura: Dev and Lab never self-update, so they keep their channel artifact name.
+    if (buildConfig.publish && channel === "stable") {
       buildConfig.appImage = {
         artifactName:
           updateChannel === "nightly" ? "T3-Code-Nightly-${arch}.${ext}" : "T3-Code-${arch}.${ext}",
@@ -3708,7 +3754,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
 
   const appVersion =
     options.version ?? resolveTaggedSourceVersion(repoRoot, serverPackageJson.version);
-  const iconAssets = resolveDesktopBuildIconAssets(appVersion);
+  const iconAssets = resolveDesktopBuildIconAssets(appVersion, options.channel);
   const commitHash = yield* resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
@@ -3957,6 +4003,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
         : undefined,
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
+      options.channel,
     ),
     dependencies: stageDependencies,
     devDependencies: {
@@ -3964,8 +4011,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     },
   };
 
-  const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
-  yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
+  yield* writeStagePackageJson(stageAppDir, stagePackageJson, options.channel);
   const stageWorkspaceConfig = createStageWorkspaceConfig({
     platform: options.platform,
     arch: options.arch,
@@ -4118,7 +4164,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   if (options.platform === "win") {
     yield* validateWindowsPackagedPayload({
       stageDistDir,
-      appExecutableName: `${resolveDesktopProductName(appVersion)}.exe`,
+      appExecutableName: `${resolveDesktopProductName(appVersion, options.channel)}.exe`,
       targetArch: options.arch,
       appVersion,
       expectWslRuntime: bundlesWslRuntime({
@@ -4262,6 +4308,10 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.withDescription(
       "Path to the Linux CLI release archive (t3-<version>-linux-x64.tar.gz) to embed as the WSL runtime of a Windows build (env: T3CODE_DESKTOP_WSL_RUNTIME).",
     ),
+    Flag.optional,
+  ),
+  channel: Flag.Literals("channel", MESURA_DESKTOP_CHANNELS).pipe(
+    Flag.withDescription("Packaged Mesura channel that runs side by side (default: stable)."),
     Flag.optional,
   ),
 }).pipe(

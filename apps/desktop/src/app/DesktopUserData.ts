@@ -4,7 +4,11 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
-import { resolveDesktopUserDataIdentity } from "../../../../scripts/lib/brand-assets.ts";
+import {
+  resolveDesktopUserDataIdentity,
+  type MesuraDesktopChannel,
+  type MesuraDesktopChannelIdentity,
+} from "../../../../scripts/lib/brand-assets.ts";
 
 export class DesktopUserDataInitializationError extends Schema.TaggedError<DesktopUserDataInitializationError>()(
   "DesktopUserDataInitializationError",
@@ -46,8 +50,9 @@ export interface DesktopUserDataDirectoryNames {
  */
 export const resolveUserDataDirectoryNames = (
   isDevelopment: boolean,
+  channel?: MesuraDesktopChannel,
 ): DesktopUserDataDirectoryNames => {
-  const identity = resolveDesktopUserDataIdentity(isDevelopment);
+  const identity = resolveDesktopUserDataIdentity(isDevelopment, channel);
   return { current: identity.userDataDirName, legacy: identity.legacyUserDataDirName };
 };
 
@@ -57,12 +62,15 @@ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPa
     readonly appDataDirectory: string;
     readonly isDevelopment: boolean;
     readonly platform: NodeJS.Platform;
+    readonly mesuraChannel?: MesuraDesktopChannelIdentity;
     /** Tests pass distinct names to exercise the legacy and Windows migration branches. */
     readonly directoryNames?: DesktopUserDataDirectoryNames;
   }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const names = input.directoryNames ?? resolveUserDataDirectoryNames(input.isDevelopment);
+    const names =
+      input.directoryNames ??
+      resolveUserDataDirectoryNames(input.isDevelopment, input.mesuraChannel?.channel);
     const destinationPath = path.join(input.appDataDirectory, names.current);
     const legacyPath = path.join(input.appDataDirectory, names.legacy);
     const inspect = (resourcePath: string) =>

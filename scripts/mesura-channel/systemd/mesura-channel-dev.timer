@@ -1,0 +1,10 @@
+# Installed by symlink from the pinned follower checkout; see docs/operations/mesura-channels.md.
+[Unit]
+Description=Every 15 minutes, build and stage the Mesura Code Dev channel when origin/dev moved
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -95,6 +95,16 @@ it("updates a helper left stale by an app update before capturing", async () => 
   expect(await NodeFSP.readFile(hyprlandCaptureExecutable(paths), "utf8")).toBe("update");
   result.feedback?.close();
 });
+it("desktop channels AC4: a Dev or Lab capture leaves the stable app's stale helper in place", async () => {
+  await setup.perform("install-hyprland-helper");
+  await NodeFSP.writeFile(paths.bundle, "channel build");
+  await expect(captureHyprlandWindow({ ...paths, refreshInstalled: false })).rejects.toBeInstanceOf(
+    CaptureSetupRequiredError,
+  );
+  expect(await NodeFSP.readFile(hyprlandCaptureExecutable(paths), "utf8")).toBe(
+    "bundled executable",
+  );
+});
 it("leaves first-time installation to explicit setup", async () => {
   await expect(captureHyprlandWindow(paths)).rejects.toBeInstanceOf(CaptureSetupRequiredError);
   await expect(NodeFSP.stat(hyprlandCaptureExecutable(paths))).rejects.toMatchObject({

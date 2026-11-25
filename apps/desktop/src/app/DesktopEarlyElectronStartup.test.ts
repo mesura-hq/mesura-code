@@ -2,6 +2,8 @@
 import * as NodePath from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 
+import { MESURA_DESKTOP_CHANNEL_IDENTITY } from "../../../../scripts/lib/brand-assets.ts";
+
 import {
   restoreEarlyLinuxDeviceScaleFactor,
   resolveEarlyLinuxPasswordStorePreference,
@@ -74,6 +76,33 @@ describe("DesktopEarlyElectronStartup", () => {
       linuxDesktopEntryName: "mesura-code-dev.desktop",
       passwordStore: "gnome-libsecret",
     });
+  });
+
+  it("resolves a packaged Dev channel's early identity and settings home, development still winning", () => {
+    const readPaths: Array<string> = [];
+    const resolve = (env: NodeJS.ProcessEnv) =>
+      resolveEarlyLinuxElectronOptions({
+        env,
+        homeDirectory: "/home/user",
+        joinPath,
+        channel: MESURA_DESKTOP_CHANNEL_IDENTITY.dev,
+        readFileString: (path) => {
+          readPaths.push(path);
+          return "{}";
+        },
+      });
+
+    const packaged = resolve({});
+    assert.equal(packaged.linuxDesktopEntryName, "mesura-code-channel-dev.desktop");
+    assert.equal(packaged.linuxWmClass, "mesura-code-channel-dev");
+    resolve({ T3CODE_HOME: "/home/user/custom" });
+    const development = resolve({ VITE_DEV_SERVER_URL: "http://127.0.0.1:5173" });
+    assert.equal(development.linuxDesktopEntryName, "mesura-code-dev.desktop");
+    assert.deepEqual(readPaths, [
+      "/home/user/.mesura-code-channel-dev/userdata/desktop-settings.json",
+      "/home/user/custom/userdata/desktop-settings.json",
+      "/home/user/.mesura-code-channel-dev/dev/desktop-settings.json",
+    ]);
   });
 
   it("keeps implicit development state under ~/.mesura-code/dev when T3CODE_HOME is unset", () => {

@@ -4,7 +4,9 @@ import {
   BRAND_ASSET_PATHS,
   DESKTOP_LINUX_IDENTITY,
   DESKTOP_USER_DATA_IDENTITY,
+  MESURA_DESKTOP_CHANNEL_IDENTITY,
   resolveDesktopLinuxIdentity,
+  resolveMesuraDesktopChannelIdentity,
   resolveDesktopUserDataIdentity,
   resolveWebIconOverrides,
 } from "./brand-assets.ts";
@@ -40,6 +42,37 @@ describe("brand-assets", () => {
         legacyUserDataDirName: "mesura-code",
       },
     });
+  });
+
+  it("keeps the stable channel on the production identity and development ahead of every channel", () => {
+    expect(resolveDesktopLinuxIdentity(false, "stable")).toBe(DESKTOP_LINUX_IDENTITY.production);
+    expect(resolveDesktopUserDataIdentity(false, "stable")).toBe(
+      DESKTOP_USER_DATA_IDENTITY.production,
+    );
+    expect(resolveMesuraDesktopChannelIdentity("stable")).toBe(
+      MESURA_DESKTOP_CHANNEL_IDENTITY.stable,
+    );
+    expect(resolveMesuraDesktopChannelIdentity(undefined)).toBe(
+      MESURA_DESKTOP_CHANNEL_IDENTITY.stable,
+    );
+    for (const channel of ["dev", "lab"] as const) {
+      const slug = `mesura-code-channel-${channel}`;
+      expect(resolveDesktopLinuxIdentity(true, channel)).toBe(DESKTOP_LINUX_IDENTITY.development);
+      expect(resolveDesktopUserDataIdentity(true, channel)).toBe(
+        DESKTOP_USER_DATA_IDENTITY.development,
+      );
+      expect(resolveDesktopLinuxIdentity(false, channel)).toMatchObject({
+        desktopEntryName: `${slug}.desktop`,
+        executableName: slug,
+        wmClass: slug,
+      });
+      expect(resolveDesktopUserDataIdentity(false, channel)).toMatchObject({
+        userDataDirName: slug,
+        legacyUserDataDirName: slug,
+      });
+    }
+    expect(() => resolveMesuraDesktopChannelIdentity("canary")).toThrow(/canary/);
+    expect(() => resolveMesuraDesktopChannelIdentity(null)).toThrow();
   });
 
   it("uses the Mesura desktop artwork", () => {

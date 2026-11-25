@@ -16,6 +16,7 @@ import * as DesktopConfig from "./DesktopConfig.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 import { resolveDesktopLinuxIdentity } from "../../../../scripts/lib/brand-assets.ts";
+import * as MesuraChannel from "./mesuraChannel.ts";
 import type { OtlpProtocol } from "@t3tools/shared/observability";
 
 export interface MakeDesktopEnvironmentInput {
@@ -39,6 +40,7 @@ export class DesktopEnvironment extends Context.Service<
     readonly processArch: string;
     readonly isPackaged: boolean;
     readonly isDevelopment: boolean;
+    readonly mesuraChannel: MesuraChannel.MesuraDesktopChannelIdentity;
     readonly appVersion: string;
     readonly appPath: string;
     readonly resourcesPath: string;
@@ -103,7 +105,17 @@ function resolveDesktopAppStageLabel(input: {
 export function resolveDesktopAppBranding(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
+  readonly channel?: MesuraChannel.MesuraDesktopChannelIdentity;
 }): DesktopAppBranding {
+  // Mesura: a side-by-side channel is named like its packaged product, `Mesura Code Lab`.
+  const channel = input.isDevelopment ? undefined : input.channel;
+  if (channel?.stageLabel && channel.displayName) {
+    return {
+      baseName: APP_BASE_NAME,
+      stageLabel: channel.stageLabel,
+      displayName: channel.displayName,
+    };
+  }
   const stageLabel = resolveDesktopAppStageLabel(input);
   return {
     baseName: APP_BASE_NAME,
@@ -150,6 +162,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
   const homeDirectory = input.homeDirectory;
   const devServerUrl = config.devServerUrl;
   const isDevelopment = Option.isSome(devServerUrl);
+  const channel = MesuraChannel.resolveMesuraChannel(input);
   const appDataDirectory =
     input.platform === "win32"
       ? Option.getOrElse(config.appDataDirectory, () =>
@@ -162,6 +175,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     homeDirectory,
     joinPath: path.join,
     t3Home: config.t3Home,
+    homeDirName: channel.homeDirName,
   });
   const rootDir = path.resolve(input.dirname, "../../..");
   const appRoot = input.isPackaged ? input.appPath : rootDir;
@@ -172,9 +186,10 @@ const make = Effect.fn("desktop.environment.make")(function* (
   const branding = resolveDesktopAppBranding({
     isDevelopment,
     appVersion: input.appVersion,
+    channel,
   });
   const displayName = branding.displayName;
-  const linuxIdentity = resolveDesktopLinuxIdentity(isDevelopment);
+  const linuxIdentity = resolveDesktopLinuxIdentity(isDevelopment, channel.channel);
   const stateDir = resolveDesktopStateDir({
     baseDir,
     isDevelopment,
@@ -194,6 +209,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     processArch: input.processArch,
     isPackaged: input.isPackaged,
     isDevelopment,
+    mesuraChannel: channel,
     appVersion: input.appVersion,
     appPath: input.appPath,
     resourcesPath,
@@ -220,7 +236,9 @@ const make = Effect.fn("desktop.environment.make")(function* (
       : path.join(input.appPath, "dev-app-update.yml"),
     devServerUrl,
     devRemoteT3ServerEntryPath: config.devRemoteT3ServerEntryPath,
-    configuredBackendPort: config.configuredBackendPort,
+    configuredBackendPort: Option.orElse(config.configuredBackendPort, () =>
+      MesuraChannel.resolveMesuraChannelBackendPort(channel),
+    ),
     commitHashOverride: config.commitHashOverride,
     otlpTracesUrl: config.otlpTracesUrl,
     otlpMetricsUrl: config.otlpMetricsUrl,
@@ -238,7 +256,10 @@ const make = Effect.fn("desktop.environment.make")(function* (
     linuxApplicationsDir,
     desktopLauncherPath: config.desktopLauncherPath,
     appImagePath: config.appImagePath,
-    defaultDesktopSettings: DesktopAppSettings.resolveDefaultDesktopSettings(input.appVersion),
+    defaultDesktopSettings: DesktopAppSettings.resolveDefaultDesktopSettings(
+      input.appVersion,
+      channel.tailscaleServePort,
+    ),
     runtimeInfo: resolveDesktopRuntimeInfo({
       platform: input.platform,
       processArch: input.processArch,

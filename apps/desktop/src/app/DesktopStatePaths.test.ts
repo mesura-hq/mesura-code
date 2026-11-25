@@ -1,7 +1,7 @@
 import * as Option from "effect/Option";
 import { assert, it } from "vite-plus/test";
 
-import { resolveDesktopBaseDir } from "./DesktopStatePaths.ts";
+import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 
 // The function takes its own join, so the test supplies one rather than
 // importing node:path — the assertion then does not depend on the host's
@@ -17,4 +17,14 @@ it("defaults the desktop base directory to Mesura Code's own home", () => {
   });
 
   assert.equal(resolved, "/home/alice/.mesura-code");
+});
+
+it("uses the dev state subdirectory for a desktop checkout with the default home", () => {
+  const t3Home = Option.none<string>();
+  const baseDir = resolveDesktopBaseDir({ homeDirectory: "/home/alice", joinPath, t3Home });
+
+  assert.equal(
+    resolveDesktopStateDir({ baseDir, isDevelopment: true, joinPath, t3Home }),
+    "/home/alice/.mesura-code/dev",
+  );
 });

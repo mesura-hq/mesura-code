@@ -31,6 +31,7 @@ import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { ownsSharedDesktopIntegrations } from "../app/mesuraChannel.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
@@ -340,6 +341,7 @@ function getAutoUpdateDisabledReason(args: {
   policy: DesktopUpdatePolicy.UpdatePolicy;
   isDevelopment: boolean;
   isPackaged: boolean;
+  ownsSharedDesktopIntegrations: boolean;
   platform: NodeJS.Platform;
   appImage?: string | undefined;
   isDebPackage: boolean;
@@ -354,6 +356,9 @@ function getAutoUpdateDisabledReason(args: {
   }
   if (args.isDevelopment || !args.isPackaged) {
     return "Automatic updates are only available in packaged production builds.";
+  }
+  if (!args.ownsSharedDesktopIntegrations) {
+    return "Automatic updates are only available in the stable Mesura Code app.";
   }
   if (args.disabledByEnv) {
     return "Automatic updates are disabled by the T3CODE_DISABLE_AUTO_UPDATE setting.";
@@ -474,6 +479,7 @@ export const make = Effect.gen(function* () {
         policy,
         isDevelopment: environment.isDevelopment,
         isPackaged: environment.isPackaged,
+        ownsSharedDesktopIntegrations: ownsSharedDesktopIntegrations(environment),
         platform: environment.platform,
         appImage: Option.getOrUndefined(config.appImagePath),
         isDebPackage,

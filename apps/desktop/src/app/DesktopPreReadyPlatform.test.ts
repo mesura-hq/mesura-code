@@ -1,3 +1,4 @@
+// Entry point: DesktopPreReadyPlatform.layer, acquired before Electron becomes ready.
 import { assert, describe, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
@@ -17,6 +18,7 @@ const {
   execFileSyncMock,
   readFileSyncMock,
   symlinkSyncMock,
+  electronApp,
 } = vi.hoisted(() => ({
   appendSwitchMock: vi.fn(),
   getSwitchValueMock: vi.fn(),
@@ -29,6 +31,8 @@ const {
   execFileSyncMock: vi.fn(),
   readFileSyncMock: vi.fn(),
   symlinkSyncMock: vi.fn(),
+  // Mesura: the channel resolver caches per app path, so a channel test uses its own path.
+  electronApp: { appPath: "/tmp/.mount_T3/resources/app.asar" },
 }));
 
 vi.mock("electron", () => ({
@@ -36,7 +40,7 @@ vi.mock("electron", () => ({
     setDesktopName: setDesktopNameMock,
     getVersion: () => "0.0.37",
     isPackaged: true,
-    getAppPath: () => "/tmp/.mount_T3/resources/app.asar",
+    getAppPath: () => electronApp.appPath,
     commandLine: {
       appendSwitch: appendSwitchMock,
       getSwitchValue: getSwitchValueMock,
@@ -76,7 +80,145 @@ describe("DesktopPreReadyPlatform", () => {
     execFileSyncMock.mockReset();
     readFileSyncMock.mockReset().mockReturnValue("{}");
     symlinkSyncMock.mockReset();
+    electronApp.appPath = "/tmp/.mount_T3/resources/app.asar";
   });
+
+  it.effect("prepares the packaged Lab channel's own desktop entry and settings home", () => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "");
+    vi.stubEnv("T3CODE_HOME", "");
+    getSwitchValueMock.mockReturnValue("");
+    electronApp.appPath = "/tmp/.mount_Lab/resources/app.asar";
+    const files = new Map([
+      ["/tmp/.mount_Lab/resources/app.asar/package.json", '{"mesuraChannel":"lab"}'],
+    ]);
+    const readPaths: Array<string> = [];
+    readFileSyncMock.mockImplementation((path: string) => {
+      readPaths.push(path);
+      const contents = files.get(path);
+      if (contents === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return contents;
+    });
+    writeFileSyncMock.mockImplementation((path: string, contents: string | Buffer) => {
+      files.set(path, String(contents));
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* Layer.build(
+          DesktopPreReadyPlatform.layer.pipe(
+            Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+            Layer.provide(Layer.succeed(HostProcess.HomeDirectory, "/home/alice")),
+            Layer.provide(DesktopConfig.layerTest({ XDG_DATA_HOME: "/xdg" })),
+          ),
+        );
+        assert.deepEqual(setDesktopNameMock.mock.calls, [["mesura-code-channel-lab.desktop"]]);
+        assert.include(
+          files.get("/xdg/applications/mesura-code-channel-lab.desktop"),
+          "Name=Mesura Code Lab",
+        );
+        assert.isFalse(files.has("/xdg/applications/mesura-code.desktop"));
+        assert.include(
+          readPaths,
+          "/home/alice/.mesura-code-channel-lab/userdata/desktop-settings.json",
+        );
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+  });
+
+  it.effect("starts the packaged Lab channel's entry through the staged channel launcher", () => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "");
+    vi.stubEnv("T3CODE_HOME", "");
+    getSwitchValueMock.mockReturnValue("");
+    electronApp.appPath = "/tmp/.mount_LabLauncher/resources/app.asar";
+    const files = new Map([
+      ["/tmp/.mount_LabLauncher/resources/app.asar/package.json", '{"mesuraChannel":"lab"}'],
+    ]);
+    readFileSyncMock.mockImplementation((path: string) => {
+      const contents = files.get(path);
+      if (contents === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return contents;
+    });
+    writeFileSyncMock.mockImplementation((path: string, contents: string | Buffer) => {
+      files.set(path, String(contents));
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* Layer.build(
+          DesktopPreReadyPlatform.layer.pipe(
+            Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+            Layer.provide(Layer.succeed(HostProcess.HomeDirectory, "/home/alice")),
+            Layer.provide(
+              DesktopConfig.layerTest({
+                XDG_DATA_HOME: "/xdg",
+                APPIMAGE: "/home/alice/Applications/Mesura-Code-Lab.AppImage",
+                T3CODE_DESKTOP_LAUNCHER_PATH: "/home/alice/.local/bin/mesura-code-lab",
+              }),
+            ),
+          ),
+        );
+        assert.include(
+          files.get("/xdg/applications/mesura-code-channel-lab.desktop"),
+          "Exec=/home/alice/.local/bin/mesura-code-lab %U",
+        );
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+  });
+
+  it.effect.each([
+    { channel: "dev", name: "Mesura Code Dev" },
+    { channel: "lab", name: "Mesura Code Lab" },
+  ])(
+    "desktop channels AC1: early startup writes a visible launcher for packaged $channel",
+    ({ channel, name }) => {
+      vi.stubEnv("VITE_DEV_SERVER_URL", "");
+      vi.stubEnv("T3CODE_HOME", "");
+      getSwitchValueMock.mockReturnValue("");
+      const slug = `mesura-code-channel-${channel}`;
+      electronApp.appPath = `/tmp/${slug}/resources/app.asar`;
+      const iconBytes = Buffer.from(`bundled ${channel} icon`);
+      const iconSource = `${electronApp.appPath}/apps/desktop/prod-resources/icon.png`;
+      const iconPath = `/xdg/icons/${slug}.desktop.png`;
+      readFileSyncMock.mockImplementation((path: string) =>
+        path === iconSource ? iconBytes : JSON.stringify({ mesuraChannel: channel }),
+      );
+
+      return Effect.scoped(
+        Effect.gen(function* () {
+          yield* Layer.build(
+            DesktopPreReadyPlatform.layer.pipe(
+              Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+              Layer.provide(Layer.succeed(HostProcess.HomeDirectory, "/home/alice")),
+              Layer.provide(
+                DesktopConfig.layerTest({
+                  XDG_DATA_HOME: "/xdg",
+                  APPIMAGE: `/Applications/${slug}.AppImage`,
+                }),
+              ),
+            ),
+          );
+          const entries = writeFileSyncMock.mock.calls.filter(([path]) =>
+            String(path).endsWith(".desktop"),
+          );
+          assert.deepEqual(
+            entries.map(([path]) => path),
+            [`/xdg/applications/${slug}.desktop`],
+          );
+          const entry = String(entries[0]?.[1]);
+          assert.include(entry, `Name=${name}\n`);
+          assert.match(entry, new RegExp(`^Exec=/Applications/${slug}\\.AppImage(?: |$)`, "m"));
+          assert.include(entry, `Icon=${iconPath}\n`);
+          assert.deepEqual(
+            writeFileSyncMock.mock.calls.find(([path]) => path === iconPath)?.[1],
+            iconBytes,
+          );
+          assert.notInclude(entry, "NoDisplay=true");
+          assert.notInclude(entry, "MimeType=");
+          assert.include(entry, `StartupWMClass=${slug}\n`);
+        }),
+      ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+    },
+  );
 
   it.effect("persists Linux scaling synchronously across relaunches and settings rewrites", () => {
     vi.stubEnv("T3CODE_HOME", "/isolated");
@@ -86,7 +228,7 @@ describe("DesktopPreReadyPlatform", () => {
     const commandLine = new Map<string, string>();
     readFileSyncMock.mockImplementation((path: string) => {
       const contents = files.get(path);
-      if (contents === undefined) throw new Error("ENOENT");
+      if (contents === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       return contents;
     });
     writeFileSyncMock.mockImplementation((path: string, contents: string) => {
@@ -170,6 +312,7 @@ describe("DesktopPreReadyPlatform", () => {
         assert.equal(identity.desktopName, "mesura-code.desktop");
         assert.include(identity.desktopEntry ?? "", "Exec=/Applications/current.AppImage %U");
         assert.include(identity.desktopEntry ?? "", "Name=Mesura Code (Beta)");
+        assert.include(identity.desktopEntry ?? "", "NoDisplay=true");
         assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3code;");
         assert.include(identity.desktopEntry ?? "", "Icon=/xdg/icons/mesura-code.desktop.png");
         assert.equal(

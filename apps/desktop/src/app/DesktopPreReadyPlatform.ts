@@ -14,8 +14,9 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
 import { trimmedString } from "./DesktopConfig.ts";
 import { resolveDesktopAppBranding } from "./DesktopEnvironment.ts";
+import { ownsSharedDesktopIntegrations, resolveMesuraChannel } from "./mesuraChannel.ts";
 import {
-  renderUrlHandlerDesktopEntry,
+  renderLinuxDesktopEntry,
   replacedVersionedAppImagePath,
 } from "./DesktopLinuxUrlHandler.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
@@ -37,6 +38,9 @@ function readCommandLineSwitchValue(
   return value.length > 0 ? value : null;
 }
 
+const resolveProcessMesuraChannel = () =>
+  resolveMesuraChannel({ isPackaged: Electron.app.isPackaged, appPath: Electron.app.getAppPath() });
+
 export const resolveEarlyLinuxElectronOptionsFromProcess = (
   homeDirectory: string,
 ): DesktopEarlyElectronStartup.EarlyLinuxElectronOptions =>
@@ -45,6 +49,7 @@ export const resolveEarlyLinuxElectronOptionsFromProcess = (
     homeDirectory,
     joinPath: NodePath.posix.join,
     readFileString: (path) => NodeFS.readFileSync(path, "utf8"),
+    channel: resolveProcessMesuraChannel(),
   });
 
 export class DesktopPreReadyElectronOptions extends Context.Service<
@@ -81,6 +86,7 @@ export const make = Effect.gen(function* () {
         env: process.env,
         homeDirectory,
         joinPath: NodePath.posix.join,
+        channel: resolveProcessMesuraChannel(),
         commandLine: Electron.app.commandLine,
         readFileString: (path) => NodeFS.readFileSync(path, "utf8"),
         writeFileString: (path, value) => {
@@ -141,10 +147,16 @@ export const make = Effect.gen(function* () {
         }
         NodeFS.writeFileSync(
           desktopEntryPath,
-          renderUrlHandlerDesktopEntry({
+          renderLinuxDesktopEntry({
+            ownsUrlScheme: ownsSharedDesktopIntegrations({
+              isDevelopment: linux.isDevelopment,
+              mesuraChannel: resolveProcessMesuraChannel(),
+            }),
+            wmClass: linux.linuxWmClass,
             displayName: resolveDesktopAppBranding({
               isDevelopment: linux.isDevelopment,
               appVersion: Electron.app.getVersion(),
+              channel: resolveProcessMesuraChannel(),
             }).displayName,
             execTarget:
               Option.getOrUndefined(

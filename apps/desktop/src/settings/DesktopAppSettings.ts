@@ -187,17 +187,25 @@ export class DesktopAppSettings extends Context.Service<
   }
 >()("@t3tools/desktop/settings/DesktopAppSettings") {}
 
-export function resolveDefaultDesktopSettings(appVersion: string): DesktopSettings {
+// Mesura: a side-by-side channel passes its own Tailscale port (`mesuraChannel.ts`).
+export function resolveDefaultDesktopSettings(
+  appVersion: string,
+  tailscaleServePort = DEFAULT_TAILSCALE_SERVE_PORT,
+): DesktopSettings {
   return {
     ...DEFAULT_DESKTOP_SETTINGS,
+    tailscaleServePort,
     updateChannel: desktopUpdateChannelOf(appVersion),
   };
 }
 
-function normalizeTailscaleServePort(value: unknown): number {
+function normalizeTailscaleServePort(
+  value: unknown,
+  fallback: number = DEFAULT_TAILSCALE_SERVE_PORT,
+): number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65_535
     ? value
-    : DEFAULT_TAILSCALE_SERVE_PORT;
+    : fallback;
 }
 
 function normalizeWslDistro(value: unknown): string | null {
@@ -210,9 +218,8 @@ export function normalizeMainWindowBounds(value: unknown): DesktopWindowBounds |
 
 function normalizeDesktopSettingsDocument(
   parsed: DesktopSettingsDocument,
-  appVersion: string,
+  defaultSettings: DesktopSettings,
 ): DesktopSettings {
-  const defaultSettings = resolveDefaultDesktopSettings(appVersion);
   const mainWindowBounds = normalizeMainWindowBounds(parsed.mainWindowBounds);
   const parsedUpdateChannel = Option.fromNullishOr(parsed.updateChannel);
   const isLegacySettings = parsed.updateChannelConfiguredByUser === undefined;
@@ -232,7 +239,10 @@ function normalizeDesktopSettingsDocument(
     serverExposureMode:
       parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
     tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
-    tailscaleServePort: normalizeTailscaleServePort(parsed.tailscaleServePort),
+    tailscaleServePort: normalizeTailscaleServePort(
+      parsed.tailscaleServePort,
+      defaultSettings.tailscaleServePort,
+    ),
     updateChannel: updateChannelConfiguredByUser
       ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
       : defaultSettings.updateChannel,
@@ -321,10 +331,11 @@ function setMainWindowBounds(
 function setTailscaleServe(
   settings: DesktopSettings,
   input: { readonly enabled: boolean; readonly port: Option.Option<number> },
+  defaultPort?: number,
 ): DesktopSettings {
   const port = Option.match(input.port, {
     onNone: () => settings.tailscaleServePort,
-    onSome: normalizeTailscaleServePort,
+    onSome: (requested) => normalizeTailscaleServePort(requested, defaultPort),
   });
   return settings.tailscaleServeEnabled === input.enabled && settings.tailscaleServePort === port
     ? settings
@@ -390,10 +401,8 @@ function applyWslWindowsFallback(settings: DesktopSettings): DesktopSettings {
 function readSettings(
   fileSystem: FileSystem.FileSystem,
   settingsPath: string,
-  appVersion: string,
+  defaultSettings: DesktopSettings,
 ): Effect.Effect<DesktopSettings, PlatformError.PlatformError> {
-  const defaultSettings = resolveDefaultDesktopSettings(appVersion);
-
   return fileSystem.readFileString(settingsPath).pipe(
     Effect.asSome,
     Effect.catchIf(
@@ -405,7 +414,7 @@ function readSettings(
         onNone: () => Effect.succeed(defaultSettings),
         onSome: (raw) =>
           decodeDesktopSettingsJson(raw).pipe(
-            Effect.map((parsed) => normalizeDesktopSettingsDocument(parsed, appVersion)),
+            Effect.map((parsed) => normalizeDesktopSettingsDocument(parsed, defaultSettings)),
             Effect.orElseSucceed(() => defaultSettings),
           ),
       }),
@@ -534,7 +543,7 @@ export const make = Effect.gen(function* () {
       const settings = yield* readSettings(
         fileSystem,
         environment.desktopSettingsPath,
-        environment.appVersion,
+        environment.defaultDesktopSettings,
       ).pipe(
         Effect.catch((cause) =>
           Effect.logWarning(
@@ -543,7 +552,7 @@ export const make = Effect.gen(function* () {
           ).pipe(
             Effect.annotateLogs({ settingsPath: environment.desktopSettingsPath }),
             Effect.andThen(Ref.set(persistenceEnabled, false)),
-            Effect.as(resolveDefaultDesktopSettings(environment.appVersion)),
+            Effect.as(environment.defaultDesktopSettings),
           ),
         ),
       );
@@ -570,7 +579,9 @@ export const make = Effect.gen(function* () {
     setTailscaleServe: Effect.fn("desktop.settings.setTailscaleServe")(function* (input) {
       yield* Effect.annotateCurrentSpan(input);
 
-      return yield* persist((settings) => setTailscaleServe(settings, input));
+      return yield* persist((settings) =>
+        setTailscaleServe(settings, input, environment.defaultDesktopSettings.tailscaleServePort),
+      );
     }),
     setUpdateChannel: Effect.fn("desktop.settings.setUpdateChannel")(function* (channel) {
       yield* Effect.annotateCurrentSpan({ channel });
