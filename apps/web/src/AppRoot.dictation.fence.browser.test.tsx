@@ -1302,6 +1302,17 @@ function respondCalls() {
   return fixture.dictationCalls.filter((call) => call.name === "respond");
 }
 
+/** Replaces the thread's detail state, as its stream would, and tells the subscribers. */
+async function setThreadState(
+  state: Partial<import("@t3tools/client-runtime/state/threads").EnvironmentThreadState>,
+) {
+  await act(async () => {
+    appRootFence.threadStates.set(threadId, { ...EMPTY_ENVIRONMENT_THREAD_STATE, ...state });
+    for (const listener of appRootFence.threadListeners) listener();
+  });
+  await settle();
+}
+
 function notSentToasts() {
   return vi
     .mocked(toastManager.add)
@@ -1797,13 +1808,7 @@ describe("dictation phase 5 fence", () => {
     await recordInMode("send");
     const { jobId } = startedJob(0).input;
     await navigateAwayFromThread();
-    await act(async () => {
-      appRootFence.threadStates.set(threadId, {
-        ...EMPTY_ENVIRONMENT_THREAD_STATE,
-        status: "deleted",
-      });
-      for (const listener of appRootFence.threadListeners) listener();
-    });
+    await setThreadState({ status: "deleted" });
 
     await pushJobs([job(jobId, { status: "failed", mode: "submit", failure: "Network error" })]);
     await vi.waitFor(() => expect(notSentToasts()).toHaveLength(1));
@@ -1811,6 +1816,25 @@ describe("dictation phase 5 fence", () => {
     expect(
       useSendWhenReadyStore.getState().drafts[scopedThreadKey(onScreenTarget)]?.armed,
     ).not.toBe(true);
+  });
+
+  it("dictation send regression: an armed draft stays armed through a failed detail load and sends once it recovers", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+    await setThreadState({ status: "synchronizing", error: Option.some("socket closed") });
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(notSentToasts()).toHaveLength(0);
+
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await vi.waitFor(() => expect(turnStarts()).toHaveLength(1));
+    expect(squash(turnStarts()[0]!.input.message.text)).toBe("[voiced] Read the notes y resume");
   });
 
   it("dictation phase 5 AC5: a message with dictated parts carries one [voiced] prefix, and a typed one carries none", async () => {
@@ -2142,14 +2166,7 @@ describe("dictation phase 5 rework regressions", () => {
     const { jobId } = startedJob(0).input;
     await navigateAwayFromThread();
     // A snapshot cached before the question opened, as a reload starts from.
-    await act(async () => {
-      appRootFence.threadStates.set(threadId, {
-        ...EMPTY_ENVIRONMENT_THREAD_STATE,
-        status: "cached",
-        data: Option.some(makeThreadProjection()),
-      });
-      for (const listener of appRootFence.threadListeners) listener();
-    });
+    await setThreadState({ status: "cached", data: Option.some(makeThreadProjection()) });
 
     await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "en cache" })]);
     expect(respondCalls()).toHaveLength(0);
@@ -2199,6 +2216,36 @@ describe("dictation phase 5 rework regressions", () => {
     await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "respuesta" })]);
     expect(respondCalls()).toHaveLength(0);
     expect(questionAnswerText()).toBe("respuesta");
+  });
+
+  it("send glyph: an answer armed while its thread synchronizes, whose marker is then deleted by hand, is not submitted", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await setThreadState({ status: "synchronizing", data: Option.some(fixture.projection) });
+    const field = await focusQuestionAnswer();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Hello world",
+      );
+    });
+    await settle();
+    await placeAnswerCaretAfter(field, "Hello");
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+    expect(slotsIn(questionAnswerText())).toHaveLength(1);
+
+    await userEvent.fill(field, "Hello world");
+    await settle();
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await settle();
+    expect(respondCalls()).toHaveLength(0);
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "respuesta" })]);
+    expect(respondCalls()).toHaveLength(0);
   });
 
   it("send glyph: deleting an armed answer's marker by hand disarms it instead of submitting", async () => {

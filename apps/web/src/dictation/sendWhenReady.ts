@@ -312,7 +312,7 @@ function queueDraftCheck() {
 }
 useComposerDraftStore.subscribe(queueDraftCheck);
 
-const armedThreads = createArmedThreadHold(queueDraftCheck);
+const armedThreads = createArmedThreadHold(queueDraftCheck, { need: "data", watchRequests: false });
 function holdArmedThreads({ drafts }: SendWhenReadyState) {
   armedThreads.set(
     Object.values(drafts).flatMap((entry) =>

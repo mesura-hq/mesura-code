@@ -156,19 +156,25 @@ function checkArmedQuestions() {
   for (const [key, armed] of Object.entries(useSendWhenReadyStore.getState().questions)) {
     if (submitting.has(key)) continue;
     const ids = parseRequestKey(key);
-    // The hold looks again once the thread's detail is live.
-    if (ids && armedThreadAvailability(ids, "live") === "loading") continue;
-    const request = ids ? findOpenRequest(ids) : null;
-    if (!ids || !request) {
-      // Answered or dismissed elsewhere: nothing is left to send.
+    // The draft holds answers of this request only, so its markers need no live thread.
+    const answers = requests[key]?.answers ?? {};
+    const markers = dictationMarkerIds(
+      Object.values(answers)
+        .map((answer) => answer?.customAnswer ?? "")
+        .join("\n"),
+    );
+    if (dictationMarkerDeletedByHand(armed.markers, markers)) {
       disarmQuestionSendWhenReady(key);
       continue;
     }
-    const answers = requests[key]?.answers ?? {};
-    const markers = dictationMarkerIds(
-      request.questions.map((question) => answers[question.id]?.customAnswer ?? "").join("\n"),
-    );
-    if (dictationMarkerDeletedByHand(armed.markers, markers)) {
+    // The hold looks again once the thread's detail is live.
+    if (ids && armedThreadAvailability(ids, "live") === "loading") {
+      trackQuestionMarkers(key, markers);
+      continue;
+    }
+    const request = ids ? findOpenRequest(ids) : null;
+    if (!ids || !request) {
+      // Answered or dismissed elsewhere: nothing is left to send.
       disarmQuestionSendWhenReady(key);
       continue;
     }
@@ -203,7 +209,7 @@ export function useQuestionSendWhenReady(): void {
         checkArmedQuestions();
       });
     };
-    const armedThreads = createArmedThreadHold(check);
+    const armedThreads = createArmedThreadHold(check, { need: "live", watchRequests: true });
     const holdAndCheck = () => {
       armedThreads.set(
         Object.keys(useSendWhenReadyStore.getState().questions).flatMap((key) => {

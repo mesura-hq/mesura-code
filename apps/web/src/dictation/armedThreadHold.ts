@@ -1,17 +1,58 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
+import { Atom } from "effect/reactivity";
 
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { environmentThreadDetails } from "~/state/threads";
 
 /**
+ * `data` is satisfied by any snapshot, cached included. `live` needs the synchronized detail: a
+ * cached snapshot cannot tell that a request closed.
+ */
+type ArmedThreadNeed = "data" | "live";
+type ArmedThreadAvailability = "loaded" | "loading" | "gone";
+
+/** Only deletion is final: a failed load retries, and the send stays armed meanwhile. */
+function availabilityOf(state: EnvironmentThreadState, need: ArmedThreadNeed) {
+  if (state.status === "deleted") return "gone";
+  const loaded = need === "live" ? state.status === "live" : Option.isSome(state.data);
+  return loaded ? "loaded" : "loading";
+}
+
+export function armedThreadAvailability(
+  ref: ScopedThreadRef,
+  need: ArmedThreadNeed = "data",
+): ArmedThreadAvailability {
+  return availabilityOf(appAtomRegistry.get(environmentThreadDetails.stateAtom(ref)), need);
+}
+
+/**
  * Mesura: a thread's detail streams only while something mounts it, so a thread the user left
  * reads as not loaded and an armed send there was refused. A hold keeps each armed thread's detail
- * open until its send settles, and calls `onChange` when its load status or pending requests move.
+ * open until its send settles, and calls `onChange` when its availability (or, with
+ * `watchRequests`, its pending requests) moves. Neither changes with streamed text.
  */
-export function createArmedThreadHold(onChange: () => void) {
+export function createArmedThreadHold(
+  onChange: () => void,
+  options: { readonly need: ArmedThreadNeed; readonly watchRequests: boolean },
+) {
   const held = new Map<string, () => void>();
+  const holdOne = (ref: ScopedThreadRef) => {
+    const availability = Atom.make((get) =>
+      availabilityOf(get(environmentThreadDetails.stateAtom(ref)), options.need),
+    );
+    const releases = [appAtomRegistry.subscribe(availability, onChange)];
+    if (options.watchRequests) {
+      releases.push(
+        appAtomRegistry.subscribe(environmentThreadDetails.pendingRequestsAtom(ref), onChange),
+      );
+    }
+    return () => {
+      for (const release of releases) release();
+    };
+  };
   return {
     /** Holds exactly `refs`: new ones open, ones no longer listed are let go. */
     set(refs: Iterable<ScopedThreadRef>): void {
@@ -23,20 +64,7 @@ export function createArmedThreadHold(onChange: () => void) {
         held.delete(key);
       }
       for (const [key, ref] of wanted) {
-        if (held.has(key)) continue;
-        // Neither changes with streamed text. Pending requests also move when the data arrives.
-        const releaseStatus = appAtomRegistry.subscribe(
-          environmentThreadDetails.statusAtom(ref),
-          onChange,
-        );
-        const releaseRequests = appAtomRegistry.subscribe(
-          environmentThreadDetails.pendingRequestsAtom(ref),
-          onChange,
-        );
-        held.set(key, () => {
-          releaseStatus();
-          releaseRequests();
-        });
+        if (!held.has(key)) held.set(key, holdOne(ref));
       }
     },
     releaseAll(): void {
@@ -44,18 +72,4 @@ export function createArmedThreadHold(onChange: () => void) {
       held.clear();
     },
   };
-}
-
-/**
- * `loading` waits for the detail; `gone` means it will not come (deleted, or failed to load).
- * `live` needs the synchronized detail: a cached snapshot cannot tell that a request closed.
- */
-export function armedThreadAvailability(
-  ref: ScopedThreadRef,
-  need: "data" | "live" = "data",
-): "loaded" | "loading" | "gone" {
-  const state = appAtomRegistry.get(environmentThreadDetails.stateAtom(ref));
-  if (state.status === "deleted") return "gone";
-  if (need === "live" ? state.status === "live" : Option.isSome(state.data)) return "loaded";
-  return Option.isSome(state.error) && Option.isNone(state.data) ? "gone" : "loading";
 }
