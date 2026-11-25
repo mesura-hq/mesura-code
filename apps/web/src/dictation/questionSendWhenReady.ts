@@ -5,7 +5,10 @@ import { useEffect } from "react";
 
 import { toastManager } from "~/components/ui/toast";
 import { buildPendingUserInputAnswers } from "~/pendingUserInput";
-import { usePendingUserInputDraftStore } from "~/pendingUserInputDraftStore";
+import {
+  reloadPersistedAnswerDrafts,
+  usePendingUserInputDraftStore,
+} from "~/pendingUserInputDraftStore";
 import {
   collectQuestionAttachments,
   completeQuestionDraftAnswers,
@@ -179,6 +182,7 @@ function checkArmedQuestions() {
     }
     if (availability === "unreadable") {
       disarmQuestionSendWhenReady(key);
+      reloadPersistedAnswerDrafts();
       usePendingUserInputDraftStore
         .getState()
         .setError(key, { kind: "respond", message: ARMED_THREAD_UNREADABLE });

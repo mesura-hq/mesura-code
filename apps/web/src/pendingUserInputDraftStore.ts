@@ -182,9 +182,32 @@ function withoutDictationMarkers(text: string): string {
   return result;
 }
 
-// Upstream's recovery returns a cancelled or expired question's typed answer to the composer.
-setInlineAnswerDraftSource(() =>
-  Object.fromEntries(
+/**
+ * Every write replaces the whole persisted map, so a write this tab makes on its own (not from the
+ * user's typing here) first takes in what other tabs saved since. Storage keeps no errors; the
+ * ones this tab shows stay. Synchronous with localStorage.
+ */
+export function reloadPersistedAnswerDrafts(): void {
+  const before = usePendingUserInputDraftStore.getState().requests;
+  void usePendingUserInputDraftStore.persist.rehydrate();
+  const reloaded = usePendingUserInputDraftStore.getState().requests;
+  const requests = { ...reloaded };
+  let kept = false;
+  for (const [key, draft] of Object.entries(before)) {
+    const reloadedDraft = reloaded[key];
+    if (!draft.error || reloadedDraft === undefined) continue;
+    requests[key] = { ...reloadedDraft, error: draft.error };
+    kept = true;
+  }
+  if (!kept) return;
+  usePendingUserInputDraftStore.setState({ requests });
+}
+
+// Upstream's recovery returns a cancelled or expired question's typed answer to the composer. It
+// reads the saved answers, so a newer one another tab wrote is what returns.
+setInlineAnswerDraftSource(() => {
+  reloadPersistedAnswerDrafts();
+  return Object.fromEntries(
     Object.entries(usePendingUserInputDraftStore.getState().requests).map(([key, draft]) => [
       key,
       Object.fromEntries(
@@ -196,26 +219,18 @@ setInlineAnswerDraftSource(() =>
         ]),
       ),
     ]),
-  ),
-);
+  );
+});
 
 // Announced from a synchronized projection only, and on deletion, so a cached snapshot that
 // predates a question never prunes its answer. Registered after upstream's listener (this module
-// imports it), which has already moved a cancelled answer to the composer.
+// imports it), whose recovery has already reloaded storage and moved a cancelled answer to the
+// composer. Reloading again changes nothing then; it keeps this listener correct on its own.
 onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds, unansweredRequestIds }) => {
+  reloadPersistedAnswerDrafts();
   const { requests } = usePendingUserInputDraftStore.getState();
   const pruned = pruneResolvedUserInputDrafts(requests, environmentId, threadId, pendingRequestIds);
   if (pruned === requests) return;
-  // The whole map is written back, so start from storage: another tab may have saved answers since
-  // this one last wrote. With synchronous storage, rehydration lands before the next line.
-  void usePendingUserInputDraftStore.persist.rehydrate();
-  // Storage keeps no errors; the ones this tab shows stay.
-  const latest = Object.fromEntries(
-    Object.entries(usePendingUserInputDraftStore.getState().requests).map(([key, draft]) => {
-      const error = requests[key]?.error;
-      return [key, error ? { ...draft, error } : draft];
-    }),
-  );
   const recovered = unansweredRequestIds.some((requestId) =>
     Object.values(
       requests[userInputDraftKey(environmentId, threadId, requestId)]?.answers ?? {},
@@ -225,7 +240,5 @@ onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds, unanswer
   if (recovered) disarmSendWhenReady(scopeThreadRef(environmentId, threadId));
   // Keeping the answer when the composer cannot be saved risks a duplicate later, never a loss.
   if (recovered && !persistComposerDrafts()) return;
-  usePendingUserInputDraftStore.setState({
-    requests: pruneResolvedUserInputDrafts(latest, environmentId, threadId, pendingRequestIds),
-  });
+  usePendingUserInputDraftStore.setState({ requests: pruned });
 });

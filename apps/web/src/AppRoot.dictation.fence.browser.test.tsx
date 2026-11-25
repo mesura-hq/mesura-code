@@ -1359,6 +1359,25 @@ async function failFenceSession(kind: "rejected" | "network") {
   await settle();
 }
 
+const ANSWER_DRAFTS_STORAGE_KEY = "mesura-pending-question-drafts";
+
+function persistedAnswerDrafts(): Record<string, unknown> {
+  const stored = JSON.parse(window.localStorage.getItem(ANSWER_DRAFTS_STORAGE_KEY) ?? "{}") as {
+    state?: { requests?: Record<string, unknown> };
+  };
+  return stored.state?.requests ?? {};
+}
+
+/** Saves an answer the way another tab does: the whole persisted map, behind this tab's back. */
+function writeAnswerFromAnotherTab(key: string, questionId: string, text: string) {
+  const stored = JSON.parse(window.localStorage.getItem(ANSWER_DRAFTS_STORAGE_KEY) ?? "{}") as {
+    state: { requests: Record<string, unknown> };
+    version: number;
+  };
+  stored.state.requests[key] = { answers: { [questionId]: { customAnswer: text } }, version: 9 };
+  window.localStorage.setItem(ANSWER_DRAFTS_STORAGE_KEY, JSON.stringify(stored));
+}
+
 function notSentToasts() {
   return vi
     .mocked(toastManager.add)
@@ -2369,6 +2388,15 @@ describe("dictation phase 5 rework regressions", () => {
     await recordIntoQuestion("send");
     await navigateAwayFromThread();
     await setThreadState({ status: "synchronizing" });
+    const otherTabKey = pendingUserInputRequestKey(
+      environmentId,
+      offScreenThreadId,
+      RuntimeRequestId.make("other-tab-request"),
+    );
+    using _otherTab = {
+      [Symbol.dispose]: () => usePendingUserInputDraftStore.getState().clear(otherTabKey),
+    };
+    writeAnswerFromAnotherTab(otherTabKey, "depth", "Saved in the other tab");
     await setFenceSession(makeFenceSession(["orchestration:operate"]));
 
     await vi.waitFor(() =>
@@ -2380,6 +2408,7 @@ describe("dictation phase 5 rework regressions", () => {
     expect(useSendWhenReadyStore.getState().questions[key]).toBeUndefined();
     expect(respondCalls()).toHaveLength(0);
     expect(slotsIn(questionAnswerText())).toHaveLength(1);
+    expect(persistedAnswerDrafts()).toHaveProperty([otherTabKey]);
   });
 
   it("question answers: a cancelled question returns its typed answer to the thread's composer", async () => {
@@ -2491,16 +2520,7 @@ describe("dictation phase 5 rework regressions", () => {
     });
     await settle();
     // Another tab writes the whole persisted map, with an answer this tab has not loaded.
-    const storageKey = "mesura-pending-question-drafts";
-    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}") as {
-      state: { requests: Record<string, unknown> };
-      version: number;
-    };
-    stored.state.requests[otherTabKey] = {
-      answers: { depth: { customAnswer: "Other tab's answer" } },
-      version: 1,
-    };
-    window.localStorage.setItem(storageKey, JSON.stringify(stored));
+    writeAnswerFromAnotherTab(otherTabKey, "depth", "Other tab's answer");
 
     await act(async () =>
       publishFenceThreadProjection(
@@ -2512,9 +2532,33 @@ describe("dictation phase 5 rework regressions", () => {
     expect(
       usePendingUserInputDraftStore.getState().requests[otherTabKey]?.answers.depth?.customAnswer,
     ).toBe("Other tab's answer");
-    expect(
-      JSON.parse(window.localStorage.getItem(storageKey) ?? "{}").state.requests,
-    ).toHaveProperty([otherTabKey]);
+    expect(persistedAnswerDrafts()).toHaveProperty([otherTabKey]);
+  });
+
+  it("question answers: a cancelled question returns the newer answer another tab saved", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Older answer in this tab");
+    });
+    await settle();
+    writeAnswerFromAnotherTab(key, "scope", "Newer answer from the other tab");
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    const prompt = squash(promptOf(onScreenTarget));
+    expect(prompt).toContain("Newer answer from the other tab");
+    expect(prompt).not.toContain("Older answer in this tab");
+    expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
   });
 
   it("question answers: two resolutions announced back to back return each answer once", async () => {
