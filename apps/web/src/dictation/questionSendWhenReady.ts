@@ -16,6 +16,7 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { readThread } from "~/state/entities";
 import { environmentServerConfigsAtom } from "~/state/server";
 import { threadEnvironment } from "~/state/threads";
+import { armedThreadAvailability, createArmedThreadHold } from "./armedThreadHold";
 import {
   dictationMarkerDeletedByHand,
   dictationMarkerIds,
@@ -154,6 +155,8 @@ function checkArmedQuestions() {
   for (const [key, armed] of Object.entries(useSendWhenReadyStore.getState().questions)) {
     if (submitting.has(key)) continue;
     const ids = parseRequestKey(key);
+    // The hold looks again once the thread's detail has loaded.
+    if (ids && armedThreadAvailability(ids) === "loading") continue;
     const request = ids ? findOpenRequest(ids) : null;
     if (!ids || !request) {
       // Answered or dismissed elsewhere: nothing is left to send.
@@ -192,12 +195,23 @@ export function useQuestionSendWhenReady(): void {
         checkArmedQuestions();
       });
     };
+    const armedThreads = createArmedThreadHold(check);
+    const holdAndCheck = () => {
+      armedThreads.set(
+        Object.keys(useSendWhenReadyStore.getState().questions).flatMap((key) => {
+          const ids = parseRequestKey(key);
+          return ids ? [{ environmentId: ids.environmentId, threadId: ids.threadId }] : [];
+        }),
+      );
+      check();
+    };
     const unsubscribeAnswers = usePendingUserInputDraftStore.subscribe(check);
-    const unsubscribeArmed = useSendWhenReadyStore.subscribe(check);
-    check();
+    const unsubscribeArmed = useSendWhenReadyStore.subscribe(holdAndCheck);
+    holdAndCheck();
     return () => {
       unsubscribeAnswers();
       unsubscribeArmed();
+      armedThreads.releaseAll();
     };
   }, []);
 }

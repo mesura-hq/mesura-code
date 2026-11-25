@@ -1299,6 +1299,22 @@ function respondCalls() {
   return fixture.dictationCalls.filter((call) => call.name === "respond");
 }
 
+function notSentToasts() {
+  return vi
+    .mocked(toastManager.add)
+    .mock.calls.filter(([toast]) => toast.title === "The dictated message was not sent");
+}
+
+/** Thread details load as the real stream does: empty when first subscribed, filled a moment later. */
+function detailsLoadLate(): Disposable {
+  appRootFence.threadDetailsLoadLate = true;
+  return {
+    [Symbol.dispose]: () => {
+      appRootFence.threadDetailsLoadLate = false;
+    },
+  };
+}
+
 const VOICED = "[voiced] ";
 
 function voicedCount(text: string): number {
@@ -1752,6 +1768,24 @@ describe("dictation phase 5 fence", () => {
     expect(turnStarts()).toHaveLength(1);
   });
 
+  it("dictation send regression: an armed draft sends after the user leaves its thread, which nothing else holds", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _late = detailsLoadLate();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    await vi.waitFor(() => expect(turnStarts()).toHaveLength(1));
+    expect(turnStarts()[0]!.input.threadId).toBe(threadId);
+    expect(squash(turnStarts()[0]!.input.message.text)).toBe("[voiced] Read the notes y resume");
+    expect(squash(promptOf(onScreenTarget))).toBe("");
+    expect(notSentToasts()).toHaveLength(0);
+  });
+
   it("dictation phase 5 AC5: a message with dictated parts carries one [voiced] prefix, and a typed one carries none", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
@@ -2050,6 +2084,24 @@ describe("dictation phase 5 rework regressions", () => {
         requestId: questionRequestId,
         answers: { scope: "[voiced] fuera de pantalla" },
       },
+    });
+  });
+
+  it("dictation send regression: a send-mode answer is submitted after the user leaves its thread, which nothing else holds", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _late = detailsLoadLate();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await focusQuestionAnswer();
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "lejos" })]);
+    await vi.waitFor(() => expect(respondCalls()).toHaveLength(1));
+    expect(respondCalls()[0]!.value).toMatchObject({
+      input: { threadId, requestId: questionRequestId, answers: { scope: "[voiced] lejos" } },
     });
   });
 
