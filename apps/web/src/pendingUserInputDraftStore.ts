@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import {
   onThreadRequestsResolved,
   pruneResolvedUserInputDrafts,
+  userInputDraftKey,
 } from "@t3tools/client-runtime/state/thread-requests";
 import type { UserInputQuestion } from "@t3tools/contracts";
 import {
@@ -13,6 +14,8 @@ import {
 import { setInlineAnswerDraftSource } from "./questionAttachments";
 import { persistComposerDrafts } from "./composerDraftStore";
 import { findDictationSlots, removeDictationSlot } from "@t3tools/shared/dictationSlots";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { disarmSendWhenReady } from "./dictation/sendWhenReady";
 
 export { pendingUserInputRequestKey } from "./pendingUserInput";
 
@@ -198,12 +201,19 @@ setInlineAnswerDraftSource(() =>
 
 // Announced from a synchronized projection only, and on deletion, so a cached snapshot that
 // predates a question never prunes its answer. Registered after upstream's listener (this module
-// imports it), which has already moved a cancelled answer to the composer; saving the composer
-// first means a crash cannot lose both copies.
-onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds }) => {
+// imports it), which has already moved a cancelled answer to the composer.
+onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds, unansweredRequestIds }) => {
   const { requests } = usePendingUserInputDraftStore.getState();
   const pruned = pruneResolvedUserInputDrafts(requests, environmentId, threadId, pendingRequestIds);
   if (pruned === requests) return;
-  persistComposerDrafts();
+  const recovered = unansweredRequestIds.some((requestId) =>
+    Object.values(
+      requests[userInputDraftKey(environmentId, threadId, requestId)]?.answers ?? {},
+    ).some((answer) => withoutDictationMarkers(answer.customAnswer ?? "").trim() !== ""),
+  );
+  // An armed composer send would carry the recovered answer with it; the user reviews it first.
+  if (recovered) disarmSendWhenReady(scopeThreadRef(environmentId, threadId));
+  // Keeping the answer when the composer cannot be saved risks a duplicate later, never a loss.
+  if (recovered && !persistComposerDrafts()) return;
   usePendingUserInputDraftStore.setState({ requests: pruned });
 });

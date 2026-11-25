@@ -259,7 +259,7 @@ import {
 } from "./pendingUserInputDraftStore";
 
 import { useDictationSessionStore } from "./dictation/dictationSessionStore";
-import { useSendWhenReadyStore } from "./dictation/sendWhenReady";
+import { armSendWhenReady, useSendWhenReadyStore } from "./dictation/sendWhenReady";
 import { useDictationWidgetActivityStore } from "./dictation/dictationWidgetState";
 import { createFakeMedia } from "./dictation/dictationMedia.testFixtures";
 import { setDictationMediaBackend } from "./dictation/recorder";
@@ -2433,6 +2433,40 @@ describe("dictation phase 5 rework regressions", () => {
     await settle();
     expect(squash(promptOf(onScreenTarget))).toContain("Riverside");
     expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(0);
+  });
+
+  it("question answers: a recovered answer disarms the thread's armed composer send", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    const composerMarker = formatDictationSlot(DictationJobId.make("composer-transcribing"));
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, `Composer text ${composerMarker}`);
+    await mountApp();
+    await act(async () => {
+      armSendWhenReady(onScreenTarget);
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Recovered answer",
+      );
+    });
+    await settle();
+    expect(useSendWhenReadyStore.getState().drafts[scopedThreadKey(onScreenTarget)]?.armed).toBe(
+      true,
+    );
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toContain("Recovered answer");
+    expect(
+      useSendWhenReadyStore.getState().drafts[scopedThreadKey(onScreenTarget)]?.armed,
+    ).not.toBe(true);
+    expect(turnStarts()).toHaveLength(0);
   });
 
   it("question answers: two resolutions announced back to back return each answer once", async () => {
