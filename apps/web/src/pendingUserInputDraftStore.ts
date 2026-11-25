@@ -11,6 +11,8 @@ import {
   type PendingUserInputDraftAnswer,
 } from "./pendingUserInput";
 import { setInlineAnswerDraftSource } from "./questionAttachments";
+import { persistComposerDrafts } from "./composerDraftStore";
+import { findDictationSlots, removeDictationSlot } from "@t3tools/shared/dictationSlots";
 
 export { pendingUserInputRequestKey } from "./pendingUserInput";
 
@@ -167,28 +169,41 @@ export function markPendingUserInputAnswerVoiced(key: string, questionId: string
   });
 }
 
+/** A pending marker's job targets the question, so it could never fill in the composer. */
+function withoutDictationMarkers(text: string): string {
+  let result = text;
+  for (const { jobId } of findDictationSlots(text)) {
+    const removed = removeDictationSlot(result, jobId);
+    if (!("missing" in removed)) result = removed.text;
+  }
+  return result;
+}
+
+// Upstream's recovery returns a cancelled or expired question's typed answer to the composer.
 setInlineAnswerDraftSource(() =>
   Object.fromEntries(
     Object.entries(usePendingUserInputDraftStore.getState().requests).map(([key, draft]) => [
       key,
-      draft.answers,
+      Object.fromEntries(
+        Object.entries(draft.answers).map(([questionId, answer]) => [
+          questionId,
+          answer.customAnswer === undefined
+            ? answer
+            : { ...answer, customAnswer: withoutDictationMarkers(answer.customAnswer) },
+        ]),
+      ),
     ]),
   ),
 );
 
 // Announced from a synchronized projection only, and on deletion, so a cached snapshot that
-// predates a question never prunes its answer. Deferred past every listener, so upstream's has
-// returned a cancelled question's answer to the composer first.
+// predates a question never prunes its answer. Registered after upstream's listener (this module
+// imports it), which has already moved a cancelled answer to the composer; saving the composer
+// first means a crash cannot lose both copies.
 onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds }) => {
-  queueMicrotask(() =>
-    usePendingUserInputDraftStore.setState((state) => {
-      const requests = pruneResolvedUserInputDrafts(
-        state.requests,
-        environmentId,
-        threadId,
-        pendingRequestIds,
-      );
-      return requests === state.requests ? state : { requests };
-    }),
-  );
+  const { requests } = usePendingUserInputDraftStore.getState();
+  const pruned = pruneResolvedUserInputDrafts(requests, environmentId, threadId, pendingRequestIds);
+  if (pruned === requests) return;
+  persistComposerDrafts();
+  usePendingUserInputDraftStore.setState({ requests: pruned });
 });

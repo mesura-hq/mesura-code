@@ -1443,6 +1443,17 @@ async function recordInMode(mode: "send" | "insert") {
 }
 
 const questionRequestId = RuntimeRequestId.make("dictation-phase-five-question");
+const secondQuestionRequestId = RuntimeRequestId.make("dictation-phase-five-second-question");
+
+function withRequestStatus(
+  thread: OrchestrationV2ThreadProjection,
+  status: "cancelled" | "expired",
+): OrchestrationV2ThreadProjection {
+  return {
+    ...thread,
+    runtimeRequests: thread.runtimeRequests.map((request) => ({ ...request, status })),
+  };
+}
 
 function withOpenQuestion(
   thread: OrchestrationV2ThreadProjection,
@@ -2386,17 +2397,108 @@ describe("dictation phase 5 rework regressions", () => {
     });
     await settle();
 
-    const cancelled = {
-      ...fixture.projection,
-      runtimeRequests: fixture.projection.runtimeRequests.map((request) => ({
-        ...request,
-        status: "cancelled" as const,
-      })),
-    };
-    await act(async () => publishFenceThreadProjection(cancelled, environmentId));
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "cancelled"),
+        environmentId,
+      ),
+    );
     await settle();
     expect(questionAnswerText()).toBe("");
     expect(squash(promptOf(onScreenTarget))).toContain("Only the web client");
+  });
+
+  it("question answers: a cancelled answer returns without its pending dictation marker", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "");
+    await mountApp();
+    const pendingMarker = formatDictationSlot(DictationJobId.make("still-transcribing"));
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => `Riverside ${pendingMarker}`,
+      );
+    });
+    await settle();
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "cancelled"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toContain("Riverside");
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(0);
+  });
+
+  it("question answers: two resolutions announced back to back return each answer once", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const second = makeFenceUserInput({
+      threadId,
+      requestId: secondQuestionRequestId,
+      createdAt: now,
+      questions: [
+        {
+          id: "depth",
+          header: "Depth",
+          question: "How deep?",
+          multiSelect: false,
+          options: [{ label: "Shallow", description: "Quick pass" }],
+        },
+      ],
+    });
+    const open = withOpenQuestion(makeThreadProjection());
+    fixture.projection = {
+      ...open,
+      runtimeRequests: [...open.runtimeRequests, second.request],
+      turnItems: [...open.turnItems, second.item],
+    };
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "");
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "answer A",
+      );
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, secondQuestionRequestId),
+        "depth",
+        () => "answer B",
+      );
+    });
+    await settle();
+
+    const status = (requestId: string, next: "cancelled" | "expired" | "pending") =>
+      fixture.projection!.runtimeRequests.map((request) =>
+        request.id === requestId ? { ...request, status: next } : request,
+      );
+    await act(async () => {
+      publishFenceThreadProjection(
+        { ...fixture.projection!, runtimeRequests: status(questionRequestId, "cancelled") },
+        environmentId,
+      );
+      publishFenceThreadProjection(
+        {
+          ...fixture.projection!,
+          runtimeRequests: status(questionRequestId, "cancelled").map((request) =>
+            request.id === secondQuestionRequestId
+              ? { ...request, status: "expired" as const }
+              : request,
+          ),
+        },
+        environmentId,
+      );
+    });
+    await settle();
+    const prompt = squash(promptOf(onScreenTarget));
+    expect(prompt.split("answer A").length - 1, prompt).toBe(1);
+    expect(prompt.split("answer B").length - 1, prompt).toBe(1);
   });
 
   it("question answers: a deleted thread drops its answers, on screen or not", async () => {
