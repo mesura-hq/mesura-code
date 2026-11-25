@@ -237,7 +237,9 @@ vi.mock("@legendapp/list/react", () => ({
   ),
 }));
 
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
+import * as Option from "effect/Option";
 import { AppRoot } from "./AppRoot";
 import { AppSidebarLayout } from "./components/AppSidebarLayout";
 import ChatView from "./components/ChatView";
@@ -254,6 +256,7 @@ import {
 } from "./pendingUserInputDraftStore";
 
 import { useDictationSessionStore } from "./dictation/dictationSessionStore";
+import { useSendWhenReadyStore } from "./dictation/sendWhenReady";
 import { useDictationWidgetActivityStore } from "./dictation/dictationWidgetState";
 import { createFakeMedia } from "./dictation/dictationMedia.testFixtures";
 import { setDictationMediaBackend } from "./dictation/recorder";
@@ -1786,6 +1789,30 @@ describe("dictation phase 5 fence", () => {
     expect(notSentToasts()).toHaveLength(0);
   });
 
+  it("dictation send regression: an armed draft whose thread is deleted is disarmed and reported, not held", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+    await act(async () => {
+      appRootFence.threadStates.set(threadId, {
+        ...EMPTY_ENVIRONMENT_THREAD_STATE,
+        status: "deleted",
+      });
+      for (const listener of appRootFence.threadListeners) listener();
+    });
+
+    await pushJobs([job(jobId, { status: "failed", mode: "submit", failure: "Network error" })]);
+    await vi.waitFor(() => expect(notSentToasts()).toHaveLength(1));
+    expect(turnStarts()).toHaveLength(0);
+    expect(
+      useSendWhenReadyStore.getState().drafts[scopedThreadKey(onScreenTarget)]?.armed,
+    ).not.toBe(true);
+  });
+
   it("dictation phase 5 AC5: a message with dictated parts carries one [voiced] prefix, and a typed one carries none", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
@@ -2102,6 +2129,35 @@ describe("dictation phase 5 rework regressions", () => {
     await vi.waitFor(() => expect(respondCalls()).toHaveLength(1));
     expect(respondCalls()[0]!.value).toMatchObject({
       input: { threadId, requestId: questionRequestId, answers: { scope: "[voiced] lejos" } },
+    });
+  });
+
+  it("dictation send regression: a cached snapshot without the question waits for the live thread before judging the answer", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await focusQuestionAnswer();
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+    // A snapshot cached before the question opened, as a reload starts from.
+    await act(async () => {
+      appRootFence.threadStates.set(threadId, {
+        ...EMPTY_ENVIRONMENT_THREAD_STATE,
+        status: "cached",
+        data: Option.some(makeThreadProjection()),
+      });
+      for (const listener of appRootFence.threadListeners) listener();
+    });
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "en cache" })]);
+    expect(respondCalls()).toHaveLength(0);
+
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await vi.waitFor(() => expect(respondCalls()).toHaveLength(1));
+    expect(respondCalls()[0]!.value).toMatchObject({
+      input: { threadId, requestId: questionRequestId, answers: { scope: "[voiced] en cache" } },
     });
   });
 

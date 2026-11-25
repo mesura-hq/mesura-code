@@ -264,6 +264,18 @@ function checkDraftsAfterChange() {
       forgetDraftSendState(key);
       continue;
     }
+    if (
+      entry.armed &&
+      !inFlight &&
+      typeof entry.target !== "string" &&
+      armedThreadAvailability(entry.target) === "gone"
+    ) {
+      reportUnsent(
+        entry.target,
+        "Its thread could not be reached. The text is still in the draft.",
+      );
+      continue;
+    }
     // Tracked while a send is in flight too: an edit then sends as `draft-changed` asks again.
     if (deletedByHand && entry.armed) {
       updateDraftSendState(entry.target, { armed: false, markers });

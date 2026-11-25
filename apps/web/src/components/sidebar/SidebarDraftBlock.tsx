@@ -88,6 +88,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         role="button"
         tabIndex={0}
         data-sidebar-row={`draft:${draftId}`}
+        data-mesura-nav-stop=""
         aria-label={accessibility.label}
         aria-current={accessibility.current}
         data-testid="sidebar-draft-row"
