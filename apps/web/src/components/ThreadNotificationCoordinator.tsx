@@ -43,8 +43,14 @@ import {
 } from "../pushNotifications/pushRegistration";
 import { resolveBackgroundThreadRequest } from "./backgroundThreadAnnouncement";
 import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "./Sidebar.logic";
-import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-inbox";
-import { resolveSidebarThreadAttention } from "./sidebarThreadAttention";
+import {
+  resolveSidebarThreadAttention,
+  sidebarThreadAttentionFacts,
+} from "./sidebarThreadAttention";
+import {
+  factoryQuestionIsOpen,
+  threadRuntimeIsExecuting,
+} from "@t3tools/client-runtime/state/thread-inbox";
 import {
   createThreadNotificationGate,
   isSnoozedForNotification,
@@ -335,14 +341,19 @@ export function startThreadNotifications(
       if (status === "ready" && thread.latestRun?.status === "failed") status = "failed";
       // Mesura: the sidebar's label decides, so an agent's needs-input signal or a stopped
       // Factory run asks for the developer the way a structured question does.
+      // The coordinator keeps its own timing: an agent's signal notifies once the agent stops
+      // executing, a Factory question as soon as the run asks.
+      const facts = sidebarThreadAttentionFacts(thread);
       const attentionKind =
         resolveSidebarThreadAttention({
           status,
           isUnread: false,
           isWoke: false,
-          agentSignal: thread.agentSignal,
-          agentExecuting: threadRuntimeIsExecuting(thread.runtime),
-          factoryRun: thread.factoryRun,
+          ...facts,
+          agentQuestionOpen:
+            (thread.agentSignal?.kind === "needs_input" && !facts.agentExecuting) ||
+            factoryQuestionIsOpen(thread),
+          agentExecuting: false,
         })?.kind ?? null;
       const loudKind: LoudKind | null =
         status === "request"

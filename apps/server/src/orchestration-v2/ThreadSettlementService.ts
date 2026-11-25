@@ -9,6 +9,7 @@ import {
   CommandId,
   factoryRunHoldsCompletion,
   factoryRunIsUnclosed,
+  factoryRunQuestionOpen,
   isOrchestrationV2WorkActive,
   type ThreadId,
   type OrchestrationV2DomainEvent,
@@ -164,7 +165,7 @@ function pullRequestSettles(
 
 export function isAutoSettlementCandidate(
   thread: Omit<ProjectionStore.ProjectionSettlementCandidate, "latestUserAuthoredMessageAt"> &
-    Pick<OrchestrationV2ThreadShell, "factoryRun">,
+    Pick<OrchestrationV2ThreadShell, "factoryRun" | "latestUserAuthoredMessageAt">,
   nowMs: number,
 ): boolean {
   if (thread.archivedAt !== null || thread.settledOverride !== null) return false;
@@ -182,6 +183,10 @@ export function isAutoSettlementCandidate(
   if (factoryRunHoldsCompletion(thread.factoryRun)) return false;
   // Mesura: settling would hide a Factory run whose phases closed without `run.finished`.
   if (factoryRunIsUnclosed(thread.factoryRun)) return false;
+  // Mesura: a Factory run's open question blocks settling, as the sidebar shows Needs input.
+  if (factoryRunQuestionOpen(thread.factoryRun, toMillis(thread.latestUserAuthoredMessageAt))) {
+    return false;
+  }
   if (threadHasQueuedTurnStart(thread, nowMs)) return false;
   // Interrupted runs must keep the same snooze protection the sidebar shows.
   return !isSnoozed(thread, nowMs);

@@ -98,9 +98,9 @@ import {
   useSidebarRowSubscriptionLease,
   setFileDragActive,
 } from "../Sidebar.logic";
-import { threadRuntimeIsExecuting } from "@t3tools/client-runtime/state/thread-inbox";
 import {
   resolveSidebarThreadAttention,
+  sidebarThreadAttentionFacts,
   sidebarThreadAttentionLook,
   sidebarThreadAttentionShowsTime,
   sidebarThreadAttentionSweeps,
@@ -582,6 +582,20 @@ function TopStatusIcon(props: { icon: keyof typeof TOP_STATUS_ICONS | null; clas
   return <Icon aria-hidden className={cn("shrink-0", props.className)} />;
 }
 
+// Mesura: the agent's question stays open while it works (developer, 2026-11-01).
+function OpenQuestionMark(props: { open: boolean; className: string }) {
+  if (!props.open) return null;
+  return (
+    <>
+      <MessageCircleQuestionIcon
+        aria-hidden
+        className={cn("shrink-0 text-needs-input", props.className)}
+      />
+      <span className="sr-only">Question open,</span>
+    </>
+  );
+}
+
 type SidebarThreadRowProps = {
   thread: SidebarThreadSummary;
   // "folder" is a one-line row inside a boring sidebar project folder;
@@ -780,10 +794,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     status,
     isUnread,
     isWoke,
-    agentSignal: thread.agentSignal,
-    agentExecuting: threadRuntimeIsExecuting(thread.runtime),
-    factoryRun: thread.factoryRun,
-    goalActive: thread.goal?.status === "active",
+    ...sidebarThreadAttentionFacts(thread),
   });
   const shouldRecede = shouldRecedeSidebarThread({
     status,
@@ -1345,6 +1356,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           topStatus.className,
                         )}
                       >
+                        <OpenQuestionMark open={topStatus.questionOpen} className="size-3" />
                         <TopStatusIcon icon={topStatus.icon} className="size-3" />
                         {sidebarThreadAttentionSweeps(topStatus.kind) ? (
                           <WorkingSweepText text={topStatus.label} />
@@ -1542,16 +1554,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         </span>
                       ) : (
                         <span className={cn("inline-flex items-center gap-1", topStatus.className)}>
-                          {topStatus.questionOpen ? (
-                            // Mesura: the agent's question stays open while it works (developer, 2026-11-01).
-                            <>
-                              <MessageCircleQuestionIcon
-                                aria-hidden
-                                className="size-4 shrink-0 text-needs-input"
-                              />
-                              <span className="sr-only">Question open,</span>
-                            </>
-                          ) : null}
+                          <OpenQuestionMark open={topStatus.questionOpen} className="size-4" />
                           <TopStatusIcon icon={topStatus.icon} className="size-4" />
                           {/* Not a live region: a collapsed sidebar is inert, so
                             BackgroundThreadAnnouncer and the open thread's

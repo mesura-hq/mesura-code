@@ -124,7 +124,55 @@ describe("factory run fold over the record-version-1 fixture", () => {
       phaseIndex: 2,
       phaseCount: 2,
       node: "commit",
+      askedAt: null,
     });
+  });
+});
+
+// Seal review P1-1: `lastEventAt` moves with every event, so a note after the developer's reply
+// reopened the question. `askedAt` is the stop itself.
+describe("factory run askedAt", () => {
+  const line = (event: Record<string, unknown>) => JSON.stringify({ v: 1, ...event });
+  const started = line({
+    at: "2026-11-24T10:00:00.000Z",
+    type: "run.started",
+    runId: "asks",
+    request: "Asks",
+    phases: [{ index: 1, title: "One", acceptance: ["It works."] }],
+  });
+  const raised = line({
+    at: "2026-11-24T10:05:00.000Z",
+    type: "stop.raised",
+    phase: 1,
+    question: "Ship it?",
+    options: [],
+  });
+  const note = line({ at: "2026-11-24T10:07:00.000Z", type: "note", phase: 1, text: "Waiting." });
+
+  it("keeps a waiting run's askedAt at its open stop when later events arrive", () => {
+    const state = foldLines([started, raised, note]);
+    expect(state.status).toBe("waiting");
+    expect(state.lastEventAt).toBe("2026-11-24T10:07:00.000Z");
+    expect(toFactoryRunShellSummary(state).askedAt).toBe("2026-11-24T10:05:00.000Z");
+    expect(summarizeFactoryRun(state).askedAt).toBe("2026-11-24T10:05:00.000Z");
+  });
+
+  it("dates a stopped run's question at its finish, not at a later event", () => {
+    const finished = line({
+      at: "2026-11-24T10:06:00.000Z",
+      type: "run.finished",
+      status: "stopped",
+    });
+    const state = foldLines([started, finished, note]);
+    expect(state.status).toBe("stopped");
+    expect(toFactoryRunShellSummary(state).askedAt).toBe("2026-11-24T10:06:00.000Z");
+  });
+
+  it("clears askedAt once the stop is answered and the run goes on", () => {
+    const answered = line({ at: "2026-11-24T10:08:00.000Z", type: "stop.answered", answer: "Yes" });
+    const state = foldLines([started, raised, answered]);
+    expect(state.status).toBe("running");
+    expect(toFactoryRunShellSummary(state).askedAt).toBeNull();
   });
 });
 
@@ -572,7 +620,7 @@ describe("factory run status once every phase closed", () => {
     const unclosed = foldLines([started, ...closePhase(1, 1), ...closePhase(4, 2)]);
     expect(unclosed.status).toBe("unclosed");
     expect(summarizeFactoryRun(unclosed).status).toBe("unclosed");
-    expect(toFactoryRunShellSummary(unclosed)).toEqual({
+    expect(toFactoryRunShellSummary(unclosed)).toMatchObject({
       status: "unclosed",
       phaseIndex: 2,
       phaseCount: 2,

@@ -1,9 +1,10 @@
 import { factoryRunShortLabel } from "@t3tools/client-runtime/factory/run-presentation";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
-  factoryRunIsUnclosed,
-  type FactoryRunShellSummary,
-  type ThreadAgentSignal,
-} from "@t3tools/contracts";
+  agentQuestionIsOpen,
+  threadRuntimeIsExecuting,
+} from "@t3tools/client-runtime/state/thread-inbox";
+import { factoryRunIsUnclosed, type FactoryRunShellSummary } from "@t3tools/contracts";
 
 import type { SidebarThreadStatus } from "./Sidebar.logic";
 
@@ -30,7 +31,7 @@ export interface SidebarThreadAttention {
   readonly kind: SidebarThreadAttentionKind;
   readonly text: string;
   readonly emphasis: SidebarThreadAttentionEmphasis;
-  /** The agent's `needs_input` question is still open while it executes a later turn. */
+  /** An agent question (`agentQuestionIsOpen`) is still open while the agent executes a later turn. */
   readonly questionOpen?: true;
 }
 
@@ -38,7 +39,8 @@ export interface SidebarThreadAttentionInput {
   readonly status: SidebarThreadStatus;
   readonly isUnread: boolean;
   readonly isWoke: boolean;
-  readonly agentSignal: ThreadAgentSignal | null | undefined;
+  /** `agentQuestionIsOpen`: a `needs_input` signal or an unanswered Factory question. */
+  readonly agentQuestionOpen: boolean;
   /** The agent is executing a turn (`threadRuntimeIsExecuting`), not waiting on background work. */
   readonly agentExecuting: boolean;
   readonly factoryRun: FactoryRunShellSummary | null | undefined;
@@ -46,27 +48,39 @@ export interface SidebarThreadAttentionInput {
   readonly goalActive?: boolean;
 }
 
+/** The fields of `SidebarThreadAttentionInput` that come straight from the thread. */
+export function sidebarThreadAttentionFacts(
+  thread: Pick<
+    EnvironmentThreadShell,
+    "agentSignal" | "factoryRun" | "latestUserAuthoredMessageAt" | "runtime" | "goal"
+  >,
+): Pick<
+  SidebarThreadAttentionInput,
+  "agentQuestionOpen" | "agentExecuting" | "factoryRun" | "goalActive"
+> {
+  return {
+    agentQuestionOpen: agentQuestionIsOpen(thread),
+    agentExecuting: threadRuntimeIsExecuting(thread.runtime),
+    factoryRun: thread.factoryRun,
+    goalActive: thread.goal?.status === "active",
+  };
+}
+
 const NEEDS_INPUT: SidebarThreadAttention = {
   kind: "input",
   text: "Needs input",
   emphasis: "loud",
 };
-// A run that stopped on a question or was stopped waits on the developer.
-const FACTORY_NEEDS_INPUT_STATUSES: ReadonlySet<string> = new Set(["waiting", "stopped"]);
 /** Precedence follows the prototype's `statusAfter`: what needs the developer first, then busy work, then finished. */
 export function resolveSidebarThreadAttention(
   input: SidebarThreadAttentionInput,
 ): SidebarThreadAttention | null {
-  const { status, agentSignal, factoryRun } = input;
-  const agentQuestionOpen = agentSignal?.kind === "needs_input";
+  const { status, agentQuestionOpen, factoryRun } = input;
   if (status === "approval") return { kind: "approval", text: "Approval", emphasis: "loud" };
-  if (
-    status === "input" ||
-    (agentQuestionOpen && !input.agentExecuting) ||
-    (factoryRun != null && FACTORY_NEEDS_INPUT_STATUSES.has(factoryRun.status))
-  ) {
-    return NEEDS_INPUT;
-  }
+  // An open question yields to the executing agent's label; Preparing has none of its own.
+  const executingLabelShown =
+    input.agentExecuting && (status !== "preparing" || factoryRun?.status === "running");
+  if (status === "input" || (agentQuestionOpen && !executingLabelShown)) return NEEDS_INPUT;
   if (status === "request") return { kind: "request", text: "Request", emphasis: "loud" };
   if (status === "failed") return { kind: "failed", text: "Failed", emphasis: "loud" };
   if (status === "limited") return { kind: "limited", text: "Limited", emphasis: "loud" };
