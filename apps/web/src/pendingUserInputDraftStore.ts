@@ -1,12 +1,16 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { onThreadRequestsResolved } from "@t3tools/client-runtime/state/thread-requests";
+import {
+  onThreadRequestsResolved,
+  pruneResolvedUserInputDrafts,
+} from "@t3tools/client-runtime/state/thread-requests";
 import type { UserInputQuestion } from "@t3tools/contracts";
 import {
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
 } from "./pendingUserInput";
+import { setInlineAnswerDraftSource } from "./questionAttachments";
 
 export { pendingUserInputRequestKey } from "./pendingUserInput";
 
@@ -163,22 +167,28 @@ export function markPendingUserInputAnswerVoiced(key: string, questionId: string
   });
 }
 
-// Announced from a synchronized projection only, and on deletion: a cached snapshot that predates
-// a question never prunes its answer. Runs whether or not the thread is on screen.
+setInlineAnswerDraftSource(() =>
+  Object.fromEntries(
+    Object.entries(usePendingUserInputDraftStore.getState().requests).map(([key, draft]) => [
+      key,
+      draft.answers,
+    ]),
+  ),
+);
+
+// Announced from a synchronized projection only, and on deletion, so a cached snapshot that
+// predates a question never prunes its answer. Deferred past every listener, so upstream's has
+// returned a cancelled question's answer to the composer first.
 onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds }) => {
-  const pending = new Set<string>(pendingRequestIds);
-  const store = usePendingUserInputDraftStore.getState();
-  for (const key of Object.keys(store.requests)) {
-    const [draftEnvironmentId, draftThreadId, requestId] = JSON.parse(key) as [
-      string,
-      string,
-      string,
-    ];
-    if (
-      draftEnvironmentId === environmentId &&
-      draftThreadId === threadId &&
-      !pending.has(requestId)
-    )
-      store.clear(key);
-  }
+  queueMicrotask(() =>
+    usePendingUserInputDraftStore.setState((state) => {
+      const requests = pruneResolvedUserInputDrafts(
+        state.requests,
+        environmentId,
+        threadId,
+        pendingRequestIds,
+      );
+      return requests === state.requests ? state : { requests };
+    }),
+  );
 });

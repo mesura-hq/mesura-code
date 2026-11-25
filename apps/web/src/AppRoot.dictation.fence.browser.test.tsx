@@ -239,7 +239,10 @@ vi.mock("@legendapp/list/react", () => ({
 
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
+import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
+import { AsyncResult } from "effect/reactivity";
+import { EnvironmentAuthInvalidError } from "@t3tools/contracts";
 import { AppRoot } from "./AppRoot";
 import { AppSidebarLayout } from "./components/AppSidebarLayout";
 import ChatView from "./components/ChatView";
@@ -1334,8 +1337,26 @@ function restoreFenceSession(): Disposable {
     [Symbol.dispose]: () => {
       appRootFence.sessions.set(FENCE_ENVIRONMENT_ID, makeFenceSession());
       appRootFence.sessionsWaiting.delete(FENCE_ENVIRONMENT_ID);
+      appRootFence.sessionResults.delete(FENCE_ENVIRONMENT_ID);
     },
   };
+}
+
+/** Settles the session lookup as failed: the host rejecting the credential, or the network. */
+async function failFenceSession(kind: "rejected" | "network") {
+  const error =
+    kind === "rejected"
+      ? new EnvironmentAuthInvalidError({
+          code: "auth_invalid",
+          reason: "invalid_credential",
+          traceId: "fence-trace",
+        })
+      : new Error("network down");
+  await act(async () => {
+    appRootFence.sessionResults.set(FENCE_ENVIRONMENT_ID, AsyncResult.failure(Cause.fail(error)));
+    for (const listener of appRootFence.threadListeners) listener();
+  });
+  await settle();
 }
 
 function notSentToasts() {
@@ -1887,6 +1908,24 @@ describe("dictation phase 5 fence", () => {
     ).not.toBe(true);
   });
 
+  it("dictation send regression: a rejected credential fails an armed draft, and a network failure does not", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _session = restoreFenceSession();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    await navigateAwayFromThread();
+    await setThreadState({ status: "synchronizing" });
+
+    await failFenceSession("network");
+    expect(notSentToasts()).toHaveLength(0);
+    await failFenceSession("rejected");
+    await vi.waitFor(() => expect(notSentToasts()).toHaveLength(1));
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toContain("Read the notes");
+  });
+
   it("dictation send regression: a denial still shown while the session is replaced does not cancel the send", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     using _session = restoreFenceSession();
@@ -2330,6 +2369,34 @@ describe("dictation phase 5 rework regressions", () => {
     expect(useSendWhenReadyStore.getState().questions[key]).toBeUndefined();
     expect(respondCalls()).toHaveLength(0);
     expect(slotsIn(questionAnswerText())).toHaveLength(1);
+  });
+
+  it("question answers: a cancelled question returns its typed answer to the thread's composer", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "");
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Only the web client",
+      );
+    });
+    await settle();
+
+    const cancelled = {
+      ...fixture.projection,
+      runtimeRequests: fixture.projection.runtimeRequests.map((request) => ({
+        ...request,
+        status: "cancelled" as const,
+      })),
+    };
+    await act(async () => publishFenceThreadProjection(cancelled, environmentId));
+    await settle();
+    expect(questionAnswerText()).toBe("");
+    expect(squash(promptOf(onScreenTarget))).toContain("Only the web client");
   });
 
   it("question answers: a deleted thread drops its answers, on screen or not", async () => {

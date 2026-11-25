@@ -1,8 +1,8 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
+import { sessionDeniesScope } from "@t3tools/client-runtime/state/session";
 import {
   AuthOrchestrationReadScope,
-  sessionGrantsScope,
   type AuthSessionState,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -34,10 +34,9 @@ function availabilityOf(
   if (state.status === "deleted") return "gone";
   const loaded = need === "live" ? state.status === "live" : Option.isSome(state.data);
   if (loaded) return "loaded";
-  // Only a settled session is judged: one being replaced still carries the previous answer.
-  return AsyncResult.isSuccess(session) &&
-    !session.waiting &&
-    !sessionGrantsScope(session.value, AuthOrchestrationReadScope)
+  // Only a settled denial counts: a session being replaced still carries the previous answer,
+  // and a network failure is not the host saying no.
+  return !session.waiting && sessionDeniesScope(session, AuthOrchestrationReadScope)
     ? "unreadable"
     : "loading";
 }
