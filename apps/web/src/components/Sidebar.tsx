@@ -3705,7 +3705,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           );
                         };
                         const from = isContextDrag ? null : (dragState?.activeSection ?? null);
+                        // Mesura: unsent drafts sit above the Working section.
                         const items: ReactNode[] = [
+                          <SidebarDraftBlock
+                            key="draft-sessions"
+                            projectByKey={projectByKey}
+                            projectDisplayNameByKey={projectDisplayNameByKey}
+                            scopedProjectKeys={scopedProjectKeys}
+                            routeDraftId={routeDraftIdForRows}
+                            onNavigateToDraft={navigateToDraft}
+                            onDraftContextMenu={handleDraftContextMenu}
+                          />,
                           workingShelfEnabled ? (
                             <li key="working-section" className="list-none">
                               <SidebarWorkingSection
@@ -3718,15 +3728,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               </SidebarWorkingSection>
                             </li>
                           ) : null,
-                          <SidebarDraftBlock
-                            key="draft-sessions"
-                            projectByKey={projectByKey}
-                            projectDisplayNameByKey={projectDisplayNameByKey}
-                            scopedProjectKeys={scopedProjectKeys}
-                            routeDraftId={routeDraftIdForRows}
-                            onNavigateToDraft={navigateToDraft}
-                            onDraftContextMenu={handleDraftContextMenu}
-                          />,
                         ];
                         for (const item of sidebarListItems) {
                           if (item.kind === "thread") {

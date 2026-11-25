@@ -1,6 +1,6 @@
 /**
- * Mesura: the sidebar's Working section sits directly under Search, as its own block outside the
- * sortable list, so the list below keeps the developer's order and drag-to-reorder. Upstream puts
+ * Mesura: the sidebar's Working section sits under Search and the unsent drafts, as its own block
+ * outside the sortable list, so the list below keeps the developer's order and drag-to-reorder. Upstream puts
  * it above Snoozed and orders the list by return time while it is on.
  */
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
