@@ -25,6 +25,7 @@ import {
 } from "../../questionAttachments";
 import { derivePendingApprovals, derivePendingUserInputs } from "../../session-logic";
 import { readEnvironmentScope } from "../../state/session";
+import { useThreadStatus } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
@@ -77,11 +78,14 @@ export function useMesuraPendingThreadRequests(input: {
   const pendingUserInputs = projectPendingUserInputs(
     derivePendingUserInputs(pendingRequests.userInputs),
   );
+  const threadLive =
+    useThreadStatus(activeThread ? { environmentId, threadId: activeThread.id } : null) === "live";
   const activePendingApproval = pendingApprovals[0] ?? null;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- prunes external draft stores when the server's pending set changes; no handler owns that change
   useEffect(() => {
-    if (!activeThread) return;
+    // A cached snapshot can predate a question, so only the live thread says one closed.
+    if (!activeThread || !threadLive) return;
     const questionThread = activeThread;
     const currentRequests = pendingUserInputs;
     // Answer drafts of requests that are no longer pending are dropped with their files.
@@ -116,7 +120,7 @@ export function useMesuraPendingThreadRequests(input: {
       if (key.startsWith(prefix) && !retained.has(DraftId.make(key)))
         clearQuestionAttachmentDraft(DraftId.make(key));
     }
-  }, [environmentId, activeThread, pendingUserInputs]);
+  }, [environmentId, activeThread, pendingUserInputs, threadLive]);
   const onRespondToApproval = async (
     requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,

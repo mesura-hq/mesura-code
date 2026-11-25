@@ -1,10 +1,16 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import {
+  AuthOrchestrationReadScope,
+  sessionGrantsScope,
+  type AuthSessionState,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { Atom } from "effect/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { environmentSession } from "~/state/session";
 import { environmentThreadDetails } from "~/state/threads";
 
 /**
@@ -12,21 +18,43 @@ import { environmentThreadDetails } from "~/state/threads";
  * cached snapshot cannot tell that a request closed.
  */
 type ArmedThreadNeed = "data" | "live";
-type ArmedThreadAvailability = "loaded" | "loading" | "gone";
+/** `unreadable`: this device's session may not read the thread, so its detail never loads. */
+type ArmedThreadAvailability = "loaded" | "loading" | "gone" | "unreadable";
 
-/** Only deletion is final: a failed load retries, and the send stays armed meanwhile. */
-function availabilityOf(state: EnvironmentThreadState, need: ArmedThreadNeed) {
+/**
+ * Only deletion and a session without the read scope are final: a failed load retries, and the
+ * send stays armed meanwhile. The thread stream does not retry an authorization failure, and its
+ * error text does not tell one apart, so the session itself is asked.
+ */
+function availabilityOf(
+  state: EnvironmentThreadState,
+  session: AsyncResult.AsyncResult<AuthSessionState, unknown>,
+  need: ArmedThreadNeed,
+): ArmedThreadAvailability {
   if (state.status === "deleted") return "gone";
   const loaded = need === "live" ? state.status === "live" : Option.isSome(state.data);
-  return loaded ? "loaded" : "loading";
+  if (loaded) return "loaded";
+  // A session still loading, or one that failed to load, is not judged.
+  return AsyncResult.isSuccess(session) &&
+    !sessionGrantsScope(session.value, AuthOrchestrationReadScope)
+    ? "unreadable"
+    : "loading";
 }
 
 export function armedThreadAvailability(
   ref: ScopedThreadRef,
   need: ArmedThreadNeed = "data",
 ): ArmedThreadAvailability {
-  return availabilityOf(appAtomRegistry.get(environmentThreadDetails.stateAtom(ref)), need);
+  return availabilityOf(
+    appAtomRegistry.get(environmentThreadDetails.stateAtom(ref)),
+    appAtomRegistry.get(environmentSession.sessionStateAtom(ref.environmentId)),
+    need,
+  );
 }
+
+/** What the user is told when an armed send stops waiting for good. */
+export const ARMED_THREAD_UNREADABLE =
+  "This device's session cannot read the thread. Pair it again, then send by hand.";
 
 /**
  * Mesura: a thread's detail streams only while something mounts it, so a thread the user left
@@ -41,7 +69,11 @@ export function createArmedThreadHold(
   const held = new Map<string, () => void>();
   const holdOne = (ref: ScopedThreadRef) => {
     const availability = Atom.make((get) =>
-      availabilityOf(get(environmentThreadDetails.stateAtom(ref)), options.need),
+      availabilityOf(
+        get(environmentThreadDetails.stateAtom(ref)),
+        get(environmentSession.sessionStateAtom(ref.environmentId)),
+        options.need,
+      ),
     );
     const releases = [appAtomRegistry.subscribe(availability, onChange)];
     if (options.watchRequests) {

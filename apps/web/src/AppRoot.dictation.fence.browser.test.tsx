@@ -268,6 +268,7 @@ import { threadEnvironment } from "./state/threads";
 import {
   appRootFence,
   FENCE_ENVIRONMENT_ID,
+  makeFenceSession,
   FENCE_PROJECT_ID,
   installFenceFontEvents,
 } from "./test/appRootFenceMocks";
@@ -1838,6 +1839,32 @@ describe("dictation phase 5 fence", () => {
     expect(squash(turnStarts()[0]!.input.message.text)).toBe("[voiced] Read the notes y resume");
   });
 
+  it("dictation send regression: an armed draft fails with a notice when this device's session cannot read its thread", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _session = {
+      [Symbol.dispose]: () => {
+        appRootFence.sessions.set(FENCE_ENVIRONMENT_ID, makeFenceSession());
+      },
+    };
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    await navigateAwayFromThread();
+    appRootFence.sessions.set(FENCE_ENVIRONMENT_ID, makeFenceSession(["orchestration:operate"]));
+    await setThreadState({ status: "synchronizing" });
+
+    await vi.waitFor(() => expect(notSentToasts()).toHaveLength(1));
+    expect(
+      vi.mocked(toastManager.add).mock.calls.map(([toast]) => toast.description),
+    ).toContainEqual(expect.stringContaining("cannot read the thread"));
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toContain("Read the notes");
+    expect(
+      useSendWhenReadyStore.getState().drafts[scopedThreadKey(onScreenTarget)]?.armed,
+    ).not.toBe(true);
+  });
+
   it("dictation phase 5 AC5: a message with dictated parts carries one [voiced] prefix, and a typed one carries none", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
@@ -2237,6 +2264,33 @@ describe("dictation phase 5 rework regressions", () => {
     await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
     await settle();
     expect(respondCalls()).toHaveLength(0);
+  });
+
+  it("question answers: the open chat keeps an answer while a synchronizing snapshot lacks its question", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Keep this answer",
+      );
+    });
+    await settle();
+
+    await setThreadState({ status: "synchronizing", data: Option.some(makeThreadProjection()) });
+    expect(questionAnswerText()).toBe("Keep this answer");
+
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await settle();
+    expect(questionAnswerText()).toBe("Keep this answer");
+
+    // The live thread without the question is what closes it.
+    await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
+    await settle();
+    expect(questionAnswerText()).toBe("");
   });
 
   it("send glyph: an answer armed while its thread synchronizes, whose marker is then deleted by hand, is not submitted", async () => {

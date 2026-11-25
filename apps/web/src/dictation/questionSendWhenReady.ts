@@ -16,7 +16,11 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { readThread } from "~/state/entities";
 import { environmentServerConfigsAtom } from "~/state/server";
 import { threadEnvironment } from "~/state/threads";
-import { armedThreadAvailability, createArmedThreadHold } from "./armedThreadHold";
+import {
+  ARMED_THREAD_UNREADABLE,
+  armedThreadAvailability,
+  createArmedThreadHold,
+} from "./armedThreadHold";
 import { onDictationEnvironmentForgotten } from "./dictationSessionStore";
 import {
   dictationMarkerDeletedByHand,
@@ -167,9 +171,22 @@ function checkArmedQuestions() {
       disarmQuestionSendWhenReady(key);
       continue;
     }
+    const availability = ids ? armedThreadAvailability(ids, "live") : "gone";
     // The hold looks again once the thread's detail is live.
-    if (ids && armedThreadAvailability(ids, "live") === "loading") {
+    if (availability === "loading") {
       trackQuestionMarkers(key, markers);
+      continue;
+    }
+    if (availability === "unreadable") {
+      disarmQuestionSendWhenReady(key);
+      usePendingUserInputDraftStore
+        .getState()
+        .setError(key, { kind: "respond", message: ARMED_THREAD_UNREADABLE });
+      toastManager.add({
+        type: "error",
+        title: "The dictated answer was not sent",
+        description: ARMED_THREAD_UNREADABLE,
+      });
       continue;
     }
     const request = ids ? findOpenRequest(ids) : null;
