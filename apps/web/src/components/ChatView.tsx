@@ -1468,7 +1468,6 @@ export default function ChatView(props: ChatViewProps) {
   } = useMesuraPendingThreadRequests({
     environmentId,
     activeThreadId,
-    activeThread,
     serverProjection,
     supportsQuestionAttachments,
     maxFileAttachmentBytes,

@@ -26,6 +26,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
+import { makeThreadRequestsResolvedAnnouncer } from "@t3tools/client-runtime/state/thread-requests";
 
 import type { AppRouter } from "../router";
 import { AppRoot } from "../AppRoot";
@@ -246,4 +247,28 @@ export function publishFenceThreadProjection(
     data: Option.some(projection),
   });
   for (const listener of appRootFence.threadListeners) listener();
+  announceFenceThreadRequests(environmentId, threadId);
+}
+
+const fenceRequestAnnouncers = new Map<
+  string,
+  ReturnType<typeof makeThreadRequestsResolvedAnnouncer>
+>();
+
+/**
+ * Announces resolved requests as the real thread stream does: from a live projection or a
+ * deletion only. Call it after changing a thread's fixture state by hand.
+ */
+export function announceFenceThreadRequests(environmentId: EnvironmentId, threadId: ThreadId) {
+  const state = appRootFence.threadStates.get(threadId);
+  if (state === undefined) return;
+  const key = `${environmentId}:${threadId}`;
+  let announce = fenceRequestAnnouncers.get(key);
+  if (announce === undefined) {
+    announce = makeThreadRequestsResolvedAnnouncer(environmentId, threadId);
+    fenceRequestAnnouncers.set(key, announce);
+  }
+  if (state.status === "deleted") announce([]);
+  else if (state.status === "live" && Option.isSome(state.data))
+    announce(state.data.value.runtimeRequests);
 }

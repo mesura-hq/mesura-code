@@ -34,8 +34,9 @@ function availabilityOf(
   if (state.status === "deleted") return "gone";
   const loaded = need === "live" ? state.status === "live" : Option.isSome(state.data);
   if (loaded) return "loaded";
-  // A session still loading, or one that failed to load, is not judged.
+  // Only a settled session is judged: one being replaced still carries the previous answer.
   return AsyncResult.isSuccess(session) &&
+    !session.waiting &&
     !sessionGrantsScope(session.value, AuthOrchestrationReadScope)
     ? "unreadable"
     : "loading";

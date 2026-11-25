@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { onThreadRequestsResolved } from "@t3tools/client-runtime/state/thread-requests";
 import type { UserInputQuestion } from "@t3tools/contracts";
 import {
   setPendingUserInputCustomAnswer,
@@ -161,3 +162,23 @@ export function markPendingUserInputAnswerVoiced(key: string, questionId: string
     };
   });
 }
+
+// Announced from a synchronized projection only, and on deletion: a cached snapshot that predates
+// a question never prunes its answer. Runs whether or not the thread is on screen.
+onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds }) => {
+  const pending = new Set<string>(pendingRequestIds);
+  const store = usePendingUserInputDraftStore.getState();
+  for (const key of Object.keys(store.requests)) {
+    const [draftEnvironmentId, draftThreadId, requestId] = JSON.parse(key) as [
+      string,
+      string,
+      string,
+    ];
+    if (
+      draftEnvironmentId === environmentId &&
+      draftThreadId === threadId &&
+      !pending.has(requestId)
+    )
+      store.clear(key);
+  }
+});

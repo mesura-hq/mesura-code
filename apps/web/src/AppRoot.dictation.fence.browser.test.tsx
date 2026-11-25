@@ -277,7 +277,7 @@ import {
   makeFenceThreadShell,
   makeFenceUserInput,
 } from "./test/fenceThreadShell";
-import { publishFenceThreadProjection } from "./test/appRootFenceApp";
+import { announceFenceThreadRequests, publishFenceThreadProjection } from "./test/appRootFenceApp";
 import { focusTestWindow } from "./test/windowFocus";
 
 const { DictationWidgetPage } = await import("./dictation/DictationWidget");
@@ -1310,8 +1310,32 @@ async function setThreadState(
   await act(async () => {
     appRootFence.threadStates.set(threadId, { ...EMPTY_ENVIRONMENT_THREAD_STATE, ...state });
     for (const listener of appRootFence.threadListeners) listener();
+    announceFenceThreadRequests(environmentId, threadId);
   });
   await settle();
+}
+
+/** Replaces this environment's session, as a re-pair or revalidation would. */
+async function setFenceSession(
+  session: ReturnType<typeof makeFenceSession>,
+  options: { readonly waiting?: boolean } = {},
+) {
+  await act(async () => {
+    appRootFence.sessions.set(FENCE_ENVIRONMENT_ID, session);
+    if (options.waiting) appRootFence.sessionsWaiting.add(FENCE_ENVIRONMENT_ID);
+    else appRootFence.sessionsWaiting.delete(FENCE_ENVIRONMENT_ID);
+    for (const listener of appRootFence.threadListeners) listener();
+  });
+  await settle();
+}
+
+function restoreFenceSession(): Disposable {
+  return {
+    [Symbol.dispose]: () => {
+      appRootFence.sessions.set(FENCE_ENVIRONMENT_ID, makeFenceSession());
+      appRootFence.sessionsWaiting.delete(FENCE_ENVIRONMENT_ID);
+    },
+  };
 }
 
 function notSentToasts() {
@@ -1841,19 +1865,17 @@ describe("dictation phase 5 fence", () => {
 
   it("dictation send regression: an armed draft fails with a notice when this device's session cannot read its thread", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
-    using _session = {
-      [Symbol.dispose]: () => {
-        appRootFence.sessions.set(FENCE_ENVIRONMENT_ID, makeFenceSession());
-      },
-    };
+    using _session = restoreFenceSession();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
     await mountApp();
     await recordInMode("send");
     await navigateAwayFromThread();
-    appRootFence.sessions.set(FENCE_ENVIRONMENT_ID, makeFenceSession(["orchestration:operate"]));
     await setThreadState({ status: "synchronizing" });
+    expect(notSentToasts()).toHaveLength(0);
 
+    // Only the session changes: the hold must notice it without a thread update.
+    await setFenceSession(makeFenceSession(["orchestration:operate"]));
     await vi.waitFor(() => expect(notSentToasts()).toHaveLength(1));
     expect(
       vi.mocked(toastManager.add).mock.calls.map(([toast]) => toast.description),
@@ -1863,6 +1885,27 @@ describe("dictation phase 5 fence", () => {
     expect(
       useSendWhenReadyStore.getState().drafts[scopedThreadKey(onScreenTarget)]?.armed,
     ).not.toBe(true);
+  });
+
+  it("dictation send regression: a denial still shown while the session is replaced does not cancel the send", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _session = restoreFenceSession();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+    await setThreadState({ status: "synchronizing" });
+    await setFenceSession(makeFenceSession(["orchestration:operate"]), { waiting: true });
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    expect(notSentToasts()).toHaveLength(0);
+
+    await setFenceSession(makeFenceSession());
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await vi.waitFor(() => expect(turnStarts()).toHaveLength(1));
+    expect(squash(turnStarts()[0]!.input.message.text)).toBe("[voiced] Read the notes y resume");
+    expect(notSentToasts()).toHaveLength(0);
   });
 
   it("dictation phase 5 AC5: a message with dictated parts carries one [voiced] prefix, and a typed one carries none", async () => {
@@ -2264,6 +2307,48 @@ describe("dictation phase 5 rework regressions", () => {
     await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
     await settle();
     expect(respondCalls()).toHaveLength(0);
+  });
+
+  it("dictation send regression: an armed answer fails with a notice when this device's session cannot read its thread", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _session = restoreFenceSession();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await focusQuestionAnswer();
+    await recordIntoQuestion("send");
+    await navigateAwayFromThread();
+    await setThreadState({ status: "synchronizing" });
+    await setFenceSession(makeFenceSession(["orchestration:operate"]));
+
+    await vi.waitFor(() =>
+      expect(vi.mocked(toastManager.add).mock.calls.map(([toast]) => toast.title)).toContain(
+        "The dictated answer was not sent",
+      ),
+    );
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    expect(useSendWhenReadyStore.getState().questions[key]).toBeUndefined();
+    expect(respondCalls()).toHaveLength(0);
+    expect(slotsIn(questionAnswerText())).toHaveLength(1);
+  });
+
+  it("question answers: a deleted thread drops its answers, on screen or not", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Gone with the thread",
+      );
+    });
+    await settle();
+    await navigateAwayFromThread();
+
+    await setThreadState({ status: "deleted" });
+    expect(questionAnswerText()).toBe("");
   });
 
   it("question answers: the open chat keeps an answer while a synchronizing snapshot lacks its question", async () => {

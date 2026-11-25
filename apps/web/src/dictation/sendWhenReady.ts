@@ -268,13 +268,16 @@ function checkDraftsAfterChange() {
       forgetDraftSendState(key);
       continue;
     }
+    // Read only for a waiting send: reading an unheld thread's detail would start its stream.
     const availability =
-      typeof entry.target === "string" ? "loaded" : armedThreadAvailability(entry.target);
-    if (entry.armed && !inFlight && availability === "gone") {
+      !entry.armed || inFlight || typeof entry.target === "string"
+        ? "loaded"
+        : armedThreadAvailability(entry.target);
+    if (availability === "gone") {
       reportUnsent(entry.target, "Its thread was deleted. The text is still in the draft.");
       continue;
     }
-    if (entry.armed && !inFlight && availability === "unreadable") {
+    if (availability === "unreadable") {
       reportUnsent(entry.target, ARMED_THREAD_UNREADABLE);
       continue;
     }

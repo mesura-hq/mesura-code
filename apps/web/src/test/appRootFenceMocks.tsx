@@ -24,6 +24,8 @@ export const appRootFence = {
   threads: new Map<string, EnvironmentThreadShell>(),
   threadStates: new Map<string, EnvironmentThreadState>(),
   sessions: new Map<string, AuthSessionState>([[FENCE_ENVIRONMENT_ID, makeFenceSession()]]),
+  /** Environments whose session is being replaced: the previous one is still shown, waiting. */
+  sessionsWaiting: new Set<string>(),
   queryAtoms: new WeakSet<object>(),
   openThreadId: "",
   vimMode: false,
@@ -190,7 +192,10 @@ export async function mockRuntimeSession(
     const atom = Atom.make((get) => {
       const read = () => {
         const session = appRootFence.sessions.get(environmentId);
-        return session ? AsyncResult.success(session) : AsyncResult.initial<AuthSessionState>();
+        if (!session) return AsyncResult.initial<AuthSessionState>();
+        return AsyncResult.success(session, {
+          waiting: appRootFence.sessionsWaiting.has(environmentId),
+        });
       };
       const listener = () => get.setSelf(read());
       appRootFence.threadListeners.add(listener);
