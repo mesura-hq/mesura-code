@@ -206,6 +206,16 @@ onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds, unanswer
   const { requests } = usePendingUserInputDraftStore.getState();
   const pruned = pruneResolvedUserInputDrafts(requests, environmentId, threadId, pendingRequestIds);
   if (pruned === requests) return;
+  // The whole map is written back, so start from storage: another tab may have saved answers since
+  // this one last wrote. With synchronous storage, rehydration lands before the next line.
+  void usePendingUserInputDraftStore.persist.rehydrate();
+  // Storage keeps no errors; the ones this tab shows stay.
+  const latest = Object.fromEntries(
+    Object.entries(usePendingUserInputDraftStore.getState().requests).map(([key, draft]) => {
+      const error = requests[key]?.error;
+      return [key, error ? { ...draft, error } : draft];
+    }),
+  );
   const recovered = unansweredRequestIds.some((requestId) =>
     Object.values(
       requests[userInputDraftKey(environmentId, threadId, requestId)]?.answers ?? {},
@@ -215,5 +225,7 @@ onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds, unanswer
   if (recovered) disarmSendWhenReady(scopeThreadRef(environmentId, threadId));
   // Keeping the answer when the composer cannot be saved risks a duplicate later, never a loss.
   if (recovered && !persistComposerDrafts()) return;
-  usePendingUserInputDraftStore.setState({ requests: pruned });
+  usePendingUserInputDraftStore.setState({
+    requests: pruneResolvedUserInputDrafts(latest, environmentId, threadId, pendingRequestIds),
+  });
 });

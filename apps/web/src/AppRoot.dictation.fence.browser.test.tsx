@@ -2469,6 +2469,54 @@ describe("dictation phase 5 rework regressions", () => {
     expect(turnStarts()).toHaveLength(0);
   });
 
+  it("question answers: a resolution keeps the answers another tab saved meanwhile", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const otherTabKey = pendingUserInputRequestKey(
+      environmentId,
+      offScreenThreadId,
+      RuntimeRequestId.make("other-tab-question"),
+    );
+    using _otherTab = {
+      [Symbol.dispose]: () => usePendingUserInputDraftStore.getState().clear(otherTabKey),
+    };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "This tab's answer",
+      );
+    });
+    await settle();
+    // Another tab writes the whole persisted map, with an answer this tab has not loaded.
+    const storageKey = "mesura-pending-question-drafts";
+    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "{}") as {
+      state: { requests: Record<string, unknown> };
+      version: number;
+    };
+    stored.state.requests[otherTabKey] = {
+      answers: { depth: { customAnswer: "Other tab's answer" } },
+      version: 1,
+    };
+    window.localStorage.setItem(storageKey, JSON.stringify(stored));
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(
+      usePendingUserInputDraftStore.getState().requests[otherTabKey]?.answers.depth?.customAnswer,
+    ).toBe("Other tab's answer");
+    expect(
+      JSON.parse(window.localStorage.getItem(storageKey) ?? "{}").state.requests,
+    ).toHaveProperty([otherTabKey]);
+  });
+
   it("question answers: two resolutions announced back to back return each answer once", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 

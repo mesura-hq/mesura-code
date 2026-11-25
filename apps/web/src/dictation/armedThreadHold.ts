@@ -1,45 +1,16 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
-import { sessionDeniesScope } from "@t3tools/client-runtime/state/session";
-import {
-  AuthOrchestrationReadScope,
-  type AuthSessionState,
-  type ScopedThreadRef,
-} from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/reactivity";
+import type { ScopedThreadRef } from "@t3tools/contracts";
+import { Atom } from "effect/reactivity";
 
+import { environmentCatalog } from "~/connection/catalog";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { environmentSession } from "~/state/session";
 import { environmentThreadDetails } from "~/state/threads";
-
-/**
- * `data` is satisfied by any snapshot, cached included. `live` needs the synchronized detail: a
- * cached snapshot cannot tell that a request closed.
- */
-type ArmedThreadNeed = "data" | "live";
-/** `unreadable`: this device's session may not read the thread, so its detail never loads. */
-type ArmedThreadAvailability = "loaded" | "loading" | "gone" | "unreadable";
-
-/**
- * Only deletion and a session without the read scope are final: a failed load retries, and the
- * send stays armed meanwhile. The thread stream does not retry an authorization failure, and its
- * error text does not tell one apart, so the session itself is asked.
- */
-function availabilityOf(
-  state: EnvironmentThreadState,
-  session: AsyncResult.AsyncResult<AuthSessionState, unknown>,
-  need: ArmedThreadNeed,
-): ArmedThreadAvailability {
-  if (state.status === "deleted") return "gone";
-  const loaded = need === "live" ? state.status === "live" : Option.isSome(state.data);
-  if (loaded) return "loaded";
-  // Only a settled denial counts: a session being replaced still carries the previous answer,
-  // and a network failure is not the host saying no.
-  return !session.waiting && sessionDeniesScope(session, AuthOrchestrationReadScope)
-    ? "unreadable"
-    : "loading";
-}
+import {
+  availabilityOf,
+  type ArmedThreadAvailability,
+  type ArmedThreadNeed,
+} from "./armedThreadAvailability";
 
 export function armedThreadAvailability(
   ref: ScopedThreadRef,
@@ -48,6 +19,7 @@ export function armedThreadAvailability(
   return availabilityOf(
     appAtomRegistry.get(environmentThreadDetails.stateAtom(ref)),
     appAtomRegistry.get(environmentSession.sessionStateAtom(ref.environmentId)),
+    appAtomRegistry.get(environmentCatalog.stateAtom(ref.environmentId)),
     need,
   );
 }
@@ -72,6 +44,7 @@ export function createArmedThreadHold(
       availabilityOf(
         get(environmentThreadDetails.stateAtom(ref)),
         get(environmentSession.sessionStateAtom(ref.environmentId)),
+        get(environmentCatalog.stateAtom(ref.environmentId)),
         options.need,
       ),
     );
