@@ -10,8 +10,25 @@ import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 export const ACCOUNT_LIMITS_CONTRACT_VERSION = 2 as const;
 
 const AccountLimitsErrorDetail = TrimmedNonEmptyString.check(Schema.isMaxLength(256));
+const ACCOUNT_LIMITS_IDENTIFIER_MAX_LENGTH = 256;
 /** Provider-supplied and forwarded verbatim, so it is bounded like the rest. */
-const AccountLimitsIdentifier = TrimmedNonEmptyString.check(Schema.isMaxLength(256));
+const AccountLimitsIdentifier = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(ACCOUNT_LIMITS_IDENTIFIER_MAX_LENGTH),
+);
+
+/**
+ * A subscription label cut to the length the contract accepts, or null when nothing is left.
+ * An instance name has a looser bound than a label, and one overlong label fails the whole
+ * summary. The cut keeps whole code points, so an emoji at the boundary is dropped, not split.
+ */
+export function boundedAccountLimitsLabel(value: string): string | null {
+  let bounded = "";
+  for (const character of value.trim()) {
+    if (bounded.length + character.length > ACCOUNT_LIMITS_IDENTIFIER_MAX_LENGTH) break;
+    bounded += character;
+  }
+  return bounded.trim() || null;
+}
 const AccountLimitsPercent = Schema.Number.check(
   Schema.isFinite(),
   Schema.isBetween({ minimum: 0, maximum: 100 }),
@@ -115,7 +132,7 @@ export function unfoldableInstanceSubscription(input: {
   const suffix = input.ordinal === undefined || input.ordinal === 0 ? "" : `:${input.ordinal}`;
   return {
     key: `${UNFOLDABLE_SUBSCRIPTION_PREFIX}instance:${input.instanceId}${suffix}`,
-    label: input.label ?? input.instanceId,
+    label: boundedAccountLimitsLabel(input.label ?? "") ?? input.instanceId,
   };
 }
 

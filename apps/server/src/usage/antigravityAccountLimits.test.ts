@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   AccountLimitsAccount,
+  AccountLimitsSummary,
   ProviderDriverKind,
   ProviderInstanceId,
   type AccountLimitsNamespace,
@@ -24,6 +25,7 @@ import { makeSubscriptionRegistry } from "./SubscriptionRegistry.ts";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 
 const isAccountLimitsAccount = Schema.is(AccountLimitsAccount);
+const isAccountLimitsSummary = Schema.is(AccountLimitsSummary);
 const DRIVER = ProviderDriverKind.make("antigravity");
 const INSTANCE_ID = ProviderInstanceId.make("antigravity");
 
@@ -125,6 +127,41 @@ it.layer(NodeServices.layer)("Antigravity account limits", (it) => {
       );
       assert.equal(normalizeAntigravityAccountLimits({ windows: "nope" }), null);
     }),
+  );
+
+  it.effect("keeps the summary valid when an overlong-named instance fails its first read", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-antigravity-fail-" });
+      const displayName = "n".repeat(300);
+      const instance = {
+        instanceId: INSTANCE_ID,
+        driverKind: DRIVER,
+        displayName,
+        enabled: true,
+        readAccountLimits: () =>
+          read(
+            {
+              checkedAt: "2026-11-26T12:00:00.000Z",
+              windows: [],
+              unavailable: { reason: "probeFailed" },
+            },
+            displayName,
+          ),
+      } as unknown as ProviderInstance;
+      const service = yield* makeAccountLimitsService({
+        cachePath: path.join(dir, "cache.json"),
+        listInstances: Effect.succeed([instance]),
+        refreshInterval: "1 minute",
+        freshnessTtl: "5 minutes",
+      });
+      yield* service.refreshStale;
+
+      const summary = yield* service.readSummary();
+      assert.equal(summary.snapshots[0]?.lastAttempt.status, "failed");
+      assert.isTrue(isAccountLimitsSummary(summary));
+    }).pipe(Effect.scoped),
   );
 
   it.effect("the account-limits service records an Antigravity instance's reading", () =>

@@ -9,6 +9,7 @@
 import {
   ACCOUNT_LIMITS_VENDOR_NAME,
   accountLimitsSubscriptionKey,
+  boundedAccountLimitsLabel,
   ServerProviderUsageLimits,
   type AccountLimitsWindow,
   type ProviderDriverKind,
@@ -23,14 +24,6 @@ import * as Schema from "effect/Schema";
 import { type NormalizedAccountLimits, windowIdAndLabel } from "./accountLimitsNormalize.ts";
 
 const decodeUsageLimits = Schema.decodeUnknownOption(ServerProviderUsageLimits);
-
-/** The contract bounds a subscription label; an instance name has a looser bound of its own. */
-const MAX_SUBSCRIPTION_LABEL_LENGTH = 256;
-
-function subscriptionLabel(displayName: string | undefined): string {
-  const bounded = displayName?.trim().slice(0, MAX_SUBSCRIPTION_LABEL_LENGTH).trim();
-  return bounded || ACCOUNT_LIMITS_VENDOR_NAME.antigravity;
-}
 
 /**
  * One reading per signed-in Google account, keyed by the probe's account fingerprint so the
@@ -69,7 +62,9 @@ export const readAntigravityAccountLimits = (input: {
                     namespace: "antigravity",
                     identifier: fingerprint,
                   }),
-                  label: subscriptionLabel(input.displayName),
+                  label:
+                    boundedAccountLimitsLabel(input.displayName ?? "") ??
+                    ACCOUNT_LIMITS_VENDOR_NAME.antigravity,
                 },
               }),
         },
