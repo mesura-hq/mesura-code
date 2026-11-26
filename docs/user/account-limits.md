@@ -1,7 +1,7 @@
 # Account limits
 
-Mesura Code can show the current subscription limits of Claude, ChatGPT (read through Codex) and
-Antigravity, in that order.
+Mesura Code can show the current subscription limits of Claude, ChatGPT (read through Codex),
+Antigravity and the OpenCode Go plan, in that order.
 
 Antigravity limits need a Google sign-in in Mesura Code's own Antigravity provider, on each
 environment that should read them. Signing in to the standalone Antigravity CLI is not enough.
@@ -10,9 +10,8 @@ Open **Settings** → **Providers**, choose the environment, and sign in to Anti
 account normally show one row. If one environment briefly cannot confirm the Google account, it can
 show a second Antigravity row until its next sign-in refresh.
 
-Mesura Code also supports the OpenCode Go plan and the Z.ai GLM Coding Plan, but both are paused
-for now. Mesura Code does not read their limits, the panel does not show them, and their saved
-credentials stay in place.
+Mesura Code also supports the Z.ai GLM Coding Plan, but it is paused for now. Mesura Code does not
+read its limits, the panel does not show it, and its saved credentials stay in place.
 
 Hover over the **Usage** button in the sidebar footer to open the limits panel. You can also hold
 `Alt+U`. Release the shortcut to close the panel, or press `Escape`. Selecting the Usage button

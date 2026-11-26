@@ -164,7 +164,6 @@ export const ACCOUNT_LIMITS_NAMESPACE_ORDER: ReadonlyArray<AccountLimitsNamespac
  */
 export const ACCOUNT_LIMITS_PAUSED_NAMESPACES: ReadonlySet<AccountLimitsNamespace> = new Set([
   "zai",
-  "opencode-go",
 ]);
 
 /**
