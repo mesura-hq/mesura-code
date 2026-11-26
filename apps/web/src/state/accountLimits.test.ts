@@ -1099,10 +1099,10 @@ describe("projectAccountLimits, one row per subscription", () => {
         }),
       ],
       NOW,
-      new Set<AccountLimitsNamespace>(["zai", "opencode-go"]),
     );
 
-    expect(view.rows.map((row) => row.providerLabel)).toEqual(["ChatGPT"]);
+    // The shipped pause covers GLM only; OpenCode Go stays.
+    expect(view.rows.map((row) => row.providerLabel)).toEqual(["ChatGPT", "OpenCode Go"]);
   });
 
   it("lists Claude, ChatGPT, Antigravity and GLM in that order, then rows naming no vendor", () => {

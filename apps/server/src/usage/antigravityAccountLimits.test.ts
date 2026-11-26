@@ -239,8 +239,12 @@ it.layer(NodeServices.layer)("paused subscription vendors", (it) => {
         ["OpenCode Go"],
       );
 
-      // The shipped defaults pause both, and pausing removes nothing.
-      assert.deepEqual(yield* listSubscriptionsFrom(registry, unusedHttpClient), []);
+      // The shipped defaults pause GLM only, and pausing removes nothing.
+      const shipped = yield* listSubscriptionsFrom(registry, unusedHttpClient);
+      assert.deepEqual(
+        shipped.map((subscription) => subscription.subscription.label),
+        ["OpenCode Go"],
+      );
       assert.equal((yield* registry.list).length, 2);
       assert.equal((yield* Ref.get(store)).size, 2);
     }).pipe(Effect.scoped),
