@@ -26,7 +26,7 @@ The panel opens inside the sidebar itself, above the footer buttons, and pushes 
 while it is open. It is available on the thread list only. The Settings, Usage and Pull requests
 pages show a **Back** button in that footer instead, and the panel does not open there.
 
-The panel shows one row for each subscription, not one for each machine. When two environments drive
+The panel shows one row for each subscription, not one for each machine. When two environments identify
 the same account, their readings become one row, and every window shows the newest of the two. Two
 different accounts stay on separate rows, and a row then names the account it belongs to.
 
