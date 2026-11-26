@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
+  AccountLimitsAccount,
   ProviderDriverKind,
   ProviderInstanceId,
   type AccountLimitsNamespace,
@@ -11,6 +12,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
 import { listSubscriptionsFrom, makeAccountLimitsService } from "./AccountLimitsService.ts";
@@ -21,6 +23,7 @@ import {
 import { makeSubscriptionRegistry } from "./SubscriptionRegistry.ts";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 
+const isAccountLimitsAccount = Schema.is(AccountLimitsAccount);
 const DRIVER = ProviderDriverKind.make("antigravity");
 const INSTANCE_ID = ProviderInstanceId.make("antigravity");
 
@@ -66,6 +69,17 @@ it.layer(NodeServices.layer)("Antigravity account limits", (it) => {
       );
       const unnamed = yield* read(signedInLimits);
       assert.equal(unnamed[0]?.account?.label, "Antigravity");
+    }),
+  );
+
+  it.effect("bounds an overlong instance name so the summary still encodes", () =>
+    Effect.gen(function* () {
+      const reads = yield* read(signedInLimits, `  ${"x".repeat(300)}  `);
+      const label = reads[0]?.account?.label ?? "";
+      assert.equal(label.length, 256);
+      assert.isTrue(isAccountLimitsAccount(reads[0]?.account));
+      const blank = yield* read(signedInLimits, "   ");
+      assert.equal(blank[0]?.account?.label, "Antigravity");
     }),
   );
 
