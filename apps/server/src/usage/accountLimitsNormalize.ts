@@ -208,11 +208,11 @@ export function normalizeClaudeRateLimitEvent(value: unknown): AccountLimitsWind
 }
 
 /**
- * The identity and label of a window of a given length, shared by Codex and Z.ai so the two
- * cannot drift. `unknown` is for a length the caller could not determine (a Z.ai duration unit
+ * The identity and label of a window of a given length, shared by Codex, Z.ai and Antigravity so
+ * they cannot drift. `unknown` is for a length the caller could not determine (a Z.ai duration unit
  * this fork has never seen).
  */
-function windowIdAndLabel(
+export function windowIdAndLabel(
   minutes: number | null,
   unknown: { readonly id: string; readonly label: string } = { id: "window_unknown", label: "?" },
 ): { readonly id: string; readonly label: string } {

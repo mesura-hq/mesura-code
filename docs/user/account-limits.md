@@ -1,7 +1,18 @@
 # Account limits
 
-Mesura Code can show the current subscription limits reported by Claude, Codex, the OpenCode Go
-plan and the Z.ai GLM Coding Plan.
+Mesura Code can show the current subscription limits of Claude, ChatGPT (read through Codex) and
+Antigravity, in that order.
+
+Antigravity limits need a Google sign-in in Mesura Code's own Antigravity provider, on each
+environment that should read them. Signing in to the standalone Antigravity CLI is not enough.
+Open **Settings** → **Providers**, choose the environment, and sign in to Antigravity with Google
+(see [Antigravity](./providers-antigravity.md)). Two environments signed in to the same Google
+account normally show one row. If one environment briefly cannot confirm the Google account, it can
+show a second Antigravity row until its next sign-in refresh.
+
+Mesura Code also supports the OpenCode Go plan and the Z.ai GLM Coding Plan, but both are paused
+for now. Mesura Code does not read their limits, the panel does not show them, and their saved
+credentials stay in place.
 
 Hover over the **Usage** button in the sidebar footer to open the limits panel. You can also hold
 `Alt+U`. Release the shortcut to close the panel, or press `Escape`. Selecting the Usage button
@@ -15,7 +26,7 @@ The panel opens inside the sidebar itself, above the footer buttons, and pushes 
 while it is open. It is available on the thread list only. The Settings, Usage and Pull requests
 pages show a **Back** button in that footer instead, and the panel does not open there.
 
-The panel shows one row for each subscription, not one for each machine. When two environments drive
+The panel shows one row for each subscription, not one for each machine. When two environments identify
 the same account, their readings become one row, and every window shows the newest of the two. Two
 different accounts stay on separate rows, and a row then names the account it belongs to.
 

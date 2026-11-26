@@ -5,12 +5,15 @@ import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
   accountLimitsNamespaceOf,
   accountLimitsSubscriptionKey,
+  AccountLimitsAccount,
   AccountLimitsSummary,
+  boundedAccountLimitsLabel,
   isFoldableSubscriptionKey,
   unfoldableInstanceSubscription,
 } from "./accountLimits.ts";
 
 const decodeSummary = Schema.decodeUnknownSync(AccountLimitsSummary);
+const isAccountLimitsAccount = Schema.is(AccountLimitsAccount);
 
 describe("AccountLimitsSummary", () => {
   it("keeps provider-instance identity and dynamic limit windows", () => {
@@ -378,5 +381,25 @@ describe("accountLimitsNamespaceOf", () => {
     expect(accountLimitsNamespaceOf("openais")).toBeNull();
     expect(accountLimitsNamespaceOf("anthropics")).toBeNull();
     expect(accountLimitsNamespaceOf("")).toBeNull();
+  });
+});
+
+describe("boundedAccountLimitsLabel", () => {
+  it("cuts a label to the contract's length without splitting a character", () => {
+    const label = boundedAccountLimitsLabel(`${"x".repeat(255)}\u{1F680}tail`);
+    expect(label).toBe("x".repeat(255));
+    expect(boundedAccountLimitsLabel(`  ${"y".repeat(300)}  `)).toHaveLength(256);
+    expect(boundedAccountLimitsLabel("   ")).toBeNull();
+  });
+
+  it("keeps an instance's fallback subscription valid under an overlong name", () => {
+    const subscription = unfoldableInstanceSubscription({
+      instanceId: "antigravity",
+      label: "z".repeat(300),
+    });
+    expect(isAccountLimitsAccount(subscription)).toBe(true);
+    expect(unfoldableInstanceSubscription({ instanceId: "antigravity", label: " " }).label).toBe(
+      "antigravity",
+    );
   });
 });
