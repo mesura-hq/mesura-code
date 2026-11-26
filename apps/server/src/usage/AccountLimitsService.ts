@@ -1,9 +1,11 @@
 /** Resident, per-provider-instance account-limit authority. */
 import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
+  ACCOUNT_LIMITS_PAUSED_NAMESPACES,
   accountLimitsWindowKey,
   AccountLimitsSnapshot,
   type AccountLimitsFailureReason,
+  type AccountLimitsNamespace,
   unfoldableInstanceSubscription,
   type AccountLimitsAccount,
   type AccountLimitsSummary,
@@ -42,6 +44,7 @@ import {
   normalizeCodexAccountLimits,
   type NormalizedAccountLimits,
 } from "./accountLimitsNormalize.ts";
+import { normalizeAntigravityAccountLimits } from "./antigravityAccountLimits.ts";
 
 const DEFAULT_REFRESH_INTERVAL = Duration.minutes(1);
 const DEFAULT_FRESHNESS_TTL = Duration.minutes(5);
@@ -151,6 +154,7 @@ function normalizePoll(
 ): NormalizedAccountLimits | null {
   if (driver === "claudeAgent") return normalizeClaudeAccountLimits(payload);
   if (driver === "codex") return normalizeCodexAccountLimits(payload);
+  if (driver === "antigravity") return normalizeAntigravityAccountLimits(payload);
   return null;
 }
 
@@ -757,14 +761,18 @@ export const makeAccountLimitsService = Effect.fn(function* (input: {
  * nothing else — the service never holds one, and a subscription whose
  * credential has gone is simply not polled rather than polled with nothing.
  */
-const listSubscriptionsFrom = Effect.fn(function* (
+export const listSubscriptionsFrom = Effect.fn(function* (
   subscriptions: SubscriptionRegistry.SubscriptionRegistryShape,
   httpClient: HttpClient.HttpClient,
+  pausedNamespaces: ReadonlySet<AccountLimitsNamespace> = ACCOUNT_LIMITS_PAUSED_NAMESPACES,
 ) {
   const get = makeSubscriptionHttpGet(httpClient);
   const records = yield* subscriptions.list;
   const polled: PolledSubscription[] = [];
   for (const record of records) {
+    // A paused vendor keeps its record and credential; dropping it here lets the
+    // reconciler clear only its cached reading.
+    if (pausedNamespaces.has(record.namespace)) continue;
     const credential = yield* subscriptions.credential(record);
     if (credential === null) continue;
     const read =

@@ -3,6 +3,8 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
+  ACCOUNT_LIMITS_NAMESPACE_ORDER,
+  ACCOUNT_LIMITS_PAUSED_NAMESPACES,
   ACCOUNT_LIMITS_VENDOR_NAME,
   accountLimitsNamespaceOf,
   accountLimitsWindowKey,
@@ -374,6 +376,7 @@ function leadCandidate(candidates: ReadonlyArray<AccountLimitsCandidate>): Accou
 export function projectAccountLimits(
   inputs: ReadonlyArray<EnvironmentAccountLimitsInput>,
   nowMs: number,
+  pausedNamespaces: ReadonlySet<AccountLimitsNamespace> = ACCOUNT_LIMITS_PAUSED_NAMESPACES,
 ): AccountLimitsProjection {
   const environments = inputs.map((input) => ({ ...input, state: environmentState(input) }));
   const groups = new Map<string, AccountLimitsCandidate[]>();
@@ -417,6 +420,8 @@ export function projectAccountLimits(
         ? snapshot.subscription
         : null;
       const presentation = subscriptionPresentation(snapshot.subscription);
+      // An environment on an older build still reports a paused vendor.
+      if (presentation.namespace !== null && pausedNamespaces.has(presentation.namespace)) continue;
       const readerLimits =
         reader === undefined
           ? undefined
@@ -516,14 +521,32 @@ export function projectAccountLimits(
     };
   });
 
+  const orderedRows = rows.toSorted((left, right) => vendorRank(left) - vendorRank(right));
   const readyCount = environments.filter((environment) => environment.state === "ready").length;
   const pendingCount = environments.filter((environment) => environment.state === "pending").length;
   return {
     environments,
-    rows: withSubtitles(rows),
+    rows: withSubtitles(orderedRows),
     isPending: readyCount === 0 && pendingCount > 0,
     isPartial: readyCount > 0 && environments.some((environment) => environment.state !== "ready"),
   };
+}
+
+/** The vendor an agent's subscription belongs to, for a row that has no reading to name one. */
+const NAMESPACE_BY_DRIVER: Readonly<Record<string, AccountLimitsNamespace>> = {
+  claudeAgent: "anthropic",
+  codex: "openai",
+  antigravity: "antigravity",
+};
+
+function vendorRank(row: {
+  readonly namespace?: AccountLimitsNamespace | undefined;
+  readonly driver?: ProviderDriverKind | undefined;
+}): number {
+  const namespace =
+    row.namespace ?? (row.driver === undefined ? undefined : NAMESPACE_BY_DRIVER[row.driver]);
+  const rank = namespace === undefined ? -1 : ACCOUNT_LIMITS_NAMESPACE_ORDER.indexOf(namespace);
+  return rank === -1 ? ACCOUNT_LIMITS_NAMESPACE_ORDER.length : rank;
 }
 
 interface RowDraft extends Omit<AccountLimitsRow, "subtitle"> {

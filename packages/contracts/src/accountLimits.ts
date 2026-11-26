@@ -46,6 +46,7 @@ export type AccountLimitsWindow = typeof AccountLimitsWindow.Type;
 export const AccountLimitsNamespace = Schema.Literals([
   "anthropic",
   "openai",
+  "antigravity",
   "opencode-go",
   "zai",
 ]);
@@ -126,9 +127,28 @@ export function unfoldableInstanceSubscription(input: {
 export const ACCOUNT_LIMITS_VENDOR_NAME: Readonly<Record<AccountLimitsNamespace, string>> = {
   anthropic: "Claude",
   openai: "ChatGPT",
+  antigravity: "Antigravity",
   "opencode-go": "OpenCode Go",
   zai: "GLM Coding Plan",
 };
+
+/** The usage dock lists vendors in this order; a row that names no vendor goes last. */
+export const ACCOUNT_LIMITS_NAMESPACE_ORDER: ReadonlyArray<AccountLimitsNamespace> = [
+  "anthropic",
+  "openai",
+  "antigravity",
+  "zai",
+  "opencode-go",
+];
+
+/**
+ * Vendors paused, not removed: their stored subscriptions and credentials stay, the server stops
+ * polling them and the dock hides them. Removing a vendor from this set re-enables it.
+ */
+export const ACCOUNT_LIMITS_PAUSED_NAMESPACES: ReadonlySet<AccountLimitsNamespace> = new Set([
+  "zai",
+  "opencode-go",
+]);
 
 /**
  * The vendor a subscription key names, or null when the key names no vendor.

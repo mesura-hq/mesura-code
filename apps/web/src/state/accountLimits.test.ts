@@ -3,6 +3,7 @@ import {
   EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
+  type AccountLimitsNamespace,
   type AccountLimitsSnapshot,
   type AccountLimitsSummary,
   type AccountLimitsWindow,
@@ -777,6 +778,9 @@ describe("selectVisibleAccountLimitWindows", () => {
   });
 });
 
+/** Generic behaviour tests use the paused vendors' keys; the pause has tests of its own. */
+const NOTHING_PAUSED: ReadonlySet<AccountLimitsNamespace> = new Set();
+
 describe("projectAccountLimits, one row per subscription", () => {
   function subscriptionSnapshot(input: {
     readonly key: string;
@@ -833,6 +837,7 @@ describe("projectAccountLimits, one row per subscription", () => {
         }),
       ],
       NOW,
+      NOTHING_PAUSED,
     );
 
     expect(view.rows.map((row) => row.providerLabel)).toEqual(["OpenCode Go"]);
@@ -866,6 +871,7 @@ describe("projectAccountLimits, one row per subscription", () => {
         }),
       ],
       NOW,
+      NOTHING_PAUSED,
     );
 
     expect(view.rows.map((row) => row.providerLabel).sort()).toEqual([
@@ -948,6 +954,7 @@ describe("projectAccountLimits, one row per subscription", () => {
         }),
       ],
       NOW,
+      NOTHING_PAUSED,
     );
 
     expect(view.rows[0]?.state).toBe("not-understood");
@@ -966,6 +973,7 @@ describe("projectAccountLimits, one row per subscription", () => {
         }),
       ],
       NOW,
+      NOTHING_PAUSED,
     );
 
     expect(view.rows[0]?.state).toBe("refresh-failed");
@@ -1064,12 +1072,65 @@ describe("projectAccountLimits, one row per subscription", () => {
         }),
       ],
       NOW,
+      NOTHING_PAUSED,
     );
 
     expect(view.rows.map((row) => row.providerLabel).sort()).toEqual([
       "ChatGPT",
       "GLM Coding Plan",
       "OpenCode Go",
+    ]);
+  });
+
+  it("hides a paused vendor's subscription, from any environment, and keeps the rest", () => {
+    // An environment on an older build keeps polling a paused vendor, so the
+    // client hides it too rather than trusting every server to stop.
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "laptop",
+          label: "Laptop",
+          providers: [],
+          summary: summary([
+            subscriptionSnapshot({ key: "opencode-go:a", label: "OpenCode Go" }),
+            subscriptionSnapshot({ key: "zai:b", label: "GLM Coding Plan" }),
+            subscriptionSnapshot({ key: "openai:dev@example.com", label: "dev@example.com" }),
+          ]),
+        }),
+      ],
+      NOW,
+      new Set<AccountLimitsNamespace>(["zai", "opencode-go"]),
+    );
+
+    expect(view.rows.map((row) => row.providerLabel)).toEqual(["ChatGPT"]);
+  });
+
+  it("lists Claude, ChatGPT, Antigravity and GLM in that order, then rows naming no vendor", () => {
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          // A Claude agent with no reading yet still ranks as Claude, by its driver.
+          providers: [provider({ instanceId: "claude", driver: "claudeAgent" })],
+          summary: summary([
+            subscriptionSnapshot({ key: "#instance:mystery", label: "Mystery" }),
+            subscriptionSnapshot({ key: "zai:b", label: "GLM Coding Plan" }),
+            subscriptionSnapshot({ key: "antigravity:f00d", label: "Antigravity" }),
+            subscriptionSnapshot({ key: "openai:dev@example.com", label: "dev@example.com" }),
+          ]),
+        }),
+      ],
+      NOW,
+      NOTHING_PAUSED,
+    );
+
+    expect(view.rows.map((row) => row.providerLabel)).toEqual([
+      "Claude",
+      "ChatGPT",
+      "Antigravity",
+      "GLM Coding Plan",
+      "Mystery",
     ]);
   });
 
