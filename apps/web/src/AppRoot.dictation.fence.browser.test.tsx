@@ -248,6 +248,7 @@ import { AppSidebarLayout } from "./components/AppSidebarLayout";
 import ChatView from "./components/ChatView";
 import { toastManager } from "./components/ui/toast";
 import {
+  COMPOSER_DRAFT_STORAGE_KEY,
   type ComposerFileAttachment,
   persistComposerDrafts,
   useComposerDraftStore,
@@ -1376,6 +1377,26 @@ function writeAnswerFromAnotherTab(key: string, questionId: string, text: string
   };
   stored.state.requests[key] = { answers: { [questionId]: { customAnswer: text } }, version: 9 };
   window.localStorage.setItem(ANSWER_DRAFTS_STORAGE_KEY, JSON.stringify(stored));
+}
+
+/** Saves a thread's composer prompt the way another tab does, behind this tab's back. */
+function writeComposerPromptFromAnotherTab(prompt: string) {
+  const stored = JSON.parse(window.localStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY) ?? "{}") as {
+    state: { draftsByThreadKey: Record<string, { prompt: string }> };
+  };
+  const threadKey = scopedThreadKey(onScreenTarget);
+  stored.state.draftsByThreadKey[threadKey] = {
+    ...stored.state.draftsByThreadKey[threadKey]!,
+    prompt,
+  };
+  window.localStorage.setItem(COMPOSER_DRAFT_STORAGE_KEY, JSON.stringify(stored));
+}
+
+function storedComposerPrompt(): string {
+  const stored = JSON.parse(window.localStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY) ?? "{}") as {
+    state?: { draftsByThreadKey?: Record<string, { prompt?: string }> };
+  };
+  return stored.state?.draftsByThreadKey?.[scopedThreadKey(onScreenTarget)]?.prompt ?? "";
 }
 
 function notSentToasts() {
@@ -2559,6 +2580,72 @@ describe("dictation phase 5 rework regressions", () => {
     expect(prompt).toContain("Newer answer from the other tab");
     expect(prompt).not.toContain("Older answer in this tab");
     expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
+  });
+
+  it("question answers: a recovered answer joins the composer draft another tab saved, not this tab's stale copy", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Stale text in this tab");
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Recovered answer",
+      );
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+    writeComposerPromptFromAnotherTab("Newer text from the other tab");
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    const prompt = squash(promptOf(onScreenTarget));
+    expect(prompt).toContain("Newer text from the other tab");
+    expect(prompt).toContain("Recovered answer");
+    expect(prompt).not.toContain("Stale text in this tab");
+    expect(persistComposerDrafts()).toBe(true);
+    expect(squash(storedComposerPrompt())).toContain("Newer text from the other tab");
+    expect(questionAnswerText()).toBe("");
+  });
+
+  it("question answers: when both tabs edited the composer draft, the answer stays saved and nothing is overwritten", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    // Storage then agrees with this tab again, so the next test starts without another tab's edit.
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Original text");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Answer kept for later");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+    writeComposerPromptFromAnotherTab("Edited in the other tab");
+    await act(async () => {
+      useComposerDraftStore.getState().setPrompt(onScreenTarget, "Edited in this tab");
+    });
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toBe("Edited in this tab");
+    expect(
+      usePendingUserInputDraftStore.getState().requests[key]?.answers.scope?.customAnswer,
+    ).toBe("Answer kept for later");
+    expect(persistedAnswerDrafts()).toHaveProperty([key]);
   });
 
   it("question answers: two resolutions announced back to back return each answer once", async () => {

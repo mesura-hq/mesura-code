@@ -4693,6 +4693,35 @@ export async function readStoredDraftPrompt(target: ComposerThreadTarget): Promi
   }
 }
 
+/**
+ * Mesura: before this tab writes a thread's draft on its own (not from typing here), takes in the
+ * draft another tab saved for it since this tab's last write; the per-thread merge would otherwise
+ * replace that newer draft with this tab's stale copy. `false` when both tabs edited the draft, so
+ * no single copy holds both sides and the caller should not write it.
+ */
+export function adoptOtherTabThreadDraft(target: ComposerThreadTarget): boolean {
+  const state = composerDraftStore.getState();
+  const threadKey = resolveComposerDraftKey(state, target);
+  const baseline = composerDraftLastWrite?.local ?? composerDraftLoadedState;
+  const stored = threadKey && baseline ? readStoredComposerDraftState() : null;
+  if (!threadKey || !baseline || !stored) return true;
+  const baselineDraft = baseline.draftsByThreadKey[threadKey];
+  // Both come from the same serializer, so equal drafts serialize alike.
+  if (JSON.stringify(stored.draftsByThreadKey?.[threadKey]) === JSON.stringify(baselineDraft))
+    return true;
+  const storedDraft =
+    normalizeCurrentPersistedComposerDraftStoreState(stored).draftsByThreadKey[threadKey];
+  const localDraft = partializeComposerDraftStoreState(state).draftsByThreadKey[threadKey];
+  if (!Equal.equals(localDraft, baselineDraft)) return false;
+  composerDraftStore.setState((current) => {
+    const draftsByThreadKey = { ...current.draftsByThreadKey };
+    if (storedDraft) draftsByThreadKey[threadKey] = toHydratedThreadDraft(storedDraft);
+    else delete draftsByThreadKey[threadKey];
+    return { draftsByThreadKey };
+  });
+  return true;
+}
+
 /** Puts a dictation marker at the end of a draft that has no composer to take it at the caret. */
 export function appendDictationSlotToDraft(target: ComposerThreadTarget, slot: string): boolean {
   const changed = editComposerDraftPrompt(target, (prompt) => appendDictationSlot(prompt, slot));

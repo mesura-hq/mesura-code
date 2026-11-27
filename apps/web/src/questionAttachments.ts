@@ -33,9 +33,14 @@ export const usePendingUserInputAnswers = create<
 export const usePendingUserInputQuestionIndex = create<Record<string, number>>(() => ({}));
 
 type AnswerDraftsByRequestKey = Record<string, Record<string, PendingUserInputDraftAnswer>>;
+type InlineAnswerDraftSource = (
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  unansweredRequestIds: ReadonlyArray<RuntimeRequestId>,
+) => AnswerDraftsByRequestKey;
 /** Mesura: inline question cards keep their answers in their own store, read here as well. */
-let readInlineAnswerDrafts = (): AnswerDraftsByRequestKey => ({});
-export function setInlineAnswerDraftSource(read: () => AnswerDraftsByRequestKey): void {
+let readInlineAnswerDrafts: InlineAnswerDraftSource = () => ({});
+export function setInlineAnswerDraftSource(read: InlineAnswerDraftSource): void {
   readInlineAnswerDrafts = read;
 }
 
@@ -215,7 +220,10 @@ function returnUnsentAnswersToThreadDraft(
   threadId: ThreadId,
   unansweredRequestIds: ReadonlyArray<RuntimeRequestId>,
 ): void {
-  const answers = { ...usePendingUserInputAnswers.getState(), ...readInlineAnswerDrafts() };
+  const answers = {
+    ...usePendingUserInputAnswers.getState(),
+    ...readInlineAnswerDrafts(environmentId, threadId, unansweredRequestIds),
+  };
   const store = useComposerDraftStore.getState();
   const target = scopeThreadRef(environmentId, threadId);
   const currentPrompt = store.getComposerDraft(target)?.prompt ?? "";
