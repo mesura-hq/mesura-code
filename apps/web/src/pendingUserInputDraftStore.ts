@@ -19,6 +19,7 @@ import { otherTabChangedThreadDraft, persistComposerDrafts } from "./composerDra
 import { findDictationSlots, removeDictationSlot } from "@t3tools/shared/dictationSlots";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { disarmSendWhenReady } from "./dictation/sendWhenReady";
+import { armedThreadAvailability } from "./dictation/armedThreadHold";
 
 export { pendingUserInputRequestKey } from "./pendingUserInput";
 
@@ -242,9 +243,24 @@ function recoverableAnswerDrafts(
 /** Request keys the recovery source handed to the composer in the running announcement. */
 const recoveringKeys = new Set<string>();
 
+/**
+ * Request keys deferred in the running announcement. Kept in memory as well, because the mark
+ * itself can fail to save (a full storage), and the prune below reloads from storage.
+ */
+const deferringKeys = new Set<string>();
+
 function setRecoveryPending(keys: Iterable<string>) {
   const marked = [...keys];
   if (marked.length === 0) return;
+  for (const key of marked) deferringKeys.add(key);
+  try {
+    markRecoveryPending(marked);
+  } catch {
+    // The in-memory deferral still protects the answer for this announcement.
+  }
+}
+
+function markRecoveryPending(marked: ReadonlyArray<string>) {
   usePendingUserInputDraftStore.setState((state) => {
     const requests = { ...state.requests };
     for (const key of marked) {
@@ -286,6 +302,16 @@ setInlineAnswerDraftSource((environmentId, threadId, unansweredRequestIds) => {
 // imports it), whose recovery runs the source above for the same announcement first.
 onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds }) => {
   reloadPersistedAnswerDrafts();
+  // A deleted thread has no composer to return answers to: its drafts go, waiting ones included.
+  // Its announcement carries the same empty payload as a live projection without requests.
+  if (armedThreadAvailability(scopeThreadRef(environmentId, threadId)) === "gone") {
+    recoveringKeys.clear();
+    deferringKeys.clear();
+    const { requests } = usePendingUserInputDraftStore.getState();
+    const pruned = pruneResolvedUserInputDrafts(requests, environmentId, threadId, []);
+    if (pruned !== requests) usePendingUserInputDraftStore.setState({ requests: pruned });
+    return;
+  }
   // An answer that waited is retried here: its request may no longer be in the projection at all.
   const waiting = recoveryPendingKeys(environmentId, threadId).filter(
     (key) => !recoveringKeys.has(key),
@@ -298,8 +324,10 @@ onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds }) => {
     );
   const recovering = [...recoveringKeys];
   recoveringKeys.clear();
+  const deferring = [...deferringKeys];
+  deferringKeys.clear();
   const { requests } = usePendingUserInputDraftStore.getState();
-  const stillWaiting = recoveryPendingKeys(environmentId, threadId)
+  const stillWaiting = [...new Set([...recoveryPendingKeys(environmentId, threadId), ...deferring])]
     .filter((key) => !recovering.includes(key))
     .map(requestIdOfKey);
   const pruned = pruneResolvedUserInputDrafts(requests, environmentId, threadId, [
@@ -313,6 +341,7 @@ onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds }) => {
     // Unsaved, the composer copy may not survive; the answer stays marked rather than lost.
     if (!persistComposerDrafts()) {
       setRecoveryPending(recovering);
+      deferringKeys.clear();
       return;
     }
   }

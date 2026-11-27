@@ -281,7 +281,11 @@ import {
   makeFenceThreadShell,
   makeFenceUserInput,
 } from "./test/fenceThreadShell";
-import { announceFenceThreadRequests, publishFenceThreadProjection } from "./test/appRootFenceApp";
+import {
+  announceFenceThreadRequests,
+  publishFenceThreadProjection,
+  restartFenceThreadAnnouncer,
+} from "./test/appRootFenceApp";
 import { focusTestWindow } from "./test/windowFocus";
 
 const { DictationWidgetPage } = await import("./dictation/DictationWidget");
@@ -2614,7 +2618,49 @@ describe("dictation phase 5 rework regressions", () => {
     expect(persistedAnswerDrafts()).toHaveProperty([key]);
   });
 
-  it("question answers: a waiting answer returns on the thread's next announcement, even once its request left the projection", async () => {
+  it("question answers: a waiting answer survives announcements while the conflict lasts and returns once it clears", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Text in this tab");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Waited answer");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+    writeComposerPromptFromAnotherTab("Text from the other tab");
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(usePendingUserInputDraftStore.getState().requests[key]?.recoveryPending).toBe(true);
+
+    // A later snapshot no longer lists the request (outside the recent history window), and the
+    // other tab's draft still differs: the answer keeps waiting.
+    await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
+    await settle();
+    expect(usePendingUserInputDraftStore.getState().requests[key]?.recoveryPending).toBe(true);
+    expect(squash(promptOf(onScreenTarget))).toBe("Text in this tab");
+
+    // Storage agrees with this tab again: the next announcement (a fresh stream's first live
+    // projection) returns the answer.
+    writeComposerPromptFromAnotherTab("Text in this tab");
+    restartFenceThreadAnnouncer(environmentId, threadId);
+    await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toContain("Waited answer");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined();
+    expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
+  });
+
+  it("question answers: a deleted thread drops a waiting answer instead of returning it", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projection = withOpenQuestion(makeThreadProjection());
@@ -2622,20 +2668,55 @@ describe("dictation phase 5 rework regressions", () => {
     await mountApp();
     const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
     await act(async () => {
-      editPendingUserInputAnswerText(key, "scope", () => "Waited answer");
+      editPendingUserInputAnswerText(key, "scope", () => "Orphaned answer");
       usePendingUserInputDraftStore.setState((state) => ({
         requests: { ...state.requests, [key]: { ...state.requests[key]!, recoveryPending: true } },
       }));
     });
     await settle();
-    expect(persistComposerDrafts()).toBe(true);
 
-    // A later snapshot no longer lists the request at all (outside the recent history window).
-    await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
-    await settle();
-    expect(squash(promptOf(onScreenTarget))).toContain("Waited answer");
+    await setThreadState({ status: "deleted" });
+    expect(squash(promptOf(onScreenTarget))).not.toContain("Orphaned answer");
     expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined();
-    expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
+  });
+
+  it("question answers: a deferral whose mark cannot be saved still keeps the answer", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Text in this tab");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Answer behind a full storage");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+    writeComposerPromptFromAnotherTab("Text from the other tab");
+
+    const setItem = Storage.prototype.setItem;
+    using _full = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      name: string,
+      value: string,
+    ) {
+      if (name === ANSWER_DRAFTS_STORAGE_KEY && value.includes("recoveryPending")) {
+        throw new DOMException("quota", "QuotaExceededError");
+      }
+      setItem.call(this, name, value);
+    });
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(
+      usePendingUserInputDraftStore.getState().requests[key]?.answers.scope?.customAnswer,
+    ).toBe("Answer behind a full storage");
+    expect(persistedAnswerDrafts()).toHaveProperty([key]);
   });
 
   it("question answers: when both tabs edited the composer draft, the answer stays saved and nothing is overwritten", async () => {

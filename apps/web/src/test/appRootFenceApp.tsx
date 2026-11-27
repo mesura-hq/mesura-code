@@ -255,6 +255,11 @@ const fenceRequestAnnouncers = new Map<
   ReturnType<typeof makeThreadRequestsResolvedAnnouncer>
 >();
 
+/** A fresh detail stream, as after a reload: its first live projection announces again. */
+export function restartFenceThreadAnnouncer(environmentId: EnvironmentId, threadId: ThreadId) {
+  fenceRequestAnnouncers.delete(`${environmentId}:${threadId}`);
+}
+
 /**
  * Announces resolved requests as the real thread stream does: from a live projection or a
  * deletion only. Call it after changing a thread's fixture state by hand.
