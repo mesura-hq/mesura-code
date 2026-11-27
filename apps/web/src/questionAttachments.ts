@@ -4,6 +4,7 @@ import {
   onThreadRequestsResolved,
   pruneResolvedUserInputDrafts,
   resolvedQuestionDraftKeys,
+  type ThreadRequestsResolved,
   userInputDraftKey,
 } from "@t3tools/client-runtime/state/thread-requests";
 import { PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from "@t3tools/contracts";
@@ -31,6 +32,12 @@ export const usePendingUserInputAnswers = create<
   Record<string, Record<string, PendingUserInputDraftAnswer>>
 >(() => ({}));
 export const usePendingUserInputQuestionIndex = create<Record<string, number>>(() => ({}));
+
+/** Mesura: runs on each resolution before the question drafts are pruned, to keep their chips. */
+let beforeQuestionDraftsPruned = (_event: ThreadRequestsResolved): void => {};
+export function setBeforeQuestionDraftsPruned(run: (event: ThreadRequestsResolved) => void): void {
+  beforeQuestionDraftsPruned = run;
+}
 
 export function questionAttachmentDraftPrefix(
   environmentId: EnvironmentId,
@@ -210,26 +217,44 @@ function returnUnsentAnswersToThreadDraft(
 ): void {
   const answers = usePendingUserInputAnswers.getState();
   const store = useComposerDraftStore.getState();
+  appendUnsentAnswersToThreadDraft(
+    environmentId,
+    threadId,
+    unansweredRequestIds.flatMap((requestId) =>
+      Object.entries(answers[userInputDraftKey(environmentId, threadId, requestId)] ?? {}).map(
+        ([questionId, { customAnswer }]) => ({
+          customAnswer,
+          threadContexts:
+            store.getComposerDraft(
+              questionAttachmentDraftId(environmentId, threadId, requestId, questionId),
+            )?.threadContexts ?? [],
+        }),
+      ),
+    ),
+  );
+}
+
+/** Appends unsent answers to the thread's own draft, with the thread chips each one references. */
+export function appendUnsentAnswersToThreadDraft(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  unsent: ReadonlyArray<{
+    readonly customAnswer: string | undefined;
+    readonly threadContexts: ReadonlyArray<ThreadContextRecord>;
+  }>,
+): void {
+  const store = useComposerDraftStore.getState();
   const target = scopeThreadRef(environmentId, threadId);
   const currentPrompt = store.getComposerDraft(target)?.prompt ?? "";
   let prompt = currentPrompt;
   const threadContexts: ThreadContextRecord[] = [];
-  for (const requestId of unansweredRequestIds) {
-    const drafts = answers[userInputDraftKey(environmentId, threadId, requestId)] ?? {};
-    for (const [questionId, { customAnswer }] of Object.entries(drafts)) {
-      const nextPrompt = carryDisplacedCustomAnswerIntoPrompt(prompt, customAnswer);
-      if (nextPrompt === prompt) continue;
-      prompt = nextPrompt;
-      const questionDraft = store.getComposerDraft(
-        questionAttachmentDraftId(environmentId, threadId, requestId, questionId),
-      );
-      threadContexts.push(
-        ...threadContextsReferencedByAnswer(
-          customAnswer ?? "",
-          questionDraft?.threadContexts ?? [],
-        ),
-      );
-    }
+  for (const answer of unsent) {
+    const nextPrompt = carryDisplacedCustomAnswerIntoPrompt(prompt, answer.customAnswer);
+    if (nextPrompt === prompt) continue;
+    prompt = nextPrompt;
+    threadContexts.push(
+      ...threadContextsReferencedByAnswer(answer.customAnswer ?? "", answer.threadContexts),
+    );
   }
   if (prompt === currentPrompt) return;
   store.setPrompt(target, prompt);
@@ -239,7 +264,9 @@ function returnUnsentAnswersToThreadDraft(
 // Resolution can come from anywhere: another device, an interrupt, the turn
 // ending, or a reload over drafts for requests resolved meanwhile. One listener,
 // so unsent answers and their chips are read before their drafts are pruned.
-onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds, unansweredRequestIds }) => {
+onThreadRequestsResolved((event) => {
+  const { environmentId, threadId, pendingRequestIds, unansweredRequestIds } = event;
+  beforeQuestionDraftsPruned(event);
   returnUnsentAnswersToThreadDraft(environmentId, threadId, unansweredRequestIds);
   usePendingUserInputAnswers.setState(
     (existing) =>

@@ -239,24 +239,29 @@ vi.mock("@legendapp/list/react", () => ({
 
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
+import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
+import { AsyncResult } from "effect/reactivity";
+import { EnvironmentAuthInvalidError } from "@t3tools/contracts";
 import { AppRoot } from "./AppRoot";
 import { AppSidebarLayout } from "./components/AppSidebarLayout";
 import ChatView from "./components/ChatView";
 import { toastManager } from "./components/ui/toast";
 import {
+  COMPOSER_DRAFT_STORAGE_KEY,
   type ComposerFileAttachment,
   persistComposerDrafts,
   useComposerDraftStore,
 } from "./composerDraftStore";
 import {
+  ANSWER_RECOVERY_LOCK,
   editPendingUserInputAnswerText,
   pendingUserInputRequestKey,
   usePendingUserInputDraftStore,
 } from "./pendingUserInputDraftStore";
 
 import { useDictationSessionStore } from "./dictation/dictationSessionStore";
-import { useSendWhenReadyStore } from "./dictation/sendWhenReady";
+import { armSendWhenReady, useSendWhenReadyStore } from "./dictation/sendWhenReady";
 import { useDictationWidgetActivityStore } from "./dictation/dictationWidgetState";
 import { createFakeMedia } from "./dictation/dictationMedia.testFixtures";
 import { setDictationMediaBackend } from "./dictation/recorder";
@@ -268,6 +273,7 @@ import { threadEnvironment } from "./state/threads";
 import {
   appRootFence,
   FENCE_ENVIRONMENT_ID,
+  makeFenceSession,
   FENCE_PROJECT_ID,
   installFenceFontEvents,
 } from "./test/appRootFenceMocks";
@@ -276,7 +282,11 @@ import {
   makeFenceThreadShell,
   makeFenceUserInput,
 } from "./test/fenceThreadShell";
-import { publishFenceThreadProjection } from "./test/appRootFenceApp";
+import {
+  announceFenceThreadRequests,
+  publishFenceThreadProjection,
+  restartFenceThreadAnnouncer,
+} from "./test/appRootFenceApp";
 import { focusTestWindow } from "./test/windowFocus";
 
 const { DictationWidgetPage } = await import("./dictation/DictationWidget");
@@ -520,11 +530,13 @@ async function navigateToOtherThread() {
 }
 
 /** Lets promise chains (getUserMedia, Blob reads, upload, start) settle inside React's act. */
-async function settle() {
+async function settle({ answerRecovery = true }: { readonly answerRecovery?: boolean } = {}) {
   await act(async () => {
     for (let round = 0; round < 10; round += 1) {
       await flushBrowserTasks();
     }
+    // Locks are granted in order, so this waits out every answer recovery already queued.
+    if (answerRecovery) await navigator.locks.request(ANSWER_RECOVERY_LOCK, () => undefined);
   });
 }
 
@@ -1309,8 +1321,98 @@ async function setThreadState(
   await act(async () => {
     appRootFence.threadStates.set(threadId, { ...EMPTY_ENVIRONMENT_THREAD_STATE, ...state });
     for (const listener of appRootFence.threadListeners) listener();
+    announceFenceThreadRequests(environmentId, threadId);
   });
   await settle();
+}
+
+/** Replaces this environment's session, as a re-pair or revalidation would. */
+async function setFenceSession(
+  session: ReturnType<typeof makeFenceSession>,
+  options: { readonly waiting?: boolean } = {},
+) {
+  await act(async () => {
+    appRootFence.sessions.set(FENCE_ENVIRONMENT_ID, session);
+    if (options.waiting) appRootFence.sessionsWaiting.add(FENCE_ENVIRONMENT_ID);
+    else appRootFence.sessionsWaiting.delete(FENCE_ENVIRONMENT_ID);
+    for (const listener of appRootFence.threadListeners) listener();
+  });
+  await settle();
+}
+
+function restoreFenceSession(): Disposable {
+  return {
+    [Symbol.dispose]: () => {
+      appRootFence.sessions.set(FENCE_ENVIRONMENT_ID, makeFenceSession());
+      appRootFence.sessionsWaiting.delete(FENCE_ENVIRONMENT_ID);
+      appRootFence.sessionResults.delete(FENCE_ENVIRONMENT_ID);
+    },
+  };
+}
+
+/** Settles the session lookup as failed: the host rejecting the credential, or the network. */
+async function failFenceSession(kind: "rejected" | "network") {
+  const error =
+    kind === "rejected"
+      ? new EnvironmentAuthInvalidError({
+          code: "auth_invalid",
+          reason: "invalid_credential",
+          traceId: "fence-trace",
+        })
+      : new Error("network down");
+  await act(async () => {
+    appRootFence.sessionResults.set(FENCE_ENVIRONMENT_ID, AsyncResult.failure(Cause.fail(error)));
+    for (const listener of appRootFence.threadListeners) listener();
+  });
+  await settle();
+}
+
+const ANSWER_DRAFTS_STORAGE_KEY = "mesura-pending-question-drafts";
+
+function persistedAnswerDrafts(): Record<string, unknown> {
+  const stored = JSON.parse(window.localStorage.getItem(ANSWER_DRAFTS_STORAGE_KEY) ?? "{}") as {
+    state?: { requests?: Record<string, unknown> };
+  };
+  return stored.state?.requests ?? {};
+}
+
+/** Saves an answer the way another tab does: the whole persisted map, behind this tab's back. */
+function writeAnswerFromAnotherTab(key: string, questionId: string, text: string) {
+  const stored = JSON.parse(window.localStorage.getItem(ANSWER_DRAFTS_STORAGE_KEY) ?? "{}") as {
+    state: { requests: Record<string, unknown> };
+    version: number;
+  };
+  stored.state.requests[key] = { answers: { [questionId]: { customAnswer: text } }, version: 9 };
+  window.localStorage.setItem(ANSWER_DRAFTS_STORAGE_KEY, JSON.stringify(stored));
+}
+
+/** Saves a thread's composer prompt the way another tab does, behind this tab's back. */
+function writeComposerPromptFromAnotherTab(prompt: string) {
+  const stored = JSON.parse(window.localStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY) ?? "{}") as {
+    state: { draftsByThreadKey: Record<string, { prompt: string }> };
+  };
+  const threadKey = scopedThreadKey(onScreenTarget);
+  stored.state.draftsByThreadKey[threadKey] = {
+    ...stored.state.draftsByThreadKey[threadKey]!,
+    prompt,
+  };
+  window.localStorage.setItem(COMPOSER_DRAFT_STORAGE_KEY, JSON.stringify(stored));
+}
+
+/** Another tab returned the answer: it took the request draft out of storage. */
+function claimAnswerFromAnotherTab(key: string) {
+  const stored = JSON.parse(window.localStorage.getItem(ANSWER_DRAFTS_STORAGE_KEY) ?? "{}") as {
+    state: { requests: Record<string, unknown> };
+  };
+  delete stored.state.requests[key];
+  window.localStorage.setItem(ANSWER_DRAFTS_STORAGE_KEY, JSON.stringify(stored));
+}
+
+function storedComposerPrompt(): string {
+  const stored = JSON.parse(window.localStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY) ?? "{}") as {
+    state?: { draftsByThreadKey?: Record<string, { prompt?: string }> };
+  };
+  return stored.state?.draftsByThreadKey?.[scopedThreadKey(onScreenTarget)]?.prompt ?? "";
 }
 
 function notSentToasts() {
@@ -1397,6 +1499,17 @@ async function recordInMode(mode: "send" | "insert") {
 }
 
 const questionRequestId = RuntimeRequestId.make("dictation-phase-five-question");
+const secondQuestionRequestId = RuntimeRequestId.make("dictation-phase-five-second-question");
+
+function withRequestStatus(
+  thread: OrchestrationV2ThreadProjection,
+  status: "cancelled" | "expired",
+): OrchestrationV2ThreadProjection {
+  return {
+    ...thread,
+    runtimeRequests: thread.runtimeRequests.map((request) => ({ ...request, status })),
+  };
+}
 
 function withOpenQuestion(
   thread: OrchestrationV2ThreadProjection,
@@ -1838,6 +1951,69 @@ describe("dictation phase 5 fence", () => {
     expect(squash(turnStarts()[0]!.input.message.text)).toBe("[voiced] Read the notes y resume");
   });
 
+  it("dictation send regression: an armed draft fails with a notice when this device's session cannot read its thread", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _session = restoreFenceSession();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    await navigateAwayFromThread();
+    await setThreadState({ status: "synchronizing" });
+    expect(notSentToasts()).toHaveLength(0);
+
+    // Only the session changes: the hold must notice it without a thread update.
+    await setFenceSession(makeFenceSession(["orchestration:operate"]));
+    await vi.waitFor(() => expect(notSentToasts()).toHaveLength(1));
+    expect(
+      vi.mocked(toastManager.add).mock.calls.map(([toast]) => toast.description),
+    ).toContainEqual(expect.stringContaining("cannot read the thread"));
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toContain("Read the notes");
+    expect(
+      useSendWhenReadyStore.getState().drafts[scopedThreadKey(onScreenTarget)]?.armed,
+    ).not.toBe(true);
+  });
+
+  it("dictation send regression: a rejected credential fails an armed draft, and a network failure does not", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _session = restoreFenceSession();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    await navigateAwayFromThread();
+    await setThreadState({ status: "synchronizing" });
+
+    await failFenceSession("network");
+    expect(notSentToasts()).toHaveLength(0);
+    await failFenceSession("rejected");
+    await vi.waitFor(() => expect(notSentToasts()).toHaveLength(1));
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toContain("Read the notes");
+  });
+
+  it("dictation send regression: a denial still shown while the session is replaced does not cancel the send", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _session = restoreFenceSession();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+    await setThreadState({ status: "synchronizing" });
+    await setFenceSession(makeFenceSession(["orchestration:operate"]), { waiting: true });
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    expect(notSentToasts()).toHaveLength(0);
+
+    await setFenceSession(makeFenceSession());
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await vi.waitFor(() => expect(turnStarts()).toHaveLength(1));
+    expect(squash(turnStarts()[0]!.input.message.text)).toBe("[voiced] Read the notes y resume");
+    expect(notSentToasts()).toHaveLength(0);
+  });
+
   it("dictation phase 5 AC5: a message with dictated parts carries one [voiced] prefix, and a typed one carries none", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
@@ -2237,6 +2413,548 @@ describe("dictation phase 5 rework regressions", () => {
     await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
     await settle();
     expect(respondCalls()).toHaveLength(0);
+  });
+
+  it("dictation send regression: an armed answer fails with a notice when this device's session cannot read its thread", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _session = restoreFenceSession();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await focusQuestionAnswer();
+    await recordIntoQuestion("send");
+    await navigateAwayFromThread();
+    await setThreadState({ status: "synchronizing" });
+    const otherTabKey = pendingUserInputRequestKey(
+      environmentId,
+      offScreenThreadId,
+      RuntimeRequestId.make("other-tab-request"),
+    );
+    using _otherTab = {
+      [Symbol.dispose]: () => usePendingUserInputDraftStore.getState().clear(otherTabKey),
+    };
+    writeAnswerFromAnotherTab(otherTabKey, "depth", "Saved in the other tab");
+    await setFenceSession(makeFenceSession(["orchestration:operate"]));
+
+    await vi.waitFor(() =>
+      expect(vi.mocked(toastManager.add).mock.calls.map(([toast]) => toast.title)).toContain(
+        "The dictated answer was not sent",
+      ),
+    );
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    expect(useSendWhenReadyStore.getState().questions[key]).toBeUndefined();
+    expect(respondCalls()).toHaveLength(0);
+    expect(slotsIn(questionAnswerText())).toHaveLength(1);
+    expect(persistedAnswerDrafts()).toHaveProperty([otherTabKey]);
+  });
+
+  it("question answers: a cancelled question returns its typed answer to the thread's composer", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "");
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Only the web client",
+      );
+    });
+    await settle();
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "cancelled"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(questionAnswerText()).toBe("");
+    expect(squash(promptOf(onScreenTarget))).toContain("Only the web client");
+  });
+
+  it("question answers: a cancelled answer returns without its pending dictation marker", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "");
+    await mountApp();
+    const pendingMarker = formatDictationSlot(DictationJobId.make("still-transcribing"));
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => `Riverside ${pendingMarker}`,
+      );
+    });
+    await settle();
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "cancelled"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toContain("Riverside");
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(0);
+  });
+
+  it("question answers: a recovered answer disarms the thread's armed composer send", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    const composerMarker = formatDictationSlot(DictationJobId.make("composer-transcribing"));
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, `Composer text ${composerMarker}`);
+    await mountApp();
+    await act(async () => {
+      armSendWhenReady(onScreenTarget);
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Recovered answer",
+      );
+    });
+    await settle();
+    expect(useSendWhenReadyStore.getState().drafts[scopedThreadKey(onScreenTarget)]?.armed).toBe(
+      true,
+    );
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toContain("Recovered answer");
+    expect(
+      useSendWhenReadyStore.getState().drafts[scopedThreadKey(onScreenTarget)]?.armed,
+    ).not.toBe(true);
+    expect(turnStarts()).toHaveLength(0);
+  });
+
+  it("question answers: a resolution keeps the answers another tab saved meanwhile", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const otherTabKey = pendingUserInputRequestKey(
+      environmentId,
+      offScreenThreadId,
+      RuntimeRequestId.make("other-tab-question"),
+    );
+    using _otherTab = {
+      [Symbol.dispose]: () => usePendingUserInputDraftStore.getState().clear(otherTabKey),
+    };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "This tab's answer",
+      );
+    });
+    await settle();
+    // Another tab writes the whole persisted map, with an answer this tab has not loaded.
+    writeAnswerFromAnotherTab(otherTabKey, "depth", "Other tab's answer");
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(
+      usePendingUserInputDraftStore.getState().requests[otherTabKey]?.answers.depth?.customAnswer,
+    ).toBe("Other tab's answer");
+    expect(persistedAnswerDrafts()).toHaveProperty([otherTabKey]);
+  });
+
+  it("question answers: a cancelled question returns the newer answer another tab saved", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Older answer in this tab");
+    });
+    await settle();
+    writeAnswerFromAnotherTab(key, "scope", "Newer answer from the other tab");
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    const prompt = squash(promptOf(onScreenTarget));
+    expect(prompt).toContain("Newer answer from the other tab");
+    expect(prompt).not.toContain("Older answer in this tab");
+    expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
+  });
+
+  it("question answers: a recovered answer waits when another tab changed the composer draft, and nothing is overwritten", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    // Storage then agrees with this tab again, so the next test starts without another tab's edit.
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Stale text in this tab");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Recovered later");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+    writeComposerPromptFromAnotherTab("Newer text from the other tab");
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toBe("Stale text in this tab");
+    expect(squash(storedComposerPrompt())).toBe("Newer text from the other tab");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toMatchObject({
+      recoveryPending: true,
+      answers: { scope: { customAnswer: "Recovered later" } },
+    });
+    expect(persistedAnswerDrafts()).toHaveProperty([key]);
+  });
+
+  it("question answers: a waiting answer survives announcements while the conflict lasts and returns once it clears", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Text in this tab");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Waited answer");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+    writeComposerPromptFromAnotherTab("Text from the other tab");
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(usePendingUserInputDraftStore.getState().requests[key]?.recoveryPending).toBe(true);
+
+    // A later snapshot no longer lists the request (outside the recent history window), and the
+    // other tab's draft still differs: the answer keeps waiting.
+    await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
+    await settle();
+    expect(usePendingUserInputDraftStore.getState().requests[key]?.recoveryPending).toBe(true);
+    expect(squash(promptOf(onScreenTarget))).toBe("Text in this tab");
+
+    // Storage agrees with this tab again: the next announcement (a fresh stream's first live
+    // projection) returns the answer.
+    writeComposerPromptFromAnotherTab("Text in this tab");
+    restartFenceThreadAnnouncer(environmentId, threadId);
+    await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toContain("Waited answer");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined();
+    expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
+  });
+
+  it("question answers: an answer another tab returned is not returned again here, before or after this tab marked it", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Text in this tab");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Answer returned once");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+    // The other tab, with no conflict of its own, appends the answer and takes the draft first.
+    writeComposerPromptFromAnotherTab("Text in this tab\n\nAnswer returned once");
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    // This tab marked it (its copy of the composer is stale); then the other tab claims it.
+    expect(usePendingUserInputDraftStore.getState().requests[key]?.recoveryPending).toBe(true);
+    claimAnswerFromAnotherTab(key);
+
+    // A fresh stream here (a reload) finds the answer gone and appends nothing.
+    writeComposerPromptFromAnotherTab("Text in this tab");
+    restartFenceThreadAnnouncer(environmentId, threadId);
+    await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toBe("Text in this tab");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined();
+    expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
+  });
+
+  it("question answers: while another tab holds the recovery lock and returns the answer, this tab does not return it again", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Shared text");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Returned by the other tab");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+
+    // The other tab got the same announcement first and holds the lock while it returns the answer.
+    let releaseOtherTab = () => {};
+    const otherTabHolds = new Promise<void>((resolve) => {
+      releaseOtherTab = resolve;
+    });
+    const otherTabGranted = new Promise<void>((granted) => {
+      void navigator.locks.request("mesura:question-answer-recovery", () => {
+        granted();
+        return otherTabHolds;
+      });
+    });
+    await otherTabGranted;
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle({ answerRecovery: false });
+    writeComposerPromptFromAnotherTab("Shared text\n\nReturned by the other tab");
+    claimAnswerFromAnotherTab(key);
+    releaseOtherTab();
+    await settle();
+
+    expect(squash(promptOf(onScreenTarget))).toBe("Shared text");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined();
+    expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
+  });
+
+  it("question answers: a deleted thread drops a waiting answer instead of returning it", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Orphaned answer");
+      usePendingUserInputDraftStore.setState((state) => ({
+        requests: { ...state.requests, [key]: { ...state.requests[key]!, recoveryPending: true } },
+      }));
+    });
+    await settle();
+
+    await setThreadState({ status: "deleted" });
+    expect(squash(promptOf(onScreenTarget))).not.toContain("Orphaned answer");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined();
+  });
+
+  it("question answers: a deferral whose mark cannot be saved still keeps the answer", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Text in this tab");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Answer behind a full storage");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+    writeComposerPromptFromAnotherTab("Text from the other tab");
+
+    const setItem = Storage.prototype.setItem;
+    using _full = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      name: string,
+      value: string,
+    ) {
+      if (name === ANSWER_DRAFTS_STORAGE_KEY && value.includes("recoveryPending")) {
+        throw new DOMException("quota", "QuotaExceededError");
+      }
+      setItem.call(this, name, value);
+    });
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(
+      usePendingUserInputDraftStore.getState().requests[key]?.answers.scope?.customAnswer,
+    ).toBe("Answer behind a full storage");
+    expect(persistedAnswerDrafts()).toHaveProperty([key]);
+  });
+
+  it("question answers: when both tabs edited the composer draft, the answer stays saved and nothing is overwritten", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    // Storage then agrees with this tab again, so the next test starts without another tab's edit.
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Original text");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Answer kept for later");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+    writeComposerPromptFromAnotherTab("Edited in the other tab");
+    await act(async () => {
+      useComposerDraftStore.getState().setPrompt(onScreenTarget, "Edited in this tab");
+    });
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toBe("Edited in this tab");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toMatchObject({
+      recoveryPending: true,
+      answers: { scope: { customAnswer: "Answer kept for later" } },
+    });
+    expect(persistedAnswerDrafts()).toHaveProperty([key]);
+  });
+
+  it("question answers: two resolutions announced back to back return each answer once", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const second = makeFenceUserInput({
+      threadId,
+      requestId: secondQuestionRequestId,
+      createdAt: now,
+      questions: [
+        {
+          id: "depth",
+          header: "Depth",
+          question: "How deep?",
+          multiSelect: false,
+          options: [{ label: "Shallow", description: "Quick pass" }],
+        },
+      ],
+    });
+    const open = withOpenQuestion(makeThreadProjection());
+    fixture.projection = {
+      ...open,
+      runtimeRequests: [...open.runtimeRequests, second.request],
+      turnItems: [...open.turnItems, second.item],
+    };
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "");
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "answer A",
+      );
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, secondQuestionRequestId),
+        "depth",
+        () => "answer B",
+      );
+    });
+    await settle();
+
+    const status = (requestId: string, next: "cancelled" | "expired" | "pending") =>
+      fixture.projection!.runtimeRequests.map((request) =>
+        request.id === requestId ? { ...request, status: next } : request,
+      );
+    await act(async () => {
+      publishFenceThreadProjection(
+        { ...fixture.projection!, runtimeRequests: status(questionRequestId, "cancelled") },
+        environmentId,
+      );
+      publishFenceThreadProjection(
+        {
+          ...fixture.projection!,
+          runtimeRequests: status(questionRequestId, "cancelled").map((request) =>
+            request.id === secondQuestionRequestId
+              ? { ...request, status: "expired" as const }
+              : request,
+          ),
+        },
+        environmentId,
+      );
+    });
+    await settle();
+    const prompt = squash(promptOf(onScreenTarget));
+    expect(prompt.split("answer A").length - 1, prompt).toBe(1);
+    expect(prompt.split("answer B").length - 1, prompt).toBe(1);
+  });
+
+  it("question answers: a deleted thread drops its answers, on screen or not", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Gone with the thread",
+      );
+    });
+    await settle();
+    await navigateAwayFromThread();
+
+    await setThreadState({ status: "deleted" });
+    expect(questionAnswerText()).toBe("");
+  });
+
+  it("question answers: the open chat keeps an answer while a synchronizing snapshot lacks its question", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    await mountApp();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Keep this answer",
+      );
+    });
+    await settle();
+
+    await setThreadState({ status: "synchronizing", data: Option.some(makeThreadProjection()) });
+    expect(questionAnswerText()).toBe("Keep this answer");
+
+    await act(async () => publishFenceThreadProjection(fixture.projection!, environmentId));
+    await settle();
+    expect(questionAnswerText()).toBe("Keep this answer");
+
+    // The live thread without the question is what closes it.
+    await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
+    await settle();
+    expect(questionAnswerText()).toBe("");
   });
 
   it("send glyph: an answer armed while its thread synchronizes, whose marker is then deleted by hand, is not submitted", async () => {

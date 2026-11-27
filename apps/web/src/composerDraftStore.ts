@@ -4693,6 +4693,23 @@ export async function readStoredDraftPrompt(target: ComposerThreadTarget): Promi
   }
 }
 
+/**
+ * Mesura: whether another tab saved a different draft for `target` since this tab's last write. A
+ * write this tab makes on its own (not from typing here) would then replace it, because the
+ * per-thread merge lets an entry this tab changed win; such a write waits instead.
+ */
+export function otherTabChangedThreadDraft(target: ComposerThreadTarget): boolean {
+  const threadKey = resolveComposerDraftKey(composerDraftStore.getState(), target);
+  const baseline = composerDraftLastWrite?.local ?? composerDraftLoadedState;
+  const stored = threadKey && baseline ? readStoredComposerDraftState() : null;
+  if (!threadKey || !baseline || !stored) return false;
+  // Both come from the same serializer, so equal drafts serialize alike.
+  return (
+    JSON.stringify(stored.draftsByThreadKey?.[threadKey]) !==
+    JSON.stringify(baseline.draftsByThreadKey[threadKey])
+  );
+}
+
 /** Puts a dictation marker at the end of a draft that has no composer to take it at the caret. */
 export function appendDictationSlotToDraft(target: ComposerThreadTarget, slot: string): boolean {
   const changed = editComposerDraftPrompt(target, (prompt) => appendDictationSlot(prompt, slot));

@@ -24,6 +24,10 @@ export const appRootFence = {
   threads: new Map<string, EnvironmentThreadShell>(),
   threadStates: new Map<string, EnvironmentThreadState>(),
   sessions: new Map<string, AuthSessionState>([[FENCE_ENVIRONMENT_ID, makeFenceSession()]]),
+  /** Environments whose session is being replaced: the previous one is still shown, waiting. */
+  sessionsWaiting: new Set<string>(),
+  /** A settled session lookup to show in place of `sessions`, such as a rejection or a network failure. */
+  sessionResults: new Map<string, AsyncResult.AsyncResult<AuthSessionState, unknown>>(),
   queryAtoms: new WeakSet<object>(),
   openThreadId: "",
   vimMode: false,
@@ -126,9 +130,7 @@ type FenceRuntimeSessionModule = ModuleWithOverrides<
       {
         sessionStateAtom: (
           environmentId: EnvironmentId,
-        ) => Atom.Atom<
-          AsyncResult.Initial<AuthSessionState> | AsyncResult.Success<AuthSessionState>
-        >;
+        ) => Atom.Atom<AsyncResult.AsyncResult<AuthSessionState, unknown>>;
       }
     >;
   }
@@ -189,8 +191,13 @@ export async function mockRuntimeSession(
   const sessionStateAtom = Atom.family((environmentId: EnvironmentId) => {
     const atom = Atom.make((get) => {
       const read = () => {
+        const result = appRootFence.sessionResults.get(environmentId);
+        if (result) return result;
         const session = appRootFence.sessions.get(environmentId);
-        return session ? AsyncResult.success(session) : AsyncResult.initial<AuthSessionState>();
+        if (!session) return AsyncResult.initial<AuthSessionState>();
+        return AsyncResult.success(session, {
+          waiting: appRootFence.sessionsWaiting.has(environmentId),
+        });
       };
       const listener = () => get.setSelf(read());
       appRootFence.threadListeners.add(listener);

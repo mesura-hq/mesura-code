@@ -15,14 +15,6 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { createPendingUserInputProjection } from "../../pendingUserInput";
-import { usePendingUserInputDraftStore } from "../../pendingUserInputDraftStore";
-import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
-import {
-  clearQuestionAttachmentDraft,
-  questionAttachmentDraftId,
-  questionAttachmentDraftPrefix,
-  useQuestionAttachmentPreparation,
-} from "../../questionAttachments";
 import { derivePendingApprovals, derivePendingUserInputs } from "../../session-logic";
 import { readEnvironmentScope } from "../../state/session";
 import { threadEnvironment } from "../../state/threads";
@@ -35,7 +27,6 @@ import { registerQuestionResponder } from "../../dictation/questionSendWhenReady
 export function useMesuraPendingThreadRequests(input: {
   environmentId: EnvironmentId;
   activeThreadId: ThreadId | null;
-  activeThread: { readonly id: ThreadId } | undefined;
   serverProjection: Pick<ThreadStructure, "runtimeRequests" | "turnItems"> | null;
   supportsQuestionAttachments: boolean;
   maxFileAttachmentBytes: number | null;
@@ -46,7 +37,6 @@ export function useMesuraPendingThreadRequests(input: {
   const {
     environmentId,
     activeThreadId,
-    activeThread,
     serverProjection,
     supportsQuestionAttachments,
     maxFileAttachmentBytes,
@@ -79,44 +69,6 @@ export function useMesuraPendingThreadRequests(input: {
   );
   const activePendingApproval = pendingApprovals[0] ?? null;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- prunes external draft stores when the server's pending set changes; no handler owns that change
-  useEffect(() => {
-    if (!activeThread) return;
-    const questionThread = activeThread;
-    const currentRequests = pendingUserInputs;
-    // Answer drafts of requests that are no longer pending are dropped with their files.
-    const requestIds = new Set<string>(currentRequests.map((request) => request.requestId));
-    for (const key of Object.keys(usePendingUserInputDraftStore.getState().requests)) {
-      const [draftEnvironmentId, draftThreadId, requestId] = JSON.parse(key);
-      if (
-        draftEnvironmentId === environmentId &&
-        draftThreadId === questionThread.id &&
-        !requestIds.has(requestId)
-      )
-        usePendingUserInputDraftStore.getState().clear(key);
-    }
-    const prefix = questionAttachmentDraftPrefix(environmentId, questionThread.id);
-    const retained = new Set(
-      currentRequests.flatMap((request) =>
-        request.questions.map((question) =>
-          questionAttachmentDraftId(
-            environmentId,
-            questionThread.id,
-            request.requestId,
-            question.id,
-          ),
-        ),
-      ),
-    );
-    const keys = new Set([
-      ...Object.keys(useComposerDraftStore.getState().draftsByThreadKey),
-      ...Object.keys(useQuestionAttachmentPreparation.getState().counts),
-    ]);
-    for (const key of keys) {
-      if (key.startsWith(prefix) && !retained.has(DraftId.make(key)))
-        clearQuestionAttachmentDraft(DraftId.make(key));
-    }
-  }, [environmentId, activeThread, pendingUserInputs]);
   const onRespondToApproval = async (
     requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,

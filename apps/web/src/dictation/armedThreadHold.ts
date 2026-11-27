@@ -1,32 +1,32 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 
+import { environmentCatalog } from "~/connection/catalog";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { environmentSession } from "~/state/session";
 import { environmentThreadDetails } from "~/state/threads";
-
-/**
- * `data` is satisfied by any snapshot, cached included. `live` needs the synchronized detail: a
- * cached snapshot cannot tell that a request closed.
- */
-type ArmedThreadNeed = "data" | "live";
-type ArmedThreadAvailability = "loaded" | "loading" | "gone";
-
-/** Only deletion is final: a failed load retries, and the send stays armed meanwhile. */
-function availabilityOf(state: EnvironmentThreadState, need: ArmedThreadNeed) {
-  if (state.status === "deleted") return "gone";
-  const loaded = need === "live" ? state.status === "live" : Option.isSome(state.data);
-  return loaded ? "loaded" : "loading";
-}
+import {
+  availabilityOf,
+  type ArmedThreadAvailability,
+  type ArmedThreadNeed,
+} from "./armedThreadAvailability";
 
 export function armedThreadAvailability(
   ref: ScopedThreadRef,
   need: ArmedThreadNeed = "data",
 ): ArmedThreadAvailability {
-  return availabilityOf(appAtomRegistry.get(environmentThreadDetails.stateAtom(ref)), need);
+  return availabilityOf(
+    appAtomRegistry.get(environmentThreadDetails.stateAtom(ref)),
+    appAtomRegistry.get(environmentSession.sessionStateAtom(ref.environmentId)),
+    appAtomRegistry.get(environmentCatalog.stateAtom(ref.environmentId)),
+    need,
+  );
 }
+
+/** What the user is told when an armed send stops waiting for good. */
+export const ARMED_THREAD_UNREADABLE =
+  "This device's session cannot read the thread. Pair it again, then send by hand.";
 
 /**
  * Mesura: a thread's detail streams only while something mounts it, so a thread the user left
@@ -41,7 +41,12 @@ export function createArmedThreadHold(
   const held = new Map<string, () => void>();
   const holdOne = (ref: ScopedThreadRef) => {
     const availability = Atom.make((get) =>
-      availabilityOf(get(environmentThreadDetails.stateAtom(ref)), options.need),
+      availabilityOf(
+        get(environmentThreadDetails.stateAtom(ref)),
+        get(environmentSession.sessionStateAtom(ref.environmentId)),
+        get(environmentCatalog.stateAtom(ref.environmentId)),
+        options.need,
+      ),
     );
     const releases = [appAtomRegistry.subscribe(availability, onChange)];
     if (options.watchRequests) {
