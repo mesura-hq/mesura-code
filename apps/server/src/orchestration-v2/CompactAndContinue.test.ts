@@ -76,6 +76,7 @@ interface MockProvider {
     ProviderInstanceId,
     PubSub.PubSub<ProviderAdapter.ProviderAdapterV2Event>
   >;
+  canCompact: boolean;
 }
 
 function makeMockAdapter(input: {
@@ -145,7 +146,12 @@ function makeMockAdapter(input: {
             }),
           resumeThread: ({ providerThread }) => Effect.succeed(providerThread),
           startTurn: record("turn"),
-          ...(input.compacts ? { compactThread: record("compact") } : {}),
+          ...(input.compacts
+            ? {
+                canCompactThread: () => Effect.sync(() => input.provider.canCompact),
+                compactThread: record("compact"),
+              }
+            : {}),
           steerTurn: () => Effect.void,
           interruptTurn: () => Effect.void,
           respondToRuntimeRequest: () => Effect.void,
@@ -263,6 +269,7 @@ const withHarness = <A, E, R>(body: (provider: MockProvider) => Effect.Effect<A,
           [compactingInstance, yield* PubSub.unbounded<ProviderAdapter.ProviderAdapterV2Event>()],
           [plainInstance, yield* PubSub.unbounded<ProviderAdapter.ProviderAdapterV2Event>()],
         ]),
+        canCompact: true,
       };
       return yield* body(provider).pipe(Effect.provide(layerFor(provider)));
     }),
@@ -798,6 +805,21 @@ describe("compact-and-continue review regressions", () => {
           assert.equal(waiting?.status, "queued");
           assert.isTrue(waiting?.queueHeld === true);
           assert.equal(yield* Queue.size(provider.started), 0, "no turn started on its own");
+        }),
+      ),
+  );
+
+  it.effect(
+    "compact-and-continue regression P1-3: refuses and queues nothing when canCompactThread returns false",
+    () =>
+      withHarness((provider) =>
+        Effect.gen(function* () {
+          provider.canCompact = false;
+          const { threadId, caller } = yield* activeThread(provider, "regression-can-compact");
+          const outcome = yield* callOutcome(caller, { next: NEXT });
+          assert.isFalse(outcome.ok, outcome.text);
+          assert.match(outcome.text, /compaction/i);
+          assert.lengthOf(yield* queuedRuns(threadId), 0);
         }),
       ),
   );

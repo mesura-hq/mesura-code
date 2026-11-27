@@ -8181,6 +8181,115 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         assert.deepInclude(collected.at(-1), { type: "turn.terminal", status: "completed" });
       }),
   );
+
+  it.effect("compacts via compactThread for MCP-queued /compact and runs the follow-up turn", () =>
+    Effect.gen(function* () {
+      const { runtime, thread } = yield* resumed([
+        out("session.compact", {
+          sessionID: SESSION,
+          id: `msg_t3_turn_${SESSION}:attempt:opencode2-compact`,
+        }),
+        replyData("session.compact", {
+          id: `msg_t3_turn_${SESSION}:attempt:opencode2-compact`,
+          sessionID: SESSION,
+          time: { created: 1790657132555 },
+          type: "compaction",
+          payload: {},
+          delivery: "steer",
+        }),
+        event("session.execution.started", { sessionID: SESSION }),
+        event("session.compaction.started", {
+          sessionID: SESSION,
+          reason: "manual",
+          recent: "",
+          inputID: `msg_t3_turn_${SESSION}:attempt:opencode2-compact`,
+        }),
+        event("session.compaction.ended", {
+          sessionID: SESSION,
+          reason: "manual",
+          model: { id: "big-pickle", providerID: "opencode", variant: "default" },
+          text: "Compacted summary.",
+          recent: "",
+          tokens: { input: 200, output: 50, reasoning: 0, cache: { read: 0, write: 0 } },
+          cost: 0,
+        }),
+        event("session.execution.succeeded", { sessionID: SESSION }),
+        out("session.prompt", {
+          sessionID: SESSION,
+          id: `msg_t3_turn_${SESSION}:attempt:opencode2-followup`,
+          text: "Continue after compaction.",
+        }),
+        promptAccepted,
+        event("session.execution.started", { sessionID: SESSION }),
+        event("session.text.ended", {
+          sessionID: SESSION,
+          assistantMessageID: "msg_followup",
+          ordinal: 0,
+          text: "Resumed cleanly.",
+        }),
+        event("session.execution.succeeded", { sessionID: SESSION }),
+      ]);
+      const compactThread = runtime.compactThread;
+      assert.isDefined(compactThread);
+      const compactDone = yield* Deferred.make<void>();
+      let terminals = 0;
+      const events = yield* runtime.events.pipe(
+        Stream.tap((e) => {
+          if (e.type !== "turn.terminal") return Effect.void;
+          terminals += 1;
+          return terminals === 1 ? Deferred.succeed(compactDone, undefined) : Effect.void;
+        }),
+        Stream.takeUntil((e) => e.type === "turn.terminal" && terminals === 2),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      const base = turnInput(thread);
+      yield* compactThread!({
+        ...base,
+        attemptId: RunAttemptId.make("attempt:opencode2-compact"),
+        message: {
+          ...base.message,
+          text: "/compact",
+          createdBy: "agent",
+          creationSource: "mcp",
+        },
+      });
+      yield* Deferred.await(compactDone);
+      yield* runtime.startTurn({
+        ...base,
+        runId: RunId.make("run:opencode2-followup"),
+        runOrdinal: 2,
+        providerTurnOrdinal: 2,
+        attemptId: RunAttemptId.make("attempt:opencode2-followup"),
+        message: {
+          ...base.message,
+          messageId: MessageId.make("message:opencode2-followup"),
+          text: "Continue after compaction.",
+          createdBy: "agent",
+          creationSource: "mcp",
+        },
+      });
+      const collected = yield* Fiber.join(events);
+      assert.isTrue(
+        collected.some(
+          (e) =>
+            e.type === "turn_item.updated" &&
+            e.turnItem.type === "compaction" &&
+            e.turnItem.status === "completed" &&
+            e.turnItem.summary === "Compacted summary.",
+        ),
+      );
+      assert.isTrue(
+        collected.some(
+          (e) =>
+            e.type === "turn_item.updated" &&
+            e.turnItem.type === "assistant_message" &&
+            e.turnItem.text === "Resumed cleanly.",
+        ),
+      );
+      assert.deepInclude(collected.at(-1), { type: "turn.terminal", status: "completed" });
+    }),
+  );
 });
 
 const providerTurnId = Effect.gen(function* () {

@@ -100,14 +100,18 @@ export const queueCompactAndContinue = Effect.fn("CompactAndContinue.queue")(fun
   const providerThreadId =
     runs.find((run) => run.id === shell.activeRunId)?.providerThreadId ??
     shell.activeProviderThreadId;
-  const providerSessionId = providerThreads.find(
-    (providerThread) => providerThread.id === providerThreadId,
-  )?.providerSessionId;
+  const providerThread = providerThreads.find((candidate) => candidate.id === providerThreadId);
+  const providerSessionId = providerThread?.providerSessionId;
   const session =
     providerSessionId == null
       ? Option.none()
       : yield* sessions.get(providerSessionId).pipe(Effect.orElseSucceed(() => Option.none()));
   if (Option.isNone(session) || session.value.compactThread === undefined)
+    return yield* refuse("no_compaction");
+  if (
+    session.value.canCompactThread !== undefined &&
+    (providerThread === undefined || !(yield* session.value.canCompactThread(providerThread)))
+  )
     return yield* refuse("no_compaction");
 
   const handoff = input.handoff?.trim() ? input.handoff : undefined;

@@ -1424,6 +1424,188 @@ describe("AcpAdapterV2", () => {
       assert.equal(watchedSessions[0], watchedSessions[1]);
     }).pipe(Effect.provide(layerTest)),
   );
+  it.live(
+    "drops retired runtime /compact advertisements when a restarted runtime omits /compact",
+    () =>
+      Effect.gen(function* () {
+        const instanceId = ProviderInstanceId.make("acp-test-compact-restart-invalidation");
+        const threadId = ThreadId.make("thread-acp-compact-restart-invalidation");
+        const firstAdvertised = yield* Deferred.make<void>();
+        const failure = {
+          class: "usage_limit",
+          message: "Quota reached.",
+          code: "RESOURCE_EXHAUSTED",
+          retryable: true,
+          resetAt: "2030-01-01T00:00:00.000Z",
+        } as const;
+        let watched = 0;
+        let runtimeOrdinal = 0;
+        const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const mockAgentPath = yield* bundledMockAgentPath;
+        const adapter = yield* makeAcpAdapterV2({
+          instanceId,
+          selfInvocation: yield* resolveSelfInvocation(),
+          flavor: {
+            driver: ACP_TEST_DRIVER,
+            capabilities: AcpProviderCapabilitiesV2,
+            compactViaAdvertisedCommand: true,
+            onAvailableCommandsUpdate: (commands) =>
+              commands.some((command) => command.name === "compact")
+                ? Deferred.succeed(firstAdvertised, undefined).pipe(Effect.asVoid)
+                : Effect.void,
+            watchPromptOutcome: () =>
+              Effect.sync(() => {
+                watched += 1;
+                const failThisTurn = watched === 1;
+                return () => Effect.succeed(failThisTurn ? failure : undefined);
+              }),
+            makeRuntime: (input) => {
+              runtimeOrdinal += 1;
+              const isFirst = runtimeOrdinal === 1;
+              return makeMockRuntime({
+                childProcessSpawner,
+                mockAgentPath,
+                environment: isFirst ? { T3_ACP_AVAILABLE_COMMANDS: "compact" } : {},
+              })(input);
+            },
+          },
+        });
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+        });
+        const modelSelection = { instanceId, model: "default" } as const;
+        const session = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-acp-compact-restart"),
+          modelSelection,
+          runtimePolicy,
+        });
+        const providerThread = yield* session.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy,
+        });
+        yield* Deferred.await(firstAdvertised);
+        assert.isTrue(yield* session.canCompactThread!(providerThread));
+
+        // Fail turn 1 to trigger a runtime restart on the next turn with the same native session ID.
+        yield* session.startTurn(
+          makeTurnInput({
+            threadId,
+            providerThread,
+            instanceId,
+            runtimePolicy,
+            now: yield* DateTime.now,
+            ordinal: 1,
+          }),
+        );
+        const turn1Events = yield* session.events.pipe(
+          Stream.takeUntil((event) => event.type === "turn.terminal"),
+          Stream.runCollect,
+        );
+        const turn1Terminal = turn1Events.at(-1);
+        assert.equal(
+          turn1Terminal?.type === "turn.terminal" ? turn1Terminal.status : null,
+          "failed",
+        );
+
+        // Turn 2 runs on the restarted runtime (which omits /compact); compaction must be refused.
+        const compactExit = yield* Effect.exit(
+          session.compactThread!(
+            makeTurnInput({
+              threadId,
+              providerThread,
+              instanceId,
+              runtimePolicy,
+              now: yield* DateTime.now,
+              ordinal: 2,
+              messageText: "/compact",
+            }),
+          ),
+        );
+        assert.isTrue(Exit.isFailure(compactExit));
+        const error =
+          compactExit._tag === "Failure" && compactExit.cause.reasons[0]?._tag === "Fail"
+            ? (compactExit.cause.reasons[0].error as { _tag?: string; cause?: { _tag?: string } })
+            : undefined;
+        assert.equal(error?._tag, "ProviderAdapterTurnStartError");
+        assert.equal(error?.cause?._tag, "ProviderCompactionUnsupportedError");
+        assert.isFalse(yield* session.canCompactThread!(providerThread));
+        assert.equal(runtimeOrdinal, 2);
+      }).pipe(Effect.provide(layerTest)),
+  );
+  it.live(
+    "passes workspace cwd to onSessionEvent and ignores non-root available_commands_update notifications",
+    () =>
+      Effect.gen(function* () {
+        const instanceId = ProviderInstanceId.make("acp-test-ignore-child-commands");
+        const threadId = ThreadId.make("thread-acp-ignore-child-commands");
+        const published: Array<readonly [ReadonlyArray<string>, string | undefined]> = [];
+        let emitSessionUpdate:
+          | ((notification: EffectAcpSchema.SessionNotification) => Effect.Effect<void>)
+          | undefined;
+        const adapter = yield* makeAcpAdapterV2({
+          instanceId,
+          selfInvocation: yield* resolveSelfInvocation(),
+          flavor: {
+            driver: ACP_TEST_DRIVER,
+            capabilities: AcpProviderCapabilitiesV2,
+            compactViaAdvertisedCommand: true,
+            onSessionEvent: (event, cwd) =>
+              event._tag === "AvailableCommandsUpdated"
+                ? Effect.sync(() => {
+                    published.push([event.availableCommands.map((command) => command.name), cwd]);
+                  })
+                : Effect.void,
+            makeRuntime: makeMockRuntime({
+              childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+              mockAgentPath: yield* bundledMockAgentPath,
+              environment: { T3_ACP_AVAILABLE_COMMANDS: "compact" },
+              wrapRuntime: (runtime) => ({
+                ...runtime,
+                handleSessionUpdate: (handler) => {
+                  emitSessionUpdate = (notification) => handler(notification).pipe(Effect.ignore);
+                  return runtime.handleSessionUpdate(handler);
+                },
+              }),
+            }),
+          },
+        });
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+        });
+        const modelSelection = { instanceId, model: "default" } as const;
+        const session = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-acp-ignore-child-commands"),
+          modelSelection,
+          runtimePolicy,
+        });
+        const providerThread = yield* session.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy,
+        });
+        assert.isDefined(emitSessionUpdate);
+        const rootSessionId = providerThread.nativeThreadRef?.nativeId;
+        assert.isDefined(rootSessionId);
+
+        yield* emitSessionUpdate!({
+          sessionId: `${rootSessionId!}:child:1`,
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: [{ name: "help", description: "Child only command" }],
+          },
+        });
+
+        assert.deepEqual(published, [[["compact"], runtimePolicy.cwd ?? undefined]]);
+        assert.isTrue(yield* session.canCompactThread!(providerThread));
+      }).pipe(Effect.provide(layerTest)),
+  );
   it.live("retains returned usage when Stop finalizes before the prompt callback", () =>
     Effect.gen(function* () {
       const instanceId = ProviderInstanceId.make("acp-test-prompt-usage-stop");

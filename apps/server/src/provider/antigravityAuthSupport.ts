@@ -249,6 +249,55 @@ const linkAntigravityUserSkills = Effect.fn("linkAntigravityUserSkills")(functio
 }): Effect.fn.Return<void, never, FileSystem.FileSystem | Path.Path> {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const syncPerEntryLinks = Effect.fnUntraced(function* (
+    linkDirectory: string,
+    targetDirectory: string,
+    targetExists: boolean,
+  ) {
+    const existingEntries = yield* fs.readDirectory(linkDirectory);
+    const targetEntries = targetExists
+      ? new Set(yield* fs.readDirectory(targetDirectory))
+      : new Set<string>();
+    for (const entry of existingEntries) {
+      const entryPath = path.join(linkDirectory, entry);
+      const linkedTo = yield* fs.readLink(entryPath).pipe(
+        Effect.map((value) => path.resolve(linkDirectory, value)),
+        Effect.orElseSucceed(() => undefined),
+      );
+      // Only manage same-name links that we create into targetDirectory;
+      // preserve user-created aliases (e.g. my-review -> .../review).
+      if (linkedTo !== path.resolve(targetDirectory, entry)) continue;
+      if (!targetExists || !targetEntries.has(entry)) {
+        yield* fs.remove(entryPath);
+      }
+    }
+    if (!targetExists) return;
+    for (const entry of targetEntries) {
+      const entryLink = path.join(linkDirectory, entry);
+      const entryTarget = path.join(targetDirectory, entry);
+      // Local profile skills win on name collisions and are never overwritten.
+      const occupied = yield* fs.lstat(entryLink).pipe(
+        Effect.as(true),
+        Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(false)),
+      );
+      if (occupied) continue;
+      const targetInfo = yield* fs.stat(entryTarget).pipe(Effect.orElseSucceed(() => undefined));
+      if (targetInfo === undefined) continue;
+      yield* Effect.tryPromise({
+        try: () =>
+          NodeFSP.symlink(
+            entryTarget,
+            entryLink,
+            input.platform === "win32"
+              ? targetInfo.type === "Directory"
+                ? "junction"
+                : "file"
+              : undefined,
+          ),
+        catch: (cause) => new AntigravitySkillLinkError({ link: entryLink, cause }),
+      });
+    }
+  });
   const links = antigravityUserSkillDirectories(path, input.profileDirectory);
   const targets = antigravityUserSkillDirectories(path, path.join(input.userHome, ".gemini"));
   for (const [link, target] of [
@@ -256,30 +305,53 @@ const linkAntigravityUserSkills = Effect.fn("linkAntigravityUserSkills")(functio
     [links[1], targets[1]],
   ] as const) {
     yield* Effect.gen(function* () {
+      const targetExists = yield* fs.exists(target);
       // The harness creates these folders itself, and mkdir fails on a dangling link.
-      if (!(yield* fs.exists(target))) {
+      if (!targetExists) {
         const linked = yield* fs.readLink(link).pipe(
           Effect.as(true),
           Effect.orElseSucceed(() => false),
         );
-        if (linked) yield* fs.remove(link);
+        if (linked) {
+          yield* fs.remove(link);
+          return;
+        }
+        const info = yield* fs.stat(link).pipe(Effect.orElseSucceed(() => undefined));
+        if (info?.type === "Directory") {
+          yield* syncPerEntryLinks(link, target, false);
+        }
         return;
       }
       const existing = yield* fs.readLink(link).pipe(
-        Effect.map((value): string | undefined => path.resolve(path.dirname(link), value)),
+        Effect.map((value): string | "non-empty-dir" | undefined =>
+          path.resolve(path.dirname(link), value),
+        ),
         Effect.catchReason("PlatformError", "NotFound", () => Effect.undefined),
         // An empty folder is the harness's placeholder from a launch without the link.
-        // rmdir refuses a non-empty folder, so content added meanwhile is never deleted.
+        // A non-empty folder keeps its local skills and receives global skills per item.
         Effect.catch((error) =>
           Effect.tryPromise({
             try: () => NodeFSP.rmdir(link),
             catch: (cause) => new AntigravitySkillLinkError({ link, cause }),
           }).pipe(
-            Effect.as(undefined),
-            Effect.mapError(() => error),
+            Effect.as(undefined as string | "non-empty-dir" | undefined),
+            Effect.catch(() =>
+              fs.stat(link).pipe(
+                Effect.flatMap((info) =>
+                  info.type === "Directory"
+                    ? Effect.succeed("non-empty-dir" as const)
+                    : Effect.fail(error),
+                ),
+                Effect.mapError(() => error),
+              ),
+            ),
           ),
         ),
       );
+      if (existing === "non-empty-dir") {
+        yield* syncPerEntryLinks(link, target, true);
+        return;
+      }
       if (existing === target) return;
       if (existing !== undefined) {
         yield* fs.remove(link);
