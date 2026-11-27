@@ -254,6 +254,7 @@ import {
   useComposerDraftStore,
 } from "./composerDraftStore";
 import {
+  ANSWER_RECOVERY_LOCK,
   editPendingUserInputAnswerText,
   pendingUserInputRequestKey,
   usePendingUserInputDraftStore,
@@ -529,11 +530,13 @@ async function navigateToOtherThread() {
 }
 
 /** Lets promise chains (getUserMedia, Blob reads, upload, start) settle inside React's act. */
-async function settle() {
+async function settle({ answerRecovery = true }: { readonly answerRecovery?: boolean } = {}) {
   await act(async () => {
     for (let round = 0; round < 10; round += 1) {
       await flushBrowserTasks();
     }
+    // Locks are granted in order, so this waits out every answer recovery already queued.
+    if (answerRecovery) await navigator.locks.request(ANSWER_RECOVERY_LOCK, () => undefined);
   });
 }
 
@@ -1394,6 +1397,15 @@ function writeComposerPromptFromAnotherTab(prompt: string) {
     prompt,
   };
   window.localStorage.setItem(COMPOSER_DRAFT_STORAGE_KEY, JSON.stringify(stored));
+}
+
+/** Another tab returned the answer: it took the request draft out of storage. */
+function claimAnswerFromAnotherTab(key: string) {
+  const stored = JSON.parse(window.localStorage.getItem(ANSWER_DRAFTS_STORAGE_KEY) ?? "{}") as {
+    state: { requests: Record<string, unknown> };
+  };
+  delete stored.state.requests[key];
+  window.localStorage.setItem(ANSWER_DRAFTS_STORAGE_KEY, JSON.stringify(stored));
 }
 
 function storedComposerPrompt(): string {
@@ -2656,6 +2668,86 @@ describe("dictation phase 5 rework regressions", () => {
     await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
     await settle();
     expect(squash(promptOf(onScreenTarget))).toContain("Waited answer");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined();
+    expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
+  });
+
+  it("question answers: an answer another tab returned is not returned again here, before or after this tab marked it", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Text in this tab");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Answer returned once");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+    // The other tab, with no conflict of its own, appends the answer and takes the draft first.
+    writeComposerPromptFromAnotherTab("Text in this tab\n\nAnswer returned once");
+
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle();
+    // This tab marked it (its copy of the composer is stale); then the other tab claims it.
+    expect(usePendingUserInputDraftStore.getState().requests[key]?.recoveryPending).toBe(true);
+    claimAnswerFromAnotherTab(key);
+
+    // A fresh stream here (a reload) finds the answer gone and appends nothing.
+    writeComposerPromptFromAnotherTab("Text in this tab");
+    restartFenceThreadAnnouncer(environmentId, threadId);
+    await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toBe("Text in this tab");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined();
+    expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
+  });
+
+  it("question answers: while another tab holds the recovery lock and returns the answer, this tab does not return it again", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Shared text");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Returned by the other tab");
+    });
+    await settle();
+    expect(persistComposerDrafts()).toBe(true);
+
+    // The other tab got the same announcement first and holds the lock while it returns the answer.
+    let releaseOtherTab = () => {};
+    const otherTabHolds = new Promise<void>((resolve) => {
+      releaseOtherTab = resolve;
+    });
+    const otherTabGranted = new Promise<void>((granted) => {
+      void navigator.locks.request("mesura:question-answer-recovery", () => {
+        granted();
+        return otherTabHolds;
+      });
+    });
+    await otherTabGranted;
+    await act(async () =>
+      publishFenceThreadProjection(
+        withRequestStatus(fixture.projection!, "expired"),
+        environmentId,
+      ),
+    );
+    await settle({ answerRecovery: false });
+    writeComposerPromptFromAnotherTab("Shared text\n\nReturned by the other tab");
+    claimAnswerFromAnotherTab(key);
+    releaseOtherTab();
+    await settle();
+
+    expect(squash(promptOf(onScreenTarget))).toBe("Shared text");
     expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined();
     expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
   });

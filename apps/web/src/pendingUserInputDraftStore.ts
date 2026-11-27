@@ -5,17 +5,28 @@ import {
   pruneResolvedUserInputDrafts,
   userInputDraftKey,
 } from "@t3tools/client-runtime/state/thread-requests";
-import type { RuntimeRequestId, UserInputQuestion } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ThreadContextRecord,
+  ThreadId,
+  UserInputQuestion,
+} from "@t3tools/contracts";
 import {
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
 } from "./pendingUserInput";
 import {
-  returnUnsentAnswersToThreadDraft,
-  setInlineAnswerDraftSource,
+  appendUnsentAnswersToThreadDraft,
+  questionAttachmentDraftId,
+  questionAttachmentDraftPrefix,
+  setBeforeQuestionDraftsPruned,
 } from "./questionAttachments";
-import { otherTabChangedThreadDraft, persistComposerDrafts } from "./composerDraftStore";
+import {
+  otherTabChangedThreadDraft,
+  persistComposerDrafts,
+  useComposerDraftStore,
+} from "./composerDraftStore";
 import { findDictationSlots, removeDictationSlot } from "@t3tools/shared/dictationSlots";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { disarmSendWhenReady } from "./dictation/sendWhenReady";
@@ -240,35 +251,20 @@ function recoverableAnswerDrafts(
   return recoverable;
 }
 
-/** Request keys the recovery source handed to the composer in the running announcement. */
-const recoveringKeys = new Set<string>();
-
-/**
- * Request keys deferred in the running announcement. Kept in memory as well, because the mark
- * itself can fail to save (a full storage), and the prune below reloads from storage.
- */
-const deferringKeys = new Set<string>();
-
-function setRecoveryPending(keys: Iterable<string>) {
-  const marked = [...keys];
-  if (marked.length === 0) return;
-  for (const key of marked) deferringKeys.add(key);
+function setRecoveryPending(keys: ReadonlyArray<string>) {
+  if (keys.length === 0) return;
   try {
-    markRecoveryPending(marked);
+    usePendingUserInputDraftStore.setState((state) => {
+      const requests = { ...state.requests };
+      for (const key of keys) {
+        const draft = requests[key];
+        if (draft && !draft.recoveryPending) requests[key] = { ...draft, recoveryPending: true };
+      }
+      return { requests };
+    });
   } catch {
-    // The in-memory deferral still protects the answer for this announcement.
+    // A full storage: the answer stays in this tab's memory, unmarked.
   }
-}
-
-function markRecoveryPending(marked: ReadonlyArray<string>) {
-  usePendingUserInputDraftStore.setState((state) => {
-    const requests = { ...state.requests };
-    for (const key of marked) {
-      const draft = requests[key];
-      if (draft && !draft.recoveryPending) requests[key] = { ...draft, recoveryPending: true };
-    }
-    return { requests };
-  });
 }
 
 /** The thread's request keys whose answer still waits to return to the composer. */
@@ -281,69 +277,132 @@ function recoveryPendingKeys(environmentId: string, threadId: string): string[] 
 
 const requestIdOfKey = (key: string) => (JSON.parse(key) as [string, string, string])[2];
 
-// Upstream's recovery returns a cancelled or expired question's typed answer to the composer. It
-// reads the newest saved answers. When another tab changed that composer draft, appending to this
-// tab's copy would replace it, so the answer stays saved and marked for a later announcement.
-setInlineAnswerDraftSource((environmentId, threadId, unansweredRequestIds) => {
+/** The answers a resolution may return: closed unanswered, or waiting from an earlier one. */
+function recoveryCandidates(
+  environmentId: string,
+  threadId: string,
+  unansweredRequestIds: ReadonlyArray<string>,
+): string[] {
+  return [
+    ...new Set([
+      ...Object.keys(recoverableAnswerDrafts(environmentId, threadId, unansweredRequestIds)),
+      ...recoveryPendingKeys(environmentId, threadId),
+    ]),
+  ].map(requestIdOfKey);
+}
+
+/**
+ * The chips of the questions whose answers wait to return, by question draft id. Upstream prunes
+ * those drafts on the resolution itself, before the locked recovery below runs.
+ */
+const keptThreadContexts = new Map<string, ReadonlyArray<ThreadContextRecord>>();
+
+setBeforeQuestionDraftsPruned(({ environmentId, threadId, unansweredRequestIds }) => {
   reloadPersistedAnswerDrafts();
-  const recoverable = recoverableAnswerDrafts(environmentId, threadId, unansweredRequestIds);
-  const keys = Object.keys(recoverable);
-  if (keys.length === 0) return {};
-  if (otherTabChangedThreadDraft(scopeThreadRef(environmentId, threadId))) {
-    setRecoveryPending(keys);
-    return {};
+  const { requests } = usePendingUserInputDraftStore.getState();
+  const composer = useComposerDraftStore.getState();
+  for (const requestId of recoveryCandidates(environmentId, threadId, unansweredRequestIds)) {
+    const answers = requests[userInputDraftKey(environmentId, threadId, requestId)]?.answers ?? {};
+    for (const questionId of Object.keys(answers)) {
+      const draftId = questionAttachmentDraftId(environmentId, threadId, requestId, questionId);
+      const contexts = composer.getComposerDraft(draftId)?.threadContexts ?? [];
+      if (contexts.length > 0) keptThreadContexts.set(draftId, contexts);
+    }
   }
-  for (const key of keys) recoveringKeys.add(key);
-  return recoverable;
 });
 
-// Announced from a synchronized projection only, and on deletion, so a cached snapshot that
-// predates a question never prunes its answer. Registered after upstream's listener (this module
-// imports it), whose recovery runs the source above for the same announcement first.
-onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds }) => {
+/** Held by the tab returning answers; tests take it to wait for the queued recoveries. */
+export const ANSWER_RECOVERY_LOCK = "mesura:question-answer-recovery";
+
+/**
+ * Every tab with the thread open gets the same announcement, and localStorage reaches other tabs
+ * late, so only a lock shared by the origin's tabs stops two of them appending one answer. Inside
+ * it the answer is reloaded, claimed (taken out of storage) and only then appended.
+ */
+function recoverThreadAnswersOneTabAtATime(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  requestIds: ReadonlyArray<string>,
+) {
+  const run = () => recoverThreadAnswers(environmentId, threadId, requestIds);
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (locks === undefined) return run();
+  void locks.request(ANSWER_RECOVERY_LOCK, run);
+}
+
+function recoverThreadAnswers(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  requestIds: ReadonlyArray<string>,
+) {
   reloadPersistedAnswerDrafts();
+  const recoverable = recoverableAnswerDrafts(environmentId, threadId, requestIds);
+  const keys = Object.keys(recoverable);
+  if (keys.length === 0) return;
+  // Appending to this tab's stale copy of the composer would replace another tab's newer draft.
+  if (otherTabChangedThreadDraft(scopeThreadRef(environmentId, threadId))) {
+    setRecoveryPending(keys);
+    return;
+  }
+  const { requests } = usePendingUserInputDraftStore.getState();
+  const claimed = new Map(keys.map((key) => [key, requests[key]!] as const));
+  const remaining = { ...requests };
+  for (const key of keys) delete remaining[key];
+  usePendingUserInputDraftStore.setState({ requests: remaining });
+  appendUnsentAnswersToThreadDraft(
+    environmentId,
+    threadId,
+    keys.flatMap((key) =>
+      Object.entries(recoverable[key]!).map(([questionId, { customAnswer }]) => {
+        const draftId = questionAttachmentDraftId(
+          environmentId,
+          threadId,
+          requestIdOfKey(key),
+          questionId,
+        );
+        const threadContexts = keptThreadContexts.get(draftId) ?? [];
+        keptThreadContexts.delete(draftId);
+        return { customAnswer, threadContexts };
+      }),
+    ),
+  );
+  // An armed composer send would carry the recovered answer with it; the user reviews it first.
+  disarmSendWhenReady(scopeThreadRef(environmentId, threadId));
+  if (persistComposerDrafts()) return;
+  // Unsaved, the composer copy may not survive; the answers go back, marked, rather than lost.
+  reloadPersistedAnswerDrafts();
+  try {
+    usePendingUserInputDraftStore.setState((state) => {
+      const next = { ...state.requests };
+      for (const [key, draft] of claimed) next[key] = { ...draft, recoveryPending: true };
+      return { requests: next };
+    });
+  } catch {
+    // Nothing more can be saved; the composer still shows the answer in this tab.
+  }
+}
+
+// Announced from a synchronized projection only, and on deletion, so a cached snapshot that
+// predates a question never prunes its answer.
+onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds, unansweredRequestIds }) => {
+  reloadPersistedAnswerDrafts();
+  const { requests } = usePendingUserInputDraftStore.getState();
   // A deleted thread has no composer to return answers to: its drafts go, waiting ones included.
   // Its announcement carries the same empty payload as a live projection without requests.
   if (armedThreadAvailability(scopeThreadRef(environmentId, threadId)) === "gone") {
-    recoveringKeys.clear();
-    deferringKeys.clear();
-    const { requests } = usePendingUserInputDraftStore.getState();
+    const threadDraftPrefix = questionAttachmentDraftPrefix(environmentId, threadId);
+    for (const draftId of keptThreadContexts.keys())
+      if (draftId.startsWith(threadDraftPrefix)) keptThreadContexts.delete(draftId);
     const pruned = pruneResolvedUserInputDrafts(requests, environmentId, threadId, []);
     if (pruned !== requests) usePendingUserInputDraftStore.setState({ requests: pruned });
     return;
   }
-  // An answer that waited is retried here: its request may no longer be in the projection at all.
-  const waiting = recoveryPendingKeys(environmentId, threadId).filter(
-    (key) => !recoveringKeys.has(key),
-  );
-  if (waiting.length > 0)
-    returnUnsentAnswersToThreadDraft(
-      environmentId,
-      threadId,
-      waiting.map((key) => requestIdOfKey(key) as RuntimeRequestId),
-    );
-  const recovering = [...recoveringKeys];
-  recoveringKeys.clear();
-  const deferring = [...deferringKeys];
-  deferringKeys.clear();
-  const { requests } = usePendingUserInputDraftStore.getState();
-  const stillWaiting = [...new Set([...recoveryPendingKeys(environmentId, threadId), ...deferring])]
-    .filter((key) => !recovering.includes(key))
-    .map(requestIdOfKey);
+  // Answers to return, including ones that waited: their request may have left the projection.
+  const candidates = recoveryCandidates(environmentId, threadId, unansweredRequestIds);
   const pruned = pruneResolvedUserInputDrafts(requests, environmentId, threadId, [
     ...pendingRequestIds,
-    ...stillWaiting,
+    ...candidates,
   ]);
-  if (pruned === requests) return;
-  if (recovering.length > 0) {
-    // An armed composer send would carry the recovered answer with it; the user reviews it first.
-    disarmSendWhenReady(scopeThreadRef(environmentId, threadId));
-    // Unsaved, the composer copy may not survive; the answer stays marked rather than lost.
-    if (!persistComposerDrafts()) {
-      setRecoveryPending(recovering);
-      deferringKeys.clear();
-      return;
-    }
-  }
-  usePendingUserInputDraftStore.setState({ requests: pruned });
+  if (pruned !== requests) usePendingUserInputDraftStore.setState({ requests: pruned });
+  if (candidates.length > 0) recoverThreadAnswersOneTabAtATime(environmentId, threadId, candidates);
 });
