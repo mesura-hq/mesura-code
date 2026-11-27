@@ -63,6 +63,7 @@ import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeL
 import { ProviderDriverError } from "../Errors.ts";
 import { makeAntigravityProvider } from "../AntigravityProvider.ts";
 import { makeAntigravityUsageProbe } from "../antigravityUsageLimits.ts";
+import { readAntigravityAccountLimits } from "../../usage/antigravityAccountLimits.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 import {
@@ -573,6 +574,14 @@ export const AntigravityDriver: ProviderDriver<
       textGeneration,
       auth: authFlow.controller,
       refreshModels,
+      // Mesura: the usage dock reads the quota probe the composer already shows.
+      readAccountLimits: () =>
+        readAntigravityAccountLimits({
+          probe: usage.probe,
+          driver: DRIVER,
+          instanceId,
+          displayName,
+        }),
     } satisfies ProviderInstance;
   }),
 };

@@ -1,6 +1,6 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+import type { AccountLimitsNamespace, ProviderDriverKind } from "@t3tools/contracts";
 import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
-import { ClaudeAI, Icon, OpenAI, OpenCodeIcon, ZaiIcon } from "../Icons";
+import { AntigravityIcon, ClaudeAI, Icon, OpenAI, OpenCodeIcon, ZaiIcon } from "../Icons";
 
 /**
  * The mark for a subscription, keyed by the vendor that meters it.
@@ -9,9 +9,10 @@ import { ClaudeAI, Icon, OpenAI, OpenCodeIcon, ZaiIcon } from "../Icons";
  * environment polls itself has no agent behind it, so a driver-keyed map leaves
  * exactly the new rows without an icon.
  */
-export const SUBSCRIPTION_ICON_BY_NAMESPACE: Readonly<Record<string, Icon>> = {
+export const SUBSCRIPTION_ICON_BY_NAMESPACE: Readonly<Record<AccountLimitsNamespace, Icon>> = {
   anthropic: ClaudeAI,
   openai: OpenAI,
+  antigravity: AntigravityIcon,
   "opencode-go": OpenCodeIcon,
   zai: ZaiIcon,
 };
