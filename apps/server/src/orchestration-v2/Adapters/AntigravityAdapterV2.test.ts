@@ -223,6 +223,8 @@ describe("AntigravityAdapterV2 compaction", () => {
           modelSelection,
           runtimePolicy,
         });
+        assert.isDefined(session.canCompactThread);
+        assert.isFalse(yield* session.canCompactThread!(providerThread));
         const now = yield* DateTime.now;
         const exit = yield* Effect.exit(
           session.compactThread!({
@@ -304,7 +306,7 @@ describe("AntigravityAdapterV2 compaction", () => {
           interactionMode: "default",
           cwd: process.cwd(),
         });
-        const commandsAdvertised = yield* Deferred.make<void>();
+        const commandsAdvertised = yield* Deferred.make<string | undefined>();
         const adapter = yield* makeAntigravityAdapterV2({
           instanceId,
           selfInvocation: yield* resolveSelfInvocation(),
@@ -325,10 +327,9 @@ describe("AntigravityAdapterV2 compaction", () => {
             }).pipe(Effect.provideService(SecureRandom.SecureRandom, crypto)),
           withProcess: (_stop, task) => task,
           defaultModel: Effect.undefined,
-          onSessionEvent: (event) =>
-            event._tag === "AvailableCommandsUpdated" &&
-            event.availableCommands.some((command) => command.name === "compact")
-              ? Deferred.succeed(commandsAdvertised, undefined).pipe(Effect.asVoid)
+          onAvailableCommands: (commands, cwd) =>
+            commands.some((command) => command.name === "compact")
+              ? Deferred.succeed(commandsAdvertised, cwd).pipe(Effect.asVoid)
               : Effect.void,
         });
         const session = yield* adapter.openSession({
@@ -338,12 +339,14 @@ describe("AntigravityAdapterV2 compaction", () => {
           runtimePolicy,
         });
         assert.isDefined(session.compactThread);
+        assert.isDefined(session.canCompactThread);
         const providerThread = yield* session.ensureThread({
           threadId,
           modelSelection,
           runtimePolicy,
         });
-        yield* Deferred.await(commandsAdvertised);
+        assert.equal(yield* Deferred.await(commandsAdvertised), runtimePolicy.cwd);
+        assert.isTrue(yield* session.canCompactThread!(providerThread));
 
         const now = yield* DateTime.now;
         const appThread = {

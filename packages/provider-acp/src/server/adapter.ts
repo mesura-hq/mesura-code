@@ -390,6 +390,7 @@ export interface AcpAdapterV2Flavor {
   readonly ignoreSessionUpdate?: (notification: EffectAcpSchema.SessionNotification) => boolean;
   readonly onAvailableCommandsUpdate?: (
     commands: ReadonlyArray<EffectAcpSchema.AvailableCommand>,
+    cwd?: string,
   ) => Effect.Effect<void>;
   readonly onSessionConfigurationUpdate?: (
     configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
@@ -2096,7 +2097,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             new Map(current).set(sessionId, Symbol()),
           );
         });
-        const advertisedCommandNames = yield* Ref.make(new Map<string, ReadonlySet<string>>());
+        const advertisedCommandNames = yield* Ref.make<{
+          readonly generation: number;
+          readonly bySession: ReadonlyMap<string, ReadonlySet<string>>;
+        }>({ generation: 0, bySession: new Map() });
         const compactsContext =
           flavor.supportsCompaction === true ||
           flavor.compactSession !== undefined ||
@@ -6526,7 +6530,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         const projectAcpRuntimeSessionUpdateEffect =
           /* Provider events include streaming deltas; avoid a span for each update. */
           Effect.fnUntraced(
-            function* (rawNotification: EffectAcpSchema.SessionNotification) {
+            function* (
+              handlerGeneration: number,
+              rawNotification: EffectAcpSchema.SessionNotification,
+            ) {
               if (flavor.ignoreSessionUpdate?.(rawNotification) === true) return;
               yield* notePromptProgress(rawNotification);
               const nativePromptId = flavor.forkFromTurn?.nativeTurnId(rawNotification);
@@ -6559,14 +6566,21 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 const sessionId = rawNotification.sessionId;
                 const advertisedCommands = notification.update.availableCommands;
                 yield* Ref.update(advertisedCommandNames, (current) => {
-                  const updated = new Map(current);
-                  updated.set(
+                  const bySession = new Map(
+                    current.generation === handlerGeneration ? current.bySession : [],
+                  );
+                  bySession.set(
                     sessionId,
                     new Set(advertisedCommands.map((command) => command.name.trim().toLowerCase())),
                   );
-                  return updated;
+                  return { generation: handlerGeneration, bySession };
                 });
-                yield* flavor.onAvailableCommandsUpdate?.(advertisedCommands) ?? Effect.void;
+                yield* (
+                  flavor.onAvailableCommandsUpdate?.(
+                    advertisedCommands,
+                    latestRuntimePolicy.cwd ?? undefined,
+                  ) ?? Effect.void
+                );
               }
               if (
                 notification.update.sessionUpdate === "config_option_update" ||
@@ -6604,7 +6618,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         ) =>
           runRuntimeCallbackAtGeneration(
             handlerGeneration,
-            projectAcpRuntimeSessionUpdateEffect(rawNotification),
+            projectAcpRuntimeSessionUpdateEffect(handlerGeneration, rawNotification),
           ).pipe(Effect.asVoid);
 
         // Post-settle background work retains the latest turn policy.
@@ -7161,7 +7175,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           runtimeScope = yield* Scope.make();
           const mcpContext = yield* readMcpContext(threadId);
           runtimeMcpBridge = yield* makeRuntimeMcpBridge(mcpContext, runtimeScope);
-          const runtimeGeneration = yield* Ref.get(runtimeCallbackGeneration);
+          const runtimeGeneration = yield* advanceRuntimeCallbackGeneration;
           openAgentRequests = new Set();
           runtime = yield* flavor
             .makeRuntime(
@@ -7324,7 +7338,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     yield* Effect.forEach(
                       buffered,
                       (notification) =>
-                        projectAcpRuntimeSessionUpdateEffect(notification).pipe(
+                        projectAcpRuntimeSessionUpdateEffect(
+                          replacementGeneration,
+                          notification,
+                        ).pipe(
                           Effect.catchCause((cause) =>
                             Effect.logError("failed to replay staged ACP session update", {
                               driver,
@@ -8424,11 +8441,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             }
             // Checked after activation: a loaded session advertises its own commands.
             const compactionSetup = yield* Ref.get(activeSessionSetup);
+            const advertised = yield* Ref.get(advertisedCommandNames);
+            const currentGeneration = yield* Ref.get(runtimeCallbackGeneration);
             if (
               isCompactionMessage(turnInput.message) &&
               ((flavor.compactViaAdvertisedCommand === true &&
-                (yield* Ref.get(advertisedCommandNames)).get(requestedSessionId)?.has("compact") !==
-                  true) ||
+                (advertised.generation !== currentGeneration ||
+                  advertised.bySession.get(requestedSessionId)?.has("compact") !== true)) ||
                 (flavor.compactSession !== undefined &&
                   (compactionSetup === null ||
                     !flavor.compactSession.supported(compactionSetup.initializeResult))))
@@ -9126,6 +9145,27 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           startTurn,
           ...(compactsContext
             ? {
+                canCompactThread: Effect.fn("AcpAdapterV2.canCompactThread")(function* (
+                  providerThread: OrchestrationV2ProviderThread,
+                ) {
+                  if (flavor.compactViaAdvertisedCommand === true) {
+                    const requestedSessionId = providerThread.nativeThreadRef?.nativeId ?? null;
+                    if (requestedSessionId === null) return false;
+                    const advertised = yield* Ref.get(advertisedCommandNames);
+                    const currentGeneration = yield* Ref.get(runtimeCallbackGeneration);
+                    return (
+                      advertised.generation === currentGeneration &&
+                      advertised.bySession.get(requestedSessionId)?.has("compact") === true
+                    );
+                  }
+                  if (flavor.compactSession !== undefined) {
+                    const setup = yield* Ref.get(activeSessionSetup);
+                    return (
+                      setup !== null && flavor.compactSession.supported(setup.initializeResult)
+                    );
+                  }
+                  return flavor.supportsCompaction === true;
+                }),
                 compactThread: Effect.fn("AcpAdapterV2.compactThread")(function* (
                   turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
                 ) {

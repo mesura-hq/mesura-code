@@ -57,7 +57,11 @@ function shellQuote(value: string): string {
 }
 
 const makeHarness = Effect.fn("makeAntigravityDriverHarness")(function* (
-  options: { readonly config?: Partial<AntigravitySettings>; readonly enabled?: boolean } = {},
+  options: {
+    readonly config?: Partial<AntigravitySettings>;
+    readonly enabled?: boolean;
+    readonly extraEnvironment?: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+  } = {},
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -221,6 +225,7 @@ const makeHarness = Effect.fn("makeAntigravityDriverHarness")(function* (
       { name: "GEMINI_HOME", value: "/must-not-be-used" },
       { name: "ANTIGRAVITY_HARNESS_PATH", value: "/must-not-be-used" },
       { name: "BROWSER", value: "must-not-run" },
+      ...(options.extraEnvironment ?? []),
     ].map((variable) => ({ ...variable, sensitive: false })),
   }).pipe(
     Effect.provide(layerInstallation),
@@ -577,6 +582,39 @@ it.layer(layerTest)("AntigravityDriver", (it) => {
         );
         expect(yield* fs.exists(directories.runtimeTemp)).toBe(false);
         expect(yield* fs.exists(legacyRoot)).toBe(false);
+      }),
+  );
+
+  it.effect.skipIf(windowsHost)(
+    "updates the workspace snapshot slashCommands when a session advertises /compact after startup",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness({
+          extraEnvironment: [{ name: "T3_ACP_AVAILABLE_COMMANDS", value: "compact" }],
+        });
+        const workspace = yield* h.fs.makeTempDirectoryScoped({ prefix: "t3-ag-compact-ws-" });
+        const threadId = ThreadId.make("thread-antigravity-compact-ws");
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: workspace,
+        });
+        const modelSelection = { instanceId: h.instance.instanceId, model: "gemini-test-low" };
+        const session = yield* h.instance.orchestrationAdapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-antigravity-compact-ws"),
+          modelSelection,
+          runtimePolicy,
+        });
+        yield* session.ensureThread({ threadId, modelSelection, runtimePolicy });
+
+        expect(h.instance.snapshotForCwd).toBeDefined();
+        const cwdSnapshot = yield* h.instance.snapshotForCwd!(workspace);
+        expect(cwdSnapshot.slashCommands.map((command) => command.name)).toContain("compact");
+        const wsEntry = (yield* h.instance.snapshot.getSnapshot).workspaceSnapshots?.find(
+          (entry) => entry.cwd === workspace,
+        );
+        expect(wsEntry?.slashCommands.map((command) => command.name)).toContain("compact");
       }),
   );
 });
