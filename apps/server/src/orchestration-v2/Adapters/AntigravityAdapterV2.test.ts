@@ -327,8 +327,9 @@ describe("AntigravityAdapterV2 compaction", () => {
             }).pipe(Effect.provideService(SecureRandom.SecureRandom, crypto)),
           withProcess: (_stop, task) => task,
           defaultModel: Effect.undefined,
-          onAvailableCommands: (commands, cwd) =>
-            commands.some((command) => command.name === "compact")
+          onSessionEvent: (event, cwd) =>
+            event._tag === "AvailableCommandsUpdated" &&
+            event.availableCommands.some((command) => command.name === "compact")
               ? Deferred.succeed(commandsAdvertised, cwd).pipe(Effect.asVoid)
               : Effect.void,
         });

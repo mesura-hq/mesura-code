@@ -390,7 +390,6 @@ export interface AcpAdapterV2Flavor {
   readonly ignoreSessionUpdate?: (notification: EffectAcpSchema.SessionNotification) => boolean;
   readonly onAvailableCommandsUpdate?: (
     commands: ReadonlyArray<EffectAcpSchema.AvailableCommand>,
-    cwd?: string,
   ) => Effect.Effect<void>;
   readonly onSessionConfigurationUpdate?: (
     configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
@@ -489,6 +488,7 @@ export interface AcpAdapterV2Flavor {
   ) => ReadonlyArray<ProviderApprovalOption>;
   readonly onSessionEvent?: (
     event: AcpSessionRuntime.AcpSessionRuntimeEvent,
+    cwd?: string,
   ) => Effect.Effect<void>;
   readonly subagentsIdleOnTurnCompletion?: boolean;
   readonly supportsCompaction?: boolean;
@@ -6575,12 +6575,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   );
                   return { generation: handlerGeneration, bySession };
                 });
-                yield* (
-                  flavor.onAvailableCommandsUpdate?.(
-                    advertisedCommands,
-                    latestRuntimePolicy.cwd ?? undefined,
-                  ) ?? Effect.void
-                );
+                yield* flavor.onAvailableCommandsUpdate?.(advertisedCommands) ?? Effect.void;
               }
               if (
                 notification.update.sessionUpdate === "config_option_update" ||
@@ -6713,7 +6708,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               }
               return runRuntimeCallbackAtGeneration(
                 handlerGeneration,
-                flavor.onSessionEvent?.(event) ?? Effect.void,
+                flavor.onSessionEvent?.(event, latestRuntimePolicy.cwd ?? undefined) ?? Effect.void,
               ).pipe(Effect.asVoid);
             }),
             Effect.forkIn(handlerOptions.scope ?? runtimeScope ?? sessionScope),

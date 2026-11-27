@@ -249,15 +249,6 @@ const linkAntigravityUserSkills = Effect.fn("linkAntigravityUserSkills")(functio
 }): Effect.fn.Return<void, never, FileSystem.FileSystem | Path.Path> {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const isInsideDirectory = (directory: string, candidate: string) => {
-    const relative = path.relative(directory, candidate);
-    return (
-      relative !== "" &&
-      relative !== ".." &&
-      !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative)
-    );
-  };
   const syncPerEntryLinks = Effect.fnUntraced(function* (
     linkDirectory: string,
     targetDirectory: string,
@@ -273,12 +264,10 @@ const linkAntigravityUserSkills = Effect.fn("linkAntigravityUserSkills")(functio
         Effect.map((value) => path.resolve(linkDirectory, value)),
         Effect.orElseSucceed(() => undefined),
       );
-      if (linkedTo === undefined || !isInsideDirectory(targetDirectory, linkedTo)) continue;
-      if (
-        !targetExists ||
-        !targetEntries.has(entry) ||
-        linkedTo !== path.join(targetDirectory, entry)
-      ) {
+      // Only manage same-name links that we create into targetDirectory;
+      // preserve user-created aliases (e.g. my-review -> .../review).
+      if (linkedTo !== path.resolve(targetDirectory, entry)) continue;
+      if (!targetExists || !targetEntries.has(entry)) {
         yield* fs.remove(entryPath);
       }
     }

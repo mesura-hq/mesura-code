@@ -642,6 +642,8 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
         yield* fs.makeDirectory(path.join(configSkills, "own-skill"), { recursive: true });
         yield* fs.writeFileString(path.join(configLink, "own-skill", "SKILL.md"), "local");
         yield* fs.writeFileString(path.join(configSkills, "own-skill", "SKILL.md"), "global");
+        // User-created alias pointing to a global skill under a different name.
+        yield* fs.symlink(path.join(configSkills, "review"), path.join(configLink, "my-review"));
         yield* prepareAntigravityProfile({ profileDirectory, userHome });
         expect(yield* fs.readLink(cliLink)).toBe(cliSkills);
         expect(yield* fs.exists(path.join(configLink, "own-skill"))).toBe(true);
@@ -653,11 +655,17 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
         expect(yield* fs.readLink(path.join(configLink, "review"))).toBe(
           path.join(configSkills, "review"),
         );
+        expect(yield* fs.readLink(path.join(configLink, "my-review"))).toBe(
+          path.join(configSkills, "review"),
+        );
 
-        // Removing a global skill prunes its per-item link without disturbing local skills.
+        // Removing a global skill prunes its managed link without disturbing local skills or user aliases.
         yield* fs.remove(path.join(configSkills, "review"), { recursive: true });
         yield* prepareAntigravityProfile({ profileDirectory, userHome });
         expect(yield* isLink(path.join(configLink, "review"))).toBe(false);
+        expect(yield* fs.readLink(path.join(configLink, "my-review"))).toBe(
+          path.join(configSkills, "review"),
+        );
         expect(yield* fs.readFileString(path.join(configLink, "own-skill", "SKILL.md"))).toBe(
           "local",
         );

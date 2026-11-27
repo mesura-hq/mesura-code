@@ -1536,6 +1536,76 @@ describe("AcpAdapterV2", () => {
         assert.equal(runtimeOrdinal, 2);
       }).pipe(Effect.provide(layerTest)),
   );
+  it.live(
+    "passes workspace cwd to onSessionEvent and ignores non-root available_commands_update notifications",
+    () =>
+      Effect.gen(function* () {
+        const instanceId = ProviderInstanceId.make("acp-test-ignore-child-commands");
+        const threadId = ThreadId.make("thread-acp-ignore-child-commands");
+        const published: Array<readonly [ReadonlyArray<string>, string | undefined]> = [];
+        let emitSessionUpdate:
+          | ((notification: EffectAcpSchema.SessionNotification) => Effect.Effect<void>)
+          | undefined;
+        const adapter = yield* makeAcpAdapterV2({
+          instanceId,
+          selfInvocation: yield* resolveSelfInvocation(),
+          flavor: {
+            driver: ACP_TEST_DRIVER,
+            capabilities: AcpProviderCapabilitiesV2,
+            compactViaAdvertisedCommand: true,
+            onSessionEvent: (event, cwd) =>
+              event._tag === "AvailableCommandsUpdated"
+                ? Effect.sync(() => {
+                    published.push([event.availableCommands.map((command) => command.name), cwd]);
+                  })
+                : Effect.void,
+            makeRuntime: makeMockRuntime({
+              childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+              mockAgentPath: yield* bundledMockAgentPath,
+              environment: { T3_ACP_AVAILABLE_COMMANDS: "compact" },
+              wrapRuntime: (runtime) => ({
+                ...runtime,
+                handleSessionUpdate: (handler) => {
+                  emitSessionUpdate = (notification) => handler(notification).pipe(Effect.ignore);
+                  return runtime.handleSessionUpdate(handler);
+                },
+              }),
+            }),
+          },
+        });
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+        });
+        const modelSelection = { instanceId, model: "default" } as const;
+        const session = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-acp-ignore-child-commands"),
+          modelSelection,
+          runtimePolicy,
+        });
+        const providerThread = yield* session.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy,
+        });
+        assert.isDefined(emitSessionUpdate);
+        const rootSessionId = providerThread.nativeThreadRef?.nativeId;
+        assert.isDefined(rootSessionId);
+
+        yield* emitSessionUpdate!({
+          sessionId: `${rootSessionId!}:child:1`,
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: [{ name: "help", description: "Child only command" }],
+          },
+        });
+
+        assert.deepEqual(published, [[["compact"], runtimePolicy.cwd ?? undefined]]);
+        assert.isTrue(yield* session.canCompactThread!(providerThread));
+      }).pipe(Effect.provide(layerTest)),
+  );
   it.live("retains returned usage when Stop finalizes before the prompt callback", () =>
     Effect.gen(function* () {
       const instanceId = ProviderInstanceId.make("acp-test-prompt-usage-stop");
