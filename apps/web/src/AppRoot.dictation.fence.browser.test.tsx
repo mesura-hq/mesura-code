@@ -2582,18 +2582,17 @@ describe("dictation phase 5 rework regressions", () => {
     expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
   });
 
-  it("question answers: a recovered answer joins the composer draft another tab saved, not this tab's stale copy", async () => {
+  it("question answers: a recovered answer waits when another tab changed the composer draft, and nothing is overwritten", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
+    // Storage then agrees with this tab again, so the next test starts without another tab's edit.
+    using _saved = { [Symbol.dispose]: () => void persistComposerDrafts() };
 
     fixture.projection = withOpenQuestion(makeThreadProjection());
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Stale text in this tab");
     await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
     await act(async () => {
-      editPendingUserInputAnswerText(
-        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
-        "scope",
-        () => "Recovered answer",
-      );
+      editPendingUserInputAnswerText(key, "scope", () => "Recovered later");
     });
     await settle();
     expect(persistComposerDrafts()).toBe(true);
@@ -2606,13 +2605,37 @@ describe("dictation phase 5 rework regressions", () => {
       ),
     );
     await settle();
-    const prompt = squash(promptOf(onScreenTarget));
-    expect(prompt).toContain("Newer text from the other tab");
-    expect(prompt).toContain("Recovered answer");
-    expect(prompt).not.toContain("Stale text in this tab");
+    expect(squash(promptOf(onScreenTarget))).toBe("Stale text in this tab");
+    expect(squash(storedComposerPrompt())).toBe("Newer text from the other tab");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toMatchObject({
+      recoveryPending: true,
+      answers: { scope: { customAnswer: "Recovered later" } },
+    });
+    expect(persistedAnswerDrafts()).toHaveProperty([key]);
+  });
+
+  it("question answers: a waiting answer returns on the thread's next announcement, even once its request left the projection", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "");
+    await mountApp();
+    const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+    await act(async () => {
+      editPendingUserInputAnswerText(key, "scope", () => "Waited answer");
+      usePendingUserInputDraftStore.setState((state) => ({
+        requests: { ...state.requests, [key]: { ...state.requests[key]!, recoveryPending: true } },
+      }));
+    });
+    await settle();
     expect(persistComposerDrafts()).toBe(true);
-    expect(squash(storedComposerPrompt())).toContain("Newer text from the other tab");
-    expect(questionAnswerText()).toBe("");
+
+    // A later snapshot no longer lists the request at all (outside the recent history window).
+    await act(async () => publishFenceThreadProjection(makeThreadProjection(), environmentId));
+    await settle();
+    expect(squash(promptOf(onScreenTarget))).toContain("Waited answer");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toBeUndefined();
+    expect(persistedAnswerDrafts()).not.toHaveProperty([key]);
   });
 
   it("question answers: when both tabs edited the composer draft, the answer stays saved and nothing is overwritten", async () => {
@@ -2642,9 +2665,10 @@ describe("dictation phase 5 rework regressions", () => {
     );
     await settle();
     expect(squash(promptOf(onScreenTarget))).toBe("Edited in this tab");
-    expect(
-      usePendingUserInputDraftStore.getState().requests[key]?.answers.scope?.customAnswer,
-    ).toBe("Answer kept for later");
+    expect(usePendingUserInputDraftStore.getState().requests[key]).toMatchObject({
+      recoveryPending: true,
+      answers: { scope: { customAnswer: "Answer kept for later" } },
+    });
     expect(persistedAnswerDrafts()).toHaveProperty([key]);
   });
 

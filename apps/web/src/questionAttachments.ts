@@ -215,7 +215,7 @@ export async function stageQuestionAttachments(input: {
  * the typed answers, so they move to the thread's own draft (not a queued-message
  * edit the composer may be showing) with the thread chips they reference.
  */
-function returnUnsentAnswersToThreadDraft(
+export function returnUnsentAnswersToThreadDraft(
   environmentId: EnvironmentId,
   threadId: ThreadId,
   unansweredRequestIds: ReadonlyArray<RuntimeRequestId>,

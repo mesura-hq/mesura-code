@@ -4694,32 +4694,20 @@ export async function readStoredDraftPrompt(target: ComposerThreadTarget): Promi
 }
 
 /**
- * Mesura: before this tab writes a thread's draft on its own (not from typing here), takes in the
- * draft another tab saved for it since this tab's last write; the per-thread merge would otherwise
- * replace that newer draft with this tab's stale copy. `false` when both tabs edited the draft, so
- * no single copy holds both sides and the caller should not write it.
+ * Mesura: whether another tab saved a different draft for `target` since this tab's last write. A
+ * write this tab makes on its own (not from typing here) would then replace it, because the
+ * per-thread merge lets an entry this tab changed win; such a write waits instead.
  */
-export function adoptOtherTabThreadDraft(target: ComposerThreadTarget): boolean {
-  const state = composerDraftStore.getState();
-  const threadKey = resolveComposerDraftKey(state, target);
+export function otherTabChangedThreadDraft(target: ComposerThreadTarget): boolean {
+  const threadKey = resolveComposerDraftKey(composerDraftStore.getState(), target);
   const baseline = composerDraftLastWrite?.local ?? composerDraftLoadedState;
   const stored = threadKey && baseline ? readStoredComposerDraftState() : null;
-  if (!threadKey || !baseline || !stored) return true;
-  const baselineDraft = baseline.draftsByThreadKey[threadKey];
+  if (!threadKey || !baseline || !stored) return false;
   // Both come from the same serializer, so equal drafts serialize alike.
-  if (JSON.stringify(stored.draftsByThreadKey?.[threadKey]) === JSON.stringify(baselineDraft))
-    return true;
-  const storedDraft =
-    normalizeCurrentPersistedComposerDraftStoreState(stored).draftsByThreadKey[threadKey];
-  const localDraft = partializeComposerDraftStoreState(state).draftsByThreadKey[threadKey];
-  if (!Equal.equals(localDraft, baselineDraft)) return false;
-  composerDraftStore.setState((current) => {
-    const draftsByThreadKey = { ...current.draftsByThreadKey };
-    if (storedDraft) draftsByThreadKey[threadKey] = toHydratedThreadDraft(storedDraft);
-    else delete draftsByThreadKey[threadKey];
-    return { draftsByThreadKey };
-  });
-  return true;
+  return (
+    JSON.stringify(stored.draftsByThreadKey?.[threadKey]) !==
+    JSON.stringify(baseline.draftsByThreadKey[threadKey])
+  );
 }
 
 /** Puts a dictation marker at the end of a draft that has no composer to take it at the caret. */
