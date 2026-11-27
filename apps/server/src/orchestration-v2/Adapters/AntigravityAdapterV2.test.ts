@@ -149,7 +149,7 @@ const layerSession = Layer.mergeAll(
 
 describe("AntigravityAdapterV2 compaction", () => {
   it.live.each([false, true])(
-    "negotiates native goals (%s) without enabling manual compaction",
+    "negotiates native goals (%s) and refuses manual compaction when /compact is not advertised",
     (nativeGoals) =>
       Effect.gen(function* () {
         const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -159,6 +159,13 @@ describe("AntigravityAdapterV2 compaction", () => {
           new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
         );
         const instanceId = ProviderInstanceId.make("antigravity-compaction-test");
+        const threadId = ThreadId.make("thread-antigravity-compaction");
+        const modelSelection = { instanceId, model: "gemini-test-low" } as const;
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+        });
         const goalSupport = yield* Ref.make(false);
         const startupMilestone = yield* Deferred.make<void>();
         const consumeStartupCommands = yield* Deferred.make<void>();
@@ -198,22 +205,272 @@ describe("AntigravityAdapterV2 compaction", () => {
         });
         const opening = yield* adapter
           .openSession({
-            threadId: ThreadId.make("thread-antigravity-compaction"),
+            threadId,
             providerSessionId: ProviderSessionId.make("provider-session-antigravity-compaction"),
-            modelSelection: { instanceId, model: "gemini-test-low" },
-            runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-              runtimeMode: "full-access",
-              interactionMode: "default",
-              cwd: process.cwd(),
-            }),
+            modelSelection,
+            runtimePolicy,
           })
           .pipe(Effect.forkScoped);
         yield* Deferred.await(startupMilestone);
         yield* Deferred.succeed(consumeStartupCommands, undefined);
         const session = yield* Fiber.join(opening);
-        assert.isUndefined(session.compactThread);
+        assert.isDefined(session.compactThread);
         assert.equal(session.providerSession.capabilities.turns.supportsNativeGoals, nativeGoals);
         assert.equal((yield* adapter.getCapabilities()).turns.supportsNativeGoals, nativeGoals);
+
+        const providerThread = yield* session.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy,
+        });
+        const now = yield* DateTime.now;
+        const exit = yield* Effect.exit(
+          session.compactThread!({
+            appThread: {
+              createdBy: "user",
+              creationSource: "web",
+              id: threadId,
+              projectId: ProjectId.make("project-antigravity-compaction"),
+              title: "Antigravity compaction",
+              providerInstanceId: instanceId,
+              modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: process.cwd(),
+              activeProviderThreadId: providerThread.id,
+              lineage: {
+                parentThreadId: null,
+                relationshipToParent: null,
+                rootThreadId: threadId,
+              },
+              forkedFrom: null,
+              createdAt: now,
+              updatedAt: now,
+              archivedAt: null,
+              settledOverride: null,
+              settledAt: null,
+              lastVisitedAt: null,
+              deletedAt: null,
+            },
+            threadId,
+            runId: RunId.make("run-antigravity-compaction-unsupported"),
+            runOrdinal: 1,
+            providerTurnOrdinal: 1,
+            attemptId: RunAttemptId.make("attempt-antigravity-compaction-unsupported"),
+            rootNodeId: NodeId.make("node-antigravity-compaction-unsupported"),
+            providerThread,
+            message: {
+              messageId: MessageId.make("message-antigravity-compaction-unsupported"),
+              text: "/compact",
+              attachments: [],
+              createdBy: "agent",
+              creationSource: "mcp",
+            },
+            modelSelection,
+            runtimePolicy,
+          }),
+        );
+        assert.isTrue(Exit.isFailure(exit));
+        const error =
+          exit._tag === "Failure" && exit.cause.reasons[0]?._tag === "Fail"
+            ? (exit.cause.reasons[0].error as { _tag?: string; cause?: { _tag?: string } })
+            : undefined;
+        assert.equal(error?._tag, "ProviderAdapterTurnStartError");
+        assert.equal(error?.cause?._tag, "ProviderCompactionUnsupportedError");
+      }).pipe(Effect.provide(layerSession)),
+  );
+
+  it.live(
+    "compacts via /compact when Antigravity advertises compact and re-injects instructions",
+    () =>
+      Effect.gen(function* () {
+        const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const crypto = yield* SecureRandom.SecureRandom;
+        const mockAgentPath = yield* path.fromFileUrl(
+          new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+        );
+        const logs = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-antigravity-compact-log-",
+        });
+        const requestLog = path.join(logs, "requests.jsonl");
+        const instanceId = ProviderInstanceId.make("antigravity-compact-supported");
+        const threadId = ThreadId.make("thread-antigravity-compact-supported");
+        const modelSelection = { instanceId, model: "gemini-test-low" } as const;
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+        });
+        const commandsAdvertised = yield* Deferred.make<void>();
+        const adapter = yield* makeAntigravityAdapterV2({
+          instanceId,
+          selfInvocation: yield* resolveSelfInvocation(),
+          makeRuntime: (input) =>
+            makeAntigravityAcpRuntime({
+              ...input,
+              childProcessSpawner,
+              spawn: {
+                command: process.execPath,
+                args: [mockAgentPath],
+                cwd: input.cwd,
+                env: {
+                  T3_ACP_ANTIGRAVITY: "1",
+                  T3_ACP_AVAILABLE_COMMANDS: "compact",
+                  T3_ACP_REQUEST_LOG_PATH: requestLog,
+                },
+              },
+            }).pipe(Effect.provideService(SecureRandom.SecureRandom, crypto)),
+          withProcess: (_stop, task) => task,
+          defaultModel: Effect.undefined,
+          onSessionEvent: (event) =>
+            event._tag === "AvailableCommandsUpdated" &&
+            event.availableCommands.some((command) => command.name === "compact")
+              ? Deferred.succeed(commandsAdvertised, undefined).pipe(Effect.asVoid)
+              : Effect.void,
+        });
+        const session = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-antigravity-compact"),
+          modelSelection,
+          runtimePolicy,
+        });
+        assert.isDefined(session.compactThread);
+        const providerThread = yield* session.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy,
+        });
+        yield* Deferred.await(commandsAdvertised);
+
+        const now = yield* DateTime.now;
+        const appThread = {
+          createdBy: "user" as const,
+          creationSource: "web" as const,
+          id: threadId,
+          projectId: ProjectId.make("project-antigravity-compact"),
+          title: "Antigravity compact",
+          providerInstanceId: instanceId,
+          modelSelection,
+          runtimeMode: "full-access" as const,
+          interactionMode: "default" as const,
+          branch: null,
+          worktreePath: process.cwd(),
+          activeProviderThreadId: providerThread.id,
+          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        };
+        const turnDone = [yield* Deferred.make<void>(), yield* Deferred.make<void>()] as const;
+        let completedTurns = 0;
+        const eventsFiber = yield* session.events.pipe(
+          Stream.tap((event) => {
+            if (event.type !== "turn.terminal") return Effect.void;
+            const gate = turnDone[completedTurns];
+            completedTurns += 1;
+            return gate === undefined ? Effect.void : Deferred.succeed(gate, undefined);
+          }),
+          Stream.takeUntil((event) => event.type === "turn.terminal" && completedTurns === 3),
+          Stream.runCollect,
+          Effect.forkScoped,
+        );
+
+        yield* session.startTurn({
+          appThread,
+          threadId,
+          runId: RunId.make("run-antigravity-compact-1"),
+          runOrdinal: 1,
+          providerTurnOrdinal: 1,
+          attemptId: RunAttemptId.make("attempt-antigravity-compact-1"),
+          rootNodeId: NodeId.make("node-antigravity-compact-1"),
+          providerThread,
+          message: {
+            messageId: MessageId.make("message-antigravity-compact-1"),
+            text: "Do the first step.",
+            attachments: [],
+            createdBy: "user",
+            creationSource: "web",
+          },
+          modelSelection,
+          runtimePolicy,
+        });
+        yield* Deferred.await(turnDone[0]);
+
+        yield* session.compactThread!({
+          appThread,
+          threadId,
+          runId: RunId.make("run-antigravity-compact-2"),
+          runOrdinal: 2,
+          providerTurnOrdinal: 2,
+          attemptId: RunAttemptId.make("attempt-antigravity-compact-2"),
+          rootNodeId: NodeId.make("node-antigravity-compact-2"),
+          providerThread: { ...providerThread, contextUsage: { usedTokens: 1234 } },
+          message: {
+            messageId: MessageId.make("message-antigravity-compact-2"),
+            text: "/compact",
+            attachments: [],
+            createdBy: "agent",
+            creationSource: "mcp",
+          },
+          modelSelection,
+          runtimePolicy,
+        });
+        yield* Deferred.await(turnDone[1]);
+
+        yield* session.startTurn({
+          appThread,
+          threadId,
+          runId: RunId.make("run-antigravity-compact-3"),
+          runOrdinal: 3,
+          providerTurnOrdinal: 3,
+          attemptId: RunAttemptId.make("attempt-antigravity-compact-3"),
+          rootNodeId: NodeId.make("node-antigravity-compact-3"),
+          providerThread,
+          message: {
+            messageId: MessageId.make("message-antigravity-compact-3"),
+            text: "Continue after compaction.",
+            attachments: [],
+            createdBy: "agent",
+            creationSource: "mcp",
+          },
+          modelSelection,
+          runtimePolicy,
+        });
+
+        const events = [...(yield* Fiber.join(eventsFiber))];
+        assert.isTrue(
+          events.some(
+            (event) =>
+              event.type === "turn_item.updated" &&
+              event.turnItem.type === "compaction" &&
+              event.turnItem.status === "completed" &&
+              event.turnItem.title === "Context compacted",
+          ),
+        );
+        const prompts = (yield* fileSystem.readFileString(requestLog))
+          .trim()
+          .split("\n")
+          .map(
+            (line) =>
+              JSON.parse(line) as {
+                method?: string;
+                params?: { prompt?: ReadonlyArray<{ type?: string; text?: string }> };
+              },
+          )
+          .filter((request) => request.method === "session/prompt")
+          .map((request) => request.params?.prompt?.[0]?.text ?? "");
+        assert.lengthOf(prompts, 3);
+        assert.equal(prompts[1], "/compact");
+        assert.include(prompts[2], "<t3_code_instructions>");
+        assert.include(prompts[2], "Continue after compaction.");
       }).pipe(Effect.provide(layerSession)),
   );
 });
