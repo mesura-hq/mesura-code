@@ -47,7 +47,10 @@ import {
   resolveSidebarThreadAttention,
   sidebarThreadAttentionFacts,
 } from "./sidebarThreadAttention";
-import { factoryQuestionIsOpen } from "@t3tools/client-runtime/state/thread-inbox";
+import {
+  factoryQuestionIsOpen,
+  threadRuntimeIsExecuting,
+} from "@t3tools/client-runtime/state/thread-inbox";
 import {
   createThreadNotificationGate,
   isSnoozedForNotification,
@@ -55,6 +58,12 @@ import {
   type ThreadNotificationObservation,
 } from "./ThreadNotificationCoordinator.logic";
 import { toastManager } from "./ui/toast";
+import {
+  createFactoryRunFinishes,
+  factoryRunFinishedTitle,
+  factoryRunJustFinished,
+  type FactoryRunFinish,
+} from "./factoryRunNotification";
 import { AGENT_SEARCH_FINISHED_TITLE } from "./searches/agentSearchNotification";
 import { isSearchThread } from "./searches/agentSearchPopup.logic";
 
@@ -76,6 +85,8 @@ interface WatchedEnvironment {
   previous: Map<ThreadId, NotificationState>;
   reconnecting: boolean;
   readonly gate: ReturnType<typeof createThreadNotificationGate<ThreadId>>;
+  /** Mesura: Factory run finishes waiting for the notification that announces them. */
+  readonly factoryRunFinishes: ReturnType<typeof createFactoryRunFinishes<ThreadId>>;
 }
 
 /**
@@ -167,6 +178,7 @@ export function startThreadNotifications(
     environmentId: EnvironmentId,
     state: NotificationState,
     kind: ThreadNotificationKind,
+    factoryRunFinish?: FactoryRunFinish,
   ) => {
     const { thread, loudKind } = state;
     if (
@@ -178,7 +190,7 @@ export function startThreadNotifications(
     const { notificationMode: mode, inAppNotificationsEnabled } = getClientSettings();
     const active = activeThread();
     const agentSearch = isSearchThread(thread);
-    const title =
+    let title =
       kind === "completion"
         ? agentSearch
           ? AGENT_SEARCH_FINISHED_TITLE
@@ -192,6 +204,10 @@ export function startThreadNotifications(
               : loudKind === "request"
                 ? "Guest request"
                 : "Input needed";
+    // Mesura: the notification that announces a Factory run's finish names it.
+    if (kind === "completion" && factoryRunFinish !== undefined) {
+      title = factoryRunFinishedTitle(factoryRunFinish);
+    }
     if (hasNotificationSound(mode)) {
       void playNotificationSound(kind, () =>
         hasNotificationSound(getClientSettings().notificationMode),
@@ -381,15 +397,32 @@ export function startThreadNotifications(
     entry.reconnecting = false;
     entry.previous = next;
     entry.gate.retain(new Set(next.keys()));
+    entry.factoryRunFinishes.retain(new Set(next.keys()));
     const now = Date.now();
     for (const [prior, state] of changed) {
-      entry.gate.observe(state.thread.id, prior, state, {
+      const threadId = state.thread.id;
+      entry.factoryRunFinishes.record(
+        threadId,
+        factoryRunJustFinished(prior?.thread.factoryRun, state.thread.factoryRun),
+      );
+      const options = {
         archived: state.thread.archivedAt !== null,
         // Mesura: a completion while the thread still asks for input would replace that
         // notification (both carry the thread's tag), so it is recorded, not announced.
         quiet: state.raw.latestRunStopRequested === true || state.loudKind === "input",
         snoozed: isSnoozedForNotification(state.thread, state.completedAt, now),
-      });
+      };
+      entry.gate.observe(threadId, prior, state, options);
+      // Mesura: a run finish no completion announced, on a thread with no turn left to end. A
+      // background wake's completion is still in the gate's grace and announces it then.
+      const unannounced = entry.factoryRunFinishes.takeUnannounced(
+        threadId,
+        threadRuntimeIsExecuting(state.thread.runtime) || (state.settled && state.backgroundWake),
+      );
+      const silenced = options.archived || options.quiet || options.snoozed;
+      if (unannounced !== undefined && !silenced && state.loudKind === null) {
+        present(environmentId, state, "completion", unannounced);
+      }
     }
   };
 
@@ -400,8 +433,12 @@ export function startThreadNotifications(
       unsubscribe: () => {},
       gate: createThreadNotificationGate<ThreadId>((threadId, kind) => {
         const state = entry.previous.get(threadId);
-        if (state) present(environmentId, state, kind);
+        // Mesura: the turn's completion carries the run finish it ended with.
+        const factoryRunFinish =
+          kind === "completion" ? entry.factoryRunFinishes.take(threadId) : undefined;
+        if (state) present(environmentId, state, kind, factoryRunFinish);
       }),
+      factoryRunFinishes: createFactoryRunFinishes<ThreadId>(),
     };
     let threads: ReadonlyArray<OrchestrationV2ThreadShell> | null = null;
     const unsubscribeShell = registry.subscribe(

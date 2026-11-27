@@ -308,10 +308,16 @@ export type FactoryRunEventType = keyof typeof FactoryRunEventSchemas;
 export const FactoryRunEvent = Schema.Union(Object.values(FactoryRunEventSchemas));
 export type FactoryRunEvent = typeof FactoryRunEvent.Type;
 
-/** `done` and `degraded` are finished runs; `degraded` closed at least one phase degraded. */
+/**
+ * `done`, `degraded` and `stopped` are finished runs: `run.finished` was recorded, and `degraded`
+ * closed at least one phase degraded. `unclosed` is a run whose every phase closed but whose
+ * record has no `run.finished` yet: the coordinator still owes the report steps, and a run left
+ * there is not finished, however complete its phases look.
+ */
 export const FactoryRunStatus = Schema.Literals([
   "running",
   "waiting",
+  "unclosed",
   "done",
   "degraded",
   "stopped",
@@ -521,6 +527,14 @@ export type FactoryRunShellSummary = typeof FactoryRunShellSummary.Type;
 export const factoryRunHoldsCompletion = (
   run: Pick<FactoryRunShellSummary, "status"> | null | undefined,
 ) => run?.status === "running";
+
+/**
+ * Every phase closed and no `run.finished`: nothing will wake the coordinator, so the thread is
+ * not held at Working, but settling it would hide a run that was never finished.
+ */
+export const factoryRunIsUnclosed = (
+  run: Pick<FactoryRunShellSummary, "status"> | null | undefined,
+) => run?.status === "unclosed";
 
 /** A run that waits on a question or was stopped asks the developer. */
 export const factoryRunAsksDeveloper = (status: FactoryRunStatus) =>

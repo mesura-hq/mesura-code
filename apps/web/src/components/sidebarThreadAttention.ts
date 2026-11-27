@@ -4,7 +4,7 @@ import {
   agentQuestionIsOpen,
   threadRuntimeIsExecuting,
 } from "@t3tools/client-runtime/state/thread-inbox";
-import type { FactoryRunShellSummary } from "@t3tools/contracts";
+import { factoryRunIsUnclosed, type FactoryRunShellSummary } from "@t3tools/contracts";
 
 import type { SidebarThreadStatus } from "./Sidebar.logic";
 
@@ -15,6 +15,7 @@ export type SidebarThreadAttentionKind =
   | "failed"
   | "limited"
   | "factory"
+  | "unclosed"
   | "working"
   | "waiting"
   | "woke"
@@ -100,6 +101,11 @@ export function resolveSidebarThreadAttention(
     });
   }
   if (status === "waiting") return busy({ kind: "waiting", text: "Waiting", emphasis: "quiet" });
+  // Below Working: while the coordinator still executes it is writing the report. Once its turn
+  // ends without `run.finished`, the run is left unfinished and the developer has to see it.
+  if (factoryRunIsUnclosed(factoryRun)) {
+    return { kind: "unclosed", text: "Not closed", emphasis: "loud" };
+  }
   if (input.isWoke) return { kind: "woke", text: "Woke", emphasis: "calm" };
   return input.isUnread ? { kind: "done", text: "Done", emphasis: "calm" } : null;
 }
@@ -159,6 +165,7 @@ const LOOK_BY_KIND: Readonly<Record<SidebarThreadAttentionKind, SidebarThreadAtt
   },
   limited: { className: "font-medium text-warning", icon: "failed", rowEdgeClassName: "" },
   factory: WORKING_LOOK,
+  unclosed: { className: "font-medium text-warning", icon: "failed", rowEdgeClassName: "" },
   working: WORKING_LOOK,
   waiting: QUIET_LOOK,
   woke: { className: "font-medium text-warning", icon: "woke", rowEdgeClassName: "" },

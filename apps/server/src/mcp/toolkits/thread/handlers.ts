@@ -24,6 +24,8 @@ import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts
 import { queuedRunsInDeliveryOrder } from "../../../orchestration-v2/QueuedRunOrder.ts";
 // Mesura: compact this thread, then continue.
 import { queueCompactAndContinue } from "../../../orchestration-v2/CompactAndContinue.ts";
+// Mesura: an unfinished Factory run keeps the thread from being ready to close.
+import { readyToCloseRefusal } from "../../../orchestration-v2/ThreadSignal.ts";
 import { ThreadToolkit } from "./tools.ts";
 
 function queueEntry(
@@ -347,7 +349,14 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   // Mesura: the agent's needs-input / ready-to-close mark.
   t3_thread_signal: writesThread((input) =>
     Effect.gen(function* () {
-      const { threads, projection } = yield* readThread(input.threadId);
+      const { threads, projection } = yield* readThread(input.threadId, ["turnItems"], {
+        turnItemTypes: ["factory_card"],
+      });
+      const refusal =
+        input.state === "ready_to_close" ? readyToCloseRefusal(projection.turnItems) : null;
+      if (refusal !== null) {
+        return yield* new OrchestratorMcpFailure({ code: "invalid_request", message: refusal });
+      }
       return yield* threads
         .signalThread({
           commandId: yield* newCommandId(),
